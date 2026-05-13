@@ -1,0 +1,11 @@
+**/._
+**/__pycache__
+**/*.pyc
+**/*.pyo
+node_modules
+.next
+.git
+*.md
+data/
+*.db
+*.log

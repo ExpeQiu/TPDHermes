@@ -1,0 +1,34 @@
+version: "3.9"
+
+services:
+  frontend:
+    build:
+      context: .  # Next.js root (package.json, next.config.ts, src/)
+      dockerfile: Dockerfile
+    container_name: tphermes-frontend
+    ports:
+      - "3000:3000"
+    environment:
+      - NEXT_PUBLIC_API_URL=http://localhost:8000
+    depends_on:
+      - backend
+    networks:
+      - tphermes-net
+
+  backend:
+    build:
+      context: .  # Python root (main.py, requirements.txt, app/)
+      dockerfile: backend.Dockerfile
+    container_name: tphermes-backend
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=sqlite+aiosqlite:///./data/tphermes.db
+    volumes:
+      - ./data:/app/data
+    networks:
+      - tphermes-net
+
+networks:
+  tphermes-net:
+    driver: bridge

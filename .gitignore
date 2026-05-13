@@ -1,0 +1,33 @@
+# Dependencies
+node_modules/
+__pycache__/
+*.pyc
+*.pyo
+venv/
+env/
+.venv/
+
+# Build artifacts
+dist/
+build/
+*.egg-info/
+.next/
+out/
+
+# Docker
+.docker/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+._*
+
+# Logs
+*.log
+
+# Temporary
+tmp/
+*.tmp
