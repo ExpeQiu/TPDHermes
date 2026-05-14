@@ -13,11 +13,10 @@ from __future__ import annotations
 
 import asyncio
 import json
-import weakref
 from datetime import datetime
 from typing import Any, AsyncGenerator, Dict, Optional
 
-from fastapi import APIRouter, Query, HTTPException
+from fastapi import APIRouter, Query
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
@@ -47,7 +46,8 @@ class KBEvent:
         self.timestamp = datetime.now().isoformat()
 
     def to_dict(self) -> dict:
-        return {
+        d = {
+            "type": self.event_type,
             "event_type": self.event_type,
             "project_id": self.project_id,
             "collection": self.collection,
@@ -55,6 +55,7 @@ class KBEvent:
             "timestamp": self.timestamp,
             **self.data,
         }
+        return d
 
     def to_sse(self) -> str:
         return f"data: {json.dumps(self.to_dict(), ensure_ascii=False)}\n\n"

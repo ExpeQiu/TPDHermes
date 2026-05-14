@@ -90,6 +90,7 @@ export default function ChatPage() {
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
   const API_BASE =
+    process.env.NEXT_PUBLIC_CHAT_API_URL ??
     process.env.NEXT_PUBLIC_HERMES_API_URL ??
     "http://localhost:8642/v1/chat/completions";
   const API_KEY =

@@ -9,7 +9,7 @@ export default function Home() {
         <Link href="/projects" className="px-6 py-3 bg-blue-600 rounded-lg hover:bg-blue-500 transition">
           项目管理
         </Link>
-        <Link href="/workspace" className="px-6 py-3 bg-slate-700 rounded-lg hover:bg-slate-600 transition">
+        <Link href="/workshop" className="px-6 py-3 bg-slate-700 rounded-lg hover:bg-slate-600 transition">
           输出工坊
         </Link>
         <Link href="/chat" className="px-6 py-3 bg-slate-700 rounded-lg hover:bg-slate-600 transition">

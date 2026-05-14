@@ -159,15 +159,15 @@ class SkillVersionService:
                 f"Snapshot at {vdir} does not exist."
             )
 
-        # 临时切换 skills_root 来加载指定版本
-        original_root = self.loader.skills_root
+        # 快照目录即为包根（内含 __init__.py），不能用 skills_root + load(name) 子目录布局
+        self.loader._cache.clear()
         try:
-            self.loader.skills_root = vdir
-            self.loader._cache.clear()
-            skill = self.loader.load(skill_name)
-            return skill
+            return self.loader.load_from_package_root(
+                vdir,
+                logical_name=skill_name,
+                module_unique_suffix=f"v_{version}",
+            )
         finally:
-            self.loader.skills_root = original_root
             self.loader._cache.clear()
 
     def delete_version(self, skill_name: str, version: str) -> None:

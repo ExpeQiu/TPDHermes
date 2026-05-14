@@ -14,8 +14,8 @@ from __future__ import annotations
 
 import importlib
 import importlib.util
-import json
 import os
+import re
 import sys
 from abc import ABC, abstractmethod
 from pathlib import Path
@@ -75,7 +75,7 @@ class SkillLoader:
 
     def discover(self) -> List[str]:
         """返回所有发现的 Skill 名称列表"""
-        names = []
+        names: list[str] = []
         if not self.skills_root.is_dir():
             return names
         for entry in os.listdir(self.skills_root):
@@ -123,6 +123,52 @@ class SkillLoader:
         skill_cls = self._find_skill_class(module, name)
         instance = skill_cls()
         self._cache[name] = instance
+        return instance
+
+    def load_from_package_root(
+        self,
+        package_root: Path,
+        *,
+        logical_name: str,
+        module_unique_suffix: str,
+    ) -> Skill:
+        """
+        从「已是技能包根目录」的路径加载（如版本快照 skills/.versions/<name>/<ver>/，
+        该目录下直接包含 __init__.py），不假设 package_root 下还有 logical_name 子目录。
+        """
+        package_root = Path(package_root)
+        init_file = package_root / "__init__.py"
+        if not init_file.is_file():
+            raise SkillNotFoundError(
+                f"Skill package root has no __init__.py: {package_root}"
+            )
+
+        safe = re.sub(r"[^0-9A-Za-z_]", "_", module_unique_suffix)
+        cache_key = f"{logical_name}@@{safe}"
+        if cache_key in self._cache:
+            return self._cache[cache_key]
+
+        module_name = f"tpdx_hermes_skillpkg_{logical_name}_{safe}"
+        if module_name in sys.modules:
+            del sys.modules[module_name]
+
+        try:
+            spec = importlib.util.spec_from_file_location(
+                f"{module_name}.__init__", init_file
+            )
+            if spec is None or spec.loader is None:
+                raise SkillLoadError(f"Cannot load spec for versioned '{logical_name}'")
+            module = importlib.util.module_from_spec(spec)
+            sys.modules[module_name] = module
+            spec.loader.exec_module(module)
+        except Exception as e:
+            raise SkillLoadError(
+                f"Failed to import versioned skill '{logical_name}': {e}"
+            ) from e
+
+        skill_cls = self._find_skill_class(module, logical_name)
+        instance = skill_cls()
+        self._cache[cache_key] = instance
         return instance
 
     def load_all(self) -> Dict[str, Skill]:

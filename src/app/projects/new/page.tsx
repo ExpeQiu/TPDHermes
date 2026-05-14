@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { apiFetch, readJson } from "@/lib/api";
 
 export default function NewProjectPage() {
   const router = useRouter();
@@ -33,12 +34,27 @@ export default function NewProjectPage() {
     setSubmitting(true);
     setSubmitError(null);
     try {
-      const res = await fetch("http://localhost:8000/projects", {
+      let constraints: Record<string, unknown> | null = null;
+      if (form.constraints.trim()) {
+        try {
+          constraints = JSON.parse(form.constraints) as Record<string, unknown>;
+        } catch {
+          constraints = { notes: form.constraints };
+        }
+      }
+      const res = await apiFetch("/projects/", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(form),
+        body: JSON.stringify({
+          name: form.name,
+          background: form.background || null,
+          audience: form.target_audience || null,
+          deadline: form.deadline || null,
+          constraints,
+        }),
       });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      await readJson(res);
+      setSubmitting(false);
       router.push("/projects");
     } catch (err) {
       setSubmitError((err as Error).message);

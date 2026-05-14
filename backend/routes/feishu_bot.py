@@ -22,23 +22,19 @@
 from __future__ import annotations
 
 import json
-import re
 import httpx
 from datetime import datetime
-from typing import Optional, Any
+from typing import Optional
 
-from fastapi import APIRouter, HTTPException, BackgroundTasks
+from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from backend.services.feishu import (
     get_tenant_token,
     FEISHU_BASE_URL,
-    FEISHU_APP_ID,
-    FEISHU_PUSH_CHAT_ID,
 )
 from backend.services.skill_loader import get_loader
 from backend.services.kb_proxy import kb_proxy_service
-from backend.services.kb_cache import kb_cache_service
 
 router = APIRouter(prefix="/feishu/bot", tags=["feishu_bot"])
 
@@ -253,7 +249,7 @@ async def handle_hermes_command(
                 ]
             except Exception as e:
                 blocks = [
-                    {"tag": "markdown", "content": f"**❌ Skill 加载失败**"},
+                    {"tag": "markdown", "content": "**❌ Skill 加载失败**"},
                     {"tag": "markdown", "content": f"**错误:** `{e}`"},
                     {"tag": "markdown", "content": f"`⏰ {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}`"},
                 ]
@@ -362,7 +358,7 @@ async def handle_hermes_command(
 
         skill_name = sub[0]
         blocks = [
-            {"tag": "markdown", "content": f"**⚡ 正在调用 `/ws/generate`**"},
+            {"tag": "markdown", "content": "**⚡ 正在调用 `/ws/generate`**"},
             {"tag": "markdown", "content": f"**Skill:** `{skill_name}`"},
             {"tag": "markdown", "content": "_结果将通过 SSE 返回，请稍候..._"},
             {"tag": "markdown", "content": f"`⏰ {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}`"},
@@ -424,7 +420,7 @@ async def feishu_bot_webhook(request: dict):
     open_id = sender.get("sender_id", {}).get("open_id", "")
     chat_id = message.get("chat_id", "")
     message_id = message.get("message_id", "")
-    msg_type = message.get("msg_type", "")
+    message.get("msg_type", "")
     content_str = message.get("content", "{}")
 
     # ── 解析消息内容 ─────────────────────────────────────────────

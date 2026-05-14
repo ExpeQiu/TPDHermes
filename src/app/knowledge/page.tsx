@@ -1,8 +1,9 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import KBDegradedBanner from "@/components/kb/KBDegradedBanner";
 import Link from "next/link";
+import { apiGet, getPublicApiBase } from "@/lib/api";
 
 // ============== 类型定义 ==============
 interface KBEntry {
@@ -21,13 +22,9 @@ interface Collection {
   entry_count: number;
 }
 
-interface SearchResult {
-  entries: KBEntry[];
-  total: number;
-  query: string;
-}
+const USE_MOCK_KB = process.env.NEXT_PUBLIC_USE_MOCK_KB === "true";
 
-// ============== Mock 数据（backend 实现前使用） ==============
+// ============== Mock 数据（仅当 NEXT_PUBLIC_USE_MOCK_KB=true 时作为 fallback） ==============
 const MOCK_COLLECTIONS: Collection[] = [
   { name: "meeting_notes", description: "会议纪要", entry_count: 42 },
   { name: "tech_docs", description: "技术文档", entry_count: 28 },
@@ -83,39 +80,53 @@ const MOCK_ENTRIES: KBEntry[] = [
   },
 ];
 
-// ============== API 封装 ==============
-const API_BASE = "/api/kb";
-
-async function fetchCollections(): Promise<Collection[]> {
-  const res = await fetch(`${API_BASE}/collections`);
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  return res.json();
+function mapCacheRow(row: Record<string, unknown>): KBEntry {
+  const meta = (row.metadata as Record<string, unknown>) || {};
+  const title =
+    (typeof meta.title === "string" && meta.title) ||
+    String(row.content ?? "").slice(0, 80) ||
+    "未命名条目";
+  const projectsRaw = meta.projects ?? meta.project_ids;
+  const projects = Array.isArray(projectsRaw)
+    ? (projectsRaw as unknown[]).map((x) => Number(x)).filter((n) => !Number.isNaN(n))
+    : [];
+  return {
+    id: String(row.id ?? ""),
+    title,
+    source: String(row.source ?? meta.source ?? "缓存"),
+    summary: String(row.content ?? "").slice(0, 280),
+    collection: String(row.collection ?? ""),
+    created_at: String(row.created_at ?? row.updated_at ?? ""),
+    projects,
+  };
 }
 
-async function searchKB(
-  query: string,
-  topK: number = 10
-): Promise<KBEntry[]> {
-  const res = await fetch(
-    `${API_BASE}/collections/default/query?q=${encodeURIComponent(query)}&top_k=${topK}`
-  );
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  const data = await res.json();
-  return data.entries ?? [];
+function mapQueryResult(
+  r: { content?: string; metadata?: Record<string, unknown> },
+  i: number,
+  collection: string,
+): KBEntry {
+  const meta = r.metadata || {};
+  const title =
+    (typeof meta.title === "string" && meta.title) ||
+    (r.content || "").slice(0, 80) ||
+    `结果 ${i + 1}`;
+  return {
+    id: String(meta.id ?? `hit_${i}`),
+    title,
+    source: String(meta.source ?? "知识库"),
+    summary: (r.content || "").slice(0, 280),
+    collection,
+    created_at: String(meta.created_at ?? ""),
+    projects: [],
+  };
 }
 
-async function fetchEntry(id: string): Promise<KBEntry> {
-  const res = await fetch(`${API_BASE}/entries/${id}`);
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  return res.json();
-}
-
-// ============== 工具函数 ==============
+// ============== 主页面组件 ==============
 function formatDate(dateStr: string): string {
   return dateStr || "未知";
 }
 
-// ============== 主页面组件 ==============
 export default function KnowledgePage() {
   const [activeTab, setActiveTab] = useState<"browse" | "search">("browse");
   const [searchQuery, setSearchQuery] = useState("");
@@ -125,7 +136,93 @@ export default function KnowledgePage() {
   const [page, setPage] = useState(0);
   const PAGE_SIZE = 10;
 
-  // 切换 Tab 时重置状态
+  const [collections, setCollections] = useState<Collection[]>([]);
+  const [browseEntries, setBrowseEntries] = useState<KBEntry[]>([]);
+  const [kbLoadError, setKbLoadError] = useState<string | null>(null);
+  const [filterCollection, setFilterCollection] = useState<string | null>(null);
+  const [lastSseMessage, setLastSseMessage] = useState<string | null>(null);
+  const sseRef = useRef<EventSource | null>(null);
+
+  const reloadKbBrowse = useCallback(async () => {
+    if (USE_MOCK_KB) {
+      setCollections(MOCK_COLLECTIONS);
+      setBrowseEntries(MOCK_ENTRIES);
+      setKbLoadError(null);
+      return;
+    }
+    try {
+      setKbLoadError(null);
+      const colRes = await apiGet<{ collections: string[]; warning?: string }>(
+        "/kb/collections",
+      );
+      const cols: Collection[] = colRes.collections.map((name) => ({
+        name,
+        description: name,
+        entry_count: 0,
+      }));
+      const entRes = await apiGet<{ entries: Record<string, unknown>[] }>(
+        "/kb/cache/entries/__all__?limit=100",
+      );
+      const entries = entRes.entries.map((row) => mapCacheRow(row));
+      const counts = new Map<string, number>();
+      for (const e of entries) {
+        counts.set(e.collection, (counts.get(e.collection) ?? 0) + 1);
+      }
+      setCollections(
+        cols.map((c) => ({
+          ...c,
+          entry_count: counts.get(c.name) ?? 0,
+        })),
+      );
+      setBrowseEntries(entries);
+    } catch (e) {
+      if (USE_MOCK_KB) {
+        setCollections(MOCK_COLLECTIONS);
+        setBrowseEntries(MOCK_ENTRIES);
+        setKbLoadError(null);
+        return;
+      }
+      setKbLoadError(e instanceof Error ? e.message : "加载失败");
+      setCollections([]);
+      setBrowseEntries([]);
+    }
+  }, []);
+
+  useEffect(() => {
+    void reloadKbBrowse();
+  }, [reloadKbBrowse]);
+
+  useEffect(() => {
+    if (USE_MOCK_KB || typeof window === "undefined") return;
+    const url = `${getPublicApiBase()}/api/v1/kb/events`;
+    const es = new EventSource(url);
+    sseRef.current = es;
+    es.onmessage = (ev) => {
+      try {
+        const o = JSON.parse(ev.data) as { type?: string; event_type?: string };
+        const t = o.type ?? o.event_type;
+        if (
+          t === "sync_complete" ||
+          t === "entry_added" ||
+          t === "entry_updated" ||
+          t === "query_fallback"
+        ) {
+          setLastSseMessage(`知识库事件：${t}`);
+          void reloadKbBrowse();
+        }
+      } catch {
+        /* ignore */
+      }
+    };
+    es.onerror = () => {
+      es.close();
+    };
+    return () => {
+      es.close();
+      sseRef.current = null;
+    };
+  }, [reloadKbBrowse]);
+
   const handleTabChange = (tab: "browse" | "search") => {
     setActiveTab(tab);
     setSelectedEntry(null);
@@ -136,55 +233,105 @@ export default function KnowledgePage() {
     }
   };
 
-  // 执行搜索（带 Mock fallback）
   const handleSearch = useCallback(async () => {
     if (!searchQuery.trim()) return;
     setIsSearching(true);
     setPage(0);
+    const q = searchQuery.trim();
+    const collectionName =
+      collections[0]?.name ||
+      browseEntries[0]?.collection ||
+      "default";
     try {
-      const results = await searchKB(searchQuery.trim(), PAGE_SIZE);
-      setSearchResults(results);
-    } catch {
-      // Mock fallback：模糊匹配 title
-      const q = searchQuery.toLowerCase();
-      const filtered = MOCK_ENTRIES.filter(
-        (e) =>
-          e.title.toLowerCase().includes(q) ||
-          e.summary.toLowerCase().includes(q)
+      if (USE_MOCK_KB) {
+        const filtered = MOCK_ENTRIES.filter(
+          (e) =>
+            e.title.toLowerCase().includes(q.toLowerCase()) ||
+            e.summary.toLowerCase().includes(q.toLowerCase()),
+        );
+        setSearchResults(filtered);
+        return;
+      }
+      const data = await apiGet<{
+        results: Array<{ content?: string; metadata?: Record<string, unknown> }>;
+      }>(
+        `/kb/collections/${encodeURIComponent(collectionName)}/query?q=${encodeURIComponent(q)}&n=${PAGE_SIZE}`,
       );
-      setSearchResults(filtered);
+      setSearchResults(
+        data.results.map((r, i) => mapQueryResult(r, i, collectionName)),
+      );
+    } catch {
+      if (USE_MOCK_KB) {
+        const filtered = MOCK_ENTRIES.filter(
+          (e) =>
+            e.title.toLowerCase().includes(q.toLowerCase()) ||
+            e.summary.toLowerCase().includes(q.toLowerCase()),
+        );
+        setSearchResults(filtered);
+      } else {
+        setSearchResults([]);
+        setKbLoadError("搜索请求失败");
+      }
     } finally {
       setIsSearching(false);
     }
-  }, [searchQuery]);
+  }, [searchQuery, collections, browseEntries]);
 
-  // 点击条目查看详情
   const handleEntryClick = async (entry: KBEntry) => {
     if (selectedEntry?.id === entry.id) {
       setSelectedEntry(null);
       return;
     }
-    try {
-      const detail = await fetchEntry(entry.id);
-      setSelectedEntry(detail);
-    } catch {
-      // Mock fallback：直接使用列表数据
-      setSelectedEntry(entry);
-    }
+    setSelectedEntry(entry);
   };
+
+  const visibleBrowseEntries = browseEntries.filter(
+    (e) => !filterCollection || e.collection === filterCollection,
+  );
 
   // 渲染列表视图
   const renderBrowseView = () => {
-    const collections = MOCK_COLLECTIONS; // TODO: 替换为真实 API
+    const cols = collections.length > 0 ? collections : MOCK_COLLECTIONS;
+    const rows =
+      visibleBrowseEntries.length > 0 ? visibleBrowseEntries : USE_MOCK_KB ? MOCK_ENTRIES : [];
     return (
       <div>
+        {lastSseMessage && (
+          <p className="text-xs text-slate-500 mb-3">{lastSseMessage}</p>
+        )}
+        {kbLoadError && (
+          <p className="text-sm text-amber-400 mb-3">
+            知识库数据加载异常：{kbLoadError}
+            {USE_MOCK_KB ? "" : "（可设置 NEXT_PUBLIC_USE_MOCK_KB=true 启用演示数据）"}
+          </p>
+        )}
         {/* Collection 标签栏 */}
         <div className="flex gap-2 mb-6 flex-wrap">
-          {collections.map((col) => (
+          <button
+            type="button"
+            onClick={() => setFilterCollection(null)}
+            className={`px-4 py-2 rounded-lg text-sm border transition ${
+              filterCollection === null
+                ? "bg-blue-600 border-blue-500 text-white"
+                : "bg-slate-800 border-slate-700 text-slate-300 hover:bg-slate-700"
+            }`}
+          >
+            全部
+          </button>
+          {cols.map((col) => (
             <button
+              type="button"
               key={col.name}
-              onClick={() => setActiveTab("browse")}
-              className="px-4 py-2 bg-slate-800 border border-slate-700 rounded-lg text-sm hover:bg-slate-700 hover:border-slate-600 transition"
+              onClick={() =>
+                setFilterCollection((prev) =>
+                  prev === col.name ? null : col.name,
+                )
+              }
+              className={`px-4 py-2 rounded-lg text-sm border transition ${
+                filterCollection === col.name
+                  ? "bg-blue-600 border-blue-500 text-white"
+                  : "bg-slate-800 border-slate-700 hover:bg-slate-700"
+              }`}
             >
               <span className="text-white font-medium">{col.description}</span>
               <span className="ml-2 text-slate-400 text-xs">
@@ -196,48 +343,52 @@ export default function KnowledgePage() {
 
         {/* 条目列表 */}
         <div className="space-y-3">
-          {MOCK_ENTRIES.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE).map(
-            (entry) => (
-              <div
-                key={entry.id}
-                onClick={() => handleEntryClick(entry)}
-                className={`bg-slate-800/60 border rounded-xl p-5 cursor-pointer transition ${
-                  selectedEntry?.id === entry.id
-                    ? "border-blue-500 bg-slate-700/60"
-                    : "border-slate-700 hover:bg-slate-700/40 hover:border-slate-600"
-                }`}
-              >
-                <div className="flex items-start justify-between mb-2">
-                  <h3 className="text-lg font-semibold text-white">
-                    {entry.title}
-                  </h3>
-                  <span className="text-xs text-slate-500 bg-slate-700 px-2 py-1 rounded">
-                    {entry.collection}
-                  </span>
-                </div>
-                <p className="text-slate-400 text-sm mb-3 line-clamp-2">
-                  {entry.summary}
-                </p>
-                <div className="flex items-center gap-4 text-xs text-slate-500">
-                  <span>来源：{entry.source}</span>
-                  <span>·</span>
-                  <span>{formatDate(entry.created_at)}</span>
-                  {entry.projects.length > 0 && (
-                    <>
-                      <span>·</span>
-                      <span>关联 {entry.projects.length} 个项目</span>
-                    </>
-                  )}
-                </div>
-              </div>
-            )
+          {rows.length === 0 && (
+            <p className="text-slate-500 text-center py-8 text-sm">
+              暂无条目。可在外部 KB 同步后刷新，或切换到「搜索」尝试实时查询。
+            </p>
           )}
+          {rows.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE).map((entry) => (
+            <div
+              key={entry.id}
+              onClick={() => void handleEntryClick(entry)}
+              className={`bg-slate-800/60 border rounded-xl p-5 cursor-pointer transition ${
+                selectedEntry?.id === entry.id
+                  ? "border-blue-500 bg-slate-700/60"
+                  : "border-slate-700 hover:bg-slate-700/40 hover:border-slate-600"
+              }`}
+            >
+              <div className="flex items-start justify-between mb-2">
+                <h3 className="text-lg font-semibold text-white">
+                  {entry.title}
+                </h3>
+                <span className="text-xs text-slate-500 bg-slate-700 px-2 py-1 rounded">
+                  {entry.collection}
+                </span>
+              </div>
+              <p className="text-slate-400 text-sm mb-3 line-clamp-2">
+                {entry.summary}
+              </p>
+              <div className="flex items-center gap-4 text-xs text-slate-500">
+                <span>来源：{entry.source}</span>
+                <span>·</span>
+                <span>{formatDate(entry.created_at)}</span>
+                {entry.projects.length > 0 && (
+                  <>
+                    <span>·</span>
+                    <span>关联 {entry.projects.length} 个项目</span>
+                  </>
+                )}
+              </div>
+            </div>
+          ))}
         </div>
 
         {/* 分页 */}
-        {MOCK_ENTRIES.length > PAGE_SIZE && (
+        {rows.length > PAGE_SIZE && (
           <div className="flex justify-center gap-3 mt-6">
             <button
+              type="button"
               onClick={() => setPage((p) => Math.max(0, p - 1))}
               disabled={page === 0}
               className="px-4 py-2 bg-slate-800 border border-slate-700 rounded-lg text-sm hover:bg-slate-700 disabled:opacity-40 disabled:cursor-not-allowed transition"
@@ -248,12 +399,13 @@ export default function KnowledgePage() {
               第 {page + 1} 页
             </span>
             <button
+              type="button"
               onClick={() =>
                 setPage((p) =>
-                  (p + 1) * PAGE_SIZE < MOCK_ENTRIES.length ? p + 1 : p
+                  (p + 1) * PAGE_SIZE < rows.length ? p + 1 : p,
                 )
               }
-              disabled={(page + 1) * PAGE_SIZE >= MOCK_ENTRIES.length}
+              disabled={(page + 1) * PAGE_SIZE >= rows.length}
               className="px-4 py-2 bg-slate-800 border border-slate-700 rounded-lg text-sm hover:bg-slate-700 disabled:opacity-40 disabled:cursor-not-allowed transition"
             >
               下一页

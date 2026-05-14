@@ -101,9 +101,9 @@ def _project_to_dict(project: Project) -> dict:
     constraints_val = None
     if project.constraints:
         try:
-            constraints_val = json.loads(project.constraints)
+            constraints_val = json.loads(str(project.constraints))
         except json.JSONDecodeError:
-            constraints_val = project.constraints
+            constraints_val = str(project.constraints)
 
     return {
         "id": project.id,

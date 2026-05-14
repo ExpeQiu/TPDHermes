@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback } from "react";
 import Link from "next/link";
+import { apiFetch, apiGet, readJson } from "@/lib/api";
 
 interface MarketSkill {
   id: string;
@@ -179,7 +180,23 @@ const MOCK_MARKET: MarketSkill[] = [
   },
 ];
 
-const API = "http://localhost:8000/skills/market";
+function catalogItemToMarket(row: Record<string, unknown>): MarketSkill {
+  const pkg = String(row.name ?? "");
+  return {
+    id: pkg,
+    name: String(row.display_name ?? row.name ?? pkg),
+    description: String(row.description ?? ""),
+    version: String(row.latest_version ?? "1.0.0"),
+    author: String(row.author ?? "TPD Team"),
+    category: String(row.category ?? "文档类"),
+    icon: String(row.icon ?? "📦"),
+    tags: Array.isArray(row.tags) ? (row.tags as string[]) : [],
+    install_count: typeof row.installs === "number" ? row.installs : Number(row.installs ?? 0),
+    rating: typeof row.rating === "number" ? row.rating : Number(row.rating ?? 0),
+    review_count: 0,
+    updated_at: "2026-01-01",
+  };
+}
 
 function StarRating({ rating }: { rating: number }) {
   return (
@@ -203,6 +220,18 @@ function formatCount(n: number): string {
   return String(n);
 }
 
+/** Tab 为「文档」「文案」等短名，后端目录为「文档类」「文案类」时仍能筛选 */
+function uiCategoryMatchesBackendTab(
+  uiTabId: string,
+  backendCategory: string,
+): boolean {
+  if (uiTabId === "all") return true;
+  if (backendCategory === uiTabId) return true;
+  if (backendCategory === `${uiTabId}类`) return true;
+  if (backendCategory.startsWith(uiTabId)) return true;
+  return false;
+}
+
 export default function SkillMarketPage() {
   const [skills, setSkills] = useState<MarketSkill[]>([]);
   const [loading, setLoading] = useState(true);
@@ -218,21 +247,32 @@ export default function SkillMarketPage() {
     setLoading(true);
     setError("");
     try {
-      const res = await fetch(API);
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data = await res.json();
-      setSkills(data);
+      const raw = await apiGet<Record<string, unknown>[]>("/skills/marketplace");
+      setSkills(raw.map(catalogItemToMarket));
     } catch {
-      // Fallback to mock data
       setSkills(MOCK_MARKET);
+      setError("无法连接技能市场 API，已显示演示数据");
     } finally {
       setLoading(false);
+    }
+  }, []);
+
+  const refreshInstalled = useCallback(async () => {
+    try {
+      const rows = await apiGet<Array<{ name: string }>>("/skills/");
+      setInstalledSet(new Set(rows.map((r) => r.name)));
+    } catch {
+      setInstalledSet(new Set());
     }
   }, []);
 
   useEffect(() => {
     fetchMarket();
   }, [fetchMarket]);
+
+  useEffect(() => {
+    void refreshInstalled();
+  }, [refreshInstalled]);
 
   const showMsg = (msg: string) => {
     setActionMsg(msg);
@@ -242,18 +282,21 @@ export default function SkillMarketPage() {
   const handleInstall = async (skill: MarketSkill) => {
     setInstalling(skill.id);
     try {
-      const res = await fetch(`http://localhost:8000/skills/install`, {
+      const res = await apiFetch("/skills/", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ skill_id: skill.id, name: skill.name }),
+        body: JSON.stringify({
+          name: skill.id,
+          description: skill.description || skill.name,
+          source: "local",
+        }),
       });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      await readJson(res);
       setInstalledSet((prev) => new Set([...prev, skill.id]));
       showMsg(`「${skill.name}」安装成功！`);
-    } catch {
-      // Mock success for demo
-      setInstalledSet((prev) => new Set([...prev, skill.id]));
-      showMsg(`「${skill.name}」安装成功（mock）！`);
+      await refreshInstalled();
+    } catch (e) {
+      showMsg(`安装失败：${e instanceof Error ? e.message : "未知错误"}`);
     } finally {
       setInstalling(null);
     }
@@ -266,7 +309,9 @@ export default function SkillMarketPage() {
         s.name.includes(search) ||
         s.description.includes(search) ||
         s.tags.some((t) => t.includes(search));
-      const matchCat = activeCategory === "all" || s.category === activeCategory;
+      const matchCat =
+        activeCategory === "all" ||
+        uiCategoryMatchesBackendTab(activeCategory, s.category);
       return matchSearch && matchCat;
     })
     .sort((a, b) => {
@@ -322,7 +367,7 @@ export default function SkillMarketPage() {
         {/* Error */}
         {error && (
           <div className="mb-4 px-4 py-3 bg-red-600/20 border border-red-600/40 rounded-lg text-red-300 text-sm">
-            ❌ {error}（显示 mock 数据）
+            ❌ {error}
           </div>
         )}
 

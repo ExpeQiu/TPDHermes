@@ -3,12 +3,13 @@ version: "3.9"
 services:
   frontend:
     build:
-      context: .  # Next.js root (package.json, next.config.ts, src/)
+      context: .
       dockerfile: Dockerfile
     container_name: tphermes-frontend
     ports:
       - "3000:3000"
     environment:
+      # 浏览器访问宿主机映射的 API 端口时使用
       - NEXT_PUBLIC_API_URL=http://localhost:8000
     depends_on:
       - backend
@@ -17,13 +18,14 @@ services:
 
   backend:
     build:
-      context: .  # Python root (main.py, requirements.txt, app/)
+      context: .
       dockerfile: backend.Dockerfile
     container_name: tphermes-backend
     ports:
       - "8000:8000"
     environment:
-      - DATABASE_URL=sqlite+aiosqlite:///./data/tphermes.db
+      - DATABASE_URL=sqlite+aiosqlite:////app/data/tphermes.db
+      - CHROMA_HOST=${CHROMA_HOST:-http://host.docker.internal:8001}
     volumes:
       - ./data:/app/data
     networks:

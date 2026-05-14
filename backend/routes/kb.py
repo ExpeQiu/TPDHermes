@@ -2,7 +2,7 @@
 知识库路由：提供 KB 健康检查、collection 查询等接口
 """
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Query
 from pydantic import BaseModel
 from typing import Optional
 
@@ -145,7 +145,9 @@ async def get_cached_entries(
     offset: int = Query(0, ge=0),
 ):
     """
-    读取本地 kb_cache 缓存条目（不依赖外部 ChromaDB）
+    读取本地 kb_cache 缓存条目（不依赖外部 ChromaDB）。
+
+    `project_id` 为 `__all__`、`all` 或 `*` 时表示跨项目汇总（不按 project_id 过滤）。
     """
     entries = await kb_cache_service.get_cached_entries(
         project_id=project_id,

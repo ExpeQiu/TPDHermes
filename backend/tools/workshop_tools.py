@@ -5,8 +5,6 @@ Wraps SkillLoader for MCP access.
 """
 
 import json
-from pathlib import Path
-from typing import Any
 
 from backend.services.skill_loader import get_loader, SkillNotFoundError, SkillLoadError
 

@@ -2,6 +2,27 @@
 
 import { useEffect, useRef, useState, useCallback } from "react";
 import Link from "next/link";
+import { apiFetch, apiGet, apiV1 } from "@/lib/api";
+
+const USE_MOCK_FALLBACK = process.env.NEXT_PUBLIC_USE_MOCK_WORKSHOP === "true";
+
+function mapApiSkillToUi(row: { id: string; name: string; description: string }): Skill {
+  const pkg = row.name;
+  let icon = "📦";
+  if (pkg.includes("speech")) icon = "🎤";
+  else if (pkg.includes("video")) icon = "🎬";
+  else if (pkg.includes("a4")) icon = "📄";
+  else if (pkg.includes("hello")) icon = "👋";
+  let category = "文档";
+  if (pkg.includes("email") || pkg.includes("social")) category = "文案";
+  return {
+    id: pkg,
+    name: pkg.replace(/_/g, " "),
+    description: row.description || pkg,
+    icon,
+    category,
+  };
+}
 
 interface Skill {
   id: string;
@@ -83,22 +104,17 @@ export default function WorkshopPage() {
   const outputEndRef = useRef<HTMLDivElement>(null);
   const abortRef = useRef<AbortController | null>(null);
 
-  // Fetch skills from API (mock fallback)
   useEffect(() => {
-    fetch("http://localhost:8000/skills")
-      .then((res) => {
-        if (!res.ok) throw new Error("API not ready");
-        return res.json();
-      })
-      .then((data) => {
-        setSkills(data);
-        setLoading(false);
+    setLoading(true);
+    apiGet<Array<{ id: string; name: string; description: string }>>("/skills/")
+      .then((rows) => {
+        setSkills(rows.map(mapApiSkillToUi));
       })
       .catch(() => {
-        // Use mock data when API is not ready
-        setSkills(MOCK_SKILLS);
-        setLoading(false);
-      });
+        if (USE_MOCK_FALLBACK) setSkills(MOCK_SKILLS);
+        else setSkills([]);
+      })
+      .finally(() => setLoading(false));
   }, []);
 
   const grouped = skills.reduce<Record<string, Skill[]>>((acc, skill) => {
@@ -143,7 +159,7 @@ export default function WorkshopPage() {
 
     const context = buildContext();
 
-    fetch("http://localhost:8000/ws/generate", {
+    fetch(apiV1("/ws/generate"), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ skill_name: selectedSkill, context }),

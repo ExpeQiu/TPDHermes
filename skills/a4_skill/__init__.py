@@ -3,7 +3,7 @@ A4Skill - A4技术规格文档生成模板
 生成标准A4格式的产品技术文档
 """
 
-from app.services.skill_loader import Skill
+from backend.services.skill_loader import Skill
 
 
 class A4Skill(Skill):

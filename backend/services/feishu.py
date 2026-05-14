@@ -189,7 +189,6 @@ def build_project_complete_card(
     elements = []
 
     # 状态标签
-    status_color = "#00A620" if status == "完成" else "#FF7A00"
     elements.append(
         {
             "tag": "markdown",
@@ -256,7 +255,6 @@ def build_task_card(
     """
     构建任务状态卡片
     """
-    status_color = "#00A620" if status == "完成" else "#FF7A00"
     elements = [
         {
             "tag": "markdown",
@@ -430,7 +428,6 @@ async def upload_image_to_feishu(
 
     Ref: POST /im/v1/images
     """
-    import mimetypes
     from io import BytesIO
 
     token = await get_tenant_token()

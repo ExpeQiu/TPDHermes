@@ -7,15 +7,16 @@ KBProxy 服务：外部 ChromaDB/LLM 服务的 REST 代理层
 3. 提供统一的知识查询接口
 """
 
-import json
+import os
 from typing import Optional
+
 import httpx
 
 from backend.services.kb_cache import kb_cache_service
 
 
 # 外部 ChromaDB 服务地址（可通过环境变量覆盖）
-CHROMA_HOST = "http://localhost:8001"
+CHROMA_HOST = os.getenv("CHROMA_HOST", "http://localhost:8001")
 
 
 class KBProxyService:

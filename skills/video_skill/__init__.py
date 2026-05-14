@@ -3,7 +3,7 @@ VideoSkill - 视频分镜头脚本生成模板
 生成适合拍摄制作的分镜头脚本
 """
 
-from app.services.skill_loader import Skill
+from backend.services.skill_loader import Skill
 
 
 class VideoSkill(Skill):

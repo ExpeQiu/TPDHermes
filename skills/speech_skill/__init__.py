@@ -3,7 +3,7 @@ SpeechSkill - 口播文案生成模板
 生成适合语音朗读的营销口播文案
 """
 
-from app.services.skill_loader import Skill
+from backend.services.skill_loader import Skill
 
 
 class SpeechSkill(Skill):

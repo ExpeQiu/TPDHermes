@@ -9,9 +9,9 @@ MultiSkillScheduler - 多 Skill 智能调度器
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
-from .skill_loader import Skill, SkillLoader, get_loader
+from .skill_loader import SkillLoader, get_loader
 
 
 # ─── 内置场景规则 ────────────────────────────────────────────────────────────

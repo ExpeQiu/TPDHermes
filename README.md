@@ -21,6 +21,8 @@ fastmcp>=0.9.0,<1.0.0
 
 ## 启动方式
 
+业务 API 统一前缀：`/api/v1`（根 `/` 与 `/health` 除外）。详见 [guide/API对照表.md](guide/API对照表.md)。
+
 ### 本地开发
 ```bash
 pip install -r requirements.txt
@@ -29,9 +31,10 @@ uvicorn main:app --reload --port 8000
 
 ### Docker
 ```bash
-docker build -t tphermes-backend .
-docker run -p 8000:8000 tphermes-backend
+docker compose up --build
 ```
+
+后端镜像使用根目录 [backend.Dockerfile](backend.Dockerfile)。
 
 ## API 文档
 

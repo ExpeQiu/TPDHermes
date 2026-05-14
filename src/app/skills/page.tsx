@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback } from "react";
 import Link from "next/link";
+import { apiFetch, readJson } from "@/lib/api";
 
 interface Skill {
   id: string;
@@ -18,7 +19,7 @@ interface Skill {
 
 type Tab = "installed" | "marketplace";
 
-const API = "http://localhost:8000/skills";
+const SKILLS_BASE = "/skills/";
 
 export default function SkillsPage() {
   const [tab, setTab] = useState<Tab>("installed");
@@ -34,9 +35,8 @@ export default function SkillsPage() {
     setLoading(true);
     setError("");
     try {
-      const res = await fetch(API);
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data = await res.json();
+      const res = await apiFetch(SKILLS_BASE);
+      const data = await readJson<Skill[]>(res);
       setSkills(data);
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : "加载失败";
@@ -57,12 +57,12 @@ export default function SkillsPage() {
 
   const handleToggle = async (skill: Skill) => {
     try {
-      const res = await fetch(`${API}/${skill.name}/enable`, {
+      const res = await apiFetch(`${SKILLS_BASE}${skill.name}/enable`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ enabled: !skill.enabled }),
       });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      await readJson(res);
       await fetchSkills();
       showMsg(`${skill.name} 已${!skill.enabled ? "启用" : "禁用"}`);
     } catch (e: unknown) {
@@ -73,8 +73,8 @@ export default function SkillsPage() {
   const handleUninstall = async (name: string) => {
     if (!confirm(`确定要卸载 Skill「${name}」吗？`)) return;
     try {
-      const res = await fetch(`${API}/${name}`, { method: "DELETE" });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const res = await apiFetch(`${SKILLS_BASE}${name}`, { method: "DELETE" });
+      await readJson(res);
       setSelectedSkill(null);
       await fetchSkills();
       showMsg(`「${name}」已卸载`);
@@ -86,12 +86,12 @@ export default function SkillsPage() {
   const handleSaveConfig = async (name: string) => {
     try {
       const config = JSON.parse(configText);
-      const res = await fetch(`${API}/${name}/config`, {
+      const res = await apiFetch(`${SKILLS_BASE}${name}/config`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ config }),
       });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      await readJson(res);
       setEditingConfig(false);
       await fetchSkills();
       showMsg("配置已保存");
@@ -159,7 +159,7 @@ export default function SkillsPage() {
         {/* Error */}
         {error && (
           <div className="mb-4 px-4 py-3 bg-red-600/20 border border-red-600/40 rounded-lg text-red-300 text-sm">
-            ❌ {error}（Skills Store API 尚未启动，或使用本地 mock 数据）
+            ❌ {error}
           </div>
         )}
 

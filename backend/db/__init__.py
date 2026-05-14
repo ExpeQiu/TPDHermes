@@ -1,11 +1,15 @@
+import os
+
 from sqlalchemy.orm import DeclarativeBase
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
+from sqlalchemy.pool import StaticPool
+
 
 class Base(DeclarativeBase):
     pass
-from sqlalchemy.pool import StaticPool
 
-DATABASE_URL = "sqlite+aiosqlite:///./tphermes.db"
+
+DATABASE_URL = os.getenv("DATABASE_URL", "sqlite+aiosqlite:///./tphermes.db")
 
 engine = create_async_engine(
     DATABASE_URL,

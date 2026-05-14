@@ -19,10 +19,12 @@ from fastapi import APIRouter, HTTPException, Depends, Query
 from pydantic import BaseModel
 from typing import Any, Dict, List, Optional
 
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from backend.db import get_db
 from backend.services.skill_lifecycle import SkillLifecycleService
 from backend.services.skill_version import SkillVersionService
-from backend.services.skill_loader import SkillLoader, SkillNotFoundError, get_loader
+from backend.services.skill_loader import SkillNotFoundError, get_loader
 
 
 router = APIRouter(prefix="/skills", tags=["skills"])
@@ -67,6 +69,18 @@ class SkillResponse(BaseModel):
 
 MARKETPLACE_CATALOG = [
     {
+        "name": "hello_skill",
+        "display_name": "Hello 示例",
+        "description": "最小示例技能，用于联调与验证加载链路",
+        "icon": "👋",
+        "category": "文档类",
+        "latest_version": "1.0.0",
+        "author": "TPD Team",
+        "tags": ["示例", "联调"],
+        "installs": 12,
+        "rating": 5.0,
+    },
+    {
         "name": "speech_skill",
         "display_name": "发言稿",
         "description": "生成领导讲话、产品发布、技术分享等场景的正式发言稿",
@@ -79,7 +93,7 @@ MARKETPLACE_CATALOG = [
         "rating": 4.8,
     },
     {
-        "name": "video_script_skill",
+        "name": "video_skill",
         "display_name": "视频脚本",
         "description": "生成短视频/宣传片的分镜脚本，包含旁白和画面描述",
         "icon": "🎬",
@@ -102,42 +116,6 @@ MARKETPLACE_CATALOG = [
         "installs": 156,
         "rating": 4.5,
     },
-    {
-        "name": "article_skill",
-        "display_name": "技术文章",
-        "description": "生成深度技术文章，适合公众号、技术博客发布",
-        "icon": "✍️",
-        "category": "文档类",
-        "latest_version": "1.3.0",
-        "author": "TPD Team",
-        "tags": ["文章", "技术博客", "深度"],
-        "installs": 289,
-        "rating": 4.7,
-    },
-    {
-        "name": "social_post_skill",
-        "display_name": "社交媒体文案",
-        "description": "生成微博、小红书、朋友圈等社交平台的短文案",
-        "icon": "📱",
-        "category": "文案类",
-        "latest_version": "1.0.0",
-        "author": "Community",
-        "tags": ["社交媒体", "微博", "小红书"],
-        "installs": 421,
-        "rating": 4.4,
-    },
-    {
-        "name": "email_skill",
-        "display_name": "商务邮件",
-        "description": "生成专业商务邮件，支持多种场景和语气",
-        "icon": "📧",
-        "category": "文档类",
-        "latest_version": "1.0.0",
-        "author": "Community",
-        "tags": ["邮件", "商务", "沟通"],
-        "installs": 198,
-        "rating": 4.3,
-    },
 ]
 
 
@@ -146,7 +124,7 @@ MARKETPLACE_CATALOG = [
 @router.get("/", response_model=List[SkillResponse])
 async def list_skills(
     enabled_only: bool = Query(False, description="仅返回已启用的 Skill"),
-    db=None,
+    db: AsyncSession = Depends(get_db),
 ):
     """列出所有已安装的 Skills"""
     svc = SkillLifecycleService(db, get_loader())
@@ -183,7 +161,7 @@ async def get_categories():
 
 
 @router.get("/{name}", response_model=SkillResponse)
-async def get_skill(name: str, db=None):
+async def get_skill(name: str, db: AsyncSession = Depends(get_db)):
     """获取单个 Skill 详情"""
     svc = SkillLifecycleService(db, get_loader())
     skill = await svc.get_skill(name)
@@ -193,7 +171,7 @@ async def get_skill(name: str, db=None):
 
 
 @router.post("/", response_model=SkillResponse)
-async def install_skill(data: SkillInstallRequest, db=None):
+async def install_skill(data: SkillInstallRequest, db: AsyncSession = Depends(get_db)):
     """安装一个新 Skill"""
     svc = SkillLifecycleService(db, get_loader())
     try:
@@ -209,7 +187,7 @@ async def install_skill(data: SkillInstallRequest, db=None):
 
 
 @router.put("/{name}", response_model=SkillResponse)
-async def update_skill(name: str, data: SkillUpdateRequest, db=None):
+async def update_skill(name: str, data: SkillUpdateRequest, db: AsyncSession = Depends(get_db)):
     """更新 Skill 到新版本"""
     svc = SkillLifecycleService(db, get_loader())
     try:
@@ -220,7 +198,7 @@ async def update_skill(name: str, data: SkillUpdateRequest, db=None):
 
 
 @router.patch("/{name}/enable", response_model=SkillResponse)
-async def toggle_skill(name: str, data: SkillEnableRequest, db=None):
+async def toggle_skill(name: str, data: SkillEnableRequest, db: AsyncSession = Depends(get_db)):
     """启用/禁用 Skill"""
     svc = SkillLifecycleService(db, get_loader())
     try:
@@ -231,7 +209,7 @@ async def toggle_skill(name: str, data: SkillEnableRequest, db=None):
 
 
 @router.patch("/{name}/config", response_model=SkillResponse)
-async def update_config(name: str, data: SkillConfigRequest, db=None):
+async def update_config(name: str, data: SkillConfigRequest, db: AsyncSession = Depends(get_db)):
     """更新 Skill 配置"""
     svc = SkillLifecycleService(db, get_loader())
     try:
@@ -242,7 +220,7 @@ async def update_config(name: str, data: SkillConfigRequest, db=None):
 
 
 @router.delete("/{name}")
-async def uninstall_skill(name: str, db=None):
+async def uninstall_skill(name: str, db: AsyncSession = Depends(get_db)):
     """卸载 Skill"""
     svc = SkillLifecycleService(db, get_loader())
     try:

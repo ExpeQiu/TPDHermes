@@ -15,10 +15,9 @@ import httpx
 import secrets
 import hashlib
 import base64
-import json
 from datetime import datetime, timedelta
-from typing import Optional, Any
-from dataclasses import dataclass, field
+from typing import Optional
+from dataclasses import dataclass
 
 # ── 配置 ─────────────────────────────────────────────────────────────────────
 
@@ -317,6 +316,6 @@ def get_user_session(session_token: str) -> Optional[FeishuUser]:
 
 def _cleanup_expired_sessions():
     """清理过期会话（每次调用清理一小批）"""
-    now = datetime.now().timestamp()
-    expired = [k for k, v in _USER_SESSIONS.items() if False]  # 暂时用不过期策略
+    datetime.now().timestamp()
+    [k for k, v in _USER_SESSIONS.items() if False]  # 暂时用不过期策略
     # 注意：当前实现不考虑时间过期，需要可按需扩展 Redis

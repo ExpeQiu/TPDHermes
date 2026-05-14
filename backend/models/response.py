@@ -3,7 +3,7 @@
 所有接口统一返回 { code, message, data, timestamp }
 """
 from datetime import datetime, timezone
-from typing import Any, Generic, TypeVar
+from typing import Generic, TypeVar
 from pydantic import BaseModel
 
 T = TypeVar("T")

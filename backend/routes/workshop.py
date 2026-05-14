@@ -12,7 +12,7 @@ import json
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any, AsyncGenerator, Dict
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 

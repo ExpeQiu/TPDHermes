@@ -2,13 +2,14 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import { apiGet } from "@/lib/api";
 
 interface Project {
-  id: number;
+  id: string;
   name: string;
   status: "active" | "paused" | "completed" | "archived";
-  deadline: string;
-  background: string;
+  deadline: string | null;
+  background: string | null;
 }
 
 const statusColors: Record<string, string> = {
@@ -24,16 +25,12 @@ export default function ProjectsPage() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    fetch("http://localhost:8000/projects")
-      .then((res) => {
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        return res.json();
-      })
+    apiGet<Project[]>("/projects/")
       .then((data) => {
         setProjects(data);
         setLoading(false);
       })
-      .catch((err) => {
+      .catch((err: Error) => {
         setError(err.message);
         setLoading(false);
       });

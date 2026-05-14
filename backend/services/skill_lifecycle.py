@@ -12,18 +12,15 @@ from __future__ import annotations
 
 import json
 import shutil
-import zipfile
-import tempfile
-from pathlib import Path
 from typing import Any, Dict, List, Optional
 from datetime import datetime
 import uuid
 
-from sqlalchemy import select, update
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.models.skill import Skill
-from backend.services.skill_loader import SkillLoader, SkillNotFoundError
+from backend.services.skill_loader import SkillLoader, SkillNotFoundError, SkillLoadError
 from backend.services.skill_version import SkillVersionService, bump_version
 
 
@@ -72,11 +69,20 @@ class SkillLifecycleService:
             raise ValueError(f"Skill '{name}' is already installed")
 
         skill_dir = self.loader.skills_root / name
+        if not skill_dir.is_dir() or not (skill_dir / "__init__.py").is_file():
+            raise ValueError(
+                f"技能包目录不存在或缺少 __init__.py：{skill_dir}。"
+                "请仅安装仓库 skills/ 下已存在的技能目录名。"
+            )
+        try:
+            self.loader.load(name)
+        except SkillLoadError as e:
+            raise ValueError(f"技能 '{name}' 无法被加载：{e}") from e
+
         version = "1.0.0"
 
-        # 如果目录存在，创建初始快照
-        if skill_dir.exists():
-            self.version_service.snapshot(name, version, "Initial install")
+        # 目录已校验存在，创建初始快照
+        self.version_service.snapshot(name, version, "Initial install")
 
         skill = Skill(
             id=str(uuid.uuid4()),
@@ -119,14 +125,14 @@ class SkillLifecycleService:
         else:
             version = bump_version(old_version)
 
-        # 创建新版本快照
-        try:
-            self.version_service.snapshot(name, version, changelog)
-        except SkillNotFoundError:
-            # 目录不存在则跳过快照
-            pass
+        skill_dir = self.loader.skills_root / name
+        if not skill_dir.is_dir() or not (skill_dir / "__init__.py").is_file():
+            raise SkillNotFoundError(
+                f"技能目录缺失，无法打版本快照：{skill_dir}"
+            )
 
-        # 更新版本历史
+        # 创建新版本快照（目录必须存在）
+        self.version_service.snapshot(name, version, changelog)
         history = json.loads(skill.version_history or "[]")
         history.append({
             "version": version,

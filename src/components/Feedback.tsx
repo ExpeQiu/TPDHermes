@@ -159,15 +159,17 @@ export default function Feedback({
       };
 
       try {
-        // Try API first
-        const res = await fetch(`/api/feedback/${skillId}`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(newReview),
-        });
-        if (!res.ok) throw new Error("API not available");
+        const feedbackUrl = process.env.NEXT_PUBLIC_FEEDBACK_API_URL;
+        if (feedbackUrl) {
+          const res = await fetch(`${feedbackUrl.replace(/\/$/, "")}/${skillId}`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(newReview),
+          });
+          if (!res.ok) throw new Error("API not available");
+        }
       } catch {
-        // Fallback: add locally for demo
+        // 无配置或失败时仅本地展示
       }
 
       const localReview: Review = {

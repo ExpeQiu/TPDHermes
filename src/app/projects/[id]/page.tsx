@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
 import Feedback from "@/components/Feedback";
+import { apiGet } from "@/lib/api";
 
 interface ProjectOutput {
   id: string;
@@ -17,13 +18,13 @@ interface ProjectOutput {
 }
 
 interface Project {
-  id: number;
+  id: string;
   name: string;
   status: "active" | "paused" | "completed" | "archived";
-  deadline: string;
-  background: string;
-  target_audience: string;
-  constraints: string;
+  deadline: string | null;
+  background: string | null;
+  audience: string | null;
+  constraints: unknown;
 }
 
 const statusColors: Record<string, string> = {
@@ -84,29 +85,26 @@ export default function ProjectDetailPage() {
   const [copied, setCopied] = useState(false);
 
   useEffect(() => {
-    fetch(`http://localhost:8000/projects/${id}`)
-      .then((res) => {
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        return res.json();
-      })
+    if (!id) return;
+    let cancelled = false;
+    setLoading(true);
+    setError(null);
+    apiGet<Project>(`/projects/${String(id)}`)
       .then((data) => {
-        setProject(data);
-        setLoading(false);
+        if (!cancelled) {
+          setProject(data);
+          setOutputs([]);
+        }
       })
-      .catch(() => {
-        // Mock data for demo
-        setProject({
-          id: Number(id),
-          name: "2026款旗舰车型技术推广",
-          status: "active",
-          deadline: "2026-06-30",
-          background: "围绕2026款旗舰车型的上市推广需求，系统性地生产技术推广内容，覆盖发布会、官网、社交媒体等多个渠道。",
-          target_audience: "汽车媒体记者、行业分析师、潜在购车用户、汽车KOL",
-          constraints: "1. 所有内容必须符合品牌调性\n2. 技术参数需经产品部门确认\n3. 发布时间节点需配合市场节奏",
-        });
-        setOutputs(MOCK_OUTPUTS);
-        setLoading(false);
+      .catch((e: Error) => {
+        if (!cancelled) setError(e.message);
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
       });
+    return () => {
+      cancelled = true;
+    };
   }, [id]);
 
   const handleCopy = (text: string) => {
@@ -192,7 +190,7 @@ export default function ProjectDetailPage() {
                   </InfoField>
 
                   <InfoField label="目标受众">
-                    <p className="text-slate-200">{project.target_audience || "未设置"}</p>
+                    <p className="text-slate-200">{project.audience || "未设置"}</p>
                   </InfoField>
 
                   <InfoField label="截止日期">
@@ -201,7 +199,11 @@ export default function ProjectDetailPage() {
 
                   <InfoField label="约束条件">
                     <pre className="bg-slate-900/60 rounded-lg p-4 text-slate-300 text-sm overflow-x-auto whitespace-pre-wrap leading-relaxed">
-                      {project.constraints || "暂无约束条件"}
+                      {project.constraints == null
+                        ? "暂无约束条件"
+                        : typeof project.constraints === "string"
+                          ? project.constraints
+                          : JSON.stringify(project.constraints, null, 2)}
                     </pre>
                   </InfoField>
                 </div>

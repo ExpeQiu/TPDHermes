@@ -6,8 +6,7 @@ import json
 import uuid
 from datetime import datetime
 from typing import Optional
-from sqlalchemy import select, text
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
 
 from backend.models.kb_cache import KBCache
 from backend.db import engine, async_session_maker
@@ -145,7 +144,7 @@ class KBCacheService:
         按 project_id 读取本地 kb_cache 缓存条目
 
         Args:
-            project_id: 项目 ID
+            project_id: 项目 ID；若为 ``__all__``、``*`` 或 ``all`` 则不按项目过滤（全量浏览）。
             collection: 可选，按 collection 过滤
             limit: 返回条数上限
             offset: 翻页偏移
@@ -155,7 +154,9 @@ class KBCacheService:
         """
         await self.ensure_table()
         async with async_session_maker() as db:
-            query = select(KBCache).where(KBCache.project_id == project_id)
+            query = select(KBCache)
+            if project_id not in ("__all__", "*", "all"):
+                query = query.where(KBCache.project_id == project_id)
             if collection:
                 query = query.where(KBCache.collection == collection)
             query = query.order_by(KBCache.reliability.desc(), KBCache.updated_at.desc())

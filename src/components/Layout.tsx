@@ -8,7 +8,7 @@ import { useThemeStore, useUserStore } from '@/lib/store'
 const navLinks = [
   { href: '/', label: '首页', emoji: '🏠' },
   { href: '/projects', label: '项目管理', emoji: '📁' },
-  { href: '/workspace', label: '输出工坊', emoji: '🛠️' },
+  { href: '/workshop', label: '输出工坊', emoji: '🛠️' },
   { href: '/chat', label: '对话', emoji: '💬' },
   { href: '/create', label: '快速创作', emoji: '⚡' },
   { href: '/knowledge', label: '知识库', emoji: '📚' },

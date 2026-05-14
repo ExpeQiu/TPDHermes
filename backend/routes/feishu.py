@@ -35,7 +35,6 @@ from backend.services.feishu import (
     notify,
     send_text_message,
     send_post_message,
-    send_interactive_card,
     build_project_complete_card,
     build_task_card,
     notify_project_complete,
@@ -45,12 +44,9 @@ from backend.services.feishu import (
 from backend.services.feishu_auth import (
     build_authorization_url,
     exchange_code_simple,
-    exchange_code_for_token,
-    get_user_info,
     refresh_user_token,
     create_user_session,
     get_user_session,
-    FeishuUser,
 )
 
 router = APIRouter(prefix="/feishu", tags=["feishu"])
@@ -396,7 +392,6 @@ async def api_upload_file(
     """
     from backend.services.feishu import (
         upload_file_to_feishu,
-        send_file_message,
         upload_and_send_file,
     )
 
@@ -449,7 +444,6 @@ async def api_upload_image(
     """
     from backend.services.feishu import (
         upload_image_to_feishu,
-        send_image_message,
         upload_and_send_image,
     )
 

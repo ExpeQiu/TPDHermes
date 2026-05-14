@@ -7,14 +7,9 @@ on:
     branches: [main]
 
 jobs:
-  # ─── Backend ───────────────────────────────────────────────────────────────
   backend:
     name: Backend (lint · typecheck · test)
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: backend
-
     steps:
       - uses: actions/checkout@v4
 
@@ -29,22 +24,24 @@ jobs:
           pip install ruff mypy pytest pytest-asyncio httpx
 
       - name: Lint (ruff)
-        run: ruff check .
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+        run: ruff check backend main.py
 
       - name: Type check (mypy)
-        run: mypy app/ --ignore-missing-imports
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+        run: mypy backend main.py --ignore-missing-imports
 
       - name: Test (pytest)
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+          DATABASE_URL: sqlite+aiosqlite:////tmp/tphermes_ci.db
         run: pytest -v
 
-  # ─── Frontend ──────────────────────────────────────────────────────────────
   frontend:
-    name: Frontend (lint · typecheck · test)
+    name: Frontend (lint · typecheck · build)
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: frontend
-
     steps:
       - uses: actions/checkout@v4
 
@@ -57,11 +54,11 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Lint (next lint)
+      - name: Lint
         run: npm run lint
 
-      - name: Type check (tsc --noEmit)
-        run: tsc --noEmit
+      - name: Type check
+        run: npx tsc --noEmit
 
-      - name: Test
-        run: npm test
+      - name: Build
+        run: npm run build
