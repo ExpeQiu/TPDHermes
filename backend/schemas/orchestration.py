@@ -6,7 +6,21 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
+
+
+SkillsMode = Literal["manual_only", "allowed_list", "preferred_list", "agent_select"]
+
+
+def normalize_skills_mode(raw: str | None) -> SkillsMode:
+    """兼容历史 forbidden_list 等取值。"""
+    if raw is None or raw == "":
+        return "agent_select"
+    if raw == "forbidden_list":
+        return "allowed_list"
+    if raw in ("manual_only", "allowed_list", "preferred_list", "agent_select"):
+        return raw  # type: ignore[return-value]
+    return "agent_select"
 
 
 class ProjectConstraintsPayload(BaseModel):
@@ -53,11 +67,16 @@ class OrchestrationKnowledge(BaseModel):
 
 
 class OrchestrationSkills(BaseModel):
-    mode: Literal["allowed_list", "agent_select", "manual_only", "forbidden_list"] = "allowed_list"
+    mode: SkillsMode = "agent_select"
     allowed: list[str] = Field(default_factory=list)
     preferred: list[str] = Field(default_factory=list)
     forbidden: list[str] = Field(default_factory=list)
     allow_agent_free_choice: bool = False
+
+    @field_validator("mode", mode="before")
+    @classmethod
+    def _coerce_skills_mode(cls, v: object) -> SkillsMode:
+        return normalize_skills_mode(str(v) if v is not None else None)
 
 
 class OutputValidationRules(BaseModel):
@@ -132,13 +151,26 @@ class ChatTurnMessage(BaseModel):
     content: str
 
 
+class TaskInputPayload(BaseModel):
+    """结果工坊等入口的结构化任务增量（与 user_message 合并）。"""
+
+    title: str | None = None
+    background: str | None = None
+    objective: str | None = None
+    source_material: str | None = None
+    keywords: list[str] | str | None = None
+    tone: str | None = None
+    extra: str | None = None
+
+
 class TaskExecuteRequest(BaseModel):
     """POST /tasks/execute 请求体（对齐方案第十八章）。"""
 
     entrypoint: Literal["chat", "create", "workshop", "quick_create", "project"] = "chat"
     project_id: str | None = None
     scenario_id: str | None = "general"
-    user_message: str
+    user_message: str = ""
+    task_input: TaskInputPayload | None = None
     scenario_preset_instructions: str | None = Field(
         default=None,
         description="与 /create 场景卡对齐的详细设定，写入 scenario.preset_instructions",

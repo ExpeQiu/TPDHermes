@@ -3,6 +3,7 @@
 import { useEffect, useState, useCallback } from "react";
 import Link from "next/link";
 import { apiFetch, apiGet, readJson } from "@/lib/api";
+import { CONTENT_MAX_CLASS } from "@/lib/content-shell";
 
 interface MarketSkill {
   id: string;
@@ -322,24 +323,10 @@ export default function SkillMarketPage() {
 
   const totalInstalls = skills.reduce((sum, s) => sum + s.install_count, 0);
   const topRated = skills.length > 0 ? Math.max(...skills.map((s) => s.rating)) : 0;
-  const discoveryTips = [
-    {
-      title: "先发现",
-      desc: "从技能市场确认当前任务需要哪些能力，再决定是否纳入本地能力池。",
-    },
-    {
-      title: "再安装与配置",
-      desc: "安装后回到技能策略页，设置启用状态、配置和版本策略。",
-    },
-    {
-      title: "最后进入编排",
-      desc: "在场景编排、对话协作和结果工坊里引用这些能力，让技能真正参与执行。",
-    },
-  ];
 
   return (
     <main className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 p-4 text-white sm:p-6 md:p-8">
-      <div className="mx-auto max-w-6xl">
+      <div className={CONTENT_MAX_CLASS}>
         <div className="mb-8">
           <div className="mb-3 flex items-center gap-3">
             <Link href="/skills" className="text-sm text-slate-400 transition hover:text-white">
@@ -352,10 +339,8 @@ export default function SkillMarketPage() {
           </div>
           <div className="mt-4 flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
             <div>
-              <h1 className="text-3xl font-bold sm:text-4xl">技能发现与安装入口</h1>
-              <p className="mt-3 max-w-3xl text-sm leading-relaxed text-slate-400 sm:text-base">
-                技能市场现在承担“发现”阶段：先挑选合适能力，再安装到本地能力池，随后回到技能策略页配置，并在任务编排里投入使用。
-              </p>
+              <h1 className="text-3xl font-bold sm:text-4xl">技能市场</h1>
+              <p className="mt-2 max-w-2xl text-sm text-slate-400 sm:text-base">发现、安装技能，安装后在技能策略页启用。</p>
             </div>
             <div className="flex flex-wrap gap-2">
               <Link
@@ -381,37 +366,6 @@ export default function SkillMarketPage() {
           </div>
         </div>
 
-        <div className="mb-6 grid gap-4 xl:grid-cols-[1.05fr_0.95fr]">
-          <div className="rounded-3xl border border-slate-800 bg-slate-900/50 p-6">
-            <p className="text-xs uppercase tracking-[0.2em] text-slate-500">Discovery Flow</p>
-            <h2 className="mt-2 text-xl font-semibold text-white">能力发现闭环</h2>
-            <div className="mt-5 grid gap-3 md:grid-cols-3">
-              {discoveryTips.map((tip) => (
-                <StrategyCard key={tip.title} title={tip.title} desc={tip.desc} />
-              ))}
-            </div>
-          </div>
-
-          <div className="rounded-3xl border border-slate-800 bg-slate-900/50 p-6">
-            <p className="text-xs uppercase tracking-[0.2em] text-slate-500">After Install</p>
-            <h2 className="mt-2 text-xl font-semibold text-white">安装后去哪</h2>
-            <div className="mt-5 space-y-3 text-sm leading-relaxed text-slate-400">
-              <div className="rounded-2xl border border-slate-800 bg-slate-950/60 p-4">
-                <p className="font-medium text-white">技能策略页</p>
-                <p className="mt-1">调整启用状态、编辑配置、确认版本历史，形成稳定能力池。</p>
-              </div>
-              <div className="rounded-2xl border border-slate-800 bg-slate-950/60 p-4">
-                <p className="font-medium text-white">场景编排页</p>
-                <p className="mt-1">在任务合同里声明是否携带技能策略，让能力进入执行链路。</p>
-              </div>
-              <div className="rounded-2xl border border-slate-800 bg-slate-950/60 p-4">
-                <p className="font-medium text-white">对话与工坊</p>
-                <p className="mt-1">在编排协作和结果工坊中继续使用已安装能力，形成真正闭环。</p>
-              </div>
-            </div>
-          </div>
-        </div>
-
         {actionMsg && (
           <div className="mb-4 px-4 py-3 bg-green-600/20 border border-green-600/40 rounded-lg text-green-300 text-sm">
             ✓ {actionMsg}
@@ -425,12 +379,11 @@ export default function SkillMarketPage() {
         )}
 
         <section className="rounded-3xl border border-slate-800 bg-slate-900/50 p-6">
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
             <div>
               <p className="text-xs uppercase tracking-[0.2em] text-slate-500">Discover Skills</p>
-              <h2 className="mt-2 text-xl font-semibold text-white">发现、筛选并安装</h2>
+              <h2 className="mt-2 text-xl font-semibold text-white">浏览与安装</h2>
             </div>
-            <p className="text-sm text-slate-500">从热度、评分、分类与标签快速筛出适合当前任务的能力</p>
           </div>
 
           <div className="mt-6 flex flex-col gap-3 sm:flex-row">
@@ -563,7 +516,7 @@ export default function SkillMarketPage() {
 
                       {isInstalled && (
                         <div className="mt-3 rounded-lg border border-green-600/30 bg-green-600/10 px-3 py-2 text-xs text-green-300">
-                          已进入本地能力池，下一步去“技能策略”页配置，或回到“场景编排”页使用。
+                          已安装，可在技能策略页启用与配置。
                         </div>
                       )}
                     </div>
@@ -592,15 +545,6 @@ function MetricCard({
       <p className="text-xs uppercase tracking-[0.16em] text-slate-500">{label}</p>
       <p className="mt-3 text-2xl font-semibold text-white">{value}</p>
       <p className="mt-1 text-xs text-slate-500">{hint}</p>
-    </div>
-  );
-}
-
-function StrategyCard({ title, desc }: { title: string; desc: string }) {
-  return (
-    <div className="rounded-2xl border border-slate-800 bg-slate-950/60 p-4">
-      <p className="text-base font-medium text-white">{title}</p>
-      <p className="mt-2 text-sm leading-relaxed text-slate-400">{desc}</p>
     </div>
   );
 }

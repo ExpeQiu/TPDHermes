@@ -23,6 +23,8 @@ from backend.schemas.orchestration import OrchestrationPayload, TaskExecuteReque
 from backend.services.agent_gateway import build_chat_completion_body, parse_sse_data_line
 from backend.services.orchestration_service import (
     ProjectNotFoundError,
+    ScenarioVersionMismatchError,
+    WorkshopBindingError,
     assemble_payload,
     merge_chat_messages,
 )
@@ -106,6 +108,12 @@ async def execute_task(request: TaskExecuteRequest, db: AsyncSession = Depends(g
         payload, snapshot = await assemble_payload(db, request)
     except ProjectNotFoundError as exc:
         raise HTTPException(status_code=404, detail=f"项目不存在: {exc.project_id}") from exc
+    except WorkshopBindingError as exc:
+        raise HTTPException(status_code=400, detail=exc.detail) from exc
+    except ScenarioVersionMismatchError as exc:
+        raise HTTPException(status_code=409, detail=exc.detail) from exc
+
+    user_text = payload.user_input.message
 
     tpl_sections: list[str] = []
     if payload.output.template_id:
@@ -121,6 +129,7 @@ async def execute_task(request: TaskExecuteRequest, db: AsyncSession = Depends(g
         db,
         run_id=run_id,
         project_id=request.project_id,
+        scenario_id=request.scenario_id,
         entrypoint=request.entrypoint,
         request_json=request.model_dump_json(),
         snapshot_json=json.dumps(snapshot, ensure_ascii=False),
@@ -129,7 +138,7 @@ async def execute_task(request: TaskExecuteRequest, db: AsyncSession = Depends(g
 
     if request.entrypoint == "workshop":
         skill_name = payload.skills.allowed[0]
-        context = _parse_workshop_context(request.user_message)
+        context = _parse_workshop_context(user_text)
 
         def _must_head_ws() -> bool:
             vr = payload.output.validation_rules
@@ -160,6 +169,7 @@ async def execute_task(request: TaskExecuteRequest, db: AsyncSession = Depends(g
                     error_message=None,
                     duration_ms=duration_ms,
                     project_id=payload.project.id,
+                    scenario_id=payload.scenario.id,
                     template_id=payload.output.template_id,
                     save_output=payload.execution.save_output,
                     output_title=payload.scenario.name,
@@ -207,6 +217,7 @@ async def execute_task(request: TaskExecuteRequest, db: AsyncSession = Depends(g
                         error_message=None,
                         duration_ms=duration_ms,
                         project_id=payload.project.id,
+                        scenario_id=payload.scenario.id,
                         template_id=payload.output.template_id,
                         save_output=payload.execution.save_output,
                         output_title=payload.scenario.name,
@@ -227,7 +238,7 @@ async def execute_task(request: TaskExecuteRequest, db: AsyncSession = Depends(g
             },
         )
 
-    messages = merge_chat_messages(request.messages, request.user_message)
+    messages = merge_chat_messages(request.messages, user_text)
     upstream_body = build_chat_completion_body(payload, messages)
     upstream_body["stream"] = request.stream
 
@@ -287,6 +298,7 @@ async def execute_task(request: TaskExecuteRequest, db: AsyncSession = Depends(g
                 error_message=None,
                 duration_ms=duration_ms,
                 project_id=payload.project.id,
+                scenario_id=payload.scenario.id,
                 template_id=payload.output.template_id,
                 save_output=payload.execution.save_output,
                 output_title=payload.scenario.name,
@@ -386,6 +398,7 @@ async def execute_task(request: TaskExecuteRequest, db: AsyncSession = Depends(g
                     error_message=None,
                     duration_ms=duration_ms,
                     project_id=payload.project.id,
+                    scenario_id=payload.scenario.id,
                     template_id=payload.output.template_id,
                     save_output=payload.execution.save_output,
                     output_title=payload.scenario.name,
@@ -410,6 +423,7 @@ async def execute_task(request: TaskExecuteRequest, db: AsyncSession = Depends(g
 class RunDetailResponse(BaseModel):
     id: str
     project_id: str | None
+    scenario_id: str | None = None
     entrypoint: str
     status: str
     snapshot: dict[str, Any] | None
@@ -439,6 +453,7 @@ async def get_run(run_id: str, db: AsyncSession = Depends(get_db)):
     return RunDetailResponse(
         id=row.id,
         project_id=row.project_id,
+        scenario_id=getattr(row, "scenario_id", None),
         entrypoint=row.entrypoint,
         status=row.status,
         snapshot=_loads(row.snapshot_json),

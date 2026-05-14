@@ -1,10 +1,11 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef, useCallback } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
 import Feedback from "@/components/Feedback";
-import { apiGet } from "@/lib/api";
+import { apiGet, apiV1, apiFetch, readJson } from "@/lib/api";
+import { CONTENT_MAX_CLASS } from "@/lib/content-shell";
 
 interface Project {
   id: string;
@@ -93,6 +94,31 @@ function mapApiOutput(o: ApiOutputRow): ProjectOutput {
   };
 }
 
+interface ApiAttachmentRow {
+  id: string;
+  project_id: string;
+  original_filename: string;
+  content_type: string | null;
+  size_bytes: number;
+  created_at: string | null;
+}
+
+function formatFileSize(bytes: number) {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function constraintsToEditString(constraints: unknown): string {
+  if (constraints == null) return "";
+  if (typeof constraints === "string") return constraints;
+  try {
+    return JSON.stringify(constraints, null, 2);
+  } catch {
+    return String(constraints);
+  }
+}
+
 function formatDate(value: string | null | undefined) {
   if (!value) return "未记录";
   const parsed = new Date(value);
@@ -104,17 +130,6 @@ function formatDate(value: string | null | undefined) {
     hour: "2-digit",
     minute: "2-digit",
   });
-}
-
-function summarizeConstraints(constraints: unknown): string[] {
-  if (!constraints || typeof constraints !== "object" || Array.isArray(constraints)) return [];
-  return Object.entries(constraints as Record<string, unknown>)
-    .slice(0, 6)
-    .map(([key, value]) => {
-      if (Array.isArray(value)) return `${key}: ${value.join(" / ")}`;
-      if (value && typeof value === "object") return `${key}: 已配置`;
-      return `${key}: ${String(value)}`;
-    });
 }
 
 export default function ProjectDetailPage() {
@@ -129,6 +144,29 @@ export default function ProjectDetailPage() {
   const [copied, setCopied] = useState(false);
   const [outputFullContent, setOutputFullContent] = useState<string | null>(null);
   const [outputDetailLoading, setOutputDetailLoading] = useState(false);
+  const [attachments, setAttachments] = useState<ApiAttachmentRow[]>([]);
+  const [attachmentUploading, setAttachmentUploading] = useState(false);
+  const [attachmentError, setAttachmentError] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [editOpen, setEditOpen] = useState(false);
+  const [editSaving, setEditSaving] = useState(false);
+  const [editError, setEditError] = useState<string | null>(null);
+  const [editForm, setEditForm] = useState({
+    name: "",
+    background: "",
+    audience: "",
+    deadline: "",
+    constraints: "",
+    status: "active" as Project["status"],
+  });
+
+  const refreshAttachments = useCallback(async () => {
+    if (!id) return;
+    const list = await apiGet<ApiAttachmentRow[]>(
+      `/projects/${String(id)}/attachments`,
+    ).catch(() => [] as ApiAttachmentRow[]);
+    setAttachments(list);
+  }, [id]);
 
   useEffect(() => {
     if (!id) return;
@@ -139,12 +177,16 @@ export default function ProjectDetailPage() {
       apiGet<Project>(`/projects/${String(id)}`),
       apiGet<ApiOutputRow[]>(`/projects/${String(id)}/outputs`).catch(() => [] as ApiOutputRow[]),
       apiGet<ApiRunRow[]>(`/projects/${String(id)}/runs`).catch(() => [] as ApiRunRow[]),
+      apiGet<ApiAttachmentRow[]>(`/projects/${String(id)}/attachments`).catch(
+        () => [] as ApiAttachmentRow[],
+      ),
     ])
-      .then(([proj, outRows, runRows]) => {
+      .then(([proj, outRows, runRows, attachRows]) => {
         if (!cancelled) {
           setProject(proj);
           setOutputs(outRows.map(mapApiOutput));
           setRuns(runRows);
+          setAttachments(attachRows);
         }
       })
       .catch((e: Error) => {
@@ -188,21 +230,114 @@ export default function ProjectDetailPage() {
     });
   };
 
+  const handlePickAttachment = () => {
+    setAttachmentError(null);
+    fileInputRef.current?.click();
+  };
+
+  const handleAttachmentFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file || !id) return;
+    setAttachmentUploading(true);
+    setAttachmentError(null);
+    const fd = new FormData();
+    fd.append("file", file);
+    try {
+      const res = await fetch(apiV1(`/projects/${String(id)}/attachments`), {
+        method: "POST",
+        body: fd,
+      });
+      await readJson<ApiAttachmentRow>(res);
+      await refreshAttachments();
+    } catch (err) {
+      setAttachmentError(err instanceof Error ? err.message : "上传失败");
+    } finally {
+      setAttachmentUploading(false);
+    }
+  };
+
+  const handleDeleteAttachment = async (attachmentId: string) => {
+    if (!id || !window.confirm("确定删除该附件？")) return;
+    setAttachmentError(null);
+    try {
+      const res = await fetch(apiV1(`/projects/${String(id)}/attachments/${attachmentId}`), {
+        method: "DELETE",
+      });
+      await readJson<{ ok: boolean }>(res);
+      await refreshAttachments();
+    } catch (err) {
+      setAttachmentError(err instanceof Error ? err.message : "删除失败");
+    }
+  };
+
+  const attachmentDownloadUrl = (attachmentId: string) =>
+    apiV1(`/projects/${String(id)}/attachments/${attachmentId}/download`);
+
+  const openEditProject = () => {
+    if (!project) return;
+    setEditError(null);
+    setEditForm({
+      name: project.name,
+      background: project.background ?? "",
+      audience: project.audience ?? "",
+      deadline: project.deadline ?? "",
+      constraints: constraintsToEditString(project.constraints),
+      status: project.status,
+    });
+    setEditOpen(true);
+  };
+
+  const submitEditProject = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!id || !editForm.name.trim()) {
+      setEditError("项目名称为必填");
+      return;
+    }
+    setEditSaving(true);
+    setEditError(null);
+    let constraintsPayload: Record<string, unknown> | null = null;
+    const raw = editForm.constraints.trim();
+    if (raw) {
+      try {
+        constraintsPayload = JSON.parse(raw) as Record<string, unknown>;
+      } catch {
+        constraintsPayload = { notes: raw };
+      }
+    }
+    try {
+      const res = await apiFetch(`/projects/${String(id)}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: editForm.name.trim(),
+          background: editForm.background.trim() || null,
+          audience: editForm.audience.trim() || null,
+          deadline: editForm.deadline.trim() || null,
+          constraints: constraintsPayload,
+          status: editForm.status,
+        }),
+      });
+      const updated = await readJson<Project>(res);
+      setProject(updated);
+      setEditOpen(false);
+    } catch (err) {
+      setEditError(err instanceof Error ? err.message : "保存失败");
+    } finally {
+      setEditSaving(false);
+    }
+  };
+
+  const editInputCls =
+    "w-full rounded-lg border border-slate-600 bg-slate-900/80 px-3 py-2 text-sm text-white placeholder-slate-500 focus:border-blue-500 focus:outline-none";
+
   const totalWords = outputs.reduce((sum, o) => sum + o.word_count, 0);
   const latestOutput = outputs[0];
   const latestRun = runs[0];
-  const templateTags = Array.from(
-    new Set(
-      outputs.flatMap((output) =>
-        output.tags.filter((tag) => tag.startsWith("模板:")).map((tag) => tag.replace(/^模板:/, "")),
-      ),
-    ),
-  ).slice(0, 4);
-  const constraintHighlights = summarizeConstraints(project?.constraints);
 
   return (
     <main className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 p-4 text-white sm:p-6 md:p-8">
-      <div className="mx-auto max-w-6xl">
+      <div className={CONTENT_MAX_CLASS}>
         <Link
           href="/projects"
           className="mb-6 inline-flex items-center text-sm text-slate-400 transition hover:text-white"
@@ -233,34 +368,17 @@ export default function ProjectDetailPage() {
                   {project.name}
                 </h1>
                 <p className="mt-2 text-sm text-slate-400">项目 ID: #{project.id}</p>
-                <p className="mt-3 max-w-3xl text-sm leading-relaxed text-slate-400">
-                  以项目为中心查看任务边界、输出沉淀和执行记录，让工作流配置与结果资产处于同一视图。
-                </p>
               </div>
-              <div className="flex flex-wrap gap-3">
-                <span
-                  className={`self-start rounded-full px-3 py-1 text-xs font-medium text-white sm:text-sm ${statusColors[project.status] ?? "bg-slate-500"}`}
-                >
-                  {statusLabels[project.status] ?? project.status}
-                </span>
-                <Link
-                  href={`/create?project=${id}`}
-                  className="rounded-xl border border-blue-500/40 bg-blue-500/10 px-4 py-2 text-sm font-medium text-blue-200 transition hover:border-blue-400 hover:bg-blue-500/20"
-                >
-                  发起场景编排
-                </Link>
-                <Link
-                  href={`/chat?project=${id}`}
-                  className="rounded-xl border border-slate-700 bg-slate-900/70 px-4 py-2 text-sm font-medium text-slate-200 transition hover:border-slate-600 hover:bg-slate-900"
-                >
-                  进入对话协作
-                </Link>
-              </div>
+              <span
+                className={`self-start rounded-full px-3 py-1 text-xs font-medium text-white sm:text-sm ${statusColors[project.status] ?? "bg-slate-500"}`}
+              >
+                {statusLabels[project.status] ?? project.status}
+              </span>
             </div>
 
             <div className="mb-6 grid gap-3 md:grid-cols-4">
               <MetricCard label="输出物" value={String(outputs.length)} hint="已沉淀结果" />
-              <MetricCard label="执行记录" value={String(runs.length)} hint="统一任务链路" />
+              <MetricCard label="项目附件" value={String(attachments.length)} hint="上传的参考文件" />
               <MetricCard label="累计字数" value={totalWords.toLocaleString()} hint="输出沉淀体量" />
               <MetricCard
                 label="最新活动"
@@ -306,9 +424,13 @@ export default function ProjectDetailPage() {
                         </p>
                         <h2 className="mt-2 text-xl font-semibold text-white">项目边界</h2>
                       </div>
-                      <span className="rounded-full border border-slate-700 px-3 py-1 text-xs text-slate-300">
-                        {statusLabels[project.status] ?? project.status}
-                      </span>
+                      <button
+                        type="button"
+                        onClick={openEditProject}
+                        className="shrink-0 rounded-full border border-slate-600 bg-slate-900/80 px-3 py-1 text-xs font-medium text-slate-200 transition hover:border-blue-500/50 hover:bg-slate-800 hover:text-white"
+                      >
+                        编辑
+                      </button>
                     </div>
 
                     <InfoField label="项目背景">
@@ -343,56 +465,89 @@ export default function ProjectDetailPage() {
                     </p>
                     <h2 className="mt-2 text-xl font-semibold text-white">工作流入口</h2>
                     <div className="mt-5 space-y-3">
-                      <ActionLink
-                        href={`/create?project=${id}`}
-                        title="发起场景编排"
-                        desc="从场景、知识和期望输出生成一份任务合同。"
-                      />
-                      <ActionLink
-                        href={`/chat?project=${id}`}
-                        title="继续对话协作"
-                        desc="围绕当前项目做需求澄清、执行和迭代。"
-                      />
-                      <ActionLink
-                        href={`/workshop?project=${id}`}
-                        title="进入结果工坊"
-                        desc="基于已有输出继续优化、扩写和定向生成。"
-                      />
+                      <ActionLink href={`/create?project=${id}`} title="发起场景编排" desc="" />
+                      <ActionLink href={`/chat?project=${id}`} title="编排协作" desc="" />
+                      <ActionLink href={`/workshop?project_id=${id}`} title="结果工坊" desc="" />
                     </div>
                   </div>
                 </div>
 
-                <div className="grid gap-4 xl:grid-cols-4">
-                  <PolicyCard
-                    title="技术与业务边界"
-                    description="当前项目沉淀了长期生效的业务上下文，可作为后续场景编排的默认边界。"
-                    tags={constraintHighlights.length > 0 ? constraintHighlights : ["建议补充结构化约束"]}
-                  />
-                  <PolicyCard
-                    title="知识范围"
-                    description="知识范围应跟随项目或任务配置，而不是由前端临时拼接为上下文文本。"
-                    tags={
-                      latestRun
-                        ? ["已有执行记录", "可在场景编排中指定集合"]
-                        : ["尚未沉淀知识策略", "建议从场景编排入口补全"]
-                    }
-                  />
-                  <PolicyCard
-                    title="模板策略"
-                    description="模板是输出合同的一部分，建议按项目默认模板和场景临时覆盖共同管理。"
-                    tags={templateTags.length > 0 ? templateTags : ["暂无模板沉淀", "后续可接入模板中心"]}
-                  />
-                  <PolicyCard
-                    title="结果闭环"
-                    description="项目控制台统一承接输出物与执行记录，让内容生成具备回看和复用能力。"
-                    tags={[
-                      outputs.length > 0 ? `输出 ${outputs.length} 条` : "暂无输出",
-                      runs.length > 0 ? `执行 ${runs.length} 次` : "暂无执行",
-                    ]}
-                  />
-                </div>
-
                 <div className="grid gap-4 lg:grid-cols-2">
+                  <div className="rounded-3xl border border-slate-700 bg-slate-800/50 p-5 sm:p-6">
+                    <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                      <div>
+                        <p className="text-xs uppercase tracking-[0.2em] text-slate-500">Project Files</p>
+                        <h2 className="mt-2 text-xl font-semibold text-white">项目文件</h2>
+                        <p className="mt-1 text-xs text-slate-500">
+                          上传需求说明、素材等，供编排与协作时参考。
+                        </p>
+                      </div>
+                      <div className="flex shrink-0 flex-col items-stretch gap-2 sm:items-end">
+                        <input
+                          ref={fileInputRef}
+                          type="file"
+                          className="hidden"
+                          onChange={handleAttachmentFileChange}
+                        />
+                        <button
+                          type="button"
+                          onClick={handlePickAttachment}
+                          disabled={attachmentUploading}
+                          className="rounded-xl border border-blue-500/40 bg-blue-500/10 px-4 py-2 text-sm font-medium text-blue-200 transition hover:border-blue-400 hover:bg-blue-500/20 disabled:opacity-50"
+                        >
+                          {attachmentUploading ? "上传中…" : "上传附件"}
+                        </button>
+                      </div>
+                    </div>
+                    {attachmentError ? (
+                      <p className="mt-3 text-sm text-red-400">{attachmentError}</p>
+                    ) : null}
+                    {attachments.length === 0 ? (
+                      <div className="mt-4">
+                        <EmptyState
+                          icon="📎"
+                          title="暂无附件"
+                          description="点击「上传附件」添加项目相关文件。"
+                        />
+                      </div>
+                    ) : (
+                      <ul className="mt-4 max-h-56 space-y-2 overflow-y-auto pr-1">
+                        {attachments.map((a) => (
+                          <li
+                            key={a.id}
+                            className="flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-slate-700 bg-slate-900/60 px-3 py-2.5 text-sm"
+                          >
+                            <div className="min-w-0 flex-1">
+                              <p className="truncate font-medium text-slate-100" title={a.original_filename}>
+                                {a.original_filename}
+                              </p>
+                              <p className="text-xs text-slate-500">
+                                {formatFileSize(a.size_bytes)} · {formatDate(a.created_at)}
+                              </p>
+                            </div>
+                            <div className="flex shrink-0 items-center gap-2">
+                              <a
+                                href={attachmentDownloadUrl(a.id)}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="rounded-lg border border-slate-600 px-2.5 py-1 text-xs text-slate-200 transition hover:bg-slate-700"
+                              >
+                                下载
+                              </a>
+                              <button
+                                type="button"
+                                onClick={() => void handleDeleteAttachment(a.id)}
+                                className="rounded-lg border border-red-900/50 px-2.5 py-1 text-xs text-red-300 transition hover:bg-red-950/40"
+                              >
+                                删除
+                              </button>
+                            </div>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+
                   <div className="rounded-3xl border border-slate-700 bg-slate-800/50 p-5 sm:p-6">
                     <p className="text-xs uppercase tracking-[0.2em] text-slate-500">Latest Output</p>
                     <h2 className="mt-2 text-xl font-semibold text-white">最近输出沉淀</h2>
@@ -417,39 +572,7 @@ export default function ProjectDetailPage() {
                       <EmptyState
                         icon="📝"
                         title="暂无输出物"
-                        description="从场景编排、对话协作或结果工坊发起一次生成后，这里会展示最近沉淀的内容。"
-                      />
-                    )}
-                  </div>
-
-                  <div className="rounded-3xl border border-slate-700 bg-slate-800/50 p-5 sm:p-6">
-                    <p className="text-xs uppercase tracking-[0.2em] text-slate-500">Latest Run</p>
-                    <h2 className="mt-2 text-xl font-semibold text-white">最近执行记录</h2>
-                    {latestRun ? (
-                      <div className="mt-4 rounded-2xl border border-slate-700 bg-slate-900/60 p-4">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <span className="rounded-full bg-slate-700 px-2.5 py-1 text-xs text-slate-200">
-                            {latestRun.entrypoint}
-                          </span>
-                          <span className="rounded-full bg-blue-900/40 px-2.5 py-1 text-xs text-blue-200">
-                            {latestRun.status}
-                          </span>
-                          {latestRun.duration_ms != null && (
-                            <span className="text-xs text-slate-500">
-                              耗时 {latestRun.duration_ms} ms
-                            </span>
-                          )}
-                        </div>
-                        <p className="mt-3 break-all text-xs text-slate-500">{latestRun.id}</p>
-                        <p className="mt-2 text-sm text-slate-300">
-                          记录时间：{formatDate(latestRun.created_at)}
-                        </p>
-                      </div>
-                    ) : (
-                      <EmptyState
-                        icon="📊"
-                        title="暂无执行链路"
-                        description="当前项目尚未通过统一任务入口产生执行记录，可从编排页或对话页开始一次任务。"
+                        description="从编排、对话或工坊生成后将显示在此。"
                       />
                     )}
                   </div>
@@ -473,7 +596,8 @@ export default function ProjectDetailPage() {
                   <div className="py-16 text-center text-slate-500">
                     <p className="mb-3 text-4xl">📝</p>
                     <p>暂无输出记录</p>
-                    <Link href="/workshop" className="mt-2 inline-block text-sm text-blue-400 hover:text-blue-300">
+                    <Link
+                      href={`/workshop?project_id=${id}`} className="mt-2 inline-block text-sm text-blue-400 hover:text-blue-300">
                       前往输出工坊生成 →
                     </Link>
                   </div>
@@ -561,7 +685,7 @@ export default function ProjectDetailPage() {
                       </div>
                       <div className="p-4 border-t border-slate-700 flex gap-3">
                         <Link
-                          href={`/workshop?project=${id}`}
+                          href={`/workshop?project_id=${id}`}
                           className="flex-1 px-4 py-2 bg-blue-600 hover:bg-blue-500 rounded-lg text-sm font-medium text-center transition"
                         >
                           基于此优化
@@ -612,9 +736,6 @@ export default function ProjectDetailPage() {
                           <span className="text-slate-500">耗时 {r.duration_ms} ms</span>
                         )}
                       </div>
-                      <p className="mt-3 text-slate-400">
-                        当前执行记录已纳入项目维度，可与输出沉淀一起构成完整的任务闭环。
-                      </p>
                     </div>
                   ))
                 )}
@@ -626,6 +747,128 @@ export default function ProjectDetailPage() {
                 skillId={`project-${id}`}
                 skillName={project.name}
               />
+            )}
+
+            {editOpen && (
+              <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
+                <div
+                  role="dialog"
+                  aria-modal="true"
+                  aria-labelledby="edit-project-title"
+                  className="flex max-h-[90vh] w-full max-w-lg flex-col overflow-hidden rounded-2xl border border-slate-700 bg-slate-800 shadow-xl"
+                >
+                  <form onSubmit={submitEditProject} className="flex flex-col overflow-hidden">
+                    <div className="flex items-center justify-between border-b border-slate-700 px-4 py-3 sm:px-5">
+                      <h2 id="edit-project-title" className="text-lg font-semibold text-white">
+                        编辑项目
+                      </h2>
+                      <button
+                        type="button"
+                        onClick={() => setEditOpen(false)}
+                        className="rounded-lg px-2 py-1 text-slate-400 transition hover:bg-slate-700 hover:text-white"
+                      >
+                        ✕
+                      </button>
+                    </div>
+                    <div className="space-y-4 overflow-y-auto px-4 py-4 sm:px-5">
+                      {editError ? (
+                        <p className="rounded-lg border border-red-800/50 bg-red-950/30 px-3 py-2 text-sm text-red-300">
+                          {editError}
+                        </p>
+                      ) : null}
+                      <div>
+                        <label className="mb-1 block text-xs font-medium text-slate-400">
+                          项目名称 <span className="text-red-400">*</span>
+                        </label>
+                        <input
+                          type="text"
+                          value={editForm.name}
+                          onChange={(e) => setEditForm((f) => ({ ...f, name: e.target.value }))}
+                          className={editInputCls}
+                          required
+                        />
+                      </div>
+                      <div>
+                        <label className="mb-1 block text-xs font-medium text-slate-400">项目状态</label>
+                        <select
+                          value={editForm.status}
+                          onChange={(e) =>
+                            setEditForm((f) => ({
+                              ...f,
+                              status: e.target.value as Project["status"],
+                            }))
+                          }
+                          className={editInputCls}
+                        >
+                          {(Object.keys(statusLabels) as Project["status"][]).map((key) => (
+                            <option key={key} value={key}>
+                              {statusLabels[key]}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                      <div>
+                        <label className="mb-1 block text-xs font-medium text-slate-400">项目背景</label>
+                        <textarea
+                          value={editForm.background}
+                          onChange={(e) => setEditForm((f) => ({ ...f, background: e.target.value }))}
+                          rows={3}
+                          className={`${editInputCls} resize-none`}
+                        />
+                      </div>
+                      <div className="grid gap-4 sm:grid-cols-2">
+                        <div>
+                          <label className="mb-1 block text-xs font-medium text-slate-400">目标受众</label>
+                          <input
+                            type="text"
+                            value={editForm.audience}
+                            onChange={(e) => setEditForm((f) => ({ ...f, audience: e.target.value }))}
+                            className={editInputCls}
+                          />
+                        </div>
+                        <div>
+                          <label className="mb-1 block text-xs font-medium text-slate-400">截止日期</label>
+                          <input
+                            type="text"
+                            value={editForm.deadline}
+                            onChange={(e) => setEditForm((f) => ({ ...f, deadline: e.target.value }))}
+                            placeholder="如 2026-12-31"
+                            className={editInputCls}
+                          />
+                        </div>
+                      </div>
+                      <div>
+                        <label className="mb-1 block text-xs font-medium text-slate-400">
+                          约束条件（JSON 或纯文本）
+                        </label>
+                        <textarea
+                          value={editForm.constraints}
+                          onChange={(e) => setEditForm((f) => ({ ...f, constraints: e.target.value }))}
+                          rows={5}
+                          className={`${editInputCls} resize-none font-mono text-xs`}
+                          placeholder='{} 或 {"key":"value"}'
+                        />
+                      </div>
+                    </div>
+                    <div className="flex gap-3 border-t border-slate-700 px-4 py-3 sm:px-5">
+                      <button
+                        type="submit"
+                        disabled={editSaving}
+                        className="flex-1 rounded-lg bg-blue-600 py-2 text-sm font-medium text-white transition hover:bg-blue-500 disabled:opacity-50"
+                      >
+                        {editSaving ? "保存中…" : "保存"}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setEditOpen(false)}
+                        className="rounded-lg border border-slate-600 px-4 py-2 text-sm text-slate-300 transition hover:bg-slate-700"
+                      >
+                        取消
+                      </button>
+                    </div>
+                  </form>
+                </div>
+              </div>
             )}
           </>
         )}
@@ -652,33 +895,6 @@ function MetricCard({
   );
 }
 
-function PolicyCard({
-  title,
-  description,
-  tags,
-}: {
-  title: string;
-  description: string;
-  tags: string[];
-}) {
-  return (
-    <div className="rounded-3xl border border-slate-700 bg-slate-800/50 p-5">
-      <p className="text-base font-semibold text-white">{title}</p>
-      <p className="mt-2 text-sm leading-relaxed text-slate-400">{description}</p>
-      <div className="mt-4 flex flex-wrap gap-2">
-        {tags.map((tag) => (
-          <span
-            key={tag}
-            className="rounded-full border border-slate-700 px-2.5 py-1 text-xs text-slate-300"
-          >
-            {tag}
-          </span>
-        ))}
-      </div>
-    </div>
-  );
-}
-
 function ActionLink({
   href,
   title,
@@ -694,7 +910,7 @@ function ActionLink({
       className="block rounded-2xl border border-slate-700 bg-slate-900/60 p-4 transition hover:border-slate-600 hover:bg-slate-900"
     >
       <p className="text-sm font-medium text-white">{title}</p>
-      <p className="mt-2 text-sm leading-relaxed text-slate-400">{desc}</p>
+      {desc ? <p className="mt-2 text-sm leading-relaxed text-slate-400">{desc}</p> : null}
     </Link>
   );
 }

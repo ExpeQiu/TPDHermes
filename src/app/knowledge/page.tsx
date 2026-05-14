@@ -4,6 +4,7 @@ import { useState, useCallback, useEffect, useRef } from "react";
 import KBDegradedBanner from "@/components/kb/KBDegradedBanner";
 import Link from "next/link";
 import { apiGet, getPublicApiBase } from "@/lib/api";
+import { CONTENT_MAX_CLASS } from "@/lib/content-shell";
 
 // ============== 类型定义 ==============
 interface KBEntry {
@@ -304,20 +305,6 @@ export default function KnowledgePage() {
   const collectionCount = collections.length > 0 ? collections.length : MOCK_COLLECTIONS.length;
   const browseCount = browseEntries.length;
   const boundProjectIds = new Set(browseEntries.flatMap((entry) => entry.projects));
-  const strategyTips = [
-    {
-      title: "项目知识范围",
-      desc: "将集合视为项目可访问知识域，而不是前端临时拼接的一段上下文文本。",
-    },
-    {
-      title: "检索验证入口",
-      desc: "搜索页继续保留，用于验证当前知识集合是否能支持本次任务目标。",
-    },
-    {
-      title: "结果可追溯",
-      desc: "知识策略最终应该回到项目与任务执行记录，形成可复查的来源边界。",
-    },
-  ];
 
   // 渲染列表视图
   const renderBrowseView = () => {
@@ -579,7 +566,7 @@ export default function KnowledgePage() {
 
   return (
     <main className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 p-4 text-white sm:p-6 md:p-8">
-      <div className="mx-auto max-w-6xl">
+      <div className={CONTENT_MAX_CLASS}>
         <header className="mb-8">
           <div className="inline-flex items-center gap-2 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-3 py-1 text-xs font-medium text-emerald-200">
             <span className="h-2 w-2 rounded-full bg-emerald-400" aria-hidden />
@@ -587,9 +574,9 @@ export default function KnowledgePage() {
           </div>
           <div className="mt-4 flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
             <div>
-              <h1 className="text-3xl font-bold sm:text-4xl">知识范围与检索验证</h1>
-              <p className="mt-3 max-w-3xl text-sm leading-relaxed text-slate-400 sm:text-base">
-                知识页现在承接两件事：一是为项目和任务配置知识范围，二是验证当前集合是否能支撑后续编排与对话执行。
+              <h1 className="text-3xl font-bold sm:text-4xl">知识范围与检索</h1>
+              <p className="mt-2 max-w-2xl text-sm text-slate-400 sm:text-base">
+                浏览集合、验证检索，供编排与对话引用。
               </p>
             </div>
             <div className="flex flex-wrap gap-2">
@@ -603,7 +590,7 @@ export default function KnowledgePage() {
                 href="/create"
                 className="rounded-xl border border-emerald-500/40 bg-emerald-500/10 px-4 py-2.5 text-sm font-medium text-emerald-200 transition hover:border-emerald-400 hover:bg-emerald-500/20"
               >
-                发起场景编排
+                上传知识
               </Link>
             </div>
           </div>
@@ -618,40 +605,6 @@ export default function KnowledgePage() {
             value={String(projects.length)}
             hint={projectBoundCount > 0 ? `${projectBoundCount} 条已有项目关联` : "建议逐步按项目收口"}
           />
-        </section>
-
-        <section className="mb-6 grid gap-4 xl:grid-cols-[1.05fr_0.95fr]">
-          <div className="rounded-3xl border border-slate-800 bg-slate-900/50 p-6">
-            <p className="text-xs uppercase tracking-[0.2em] text-slate-500">Knowledge Policy</p>
-            <h2 className="mt-2 text-xl font-semibold text-white">知识策略说明</h2>
-            <div className="mt-5 grid gap-3 md:grid-cols-3">
-              {strategyTips.map((tip) => (
-                <div key={tip.title} className="rounded-2xl border border-slate-800 bg-slate-950/60 p-4">
-                  <p className="text-base font-medium text-white">{tip.title}</p>
-                  <p className="mt-2 text-sm leading-relaxed text-slate-400">{tip.desc}</p>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          <div className="rounded-3xl border border-slate-800 bg-slate-900/50 p-6">
-            <p className="text-xs uppercase tracking-[0.2em] text-slate-500">How To Use</p>
-            <h2 className="mt-2 text-xl font-semibold text-white">推荐路径</h2>
-            <div className="mt-5 space-y-3 text-sm leading-relaxed text-slate-400">
-              <div className="rounded-2xl border border-slate-800 bg-slate-950/60 p-4">
-                <p className="font-medium text-white">1. 浏览集合</p>
-                <p className="mt-1">先看有哪些集合和缓存条目，确认知识域是否足够覆盖当前任务。</p>
-              </div>
-              <div className="rounded-2xl border border-slate-800 bg-slate-950/60 p-4">
-                <p className="font-medium text-white">2. 做检索验证</p>
-                <p className="mt-1">在搜索页用真实问题验证召回效果，再决定是否加入项目知识范围。</p>
-              </div>
-              <div className="rounded-2xl border border-slate-800 bg-slate-950/60 p-4">
-                <p className="font-medium text-white">3. 回到任务入口</p>
-                <p className="mt-1">确定范围后回到项目、编排页或对话页，让知识策略随任务一起执行。</p>
-              </div>
-            </div>
-          </div>
         </section>
 
         <KBDegradedBanner />

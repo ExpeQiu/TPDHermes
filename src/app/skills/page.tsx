@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import Link from "next/link";
 import { apiFetch, readJson } from "@/lib/api";
+import { CONTENT_MAX_CLASS } from "@/lib/content-shell";
 
 interface Skill {
   id: string;
@@ -37,15 +38,6 @@ function MetricCard({
   );
 }
 
-function StrategyCard({ title, desc }: { title: string; desc: string }) {
-  return (
-    <div className="rounded-2xl border border-slate-800 bg-slate-950/60 p-4">
-      <p className="text-base font-medium text-white">{title}</p>
-      <p className="mt-2 text-sm leading-relaxed text-slate-400">{desc}</p>
-    </div>
-  );
-}
-
 export default function SkillsPage() {
   const [skills, setSkills] = useState<Skill[]>([]);
   const [loading, setLoading] = useState(true);
@@ -54,6 +46,9 @@ export default function SkillsPage() {
   const [editingConfig, setEditingConfig] = useState(false);
   const [configText, setConfigText] = useState("");
   const [actionMsg, setActionMsg] = useState("");
+  const [uploading, setUploading] = useState(false);
+  const [uploadNameHint, setUploadNameHint] = useState("");
+  const uploadInputRef = useRef<HTMLInputElement>(null);
 
   const fetchSkills = useCallback(async () => {
     setLoading(true);
@@ -130,12 +125,38 @@ export default function SkillsPage() {
     setEditingConfig(true);
   };
 
+  const triggerSkillUpload = () => uploadInputRef.current?.click();
+
+  const handleSkillZipSelected = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    setUploading(true);
+    try {
+      const fd = new FormData();
+      fd.append("file", file);
+      const hint = uploadNameHint.trim();
+      if (hint) fd.append("name", hint);
+      const res = await apiFetch("/skills/upload", { method: "POST", body: fd });
+      const installed = await readJson<Skill>(res);
+      await fetchSkills();
+      setUploadNameHint("");
+      setSelectedSkill(installed);
+      setEditingConfig(false);
+      showMsg(`已从 ZIP 安装「${installed.name}」`);
+    } catch (err: unknown) {
+      showMsg(`上传失败: ${err instanceof Error ? err.message : ""}`);
+    } finally {
+      setUploading(false);
+    }
+  };
+
   const installedCount = skills.filter((s) => s.enabled).length;
   const disabledCount = skills.length - installedCount;
 
   return (
     <main className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 p-4 text-white sm:p-6 md:p-8">
-      <div className="mx-auto max-w-6xl">
+      <div className={CONTENT_MAX_CLASS}>
         <div className="mb-8">
           <div className="mb-3 flex items-center gap-3">
             <Link href="/" className="text-sm text-slate-400 transition hover:text-white">
@@ -148,24 +169,43 @@ export default function SkillsPage() {
           </div>
           <div className="mt-4 flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
             <div>
-              <h1 className="text-3xl font-bold sm:text-4xl">技能策略与已安装能力</h1>
-              <p className="mt-3 max-w-3xl text-sm leading-relaxed text-slate-400 sm:text-base">
-                技能页现在不仅管理安装状态，也承担技能策略入口角色。这里决定哪些能力可被任务编排使用、偏好哪些能力、哪些能力应保持禁用。
+              <h1 className="text-3xl font-bold sm:text-4xl">技能策略</h1>
+              <p className="mt-2 max-w-2xl text-sm text-slate-400 sm:text-base">
+                启用、配置已安装技能，并前往市场扩展能力。
               </p>
             </div>
-            <div className="flex flex-wrap gap-2">
-              <Link
-                href="/skills/market"
-                className="rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-medium transition hover:bg-blue-500"
-              >
-                访问技能市场
-              </Link>
-              <Link
-                href="/create"
-                className="rounded-xl border border-slate-700 bg-slate-900/70 px-4 py-2.5 text-sm font-medium text-slate-200 transition hover:border-slate-600 hover:bg-slate-900"
-              >
-                去场景编排
-              </Link>
+            <div className="flex flex-col items-stretch gap-2 sm:items-end">
+              <div className="flex flex-wrap gap-2">
+                <Link
+                  href="/skills/market"
+                  className="rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-medium transition hover:bg-blue-500"
+                >
+                  访问技能市场
+                </Link>
+                <button
+                  type="button"
+                  disabled={uploading}
+                  onClick={triggerSkillUpload}
+                  className="rounded-xl border border-slate-700 bg-slate-900/70 px-4 py-2.5 text-sm font-medium text-slate-200 transition hover:border-slate-600 hover:bg-slate-900 disabled:opacity-50"
+                >
+                  {uploading ? "上传中…" : "上传 Skill"}
+                </button>
+                <input
+                  ref={uploadInputRef}
+                  type="file"
+                  accept=".zip,application/zip"
+                  className="sr-only"
+                  aria-label="选择技能 ZIP 包"
+                  onChange={handleSkillZipSelected}
+                />
+              </div>
+              <input
+                type="text"
+                value={uploadNameHint}
+                onChange={(ev) => setUploadNameHint(ev.target.value)}
+                placeholder="ZIP 根目录即包时填写目录名"
+                className="w-full min-w-[12rem] max-w-xs rounded-lg border border-slate-700 bg-slate-900/80 px-3 py-2 text-xs text-slate-200 placeholder:text-slate-500 focus:border-blue-500 focus:outline-none"
+              />
             </div>
           </div>
         </div>
@@ -175,46 +215,6 @@ export default function SkillsPage() {
           <MetricCard label="启用中" value={String(installedCount)} hint="可参与任务执行" />
           <MetricCard label="已禁用" value={String(disabledCount)} hint="保留但不主动使用" />
           <MetricCard label="策略目标" value="白名单 / 偏好 / 禁用" hint="后续对接编排策略" />
-        </div>
-
-        <div className="mb-6 grid gap-4 xl:grid-cols-[1.05fr_0.95fr]">
-          <div className="rounded-3xl border border-slate-800 bg-slate-900/50 p-6">
-            <p className="text-xs uppercase tracking-[0.2em] text-slate-500">Skill Policy</p>
-            <h2 className="mt-2 text-xl font-semibold text-white">技能策略说明</h2>
-            <div className="mt-5 grid gap-3 md:grid-cols-3">
-              <StrategyCard
-                title="启用中"
-                desc="适合作为默认候选技能，被项目或场景编排引用。"
-              />
-              <StrategyCard
-                title="已禁用"
-                desc="保留安装状态，但不让任务执行链路主动使用。"
-              />
-              <StrategyCard
-                title="市场安装"
-                desc="通过技能市场扩充能力池，再回到本页进行启用和配置。"
-              />
-            </div>
-          </div>
-
-          <div className="rounded-3xl border border-slate-800 bg-slate-900/50 p-6">
-            <p className="text-xs uppercase tracking-[0.2em] text-slate-500">Recommended Path</p>
-            <h2 className="mt-2 text-xl font-semibold text-white">推荐路径</h2>
-            <div className="mt-5 space-y-3 text-sm leading-relaxed text-slate-400">
-              <div className="rounded-2xl border border-slate-800 bg-slate-950/60 p-4">
-                <p className="font-medium text-white">1. 浏览市场</p>
-                <p className="mt-1">先从技能市场补齐缺少的能力，再决定是否安装。</p>
-              </div>
-              <div className="rounded-2xl border border-slate-800 bg-slate-950/60 p-4">
-                <p className="font-medium text-white">2. 配置与启用</p>
-                <p className="mt-1">在本页调整配置、启用状态和版本，形成稳定能力池。</p>
-              </div>
-              <div className="rounded-2xl border border-slate-800 bg-slate-950/60 p-4">
-                <p className="font-medium text-white">3. 回到任务入口</p>
-                <p className="mt-1">最终让技能策略在场景编排、对话协作和结果工坊中生效。</p>
-              </div>
-            </div>
-          </div>
         </div>
 
         {actionMsg && (

@@ -15,6 +15,7 @@ class OutputAsset(Base):
 
     id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
     project_id = Column(String, ForeignKey("projects.id", ondelete="CASCADE"), nullable=False)
+    scenario_id = Column(String)
     template_id = Column(String, ForeignKey("templates.id", ondelete="SET NULL"))
     run_id = Column(String, ForeignKey("orchestration_runs.id", ondelete="SET NULL"))
     title = Column(String)

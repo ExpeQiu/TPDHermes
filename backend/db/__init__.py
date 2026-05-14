@@ -31,3 +31,6 @@ from backend.models.template import Template as _Template  # noqa: E402, F401
 from backend.models.output_asset import OutputAsset as _OutputAsset  # noqa: E402, F401
 from backend.models.orchestration_run import OrchestrationRun as _OrchestrationRun  # noqa: E402, F401
 from backend.models.project_config import ProjectConfig as _ProjectConfig  # noqa: E402, F401
+from backend.models.scenario_profile import ScenarioProfile as _ScenarioProfile  # noqa: E402, F401
+from backend.models.project_scenario import ProjectScenario as _ProjectScenario  # noqa: E402, F401
+from backend.models.project_attachment import ProjectAttachment as _ProjectAttachment  # noqa: E402, F401

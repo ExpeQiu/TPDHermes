@@ -15,6 +15,7 @@ class OrchestrationRun(Base):
 
     id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
     project_id = Column(String, ForeignKey("projects.id", ondelete="SET NULL"))
+    scenario_id = Column(String)
     entrypoint = Column(String, nullable=False)
     status = Column(String, nullable=False, default="running")  # running|completed|failed|draft
     request_json = Column(Text)

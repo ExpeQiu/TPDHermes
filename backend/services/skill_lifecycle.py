@@ -11,8 +11,13 @@ SkillLifecycleService - Skill 生命周期管理
 from __future__ import annotations
 
 import json
+import logging
+import re
 import shutil
-from typing import Any, Dict, List, Optional
+import tempfile
+import zipfile
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple
 from datetime import datetime
 import uuid
 
@@ -22,6 +27,50 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from backend.models.skill import Skill
 from backend.services.skill_loader import SkillLoader, SkillNotFoundError, SkillLoadError
 from backend.services.skill_version import SkillVersionService, bump_version
+
+logger = logging.getLogger("tpdx.hermes.skills")
+
+
+def assert_valid_skill_directory_name(name: str) -> None:
+    if not re.match(r"^[a-zA-Z][a-zA-Z0-9_]*$", name):
+        raise ValueError("技能目录名须以字母开头，且仅含字母、数字、下划线")
+
+
+def _iter_extract_root_children(extract_root: Path) -> List[Path]:
+    return [p for p in extract_root.iterdir() if p.name != "__MACOSX"]
+
+
+def resolve_zip_package_root(extract_root: Path) -> Tuple[Path, Optional[str]]:
+    """
+    解析解压目录中的技能包根目录。
+    返回 (含 __init__.py 的目录, 推断的技能名)；若根目录即包且需调用方指定名称则第二项为 None。
+    """
+    children = _iter_extract_root_children(extract_root)
+    if len(children) == 1 and children[0].is_dir():
+        pack = children[0]
+        if (pack / "__init__.py").is_file():
+            return pack, pack.name
+    if (extract_root / "__init__.py").is_file():
+        return extract_root, None
+    raise ValueError(
+        "ZIP 须为：单一顶层文件夹且内含 __init__.py；或在 ZIP 根目录直接放置 __init__.py（此时请在表单中填写技能目录名）"
+    )
+
+
+def safe_extract_zip(zf: zipfile.ZipFile, dest: Path) -> None:
+    """解压 ZIP，拒绝路径穿越。"""
+    base = dest.resolve()
+    base.mkdir(parents=True, exist_ok=True)
+    for name in zf.namelist():
+        if name.startswith("/") or name.startswith("\\"):
+            raise ValueError("压缩包包含非法路径")
+        parts = Path(name).parts
+        if ".." in parts:
+            raise ValueError("压缩包包含非法路径")
+        target = (base / name).resolve()
+        if base not in target.parents and target != base:
+            raise ValueError(f"压缩包路径越界: {name}")
+    zf.extractall(base)
 
 
 class SkillLifecycleService:
@@ -50,6 +99,91 @@ class SkillLifecycleService:
         if not skill:
             return None
         return self._skill_to_dict(skill)
+
+    async def install_from_uploaded_package(
+        self,
+        package_root: Path,
+        skill_name: str,
+        description: str = "",
+        config: Optional[Dict[str, Any]] = None,
+        source: str = "upload",
+    ) -> Dict[str, Any]:
+        """
+        将已校验的目录复制到 skills/<skill_name>/ 并执行 install（失败时回滚磁盘目录）。
+        """
+        package_root = package_root.resolve()
+        if not (package_root / "__init__.py").is_file():
+            raise ValueError("技能包缺少 __init__.py")
+        assert_valid_skill_directory_name(skill_name)
+
+        existing = await self.get_skill(skill_name)
+        if existing:
+            raise ValueError(f"Skill '{skill_name}' is already installed")
+
+        dest = self.loader.skills_root / skill_name
+        if dest.exists():
+            raise ValueError(f"技能目录已存在，无法覆盖：{skill_name}")
+
+        logger.info("skill_upload copy start name=%s from=%s", skill_name, package_root)
+        try:
+            shutil.copytree(package_root, dest)
+        except Exception as e:
+            logger.warning("skill_upload copy failed name=%s err=%s", skill_name, e)
+            raise ValueError(f"复制技能包失败：{e}") from e
+
+        try:
+            out = await self.install(
+                name=skill_name,
+                description=description,
+                config=config,
+                source=source,
+            )
+            logger.info("skill_upload installed name=%s", skill_name)
+            return out
+        except Exception:
+            logger.warning("skill_upload install rollback name=%s", skill_name)
+            if dest.exists():
+                shutil.rmtree(dest, ignore_errors=True)
+            if skill_name in self.loader._cache:
+                del self.loader._cache[skill_name]
+            raise
+
+    async def install_from_zip_bytes(
+        self,
+        data: bytes,
+        name_override: Optional[str] = None,
+        description: str = "",
+        config: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """解压 ZIP 并安装到 skills/（结构规则见 resolve_zip_package_root）。"""
+        trimmed = name_override.strip() if name_override else ""
+        with tempfile.TemporaryDirectory() as td:
+            td_path = Path(td)
+            zip_path = td_path / "upload.zip"
+            zip_path.write_bytes(data)
+            extract_root = td_path / "out"
+            extract_root.mkdir()
+            with zipfile.ZipFile(zip_path) as zf:
+                safe_extract_zip(zf, extract_root)
+            pack_root, inferred = resolve_zip_package_root(extract_root)
+            if inferred:
+                if trimmed and trimmed != inferred:
+                    raise ValueError(
+                        f"ZIP 内顶层文件夹须为技能目录名「{inferred}」，请勿在表单中填写其他名称"
+                    )
+                skill_name = inferred
+            else:
+                if not trimmed:
+                    raise ValueError("ZIP 根目录为技能包时，请在表单中填写技能目录名（name）")
+                assert_valid_skill_directory_name(trimmed)
+                skill_name = trimmed
+            return await self.install_from_uploaded_package(
+                pack_root,
+                skill_name,
+                description=description,
+                config=config,
+                source="upload",
+            )
 
     async def install(
         self,

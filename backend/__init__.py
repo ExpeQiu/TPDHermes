@@ -109,6 +109,8 @@ from backend.routes.chat import router as chat_router
 from backend.routes.feishu import router as feishu_router
 from backend.routes.feishu_bot import router as feishu_bot_router
 from backend.routes.tasks import router as tasks_router, runs_router as runs_router
+from backend.routes.scenarios import router as scenarios_router
+from backend.routes.templates import router as templates_router
 
 include_router_with_version(projects_router, strip_prefix="/projects")
 include_router_with_version(kb_router,       strip_prefix="/kb")
@@ -118,6 +120,8 @@ include_router_with_version(skills_store_router, strip_prefix="/skills")
 include_router_with_version(chat_router,     strip_prefix="/chat")
 include_router_with_version(tasks_router,    strip_prefix="/tasks")
 include_router_with_version(runs_router,     strip_prefix="/runs")
+include_router_with_version(scenarios_router, strip_prefix="/scenarios")
+include_router_with_version(templates_router, strip_prefix="/templates")
 include_router_with_version(feishu_router,   strip_prefix="/feishu")
 include_router_with_version(feishu_bot_router, strip_prefix="/feishu/bot")
 

@@ -15,8 +15,10 @@ import {
   orchestrationPreviewToBlocks,
   ProjectRecord,
   type OrchestrationPreviewResponse,
+  type QuickCreateFlowOverrides,
   type TaskExecuteBody,
 } from "@/lib/chat-context";
+import { CONTENT_MAX_CLASS } from "@/lib/content-shell";
 
 interface Message {
   id: string;
@@ -36,6 +38,8 @@ interface ChatSession {
   scenarioPresetInstructions?: string;
   scenarioOpeningHint?: string;
   taskEntrySummary?: string;
+  /** /create 多选知识库、技能子集与输出预设，供编排 overrides 与上下文构建 */
+  quickCreateOverrides?: QuickCreateFlowOverrides;
 }
 
 const STORAGE_KEY = "tphermes-chat-sessions";
@@ -203,13 +207,231 @@ function BoundaryMetric({
 }: {
   label: string;
   value: string;
-  hint: string;
+  hint?: string;
 }) {
   return (
     <div className="rounded-2xl border border-slate-700 bg-slate-950/60 p-3">
       <p className="text-[11px] uppercase tracking-[0.16em] text-slate-500">{label}</p>
       <p className="mt-2 text-sm font-medium leading-relaxed text-white">{value}</p>
-      <p className="mt-1 text-xs leading-relaxed text-slate-500">{hint}</p>
+      {hint ? <p className="mt-1 text-xs leading-relaxed text-slate-500">{hint}</p> : null}
+    </div>
+  );
+}
+
+type BoundaryCard = { label: string; value: string; hint?: string };
+
+type ChatTaskBoundaryModel = {
+  activeSession: ChatSession | undefined;
+  boundaryCards: BoundaryCard[];
+  useOrchestration: boolean;
+  transport: ChatTransportConfig | null;
+  tasksExecuteUrl: string;
+  chatApiBase: string;
+  includeProjectContext: boolean;
+  setIncludeProjectContext: (v: boolean) => void;
+  selectedProjectId: string;
+  setSelectedProjectId: (v: string) => void;
+  projects: ProjectRecord[];
+  includeKnowledgeContext: boolean;
+  setIncludeKnowledgeContext: (v: boolean) => void;
+  includeSkillsContext: boolean;
+  setIncludeSkillsContext: (v: boolean) => void;
+  selectedCollection: string;
+  setSelectedCollection: (v: string) => void;
+  collections: string[];
+  contextSummary: string[];
+  orchestrationPreview: OrchestrationPreviewResponse | null;
+  bootstrapWarnings: string[];
+};
+
+function ChatTaskBoundaryPanel({
+  model,
+  narrow,
+}: {
+  model: ChatTaskBoundaryModel;
+  narrow: boolean;
+}) {
+  const {
+    activeSession,
+    boundaryCards,
+    useOrchestration,
+    transport,
+    tasksExecuteUrl,
+    chatApiBase,
+    includeProjectContext,
+    setIncludeProjectContext,
+    selectedProjectId,
+    setSelectedProjectId,
+    projects,
+    includeKnowledgeContext,
+    setIncludeKnowledgeContext,
+    includeSkillsContext,
+    setIncludeSkillsContext,
+    selectedCollection,
+    setSelectedCollection,
+    collections,
+    contextSummary,
+    orchestrationPreview,
+    bootstrapWarnings,
+  } = model;
+
+  const metricGrid = narrow
+    ? "grid gap-3 grid-cols-1"
+    : "grid gap-3 md:grid-cols-2 xl:grid-cols-5";
+  const settingsGrid = narrow ? "grid gap-4 grid-cols-1" : "grid gap-4 xl:grid-cols-[0.95fr_1.05fr]";
+  const innerCols = narrow ? "grid gap-4 grid-cols-1" : "grid gap-4 md:grid-cols-2";
+
+  return (
+    <div className="rounded-3xl border border-slate-700 bg-slate-900/50 p-4 md:p-5">
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+        <div>
+          <p className="text-xs uppercase tracking-[0.2em] text-slate-500">Task Boundary</p>
+          <h2 className="mt-1 text-lg font-semibold text-white">任务边界</h2>
+        </div>
+        <details className="rounded-2xl border border-slate-700 bg-slate-950/60 px-3 py-2 text-sm">
+          <summary className="cursor-pointer list-none text-slate-300 [&::-webkit-details-marker]:hidden">
+            <span className="text-xs text-slate-500">链路 · </span>
+            {useOrchestration
+              ? "POST /tasks/execute"
+              : transport?.mode === "backend-proxy"
+                ? "后端代理"
+                : "自定义地址"}
+          </summary>
+          <p className="mt-2 break-all text-xs text-slate-500">
+            {useOrchestration ? tasksExecuteUrl : transport?.target ?? chatApiBase}
+          </p>
+        </details>
+      </div>
+
+      <div className={`mt-4 ${metricGrid}`}>
+        {boundaryCards.map((item) => (
+          <BoundaryMetric key={item.label} label={item.label} value={item.value} hint={item.hint} />
+        ))}
+      </div>
+
+      {activeSession?.taskEntrySummary && (
+        <details className="mt-4 rounded-2xl border border-blue-700/30 bg-blue-950/20 px-4 py-3">
+          <summary className="cursor-pointer text-xs font-medium uppercase tracking-[0.16em] text-blue-300">
+            快捷编排摘要
+          </summary>
+          <pre className="mt-2 whitespace-pre-wrap font-sans text-sm leading-relaxed text-blue-100">
+            {activeSession.taskEntrySummary}
+          </pre>
+        </details>
+      )}
+
+      <div className={`mt-4 ${settingsGrid}`}>
+        <div className="rounded-2xl border border-slate-700 bg-slate-950/60 p-4">
+          <p className="text-xs uppercase tracking-[0.16em] text-slate-500">边界设置</p>
+          <div className={`mt-4 ${innerCols}`}>
+            <div>
+              <div className="mb-2 flex items-center justify-between">
+                <label className="text-xs text-slate-400">项目上下文</label>
+                <input
+                  type="checkbox"
+                  checked={includeProjectContext}
+                  onChange={(e) => setIncludeProjectContext(e.target.checked)}
+                />
+              </div>
+              <select
+                value={selectedProjectId}
+                onChange={(e) => setSelectedProjectId(e.target.value)}
+                className="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white"
+              >
+                <option value="">不注入项目</option>
+                {projects.map((project) => (
+                  <option key={project.id} value={project.id}>
+                    {project.name}
+                  </option>
+                ))}
+              </select>
+              <p className="mt-2 text-xs text-slate-600">
+                {useOrchestration ? "携带 project_id" : "调用 mcp_tphermes_project_get"}
+              </p>
+            </div>
+
+            <div>
+              <div className="mb-2 flex items-center justify-between">
+                <label className="text-xs text-slate-400">知识库与技能</label>
+                <div className="flex items-center gap-3 text-xs text-slate-400">
+                  <label className="flex items-center gap-1">
+                    <input
+                      type="checkbox"
+                      checked={includeKnowledgeContext}
+                      onChange={(e) => setIncludeKnowledgeContext(e.target.checked)}
+                    />
+                    KB
+                  </label>
+                  <label className="flex items-center gap-1">
+                    <input
+                      type="checkbox"
+                      checked={includeSkillsContext}
+                      onChange={(e) => setIncludeSkillsContext(e.target.checked)}
+                    />
+                    技能
+                  </label>
+                </div>
+              </div>
+              <select
+                value={selectedCollection}
+                onChange={(e) => setSelectedCollection(e.target.value)}
+                className="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white"
+              >
+                {collections.length === 0 && <option value="">暂无集合</option>}
+                {collections.map((collection) => (
+                  <option key={collection} value={collection}>
+                    {collection}
+                  </option>
+                ))}
+              </select>
+              <p className="mt-2 text-xs text-slate-600">
+                {useOrchestration ? "写入任务合同" : "KB + 技能快照"}
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <div className="rounded-2xl border border-slate-700 bg-slate-950/60 p-4">
+          <div className="flex items-center justify-between gap-3">
+            <p className="text-xs uppercase tracking-[0.16em] text-slate-500">边界摘要</p>
+            <div className="flex flex-wrap gap-2 text-xs">
+              {contextSummary.length === 0 ? (
+                <span className="rounded-full border border-slate-700 bg-slate-800 px-2 py-1 text-slate-500">
+                  当前未启用额外上下文
+                </span>
+              ) : (
+                contextSummary.map((item) => (
+                  <span
+                    key={item}
+                    className="rounded-full border border-blue-700/40 bg-blue-900/30 px-2 py-1 text-blue-300"
+                  >
+                    {item}
+                  </span>
+                ))
+              )}
+            </div>
+          </div>
+
+          {useOrchestration && orchestrationPreview ? (
+            <details className="mt-4 rounded-2xl border border-slate-700 bg-slate-900/60 p-4">
+              <summary className="cursor-pointer text-sm font-medium text-white">编排预览 JSON</summary>
+              <pre className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap break-words font-sans text-xs leading-relaxed text-slate-400">
+                {JSON.stringify(orchestrationPreview.snapshot, null, 2)}
+              </pre>
+            </details>
+          ) : (
+            <p className="mt-4 text-xs text-slate-600">
+              {useOrchestration ? "选择项目后显示编排预览" : "兼容模式无编排快照"}
+            </p>
+          )}
+
+          {bootstrapWarnings.length > 0 && (
+            <div className="mt-4 rounded-xl border border-amber-700/40 bg-amber-950/30 px-3 py-2 text-xs text-amber-300">
+              {bootstrapWarnings.join("；")}
+            </div>
+          )}
+        </div>
+      </div>
     </div>
   );
 }
@@ -374,7 +596,9 @@ function ChatPageInner() {
         setSelectedProjectId(init.projectId);
         setIncludeProjectContext(true);
       }
-      if (init.selectedCollection) {
+      if (init.knowledgeCollections && init.knowledgeCollections.length > 0) {
+        setSelectedCollection(init.knowledgeCollections[0]);
+      } else if (init.selectedCollection) {
         setSelectedCollection(init.selectedCollection);
       }
       if (typeof init.knowledgeEnabled === "boolean") {
@@ -382,6 +606,24 @@ function ChatPageInner() {
       }
       if (typeof init.skillsEnabled === "boolean") {
         setIncludeSkillsContext(init.skillsEnabled);
+      }
+
+      const qc: QuickCreateFlowOverrides = {};
+      if (init.knowledgeCollections && init.knowledgeCollections.length > 0) {
+        qc.knowledgeCollections = init.knowledgeCollections;
+      }
+      if (init.selectedSkills && init.selectedSkills.length > 0) {
+        qc.skillNames = init.selectedSkills;
+      }
+      if (init.outputPreset) {
+        qc.outputPreset = init.outputPreset;
+        if (init.outputPreset === "structured" && init.outputRequiredSections?.length) {
+          qc.outputRequiredSections = init.outputRequiredSections;
+        }
+      }
+      const hasQc = Object.keys(qc).length > 0;
+      if (hasQc) {
+        console.info("[chat] 应用 /create 编排覆盖", qc);
       }
 
       const initialMessages: Message[] = [];
@@ -398,6 +640,7 @@ function ChatPageInner() {
         scenarioPresetInstructions: preset || undefined,
         scenarioOpeningHint: opener || undefined,
         taskEntrySummary: entrySummary || undefined,
+        quickCreateOverrides: hasQc ? qc : undefined,
         messages: initialMessages.length > 0 ? initialMessages : session.messages,
       }));
 
@@ -454,13 +697,20 @@ function ChatPageInner() {
       parts.push(`项目: ${project?.name ?? "已选"}`);
     }
     if (includeKnowledgeContext && selectedCollection) {
-      parts.push(`知识库: ${selectedCollection}`);
+      const kc = activeSession?.quickCreateOverrides?.knowledgeCollections;
+      parts.push(
+        kc && kc.length > 1 ? `知识库: ${kc.length} 个（${kc.join("、")}）` : `知识库: ${selectedCollection}`,
+      );
     }
     if (includeSkillsContext) {
-      parts.push(`技能快照: ${skills.length} 项`);
+      const sn = activeSession?.quickCreateOverrides?.skillNames;
+      const n = sn?.length ? sn.length : skills.length;
+      parts.push(`技能: ${n} 项`);
     }
     return parts;
   }, [
+    activeSession?.quickCreateOverrides?.knowledgeCollections,
+    activeSession?.quickCreateOverrides?.skillNames,
     includeKnowledgeContext,
     includeProjectContext,
     includeSkillsContext,
@@ -477,6 +727,7 @@ function ChatPageInner() {
 
   const boundaryCards = useMemo(() => {
     const previewPayload = orchestrationPreview?.payload ?? {};
+    const qcBound = activeSession?.quickCreateOverrides;
     const output =
       previewPayload.output && typeof previewPayload.output === "object"
         ? (previewPayload.output as Record<string, unknown>)
@@ -503,12 +754,18 @@ function ChatPageInner() {
     const requiredSections = Array.isArray(output?.required_sections)
       ? output.required_sections.length
       : 0;
-    const allowedSkills = Array.isArray(skillsPolicy?.allowed) ? skillsPolicy.allowed.length : 0;
+    const allowedSkills = Array.isArray(skillsPolicy?.allowed)
+      ? skillsPolicy.allowed.length
+      : includeSkillsContext
+        ? qcBound?.skillNames?.length || skills.length
+        : 0;
     const collectionsCount = Array.isArray(knowledgePolicy?.collections)
       ? knowledgePolicy.collections.length
-      : includeKnowledgeContext && selectedCollection
-        ? 1
-        : 0;
+      : includeKnowledgeContext && qcBound?.knowledgeCollections?.length
+        ? qcBound.knowledgeCollections.length
+        : includeKnowledgeContext && selectedCollection
+          ? 1
+          : 0;
     const scenarioName =
       typeof scenario?.name === "string" && scenario.name
         ? scenario.name
@@ -518,30 +775,31 @@ function ChatPageInner() {
       {
         label: "当前场景",
         value: scenarioName,
-        hint: useOrchestration ? "由统一任务接口承接" : "兼容聊天链路",
+        hint: useOrchestration ? "任务接口" : "聊天",
       },
       {
         label: "项目边界",
-        value: includeProjectContext ? selectedProject?.name ?? "已启用但未选择" : "未启用",
-        hint: includeProjectContext ? "项目承担长期上下文" : "本次不绑定项目",
+        value: includeProjectContext ? selectedProject?.name ?? "请选择项目" : "未启用",
+        hint:
+          includeProjectContext && !selectedProject?.name ? "在下方面板选择项目" : undefined,
       },
       {
         label: "知识策略",
-        value: includeKnowledgeContext ? `${collectionsCount} 个知识范围` : "未启用",
-        hint: includeKnowledgeContext ? (selectedCollection || "按默认集合") : "不限制知识范围",
+        value: includeKnowledgeContext ? `${collectionsCount} 个范围` : "未启用",
+        hint: includeKnowledgeContext ? selectedCollection || "默认" : undefined,
       },
       {
         label: "输出约束",
         value: templateId,
-        hint: requiredSections > 0 ? `${requiredSections} 个必填章节` : "按默认模板策略",
+        hint: requiredSections > 0 ? `${requiredSections} 个必填章` : undefined,
       },
       {
         label: "技能策略",
-        value: includeSkillsContext ? `${allowedSkills || skills.length} 项候选` : "未启用",
-        hint: includeSkillsContext ? "按策略选择技能" : "本次不主动携带技能快照",
+        value: includeSkillsContext ? `${allowedSkills || skills.length} 项` : "未启用",
       },
     ];
   }, [
+    activeSession?.quickCreateOverrides,
     includeKnowledgeContext,
     includeProjectContext,
     includeSkillsContext,
@@ -583,14 +841,20 @@ function ChatPageInner() {
         (includeKnowledgeContext && selectedCollection) ||
         includeSkillsContext
       ) {
+        const qc = priorSession?.quickCreateOverrides;
+        const skillsForContext = (() => {
+          if (!includeSkillsContext) return [] as string[];
+          if (qc?.skillNames && qc.skillNames.length > 0) return qc.skillNames.slice(0, 32);
+          return skills.slice(0, 32);
+        })();
         const built = await buildToolsContext({
           query: text,
           projectId: selectedProjectId || undefined,
           collectionName: selectedCollection || undefined,
           includeProject: includeProjectContext,
           includeKnowledge: includeKnowledgeContext,
-          includeSkills: includeSkillsContext,
-          skillSnapshot: skills,
+          includeSkills: skillsForContext.length > 0,
+          skillSnapshot: skillsForContext,
         });
         toolsContext = built.toolsContext;
         contextBlocks = built.blocks;
@@ -635,15 +899,32 @@ function ChatPageInner() {
       if (chatApiKey) headers.Authorization = `Bearer ${chatApiKey}`;
 
       if (useOrchestration) {
+        const qc = priorSession?.quickCreateOverrides;
         const overrides: TaskExecuteBody["overrides"] = {};
-        if (includeKnowledgeContext && selectedCollection) {
-          overrides.knowledge = { collections: [selectedCollection] };
+        if (includeKnowledgeContext) {
+          const cols =
+            qc?.knowledgeCollections?.filter(Boolean) ??
+            (selectedCollection ? [selectedCollection] : []);
+          if (cols.length > 0) {
+            overrides.knowledge = { collections: cols };
+          }
         }
-        if (includeSkillsContext && skills.length > 0) {
-          overrides.skills = {
-            mode: "allowed_list",
-            allowed: skills.slice(0, 32),
-            allow_agent_free_choice: false,
+        if (includeSkillsContext) {
+          const list =
+            qc?.skillNames && qc.skillNames.length > 0 ? qc.skillNames : skills;
+          const allowed = list.slice(0, 32);
+          if (allowed.length > 0) {
+            overrides.skills = {
+              mode: "allowed_list",
+              allowed,
+              allow_agent_free_choice: false,
+            };
+          }
+        }
+        if (qc?.outputPreset === "structured" && qc.outputRequiredSections?.length) {
+          overrides.output = {
+            must_follow_template: true,
+            required_sections: qc.outputRequiredSections,
           };
         }
         let scenarioPresetInstructions =
@@ -870,6 +1151,30 @@ function ChatPageInner() {
     activeSession?.messages.map((m) => `${m.role}:${m.content}`).join("") ?? "",
   );
 
+  const boundaryModel: ChatTaskBoundaryModel = {
+    activeSession,
+    boundaryCards,
+    useOrchestration,
+    transport,
+    tasksExecuteUrl,
+    chatApiBase,
+    includeProjectContext,
+    setIncludeProjectContext,
+    selectedProjectId,
+    setSelectedProjectId,
+    projects,
+    includeKnowledgeContext,
+    setIncludeKnowledgeContext,
+    includeSkillsContext,
+    setIncludeSkillsContext,
+    selectedCollection,
+    setSelectedCollection,
+    collections,
+    contextSummary,
+    orchestrationPreview,
+    bootstrapWarnings,
+  };
+
   return (
     <div className="flex h-screen bg-slate-900 text-white overflow-hidden">
       <aside
@@ -914,204 +1219,46 @@ function ChatPageInner() {
         </div>
       </aside>
 
-      <div className="flex-1 flex flex-col min-w-0">
-        <header className="flex items-center gap-3 px-4 py-3 border-b border-slate-700 bg-slate-800/80">
-          <button
-            onClick={() => setSidebarOpen((v) => !v)}
-            className="text-slate-400 hover:text-white transition text-sm"
-          >
-            {sidebarOpen ? "◀" : "▶"}
-          </button>
-          <Link href="/" className="text-slate-400 hover:text-white transition text-sm">
-            ← 首页
-          </Link>
-          <h1 className="text-sm font-semibold text-white flex-1 truncate">
-            {activeSession?.title ?? "对话"}
-          </h1>
-          {(preparingContext || streaming) && (
-            <span className="flex items-center gap-1.5 text-xs text-blue-400">
-              <span className="w-1.5 h-1.5 rounded-full bg-blue-400 animate-pulse" />
-              {preparingContext ? "准备上下文" : "生成中"}
-            </span>
-          )}
-        </header>
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col lg:flex-row">
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+          <header className="flex items-center gap-3 px-4 py-3 border-b border-slate-700 bg-slate-800/80">
+            <button
+              onClick={() => setSidebarOpen((v) => !v)}
+              className="text-slate-400 hover:text-white transition text-sm"
+            >
+              {sidebarOpen ? "◀" : "▶"}
+            </button>
+            <Link href="/" className="text-slate-400 hover:text-white transition text-sm">
+              ← 首页
+            </Link>
+            <h1 className="text-sm font-semibold text-white flex-1 truncate">
+              {activeSession?.title ?? "对话"}
+            </h1>
+            {(preparingContext || streaming) && (
+              <span className="flex items-center gap-1.5 text-xs text-blue-400">
+                <span className="w-1.5 h-1.5 rounded-full bg-blue-400 animate-pulse" />
+                {preparingContext ? "准备上下文" : "生成中"}
+              </span>
+            )}
+          </header>
 
-        <div className="border-b border-slate-700 bg-slate-800/40">
-          <div className="mx-auto max-w-5xl px-4 py-4">
-            <div className="rounded-3xl border border-slate-700 bg-slate-900/50 p-4 md:p-5">
-              <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-                <div className="max-w-2xl">
-                  <p className="text-xs uppercase tracking-[0.2em] text-slate-500">Task Boundary</p>
-                  <h2 className="mt-2 text-lg font-semibold text-white">当前任务边界面板</h2>
-                  <p className="mt-2 text-sm leading-relaxed text-slate-400">
-                    对话页现在固定展示任务边界，不再把快捷编排摘要塞进消息流。这里统一查看项目、知识、技能和输出约束。
-                  </p>
-                </div>
-                <div className="rounded-2xl border border-slate-700 bg-slate-950/60 px-4 py-3 text-sm">
-                  <p className="text-xs uppercase tracking-[0.16em] text-slate-500">聊天链路</p>
-                  <p className="mt-2 font-medium text-white">
-                    {useOrchestration
-                      ? "编排任务 · POST /tasks/execute"
-                      : transport?.mode === "backend-proxy"
-                        ? "TPDHermes 后端代理"
-                        : "自定义聊天地址"}
-                  </p>
-                  <p className="mt-1 break-all text-xs text-slate-500">
-                    {useOrchestration ? tasksExecuteUrl : transport?.target ?? chatApiBase}
-                  </p>
-                </div>
-              </div>
-
-              <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-5">
-                {boundaryCards.map((item) => (
-                  <BoundaryMetric
-                    key={item.label}
-                    label={item.label}
-                    value={item.value}
-                    hint={item.hint}
-                  />
-                ))}
-              </div>
-
-              {activeSession?.taskEntrySummary && (
-                <div className="mt-4 rounded-2xl border border-blue-700/30 bg-blue-950/20 px-4 py-3">
-                  <p className="text-xs uppercase tracking-[0.16em] text-blue-300">快捷编排摘要</p>
-                  <pre className="mt-2 whitespace-pre-wrap font-sans text-sm leading-relaxed text-blue-100">
-                    {activeSession.taskEntrySummary}
-                  </pre>
-                </div>
-              )}
-
-              <div className="mt-4 grid gap-4 xl:grid-cols-[0.95fr_1.05fr]">
-                <div className="rounded-2xl border border-slate-700 bg-slate-950/60 p-4">
-                  <p className="text-xs uppercase tracking-[0.16em] text-slate-500">边界设置</p>
-                  <div className="mt-4 grid gap-4 md:grid-cols-2">
-                    <div>
-                      <div className="mb-2 flex items-center justify-between">
-                        <label className="text-xs text-slate-400">项目上下文</label>
-                        <input
-                          type="checkbox"
-                          checked={includeProjectContext}
-                          onChange={(e) => setIncludeProjectContext(e.target.checked)}
-                        />
-                      </div>
-                      <select
-                        value={selectedProjectId}
-                        onChange={(e) => setSelectedProjectId(e.target.value)}
-                        className="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white"
-                      >
-                        <option value="">不注入项目</option>
-                        {projects.map((project) => (
-                          <option key={project.id} value={project.id}>
-                            {project.name}
-                          </option>
-                        ))}
-                      </select>
-                      <p className="mt-2 text-xs text-slate-500">
-                        {useOrchestration
-                          ? "随请求携带 project_id，由后端生成任务边界。"
-                          : "发送前显式调用 `mcp_tphermes_project_get`。"}
-                      </p>
-                    </div>
-
-                    <div>
-                      <div className="mb-2 flex items-center justify-between">
-                        <label className="text-xs text-slate-400">知识库与技能</label>
-                        <div className="flex items-center gap-3 text-xs text-slate-400">
-                          <label className="flex items-center gap-1">
-                            <input
-                              type="checkbox"
-                              checked={includeKnowledgeContext}
-                              onChange={(e) => setIncludeKnowledgeContext(e.target.checked)}
-                            />
-                            KB
-                          </label>
-                          <label className="flex items-center gap-1">
-                            <input
-                              type="checkbox"
-                              checked={includeSkillsContext}
-                              onChange={(e) => setIncludeSkillsContext(e.target.checked)}
-                            />
-                            技能
-                          </label>
-                        </div>
-                      </div>
-                      <select
-                        value={selectedCollection}
-                        onChange={(e) => setSelectedCollection(e.target.value)}
-                        className="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white"
-                      >
-                        {collections.length === 0 && <option value="">暂无集合</option>}
-                        {collections.map((collection) => (
-                          <option key={collection} value={collection}>
-                            {collection}
-                          </option>
-                        ))}
-                      </select>
-                      <p className="mt-2 text-xs text-slate-500">
-                        {useOrchestration
-                          ? "知识与技能策略将一并写入本次任务合同。"
-                          : "发送前显式调用 KB 与技能快照能力。"}
-                      </p>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="rounded-2xl border border-slate-700 bg-slate-950/60 p-4">
-                  <div className="flex items-center justify-between gap-3">
-                    <p className="text-xs uppercase tracking-[0.16em] text-slate-500">边界摘要</p>
-                    <div className="flex flex-wrap gap-2 text-xs">
-                      {contextSummary.length === 0 ? (
-                        <span className="rounded-full border border-slate-700 bg-slate-800 px-2 py-1 text-slate-500">
-                          当前未启用额外上下文
-                        </span>
-                      ) : (
-                        contextSummary.map((item) => (
-                          <span
-                            key={item}
-                            className="rounded-full border border-blue-700/40 bg-blue-900/30 px-2 py-1 text-blue-300"
-                          >
-                            {item}
-                          </span>
-                        ))
-                      )}
-                    </div>
-                  </div>
-
-                  {useOrchestration && orchestrationPreview ? (
-                    <div className="mt-4 rounded-2xl border border-slate-700 bg-slate-900/60 p-4">
-                      <p className="text-sm font-medium text-white">结构化编排预览</p>
-                      <pre className="mt-2 whitespace-pre-wrap break-words font-sans text-xs leading-relaxed text-slate-400">
-                        {JSON.stringify(orchestrationPreview.snapshot, null, 2)}
-                      </pre>
-                    </div>
-                  ) : (
-                    <div className="mt-4 rounded-2xl border border-dashed border-slate-700 bg-slate-900/30 p-4 text-sm text-slate-500">
-                      {useOrchestration
-                        ? "选择项目后将在此显示当前任务的结构化编排预览。"
-                        : "当前是兼容聊天链路模式，暂无结构化编排快照。"}
-                    </div>
-                  )}
-
-                  {bootstrapWarnings.length > 0 && (
-                    <div className="mt-4 rounded-xl border border-amber-700/40 bg-amber-950/30 px-3 py-2 text-xs text-amber-300">
-                      {bootstrapWarnings.join("；")}
-                    </div>
-                  )}
-                </div>
-              </div>
+          <details className="group border-b border-slate-700 bg-slate-800/40 lg:hidden">
+            <summary className="flex cursor-pointer list-none items-center justify-between px-4 py-2.5 text-sm font-medium text-slate-200 [&::-webkit-details-marker]:hidden">
+              <span>任务边界</span>
+              <span className="text-xs text-slate-500 group-open:hidden">展开</span>
+              <span className="hidden text-xs text-slate-500 group-open:inline">收起</span>
+            </summary>
+            <div className="max-h-[42vh] overflow-y-auto border-t border-slate-700/50 px-3 pb-3 pt-2">
+              <ChatTaskBoundaryPanel model={boundaryModel} narrow={false} />
             </div>
-          </div>
-        </div>
+          </details>
 
-        <div className="flex-1 overflow-y-auto p-4 space-y-4">
+        <div className="flex-1 overflow-y-auto space-y-4 px-4 py-4 sm:px-6 md:px-8">
           {(!activeSession || activeSession.messages.length === 0) && (
             <div className="flex flex-col items-center justify-center h-full text-slate-500">
               <p className="text-4xl mb-4">💬</p>
               <p className="text-sm">开始一段新对话吧</p>
-              <p className="text-xs mt-1 text-slate-600">
-                默认由 TPDHermes 后端转发到 Hermes-agent
-              </p>
+              <p className="text-xs mt-1 text-slate-600">Enter 发送 · Shift+Enter 换行</p>
             </div>
           )}
 
@@ -1192,8 +1339,8 @@ function ChatPageInner() {
           <div ref={messagesEndRef} />
         </div>
 
-        <div className="p-4 border-t border-slate-700 bg-slate-800/60">
-          <div className="flex gap-3 items-end max-w-4xl mx-auto">
+        <div className="border-t border-slate-700 bg-slate-800/60 py-4">
+          <div className={`${CONTENT_MAX_CLASS} flex gap-3 items-end px-4 sm:px-6 md:px-8`}>
             <textarea
               ref={inputRef}
               value={input}
@@ -1237,6 +1384,16 @@ function ChatPageInner() {
             AI 回复仅供参考，如有疑问请核实信息
           </p>
         </div>
+        </div>
+
+        <aside className="hidden min-h-0 w-[min(22rem,32vw)] max-w-sm shrink-0 flex-col border-l border-slate-700 bg-slate-800/40 lg:flex">
+          <div className="shrink-0 border-b border-slate-700/80 px-3 py-2 text-xs font-medium uppercase tracking-[0.16em] text-slate-500">
+            任务边界
+          </div>
+          <div className="min-h-0 flex-1 overflow-y-auto p-3">
+            <ChatTaskBoundaryPanel model={boundaryModel} narrow />
+          </div>
+        </aside>
       </div>
     </div>
   );

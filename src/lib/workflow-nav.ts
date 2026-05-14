@@ -19,22 +19,22 @@ export const WORKFLOW_NAV_ITEMS: WorkflowNavItem[] = [
     description: "管理长期边界，并进入项目级任务入口。",
   },
   {
+    href: "/chat",
+    label: "对话创作",
+    shortLabel: "对话创作",
+    description: "在对话中澄清边界、执行与迭代产出。",
+  },
+  {
+    href: "/workshop",
+    label: "场景输出",
+    shortLabel: "场景输出",
+    description: "在项目与场景上下文中沉淀与优化输出物。",
+  },
+  {
     href: "/create",
     label: "场景编排",
     shortLabel: "场景编排",
     description: "定义任务边界、知识范围和期望输出。",
-  },
-  {
-    href: "/chat",
-    label: "编排协作",
-    shortLabel: "编排协作",
-    description: "围绕任务边界持续对话、执行和迭代。",
-  },
-  {
-    href: "/workshop",
-    label: "结果工坊",
-    shortLabel: "结果工坊",
-    description: "优化已有结果，或做定向生成。",
   },
   {
     href: "/knowledge",

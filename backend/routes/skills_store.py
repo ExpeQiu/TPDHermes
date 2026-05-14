@@ -15,7 +15,9 @@ Skills Store API - 技能商店
 
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException, Depends, Query
+import logging
+
+from fastapi import APIRouter, HTTPException, Depends, Query, File, UploadFile, Form
 from pydantic import BaseModel
 from typing import Any, Dict, List, Optional
 
@@ -28,6 +30,9 @@ from backend.services.skill_loader import SkillNotFoundError, get_loader
 
 
 router = APIRouter(prefix="/skills", tags=["skills"])
+logger = logging.getLogger("tpdx.hermes.skills")
+
+SKILL_UPLOAD_MAX_BYTES = 20 * 1024 * 1024
 
 
 # ─── Pydantic Schemas ─────────────────────────────────────────────────────────
@@ -158,6 +163,40 @@ async def get_categories():
     """获取市场分类列表"""
     cats = sorted(set(s["category"] for s in MARKETPLACE_CATALOG))
     return cats
+
+
+@router.post("/upload", response_model=SkillResponse)
+async def upload_skill_package(
+    file: UploadFile = File(..., description="ZIP 技能包"),
+    name: Optional[str] = Form(None, description="ZIP 根目录为包时必填；单文件夹 ZIP 须留空"),
+    description: str = Form(""),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    上传 ZIP 安装技能：须含可加载的 Python 包（__init__.py），结构见 SkillLifecycleService.install_from_zip_bytes。
+    """
+    if not file.filename or not file.filename.lower().endswith(".zip"):
+        raise HTTPException(status_code=400, detail="请上传 .zip 文件")
+    raw = await file.read()
+    if len(raw) > SKILL_UPLOAD_MAX_BYTES:
+        raise HTTPException(status_code=400, detail=f"文件过大，上限 {SKILL_UPLOAD_MAX_BYTES // (1024 * 1024)}MB")
+    logger.info(
+        "skill_upload request filename=%s size=%s name_form=%s",
+        file.filename,
+        len(raw),
+        name,
+    )
+    svc = SkillLifecycleService(db, get_loader())
+    try:
+        return await svc.install_from_zip_bytes(
+            raw,
+            name_override=name,
+            description=description or "",
+            config=None,
+        )
+    except ValueError as e:
+        logger.warning("skill_upload rejected: %s", e)
+        raise HTTPException(status_code=400, detail=str(e)) from e
 
 
 @router.get("/{name}", response_model=SkillResponse)

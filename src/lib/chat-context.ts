@@ -1,5 +1,15 @@
 import { apiFetch, apiGet, readJson, apiV1 } from "@/lib/api";
 
+export type QuickCreateOutputPreset = "markdown" | "plain" | "structured";
+
+/** 从 /create 带入、仅首条会话消费的编排覆盖（避免落盘 localStorage） */
+export interface QuickCreateFlowOverrides {
+  knowledgeCollections?: string[];
+  skillNames?: string[];
+  outputPreset?: QuickCreateOutputPreset;
+  outputRequiredSections?: string[];
+}
+
 export interface ChatInit {
   scenarioId: string;
   systemContext: string;
@@ -8,8 +18,15 @@ export interface ChatInit {
   projectId?: string;
   projectName?: string;
   selectedCollection?: string;
+  /** 多选知识库时与 selectedCollection（主集合）同时存在；检索侧暂用主集合 */
+  knowledgeCollections?: string[];
   knowledgeEnabled?: boolean;
   skillsEnabled?: boolean;
+  /** 勾选「携带技能」时允许带入的子集；空则回退为工坊全量列表 */
+  selectedSkills?: string[];
+  outputPreset?: QuickCreateOutputPreset;
+  /** outputPreset=structured 时由创建页写入建议章节 */
+  outputRequiredSections?: string[];
   entrySummary?: string;
 }
 
@@ -192,11 +209,22 @@ export interface TaskExecuteOverrides {
   output?: { template_id?: string; required_sections?: string[]; must_follow_template?: boolean };
 }
 
+export interface TaskInputPayload {
+  title?: string | null;
+  background?: string | null;
+  objective?: string | null;
+  source_material?: string | null;
+  keywords?: string[] | string | null;
+  tone?: string | null;
+  extra?: string | null;
+}
+
 export interface TaskExecuteBody {
   entrypoint: "chat" | "create" | "workshop" | "quick_create" | "project";
   project_id?: string | null;
   scenario_id?: string | null;
   user_message: string;
+  task_input?: TaskInputPayload | null;
   scenario_preset_instructions?: string | null;
   scenario_opening_hint?: string | null;
   overrides?: TaskExecuteOverrides;

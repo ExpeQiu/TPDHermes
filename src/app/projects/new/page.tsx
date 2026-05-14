@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { apiFetch, readJson } from "@/lib/api";
+import { CONTENT_MAX_CLASS } from "@/lib/content-shell";
 
 export default function NewProjectPage() {
   const router = useRouter();
@@ -67,8 +68,9 @@ export default function NewProjectPage() {
 
   return (
     <main className="min-h-screen bg-gradient-to-br from-slate-900 to-slate-800 text-white p-4 sm:p-6 md:p-8">
-      <div className="max-w-2xl mx-auto">
-        <h1 className="text-3xl font-bold mb-6">新建项目</h1>
+      <div className={CONTENT_MAX_CLASS}>
+        <div className="mx-auto max-w-2xl">
+          <h1 className="text-3xl font-bold mb-6">新建项目</h1>
 
         {submitError && (
           <div className="bg-red-900/30 border border-red-700 rounded-lg p-4 text-red-300 mb-4">
@@ -175,6 +177,7 @@ export default function NewProjectPage() {
             </button>
           </div>
         </form>
+        </div>
       </div>
     </main>
   );

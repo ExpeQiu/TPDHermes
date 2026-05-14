@@ -23,6 +23,7 @@ async def create_run(
     *,
     run_id: str,
     project_id: str | None,
+    scenario_id: str | None = None,
     entrypoint: str,
     request_json: str,
     snapshot_json: str,
@@ -31,6 +32,7 @@ async def create_run(
     row = OrchestrationRun(
         id=run_id,
         project_id=project_id,
+        scenario_id=scenario_id,
         entrypoint=entrypoint,
         status="running",
         request_json=request_json,
@@ -57,6 +59,7 @@ async def finalize_run(
     error_message: str | None,
     duration_ms: int | None,
     project_id: str | None,
+    scenario_id: str | None = None,
     template_id: str | None,
     save_output: bool,
     output_title: str | None = None,
@@ -83,6 +86,7 @@ async def finalize_run(
         out = OutputAsset(
             id=str(uuid.uuid4()),
             project_id=project_id,
+            scenario_id=scenario_id,
             template_id=template_id,
             run_id=run_id,
             title=output_title or "编排生成",

@@ -2,15 +2,15 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { getWorkflowNavItem, WORKFLOW_NAV_ITEMS } from "@/lib/workflow-nav";
+import { GLOBAL_NAV_INNER_CLASS } from "@/lib/content-shell";
+import { WORKFLOW_NAV_ITEMS } from "@/lib/workflow-nav";
 
 export default function GlobalWorkflowNav() {
   const pathname = usePathname();
-  const activeItem = getWorkflowNavItem(pathname);
 
   return (
     <header className="sticky top-0 z-40 border-b border-slate-800 bg-slate-950/85 backdrop-blur-md">
-      <div className="mx-auto max-w-7xl px-4 py-3 sm:px-6 lg:px-8">
+      <div className={GLOBAL_NAV_INNER_CLASS}>
         <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
           <div className="flex items-center gap-3">
             <Link
@@ -25,11 +25,6 @@ export default function GlobalWorkflowNav() {
                 <p className="text-xs text-slate-500">统一任务编排工作台</p>
               </div>
             </Link>
-
-            <div className="hidden rounded-xl border border-slate-800 bg-slate-900/60 px-3 py-2 md:block">
-              <p className="text-[11px] uppercase tracking-[0.16em] text-slate-500">当前入口</p>
-              <p className="mt-1 text-sm font-medium text-white">{activeItem.label}</p>
-            </div>
           </div>
 
           <nav
@@ -53,11 +48,6 @@ export default function GlobalWorkflowNav() {
               );
             })}
           </nav>
-        </div>
-
-        <div className="mt-3 flex items-center justify-between gap-3 text-xs text-slate-500">
-          <p>{activeItem.description}</p>
-          <p className="hidden sm:block">统一层级：项目中心 -&gt; 场景编排 -&gt; 编排协作 -&gt; 结果工坊</p>
         </div>
       </div>
     </header>
