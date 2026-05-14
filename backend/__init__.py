@@ -21,6 +21,7 @@ from backend.middleware import ExceptionHandlerMiddleware, RequestLoggerMiddlewa
 from backend.middleware.exception_handler import http_not_found_handler
 from backend.models.response import APIResponse
 from backend.db import engine, Base
+from backend.db.sqlite_migrate import run_sqlite_migrations
 
 # ── 日志配置 ──────────────────────────────────────────────
 logging.basicConfig(
@@ -44,6 +45,7 @@ async def lifespan(app: FastAPI):
     logger.info("Creating database tables...")
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        await conn.run_sync(run_sqlite_migrations)
     logger.info("Database ready.")
     yield
     logger.info("Shutting down...")
@@ -106,6 +108,7 @@ from backend.routes.skills_store import router as skills_store_router
 from backend.routes.chat import router as chat_router
 from backend.routes.feishu import router as feishu_router
 from backend.routes.feishu_bot import router as feishu_bot_router
+from backend.routes.tasks import router as tasks_router, runs_router as runs_router
 
 include_router_with_version(projects_router, strip_prefix="/projects")
 include_router_with_version(kb_router,       strip_prefix="/kb")
@@ -113,6 +116,8 @@ include_router_with_version(kb_sse_router,   strip_prefix="/kb")
 include_router_with_version(workshop_router, strip_prefix="/ws")
 include_router_with_version(skills_store_router, strip_prefix="/skills")
 include_router_with_version(chat_router,     strip_prefix="/chat")
+include_router_with_version(tasks_router,    strip_prefix="/tasks")
+include_router_with_version(runs_router,     strip_prefix="/runs")
 include_router_with_version(feishu_router,   strip_prefix="/feishu")
 include_router_with_version(feishu_bot_router, strip_prefix="/feishu/bot")
 

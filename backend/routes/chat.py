@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import os
+import json
 from typing import Any
 
 import httpx
@@ -34,6 +35,28 @@ def _chat_target() -> tuple[str, str]:
     return url, api_key
 
 
+def _chat_client(timeout: httpx.Timeout) -> httpx.AsyncClient:
+    # Local upstreams such as localhost:8642 should bypass ambient proxy settings.
+    return httpx.AsyncClient(timeout=timeout, trust_env=False)
+
+
+def _format_upstream_error(status_code: int, detail: bytes) -> dict[str, Any]:
+    if detail:
+        try:
+            parsed = json.loads(detail.decode("utf-8", errors="ignore"))
+        except json.JSONDecodeError:
+            parsed = None
+        if isinstance(parsed, dict):
+            return parsed
+
+    return {
+        "error": {
+            "message": f"Hermes-agent upstream error (HTTP {status_code})",
+            "code": f"http_{status_code}",
+        }
+    }
+
+
 @router.get("/config")
 async def chat_config() -> dict[str, Any]:
     """返回当前聊天代理的最小配置信息，供前端展示链路状态。"""
@@ -60,31 +83,27 @@ async def chat_completions(request: ChatCompletionRequest):
 
     if not payload.get("stream", True):
         try:
-            async with httpx.AsyncClient(timeout=timeout) as client:
+            async with _chat_client(timeout) as client:
                 resp = await client.post(target_url, headers=headers, json=payload)
         except httpx.HTTPError as exc:
             raise HTTPException(status_code=502, detail=f"Hermes-agent unavailable: {exc}") from exc
 
         return JSONResponse(
             status_code=resp.status_code,
-            content=resp.json() if resp.content else {},
+            content=_format_upstream_error(resp.status_code, resp.content),
             headers={k: v for k, v in resp.headers.items() if k.lower() in {"content-type"}},
         )
 
     async def event_stream():
         try:
-            async with httpx.AsyncClient(timeout=timeout) as client:
+            async with _chat_client(timeout) as client:
                 async with client.stream("POST", target_url, headers=headers, json=payload) as resp:
                     if resp.status_code >= 400:
                         detail = await resp.aread()
-                        yield (
-                            "data: "
-                            + (
-                                detail.decode("utf-8", errors="ignore")
-                                or '{"error":{"message":"Hermes-agent error"}}'
-                            )
-                            + "\n\n"
-                        )
+                        yield "data: " + json.dumps(
+                            _format_upstream_error(resp.status_code, detail),
+                            ensure_ascii=False,
+                        ) + "\n\n"
                         return
 
                     async for chunk in resp.aiter_text():

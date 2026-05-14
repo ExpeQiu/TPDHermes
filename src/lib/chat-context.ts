@@ -5,6 +5,12 @@ export interface ChatInit {
   systemContext: string;
   opener: string;
   timestamp: number;
+  projectId?: string;
+  projectName?: string;
+  selectedCollection?: string;
+  knowledgeEnabled?: boolean;
+  skillsEnabled?: boolean;
+  entrySummary?: string;
 }
 
 export interface ProjectRecord {
@@ -172,6 +178,72 @@ function renderToolsContext(blocks: ContextBlock[]): string {
       block.content,
     ]),
   ].join("\n");
+}
+
+export interface TaskExecuteOverrides {
+  template_id?: string;
+  knowledge?: { collections?: string[]; mode?: string; top_k?: number; project_bound?: boolean };
+  skills?: {
+    mode?: string;
+    allowed?: string[];
+    preferred?: string[];
+    allow_agent_free_choice?: boolean;
+  };
+  output?: { template_id?: string; required_sections?: string[]; must_follow_template?: boolean };
+}
+
+export interface TaskExecuteBody {
+  entrypoint: "chat" | "create" | "workshop" | "quick_create" | "project";
+  project_id?: string | null;
+  scenario_id?: string | null;
+  user_message: string;
+  scenario_preset_instructions?: string | null;
+  scenario_opening_hint?: string | null;
+  overrides?: TaskExecuteOverrides;
+  stream: boolean;
+  messages?: Array<{ role: "user" | "assistant"; content: string }>;
+}
+
+export interface OrchestrationPreviewResponse {
+  payload: Record<string, unknown>;
+  snapshot: Record<string, unknown>;
+}
+
+export async function fetchOrchestrationPreview(
+  projectId: string,
+  body: {
+    scenario_id?: string;
+    user_message?: string;
+    scenario_preset_instructions?: string;
+    scenario_opening_hint?: string;
+    overrides?: TaskExecuteOverrides;
+  },
+): Promise<OrchestrationPreviewResponse> {
+  const res = await apiFetch(`/projects/${projectId}/orchestration/preview`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  return readJson<OrchestrationPreviewResponse>(res);
+}
+
+/** 将编排预览转为侧栏展示块（替代显式 MCP 注入说明）。 */
+export function orchestrationPreviewToBlocks(data: OrchestrationPreviewResponse): ContextBlock[] {
+  const snap = data.snapshot ?? {};
+  const payload = data.payload ?? {};
+  const scenario = typeof payload.scenario === "object" && payload.scenario && "name" in payload.scenario
+    ? String((payload.scenario as { name?: string }).name ?? "")
+    : "";
+  const proj = typeof payload.project === "object" && payload.project && "name" in payload.project
+    ? String((payload.project as { name?: string }).name ?? "")
+    : "";
+  return [
+    {
+      tool: "orchestration_preview",
+      title: `编排预览${proj ? ` · ${proj}` : ""}${scenario ? ` · ${scenario}` : ""}`,
+      content: JSON.stringify({ snapshot: snap, summary: { entrypoint: snap.entrypoint, template_id: snap.template_id } }, null, 2),
+    },
+  ];
 }
 
 export async function fetchChatBootstrap(): Promise<ChatBootstrapData> {

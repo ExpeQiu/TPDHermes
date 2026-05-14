@@ -23,3 +23,11 @@ async_session_maker = async_sessionmaker(engine, class_=AsyncSession, expire_on_
 async def get_db():
     async with async_session_maker() as session:
         yield session
+
+
+# 注册 ORM 元数据（编排相关表）
+from backend.models import project as _project  # noqa: E402, F401
+from backend.models.template import Template as _Template  # noqa: E402, F401
+from backend.models.output_asset import OutputAsset as _OutputAsset  # noqa: E402, F401
+from backend.models.orchestration_run import OrchestrationRun as _OrchestrationRun  # noqa: E402, F401
+from backend.models.project_config import ProjectConfig as _ProjectConfig  # noqa: E402, F401

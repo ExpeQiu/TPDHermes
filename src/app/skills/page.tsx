@@ -17,12 +17,36 @@ interface Skill {
   updated_at: string;
 }
 
-type Tab = "installed" | "marketplace";
-
 const SKILLS_BASE = "/skills/";
 
+function MetricCard({
+  label,
+  value,
+  hint,
+}: {
+  label: string;
+  value: string;
+  hint: string;
+}) {
+  return (
+    <div className="rounded-2xl border border-slate-800 bg-slate-900/50 p-4">
+      <p className="text-xs uppercase tracking-[0.16em] text-slate-500">{label}</p>
+      <p className="mt-3 text-2xl font-semibold text-white">{value}</p>
+      <p className="mt-1 text-xs text-slate-500">{hint}</p>
+    </div>
+  );
+}
+
+function StrategyCard({ title, desc }: { title: string; desc: string }) {
+  return (
+    <div className="rounded-2xl border border-slate-800 bg-slate-950/60 p-4">
+      <p className="text-base font-medium text-white">{title}</p>
+      <p className="mt-2 text-sm leading-relaxed text-slate-400">{desc}</p>
+    </div>
+  );
+}
+
 export default function SkillsPage() {
-  const [tab, setTab] = useState<Tab>("installed");
   const [skills, setSkills] = useState<Skill[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -110,46 +134,89 @@ export default function SkillsPage() {
   const disabledCount = skills.length - installedCount;
 
   return (
-    <main className="min-h-screen bg-gradient-to-br from-slate-900 to-slate-800 text-white p-8">
-      <div className="max-w-6xl mx-auto">
-        {/* Header */}
-        <div className="mb-6">
-          <div className="flex items-center gap-3 mb-2">
-            <Link href="/" className="text-slate-400 hover:text-white transition text-sm">
+    <main className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 p-4 text-white sm:p-6 md:p-8">
+      <div className="mx-auto max-w-6xl">
+        <div className="mb-8">
+          <div className="mb-3 flex items-center gap-3">
+            <Link href="/" className="text-sm text-slate-400 transition hover:text-white">
               ← 返回首页
             </Link>
           </div>
-          <div className="flex items-center justify-between">
+          <div className="inline-flex items-center gap-2 rounded-full border border-amber-500/30 bg-amber-500/10 px-3 py-1 text-xs font-medium text-amber-200">
+            <span className="h-2 w-2 rounded-full bg-amber-400" aria-hidden />
+            技能策略入口
+          </div>
+          <div className="mt-4 flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
             <div>
-              <h1 className="text-2xl sm:text-3xl md:text-4xl font-bold">Skills 管理</h1>
-              <p className="text-slate-400 mt-1">管理已安装的 Skills — 配置、版本、启用/禁用</p>
+              <h1 className="text-3xl font-bold sm:text-4xl">技能策略与已安装能力</h1>
+              <p className="mt-3 max-w-3xl text-sm leading-relaxed text-slate-400 sm:text-base">
+                技能页现在不仅管理安装状态，也承担技能策略入口角色。这里决定哪些能力可被任务编排使用、偏好哪些能力、哪些能力应保持禁用。
+              </p>
             </div>
-            <Link
-              href="/skills/market"
-              className="px-4 py-2 bg-blue-600 hover:bg-blue-500 rounded-lg text-sm font-medium transition"
-            >
-              📦 访问技能市场
-            </Link>
+            <div className="flex flex-wrap gap-2">
+              <Link
+                href="/skills/market"
+                className="rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-medium transition hover:bg-blue-500"
+              >
+                访问技能市场
+              </Link>
+              <Link
+                href="/create"
+                className="rounded-xl border border-slate-700 bg-slate-900/70 px-4 py-2.5 text-sm font-medium text-slate-200 transition hover:border-slate-600 hover:bg-slate-900"
+              >
+                去场景编排
+              </Link>
+            </div>
           </div>
         </div>
 
-        {/* Stats */}
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
-          <div className="bg-slate-800/60 border border-slate-700 rounded-xl p-4">
-            <p className="text-xs text-slate-400 uppercase tracking-wider">已安装</p>
-            <p className="text-2xl sm:text-3xl font-bold text-white mt-1">{skills.length}</p>
+        <div className="mb-6 grid grid-cols-1 gap-3 md:grid-cols-4">
+          <MetricCard label="已安装" value={String(skills.length)} hint="当前本地能力池" />
+          <MetricCard label="启用中" value={String(installedCount)} hint="可参与任务执行" />
+          <MetricCard label="已禁用" value={String(disabledCount)} hint="保留但不主动使用" />
+          <MetricCard label="策略目标" value="白名单 / 偏好 / 禁用" hint="后续对接编排策略" />
+        </div>
+
+        <div className="mb-6 grid gap-4 xl:grid-cols-[1.05fr_0.95fr]">
+          <div className="rounded-3xl border border-slate-800 bg-slate-900/50 p-6">
+            <p className="text-xs uppercase tracking-[0.2em] text-slate-500">Skill Policy</p>
+            <h2 className="mt-2 text-xl font-semibold text-white">技能策略说明</h2>
+            <div className="mt-5 grid gap-3 md:grid-cols-3">
+              <StrategyCard
+                title="启用中"
+                desc="适合作为默认候选技能，被项目或场景编排引用。"
+              />
+              <StrategyCard
+                title="已禁用"
+                desc="保留安装状态，但不让任务执行链路主动使用。"
+              />
+              <StrategyCard
+                title="市场安装"
+                desc="通过技能市场扩充能力池，再回到本页进行启用和配置。"
+              />
+            </div>
           </div>
-          <div className="bg-slate-800/60 border border-slate-700 rounded-xl p-4">
-            <p className="text-xs text-slate-400 uppercase tracking-wider">启用中</p>
-            <p className="text-2xl sm:text-3xl font-bold text-green-400 mt-1">{installedCount}</p>
-          </div>
-          <div className="bg-slate-800/60 border border-slate-700 rounded-xl p-4">
-            <p className="text-xs text-slate-400 uppercase tracking-wider">已禁用</p>
-            <p className="text-2xl sm:text-3xl font-bold text-orange-400 mt-1">{disabledCount}</p>
+
+          <div className="rounded-3xl border border-slate-800 bg-slate-900/50 p-6">
+            <p className="text-xs uppercase tracking-[0.2em] text-slate-500">Recommended Path</p>
+            <h2 className="mt-2 text-xl font-semibold text-white">推荐路径</h2>
+            <div className="mt-5 space-y-3 text-sm leading-relaxed text-slate-400">
+              <div className="rounded-2xl border border-slate-800 bg-slate-950/60 p-4">
+                <p className="font-medium text-white">1. 浏览市场</p>
+                <p className="mt-1">先从技能市场补齐缺少的能力，再决定是否安装。</p>
+              </div>
+              <div className="rounded-2xl border border-slate-800 bg-slate-950/60 p-4">
+                <p className="font-medium text-white">2. 配置与启用</p>
+                <p className="mt-1">在本页调整配置、启用状态和版本，形成稳定能力池。</p>
+              </div>
+              <div className="rounded-2xl border border-slate-800 bg-slate-950/60 p-4">
+                <p className="font-medium text-white">3. 回到任务入口</p>
+                <p className="mt-1">最终让技能策略在场景编排、对话协作和结果工坊中生效。</p>
+              </div>
+            </div>
           </div>
         </div>
 
-        {/* Action message */}
         {actionMsg && (
           <div className="mb-4 px-4 py-3 bg-blue-600/20 border border-blue-600/40 rounded-lg text-blue-300 text-sm">
             {actionMsg}
@@ -164,10 +231,9 @@ export default function SkillsPage() {
         )}
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          {/* Skill List */}
           <div className="lg:col-span-1">
             <div className="bg-slate-800/60 border border-slate-700 rounded-xl p-4">
-              <h2 className="text-lg font-semibold mb-3">已安装的 Skills</h2>
+              <h2 className="text-lg font-semibold mb-3">已安装技能池</h2>
               {loading && <p className="text-slate-400 text-sm text-center py-6">加载中…</p>}
               {!loading && skills.length === 0 && (
                 <p className="text-slate-500 text-sm text-center py-6">暂无已安装的 Skills</p>
@@ -194,7 +260,7 @@ export default function SkillsPage() {
                           {skill.enabled ? "启用" : "禁用"}
                         </span>
                       </div>
-                      <p className="text-xs text-slate-400 mt-1">v{skill.version}</p>
+                      <p className="mt-1 text-xs text-slate-400">v{skill.version}</p>
                     </button>
                   ))}
                 </div>
@@ -202,11 +268,10 @@ export default function SkillsPage() {
             </div>
           </div>
 
-          {/* Detail Panel */}
           <div className="lg:col-span-2">
             {!selectedSkill && (
               <div className="bg-slate-800/60 border border-slate-700 rounded-xl p-8 flex flex-col items-center justify-center min-h-64">
-                <p className="text-slate-500 text-sm">👈 从左侧选择一个 Skill 查看详情</p>
+                <p className="text-slate-500 text-sm">👈 从左侧选择一个 Skill 查看详情和策略状态</p>
               </div>
             )}
 

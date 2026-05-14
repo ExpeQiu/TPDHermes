@@ -1,7 +1,8 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, Suspense } from "react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 
 import { apiV1 } from "@/lib/api";
 import {
@@ -10,7 +11,11 @@ import {
   ChatTransportConfig,
   ContextBlock,
   fetchChatBootstrap,
+  fetchOrchestrationPreview,
+  orchestrationPreviewToBlocks,
   ProjectRecord,
+  type OrchestrationPreviewResponse,
+  type TaskExecuteBody,
 } from "@/lib/chat-context";
 
 interface Message {
@@ -27,6 +32,10 @@ interface ChatSession {
   title: string;
   messages: Message[];
   createdAt: number;
+  /** 来自 /create 的编排字段，仅本会话有效，避免跨会话泄漏 */
+  scenarioPresetInstructions?: string;
+  scenarioOpeningHint?: string;
+  taskEntrySummary?: string;
 }
 
 const STORAGE_KEY = "tphermes-chat-sessions";
@@ -51,25 +60,106 @@ function saveSessions(sessions: ChatSession[]) {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(sessions));
 }
 
-function parseSSELines(lines: string): string {
-  let result = "";
-  for (const line of lines.split("\n")) {
+/** Hermes / OpenAI 兼容流：单条 data 解析 */
+function parseSSEDataPayload(data: string): {
+  content: string;
+  finishReason: string | null;
+  errorText: string | null;
+} {
+  if (data === "[DONE]" || data === "") {
+    return { content: "", finishReason: null, errorText: null };
+  }
+  try {
+    const parsed = JSON.parse(data) as Record<string, unknown>;
+    if (parsed.error && typeof parsed.error === "object") {
+      const msg = (parsed.error as { message?: string }).message;
+      return {
+        content: "",
+        finishReason: null,
+        errorText: typeof msg === "string" ? msg : JSON.stringify(parsed.error),
+      };
+    }
+    const choice = (parsed.choices as Record<string, unknown>[] | undefined)?.[0] as
+      | {
+          delta?: { content?: unknown };
+          message?: { content?: unknown };
+          finish_reason?: unknown;
+        }
+      | undefined;
+    let content = "";
+    const delta = choice?.delta;
+    if (delta && typeof delta === "object") {
+      const dc = delta.content;
+      if (typeof dc === "string") content += dc;
+    } else {
+      const mc = choice?.message?.content ?? parsed.content;
+      if (typeof mc === "string") content += mc;
+    }
+    const fr = choice?.finish_reason;
+    const finishReason = typeof fr === "string" && fr.length > 0 ? fr : null;
+    return { content, finishReason, errorText: null };
+  } catch {
+    return { content: "", finishReason: null, errorText: null };
+  }
+}
+
+function parseTpHermesTaskMeta(data: string): {
+  run_id?: string;
+  output_id?: string | null;
+  validation?: unknown;
+} | null {
+  if (!data || data === "[DONE]") return null;
+  try {
+    const parsed = JSON.parse(data) as Record<string, unknown>;
+    const inner = parsed.tphermes_task as Record<string, unknown> | undefined;
+    if (!inner || typeof inner !== "object") return null;
+    return {
+      run_id: typeof inner.run_id === "string" ? inner.run_id : undefined,
+      output_id: typeof inner.output_id === "string" ? inner.output_id : null,
+      validation: inner.validation,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function accumulateSseTextBlock(block: string): {
+  text: string;
+  finishReason: string | null;
+  errorText: string | null;
+} {
+  let text = "";
+  let finishReason: string | null = null;
+  let errorText: string | null = null;
+  for (const line of block.split("\n")) {
     if (!line.startsWith("data: ")) continue;
     const data = line.slice(6).trim();
-    if (data === "[DONE]" || data === "") continue;
-    try {
-      const parsed = JSON.parse(data);
-      const content =
-        parsed.choices?.[0]?.delta?.content ??
-        parsed.choices?.[0]?.message?.content ??
-        parsed.content ??
-        (parsed.error?.message ? `[错误] ${parsed.error.message}` : "");
-      if (typeof content === "string") result += content;
-    } catch {
-      // skip malformed
+    if (data === "[DONE]") {
+      finishReason = finishReason ?? "stop";
+      continue;
     }
+    const part = parseSSEDataPayload(data);
+    if (part.errorText) errorText = part.errorText;
+    text += part.content;
+    if (part.finishReason) finishReason = part.finishReason;
   }
-  return result;
+  return { text, finishReason, errorText };
+}
+
+const CHAT_CONTINUE_USER =
+  "请接着上文直接输出后续内容，不要重复已经给出的段落。若已全部写完则只回复「（已结束）」三字。";
+const CHAT_MAX_CONTINUE_ROUNDS = 12;
+
+function messagesToApiPayload(messages: Message[]): { role: string; content: string }[] {
+  return messages
+    .filter((m) => !(m.role === "assistant" && m.content.trim() === ""))
+    .map((message) => ({
+      role: message.role,
+      content:
+        message.role === "user" && message.toolsContext
+          ? `${message.toolsContext}\n\n用户问题：${message.content}`
+          : message.content,
+    }));
 }
 
 function useAutoScroll(depend: string) {
@@ -93,6 +183,38 @@ function titleFromSession(session: ChatSession | undefined): string {
 }
 
 export default function ChatPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="flex h-screen items-center justify-center bg-slate-900 text-slate-400 text-sm">
+          加载对话…
+        </div>
+      }
+    >
+      <ChatPageInner />
+    </Suspense>
+  );
+}
+
+function BoundaryMetric({
+  label,
+  value,
+  hint,
+}: {
+  label: string;
+  value: string;
+  hint: string;
+}) {
+  return (
+    <div className="rounded-2xl border border-slate-700 bg-slate-950/60 p-3">
+      <p className="text-[11px] uppercase tracking-[0.16em] text-slate-500">{label}</p>
+      <p className="mt-2 text-sm font-medium leading-relaxed text-white">{value}</p>
+      <p className="mt-1 text-xs leading-relaxed text-slate-500">{hint}</p>
+    </div>
+  );
+}
+
+function ChatPageInner() {
   const [sessions, setSessions] = useState<ChatSession[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [input, setInput] = useState("");
@@ -124,6 +246,37 @@ export default function ChatPage() {
     process.env.NEXT_PUBLIC_CHAT_API_KEY ??
     process.env.NEXT_PUBLIC_HERMES_API_KEY ??
     "";
+
+  const searchParams = useSearchParams();
+  const scenarioFromUrl = searchParams?.get("scenario") ?? "";
+  const projectFromUrl = searchParams?.get("project") ?? "";
+  const collectionFromUrl = searchParams?.get("collection") ?? "";
+  const skillsFromUrl = searchParams?.get("skills") === "1";
+  const useOrchestration = process.env.NEXT_PUBLIC_USE_ORCHESTRATION !== "false";
+  const tasksExecuteUrl = apiV1("/tasks/execute");
+
+  const [orchestrationPreview, setOrchestrationPreview] = useState<OrchestrationPreviewResponse | null>(null);
+
+  useEffect(() => {
+    if (!useOrchestration || !includeProjectContext || !selectedProjectId) {
+      setOrchestrationPreview(null);
+      return;
+    }
+    let cancelled = false;
+    fetchOrchestrationPreview(selectedProjectId, {
+      scenario_id: scenarioFromUrl || undefined,
+      user_message: "（编排预览）",
+    })
+      .then((d) => {
+        if (!cancelled) setOrchestrationPreview(d);
+      })
+      .catch(() => {
+        if (!cancelled) setOrchestrationPreview(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [useOrchestration, includeProjectContext, selectedProjectId, scenarioFromUrl]);
 
   const activeSession = sessions.find((s) => s.id === activeId);
 
@@ -189,6 +342,20 @@ export default function ChatPage() {
   }, []);
 
   useEffect(() => {
+    if (projectFromUrl) {
+      setSelectedProjectId(projectFromUrl);
+      setIncludeProjectContext(true);
+    }
+    if (collectionFromUrl) {
+      setSelectedCollection(collectionFromUrl);
+      setIncludeKnowledgeContext(true);
+    }
+    if (skillsFromUrl) {
+      setIncludeSkillsContext(true);
+    }
+  }, [collectionFromUrl, projectFromUrl, skillsFromUrl]);
+
+  useEffect(() => {
     if (!activeId || !activeSession || activeSession.messages.length > 0) return;
     try {
       const raw = sessionStorage.getItem(CHAT_INIT_KEY);
@@ -199,18 +366,40 @@ export default function ChatPage() {
         return;
       }
 
-      if (init.systemContext?.trim()) {
-        updateSession(activeId, (session) => ({
-          ...session,
-          messages: [
-            {
-              id: uuid(),
-              role: "system",
-              content: `场景预设：\n${init.systemContext.trim()}`,
-            },
-          ],
-        }));
+      const preset = (init.systemContext ?? "").trim();
+      const opener = (init.opener ?? "").trim();
+      const entrySummary = (init.entrySummary ?? "").trim();
+
+      if (init.projectId) {
+        setSelectedProjectId(init.projectId);
+        setIncludeProjectContext(true);
       }
+      if (init.selectedCollection) {
+        setSelectedCollection(init.selectedCollection);
+      }
+      if (typeof init.knowledgeEnabled === "boolean") {
+        setIncludeKnowledgeContext(init.knowledgeEnabled);
+      }
+      if (typeof init.skillsEnabled === "boolean") {
+        setIncludeSkillsContext(init.skillsEnabled);
+      }
+
+      const initialMessages: Message[] = [];
+      if (preset) {
+        initialMessages.push({
+          id: uuid(),
+          role: "system",
+          content: `场景预设：\n${preset}`,
+        });
+      }
+
+      updateSession(activeId, (session) => ({
+        ...session,
+        scenarioPresetInstructions: preset || undefined,
+        scenarioOpeningHint: opener || undefined,
+        taskEntrySummary: entrySummary || undefined,
+        messages: initialMessages.length > 0 ? initialMessages : session.messages,
+      }));
 
       setInput(init.opener ?? "");
       sessionStorage.removeItem(CHAT_INIT_KEY);
@@ -281,6 +470,89 @@ export default function ChatPage() {
     skills.length,
   ]);
 
+  const selectedProject = useMemo(
+    () => projects.find((item) => item.id === selectedProjectId) ?? null,
+    [projects, selectedProjectId],
+  );
+
+  const boundaryCards = useMemo(() => {
+    const previewPayload = orchestrationPreview?.payload ?? {};
+    const output =
+      previewPayload.output && typeof previewPayload.output === "object"
+        ? (previewPayload.output as Record<string, unknown>)
+        : null;
+    const skillsPolicy =
+      previewPayload.skills && typeof previewPayload.skills === "object"
+        ? (previewPayload.skills as Record<string, unknown>)
+        : null;
+    const knowledgePolicy =
+      previewPayload.knowledge && typeof previewPayload.knowledge === "object"
+        ? (previewPayload.knowledge as Record<string, unknown>)
+        : null;
+    const scenario =
+      previewPayload.scenario && typeof previewPayload.scenario === "object"
+        ? (previewPayload.scenario as Record<string, unknown>)
+        : null;
+
+    const templateId =
+      typeof output?.template_id === "string"
+        ? output.template_id
+        : typeof output?.format === "string"
+          ? output.format
+          : "按任务默认";
+    const requiredSections = Array.isArray(output?.required_sections)
+      ? output.required_sections.length
+      : 0;
+    const allowedSkills = Array.isArray(skillsPolicy?.allowed) ? skillsPolicy.allowed.length : 0;
+    const collectionsCount = Array.isArray(knowledgePolicy?.collections)
+      ? knowledgePolicy.collections.length
+      : includeKnowledgeContext && selectedCollection
+        ? 1
+        : 0;
+    const scenarioName =
+      typeof scenario?.name === "string" && scenario.name
+        ? scenario.name
+        : scenarioFromUrl || "general";
+
+    return [
+      {
+        label: "当前场景",
+        value: scenarioName,
+        hint: useOrchestration ? "由统一任务接口承接" : "兼容聊天链路",
+      },
+      {
+        label: "项目边界",
+        value: includeProjectContext ? selectedProject?.name ?? "已启用但未选择" : "未启用",
+        hint: includeProjectContext ? "项目承担长期上下文" : "本次不绑定项目",
+      },
+      {
+        label: "知识策略",
+        value: includeKnowledgeContext ? `${collectionsCount} 个知识范围` : "未启用",
+        hint: includeKnowledgeContext ? (selectedCollection || "按默认集合") : "不限制知识范围",
+      },
+      {
+        label: "输出约束",
+        value: templateId,
+        hint: requiredSections > 0 ? `${requiredSections} 个必填章节` : "按默认模板策略",
+      },
+      {
+        label: "技能策略",
+        value: includeSkillsContext ? `${allowedSkills || skills.length} 项候选` : "未启用",
+        hint: includeSkillsContext ? "按策略选择技能" : "本次不主动携带技能快照",
+      },
+    ];
+  }, [
+    includeKnowledgeContext,
+    includeProjectContext,
+    includeSkillsContext,
+    orchestrationPreview?.payload,
+    scenarioFromUrl,
+    selectedCollection,
+    selectedProject?.name,
+    skills.length,
+    useOrchestration,
+  ]);
+
   const sendMessage = useCallback(async () => {
     const text = input.trim();
     const sessionId = activeIdRef.current;
@@ -289,12 +561,24 @@ export default function ChatPage() {
     setError("");
     setPreparingContext(true);
 
+    const priorSession = sessionsRef.current.find((s) => s.id === sessionId);
+    const priorMessages: Array<{ role: "user" | "assistant"; content: string }> = [];
+    for (const m of priorSession?.messages ?? []) {
+      if (m.role === "user" || m.role === "assistant") {
+        priorMessages.push({ role: m.role, content: m.content });
+      }
+    }
+
     let contextWarnings: string[] = [];
     let contextBlocks: ContextBlock[] = [];
     let toolsContext = "";
 
     try {
-      if (
+      if (useOrchestration) {
+        if (orchestrationPreview) {
+          contextBlocks = orchestrationPreviewToBlocks(orchestrationPreview);
+        }
+      } else if (
         (includeProjectContext && selectedProjectId) ||
         (includeKnowledgeContext && selectedCollection) ||
         includeSkillsContext
@@ -325,22 +609,11 @@ export default function ChatPage() {
       contextWarnings,
     };
 
-    const updated = updateSession(sessionId, (session) => ({
+    updateSession(sessionId, (session) => ({
       ...session,
       messages: [...session.messages, userMsg],
     }));
     setInput("");
-
-    const history =
-      updated
-        .find((session) => session.id === sessionId)
-        ?.messages.map((message) => ({
-          role: message.role,
-          content:
-            message.role === "user" && message.toolsContext
-              ? `${message.toolsContext}\n\n用户问题：${message.content}`
-              : message.content,
-        })) ?? [];
 
     setStreaming(true);
     if (abortRef.current) abortRef.current.abort();
@@ -350,10 +623,7 @@ export default function ChatPage() {
     const assistantId = uuid();
     updateSession(sessionId, (session) => ({
       ...session,
-      messages: [
-        ...session.messages,
-        { id: assistantId, role: "assistant", content: "" },
-      ],
+      messages: [...session.messages, { id: assistantId, role: "assistant", content: "" }],
     }));
 
     let fullContent = "";
@@ -364,64 +634,201 @@ export default function ChatPage() {
       };
       if (chatApiKey) headers.Authorization = `Bearer ${chatApiKey}`;
 
-      const res = await fetch(chatApiBase, {
-        method: "POST",
-        headers,
-        body: JSON.stringify({
-          model: "hermes-agent",
-          messages: history,
+      if (useOrchestration) {
+        const overrides: TaskExecuteBody["overrides"] = {};
+        if (includeKnowledgeContext && selectedCollection) {
+          overrides.knowledge = { collections: [selectedCollection] };
+        }
+        if (includeSkillsContext && skills.length > 0) {
+          overrides.skills = {
+            mode: "allowed_list",
+            allowed: skills.slice(0, 32),
+            allow_agent_free_choice: false,
+          };
+        }
+        let scenarioPresetInstructions =
+          priorSession?.scenarioPresetInstructions?.trim() ?? "";
+        let scenarioOpeningHint = priorSession?.scenarioOpeningHint?.trim() ?? "";
+        if (!scenarioPresetInstructions) {
+          const sys = priorSession?.messages.find(
+            (m) => m.role === "system" && m.content.trim().length > 0,
+          );
+          if (sys) {
+            scenarioPresetInstructions = sys.content.replace(/^\s*场景预设[：:]\s*\n?/, "").trim();
+          }
+        }
+        const body: TaskExecuteBody = {
+          entrypoint: "chat",
+          project_id: includeProjectContext && selectedProjectId ? selectedProjectId : null,
+          scenario_id: scenarioFromUrl || "general",
+          user_message: text,
           stream: true,
-        }),
-        signal: controller.signal,
-      });
+          messages: priorMessages.length > 0 ? priorMessages : undefined,
+          overrides: Object.keys(overrides).length > 0 ? overrides : undefined,
+        };
+        if (scenarioPresetInstructions) {
+          body.scenario_preset_instructions = scenarioPresetInstructions;
+        }
+        if (scenarioOpeningHint) {
+          body.scenario_opening_hint = scenarioOpeningHint;
+        }
 
-      if (!res.ok) {
-        const errText = await res.text().catch(() => "");
-        throw new Error(`HTTP ${res.status}: ${errText || res.statusText}`);
-      }
+        const res = await fetch(tasksExecuteUrl, {
+          method: "POST",
+          headers,
+          body: JSON.stringify(body),
+          signal: controller.signal,
+        });
 
-      const reader = res.body?.getReader();
-      if (!reader) throw new Error("响应流不可用");
-      const decoder = new TextDecoder();
-      let buffer = "";
+        if (!res.ok) {
+          const errText = await res.text().catch(() => "");
+          throw new Error(`HTTP ${res.status}: ${errText || res.statusText}`);
+        }
 
-      while (!controller.signal.aborted) {
-        const { done, value } = await reader.read();
-        if (done) break;
+        const reader = res.body?.getReader();
+        if (!reader) throw new Error("响应流不可用");
+        const decoder = new TextDecoder();
+        let buffer = "";
 
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split("\n");
-        buffer = lines.pop() ?? "";
+        while (!controller.signal.aborted) {
+          const { done, value } = await reader.read();
+          if (done) break;
 
-        const delta = parseSSELines(lines.join("\n"));
-        if (delta) {
-          fullContent += delta;
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split("\n");
+          buffer = lines.pop() ?? "";
+
+          for (const line of lines) {
+            if (!line.startsWith("data: ")) continue;
+            const data = line.slice(6).trim();
+            const meta = parseTpHermesTaskMeta(data);
+            if (meta?.run_id) {
+              console.info(`[chat] orchestration completed run_id=${meta.run_id} output_id=${meta.output_id ?? ""}`);
+            }
+            const part = parseSSEDataPayload(data);
+            if (part.errorText) throw new Error(part.errorText);
+            if (part.content) {
+              fullContent += part.content;
+              updateSession(sessionId, (session) => ({
+                ...session,
+                messages: session.messages.map((message) =>
+                  message.id === assistantId ? { ...message, content: fullContent } : message,
+                ),
+              }));
+            }
+          }
+        }
+
+        if (buffer.trim()) {
+          for (const line of buffer.split("\n")) {
+            if (!line.startsWith("data: ")) continue;
+            const data = line.slice(6).trim();
+            const meta = parseTpHermesTaskMeta(data);
+            if (meta?.run_id) {
+              console.info(`[chat] orchestration completed run_id=${meta.run_id}`);
+            }
+            const part = parseSSEDataPayload(data);
+            if (part.errorText) throw new Error(part.errorText);
+            if (part.content) fullContent += part.content;
+          }
+        }
+
+        updateSession(sessionId, (session) => ({
+          ...session,
+          messages: session.messages.map((message) =>
+            message.id === assistantId ? { ...message, content: fullContent || message.content } : message,
+          ),
+        }));
+      } else {
+        for (let continueRound = 0; continueRound < CHAT_MAX_CONTINUE_ROUNDS; continueRound++) {
+          if (controller.signal.aborted) break;
+
+          const sessionSnapshot =
+            sessionsRef.current.find((session) => session.id === sessionId)?.messages ?? [];
+          const basePayload = messagesToApiPayload(sessionSnapshot);
+          const messagesPayload =
+            continueRound === 0
+              ? basePayload
+              : [...basePayload, { role: "user" as const, content: CHAT_CONTINUE_USER }];
+
+          if (continueRound > 0) {
+            console.info(
+              `[chat] hermes 续写第 ${continueRound} 轮，当前助手消息长度 ${fullContent.length} 字符`,
+            );
+          }
+
+          const res = await fetch(chatApiBase, {
+            method: "POST",
+            headers,
+            body: JSON.stringify({
+              model: "hermes-agent",
+              messages: messagesPayload,
+              stream: true,
+            }),
+            signal: controller.signal,
+          });
+
+          if (!res.ok) {
+            const errText = await res.text().catch(() => "");
+            throw new Error(`HTTP ${res.status}: ${errText || res.statusText}`);
+          }
+
+          const reader = res.body?.getReader();
+          if (!reader) throw new Error("响应流不可用");
+          const decoder = new TextDecoder();
+          let buffer = "";
+          let roundFinish: string | null = null;
+
+          while (!controller.signal.aborted) {
+            const { done, value } = await reader.read();
+            if (done) break;
+
+            buffer += decoder.decode(value, { stream: true });
+            const lines = buffer.split("\n");
+            buffer = lines.pop() ?? "";
+
+            const { text, finishReason, errorText } = accumulateSseTextBlock(lines.join("\n"));
+            if (errorText) {
+              throw new Error(errorText);
+            }
+            if (finishReason) roundFinish = finishReason;
+            if (text) {
+              fullContent += text;
+              updateSession(sessionId, (session) => ({
+                ...session,
+                messages: session.messages.map((message) =>
+                  message.id === assistantId ? { ...message, content: fullContent } : message,
+                ),
+              }));
+            }
+          }
+
+          if (buffer.trim()) {
+            const { text, finishReason, errorText } = accumulateSseTextBlock(buffer);
+            if (errorText) {
+              throw new Error(errorText);
+            }
+            if (finishReason) roundFinish = finishReason;
+            if (text) {
+              fullContent += text;
+            }
+          }
+
           updateSession(sessionId, (session) => ({
             ...session,
             messages: session.messages.map((message) =>
-              message.id === assistantId
-                ? { ...message, content: fullContent }
-                : message,
+              message.id === assistantId ? { ...message, content: fullContent || message.content } : message,
             ),
           }));
+
+          console.info(
+            `[chat] 流结束 round=${continueRound} finish_reason=${roundFinish ?? "（未上报）"} 累计长度=${fullContent.length}`,
+          );
+
+          const needContinue = roundFinish === "length";
+          if (!needContinue) break;
         }
       }
-
-      if (buffer) {
-        const delta = parseSSELines(buffer);
-        if (delta) {
-          fullContent += delta;
-        }
-      }
-
-      updateSession(sessionId, (session) => ({
-        ...session,
-        messages: session.messages.map((message) =>
-          message.id === assistantId
-            ? { ...message, content: fullContent || message.content }
-            : message,
-        ),
-      }));
     } catch (sendError) {
       if ((sendError as Error).name !== "AbortError") {
         setError(`连接失败：${(sendError as Error).message}`);
@@ -440,12 +847,16 @@ export default function ChatPage() {
     includeProjectContext,
     includeSkillsContext,
     input,
+    orchestrationPreview,
     preparingContext,
+    scenarioFromUrl,
     selectedCollection,
     selectedProjectId,
     skills,
     streaming,
+    tasksExecuteUrl,
     updateSession,
+    useOrchestration,
   ]);
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -526,106 +937,170 @@ export default function ChatPage() {
         </header>
 
         <div className="border-b border-slate-700 bg-slate-800/40">
-          <div className="max-w-5xl mx-auto px-4 py-4 grid gap-3 md:grid-cols-3">
-            <div className="rounded-xl border border-slate-700 bg-slate-900/40 p-3">
-              <div className="text-xs text-slate-400 mb-2">聊天链路</div>
-              <div className="text-sm text-white">
-                {transport?.mode === "backend-proxy" ? "TPDHermes 后端代理" : "自定义聊天地址"}
-              </div>
-              <div className="text-xs text-slate-500 mt-1 break-all">
-                {transport?.target ?? chatApiBase}
-              </div>
-            </div>
-
-            <div className="rounded-xl border border-slate-700 bg-slate-900/40 p-3">
-              <div className="flex items-center justify-between mb-2">
-                <label className="text-xs text-slate-400">项目上下文</label>
-                <input
-                  type="checkbox"
-                  checked={includeProjectContext}
-                  onChange={(e) => setIncludeProjectContext(e.target.checked)}
-                />
-              </div>
-              <select
-                value={selectedProjectId}
-                onChange={(e) => setSelectedProjectId(e.target.value)}
-                className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white"
-              >
-                <option value="">不注入项目</option>
-                {projects.map((project) => (
-                  <option key={project.id} value={project.id}>
-                    {project.name}
-                  </option>
-                ))}
-              </select>
-              <p className="text-xs text-slate-500 mt-2">
-                发送前显式调用 `mcp_tphermes_project_get`
-              </p>
-            </div>
-
-            <div className="rounded-xl border border-slate-700 bg-slate-900/40 p-3">
-              <div className="flex items-center justify-between mb-2">
-                <label className="text-xs text-slate-400">知识库与技能</label>
-                <div className="flex items-center gap-3 text-xs text-slate-400">
-                  <label className="flex items-center gap-1">
-                    <input
-                      type="checkbox"
-                      checked={includeKnowledgeContext}
-                      onChange={(e) => setIncludeKnowledgeContext(e.target.checked)}
-                    />
-                    KB
-                  </label>
-                  <label className="flex items-center gap-1">
-                    <input
-                      type="checkbox"
-                      checked={includeSkillsContext}
-                      onChange={(e) => setIncludeSkillsContext(e.target.checked)}
-                    />
-                    技能
-                  </label>
+          <div className="mx-auto max-w-5xl px-4 py-4">
+            <div className="rounded-3xl border border-slate-700 bg-slate-900/50 p-4 md:p-5">
+              <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                <div className="max-w-2xl">
+                  <p className="text-xs uppercase tracking-[0.2em] text-slate-500">Task Boundary</p>
+                  <h2 className="mt-2 text-lg font-semibold text-white">当前任务边界面板</h2>
+                  <p className="mt-2 text-sm leading-relaxed text-slate-400">
+                    对话页现在固定展示任务边界，不再把快捷编排摘要塞进消息流。这里统一查看项目、知识、技能和输出约束。
+                  </p>
+                </div>
+                <div className="rounded-2xl border border-slate-700 bg-slate-950/60 px-4 py-3 text-sm">
+                  <p className="text-xs uppercase tracking-[0.16em] text-slate-500">聊天链路</p>
+                  <p className="mt-2 font-medium text-white">
+                    {useOrchestration
+                      ? "编排任务 · POST /tasks/execute"
+                      : transport?.mode === "backend-proxy"
+                        ? "TPDHermes 后端代理"
+                        : "自定义聊天地址"}
+                  </p>
+                  <p className="mt-1 break-all text-xs text-slate-500">
+                    {useOrchestration ? tasksExecuteUrl : transport?.target ?? chatApiBase}
+                  </p>
                 </div>
               </div>
-              <select
-                value={selectedCollection}
-                onChange={(e) => setSelectedCollection(e.target.value)}
-                className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white"
-              >
-                {collections.length === 0 && <option value="">暂无集合</option>}
-                {collections.map((collection) => (
-                  <option key={collection} value={collection}>
-                    {collection}
-                  </option>
+
+              <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-5">
+                {boundaryCards.map((item) => (
+                  <BoundaryMetric
+                    key={item.label}
+                    label={item.label}
+                    value={item.value}
+                    hint={item.hint}
+                  />
                 ))}
-              </select>
-              <p className="text-xs text-slate-500 mt-2">
-                发送前显式调用 `mcp_tphermes_kb_query` 与 `mcp_tphermes_workshop_list_skills`
-              </p>
-            </div>
-          </div>
-
-          <div className="max-w-5xl mx-auto px-4 pb-4">
-            <div className="flex flex-wrap gap-2 text-xs">
-              {contextSummary.length === 0 ? (
-                <span className="px-2 py-1 rounded-full bg-slate-800 text-slate-500 border border-slate-700">
-                  当前未启用额外上下文
-                </span>
-              ) : (
-                contextSummary.map((item) => (
-                  <span
-                    key={item}
-                    className="px-2 py-1 rounded-full bg-blue-900/30 text-blue-300 border border-blue-700/40"
-                  >
-                    {item}
-                  </span>
-                ))
-              )}
-            </div>
-
-            {bootstrapWarnings.length > 0 && (
-              <div className="mt-3 rounded-xl border border-amber-700/40 bg-amber-950/30 px-3 py-2 text-xs text-amber-300">
-                {bootstrapWarnings.join("；")}
               </div>
-            )}
+
+              {activeSession?.taskEntrySummary && (
+                <div className="mt-4 rounded-2xl border border-blue-700/30 bg-blue-950/20 px-4 py-3">
+                  <p className="text-xs uppercase tracking-[0.16em] text-blue-300">快捷编排摘要</p>
+                  <pre className="mt-2 whitespace-pre-wrap font-sans text-sm leading-relaxed text-blue-100">
+                    {activeSession.taskEntrySummary}
+                  </pre>
+                </div>
+              )}
+
+              <div className="mt-4 grid gap-4 xl:grid-cols-[0.95fr_1.05fr]">
+                <div className="rounded-2xl border border-slate-700 bg-slate-950/60 p-4">
+                  <p className="text-xs uppercase tracking-[0.16em] text-slate-500">边界设置</p>
+                  <div className="mt-4 grid gap-4 md:grid-cols-2">
+                    <div>
+                      <div className="mb-2 flex items-center justify-between">
+                        <label className="text-xs text-slate-400">项目上下文</label>
+                        <input
+                          type="checkbox"
+                          checked={includeProjectContext}
+                          onChange={(e) => setIncludeProjectContext(e.target.checked)}
+                        />
+                      </div>
+                      <select
+                        value={selectedProjectId}
+                        onChange={(e) => setSelectedProjectId(e.target.value)}
+                        className="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white"
+                      >
+                        <option value="">不注入项目</option>
+                        {projects.map((project) => (
+                          <option key={project.id} value={project.id}>
+                            {project.name}
+                          </option>
+                        ))}
+                      </select>
+                      <p className="mt-2 text-xs text-slate-500">
+                        {useOrchestration
+                          ? "随请求携带 project_id，由后端生成任务边界。"
+                          : "发送前显式调用 `mcp_tphermes_project_get`。"}
+                      </p>
+                    </div>
+
+                    <div>
+                      <div className="mb-2 flex items-center justify-between">
+                        <label className="text-xs text-slate-400">知识库与技能</label>
+                        <div className="flex items-center gap-3 text-xs text-slate-400">
+                          <label className="flex items-center gap-1">
+                            <input
+                              type="checkbox"
+                              checked={includeKnowledgeContext}
+                              onChange={(e) => setIncludeKnowledgeContext(e.target.checked)}
+                            />
+                            KB
+                          </label>
+                          <label className="flex items-center gap-1">
+                            <input
+                              type="checkbox"
+                              checked={includeSkillsContext}
+                              onChange={(e) => setIncludeSkillsContext(e.target.checked)}
+                            />
+                            技能
+                          </label>
+                        </div>
+                      </div>
+                      <select
+                        value={selectedCollection}
+                        onChange={(e) => setSelectedCollection(e.target.value)}
+                        className="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white"
+                      >
+                        {collections.length === 0 && <option value="">暂无集合</option>}
+                        {collections.map((collection) => (
+                          <option key={collection} value={collection}>
+                            {collection}
+                          </option>
+                        ))}
+                      </select>
+                      <p className="mt-2 text-xs text-slate-500">
+                        {useOrchestration
+                          ? "知识与技能策略将一并写入本次任务合同。"
+                          : "发送前显式调用 KB 与技能快照能力。"}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="rounded-2xl border border-slate-700 bg-slate-950/60 p-4">
+                  <div className="flex items-center justify-between gap-3">
+                    <p className="text-xs uppercase tracking-[0.16em] text-slate-500">边界摘要</p>
+                    <div className="flex flex-wrap gap-2 text-xs">
+                      {contextSummary.length === 0 ? (
+                        <span className="rounded-full border border-slate-700 bg-slate-800 px-2 py-1 text-slate-500">
+                          当前未启用额外上下文
+                        </span>
+                      ) : (
+                        contextSummary.map((item) => (
+                          <span
+                            key={item}
+                            className="rounded-full border border-blue-700/40 bg-blue-900/30 px-2 py-1 text-blue-300"
+                          >
+                            {item}
+                          </span>
+                        ))
+                      )}
+                    </div>
+                  </div>
+
+                  {useOrchestration && orchestrationPreview ? (
+                    <div className="mt-4 rounded-2xl border border-slate-700 bg-slate-900/60 p-4">
+                      <p className="text-sm font-medium text-white">结构化编排预览</p>
+                      <pre className="mt-2 whitespace-pre-wrap break-words font-sans text-xs leading-relaxed text-slate-400">
+                        {JSON.stringify(orchestrationPreview.snapshot, null, 2)}
+                      </pre>
+                    </div>
+                  ) : (
+                    <div className="mt-4 rounded-2xl border border-dashed border-slate-700 bg-slate-900/30 p-4 text-sm text-slate-500">
+                      {useOrchestration
+                        ? "选择项目后将在此显示当前任务的结构化编排预览。"
+                        : "当前是兼容聊天链路模式，暂无结构化编排快照。"}
+                    </div>
+                  )}
+
+                  {bootstrapWarnings.length > 0 && (
+                    <div className="mt-4 rounded-xl border border-amber-700/40 bg-amber-950/30 px-3 py-2 text-xs text-amber-300">
+                      {bootstrapWarnings.join("；")}
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
           </div>
         </div>
 
@@ -661,7 +1136,9 @@ export default function ChatPage() {
                 {msg.contextBlocks && msg.contextBlocks.length > 0 && (
                   <div className="mb-2 rounded-xl border border-slate-700 bg-slate-900/60 px-3 py-3 text-xs text-slate-300">
                     <div className="font-medium text-slate-200 mb-2">
-                      已注入 {msg.contextBlocks.length} 项显式上下文
+                      {useOrchestration && msg.contextBlocks?.some((b) => b.tool === "orchestration_preview")
+                        ? "编排预览（结构化合同）"
+                        : `已注入 ${msg.contextBlocks?.length ?? 0} 项显式上下文`}
                     </div>
                     <div className="space-y-2">
                       {msg.contextBlocks.map((block) => (

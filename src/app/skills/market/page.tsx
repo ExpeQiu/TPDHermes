@@ -321,194 +321,286 @@ export default function SkillMarketPage() {
     });
 
   const totalInstalls = skills.reduce((sum, s) => sum + s.install_count, 0);
+  const topRated = skills.length > 0 ? Math.max(...skills.map((s) => s.rating)) : 0;
+  const discoveryTips = [
+    {
+      title: "先发现",
+      desc: "从技能市场确认当前任务需要哪些能力，再决定是否纳入本地能力池。",
+    },
+    {
+      title: "再安装与配置",
+      desc: "安装后回到技能策略页，设置启用状态、配置和版本策略。",
+    },
+    {
+      title: "最后进入编排",
+      desc: "在场景编排、对话协作和结果工坊里引用这些能力，让技能真正参与执行。",
+    },
+  ];
 
   return (
-    <main className="min-h-screen bg-gradient-to-br from-slate-900 to-slate-800 text-white p-4 sm:p-6 md:p-8">
-      <div className="max-w-6xl mx-auto">
-        {/* Header */}
-        <div className="mb-6">
-          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-2">
-            <div>
-              <h1 className="text-2xl sm:text-3xl md:text-4xl font-bold">技能市场</h1>
-              <p className="text-slate-400 text-sm mt-1">发现和安装高质量技能</p>
-            </div>
-            <Link
-              href="/skills"
-              className="text-sm text-slate-400 hover:text-white transition self-start"
-            >
-              ← 已安装技能管理
+    <main className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 p-4 text-white sm:p-6 md:p-8">
+      <div className="mx-auto max-w-6xl">
+        <div className="mb-8">
+          <div className="mb-3 flex items-center gap-3">
+            <Link href="/skills" className="text-sm text-slate-400 transition hover:text-white">
+              ← 返回技能策略
             </Link>
           </div>
+          <div className="inline-flex items-center gap-2 rounded-full border border-blue-500/30 bg-blue-500/10 px-3 py-1 text-xs font-medium text-blue-200">
+            <span className="h-2 w-2 rounded-full bg-blue-400" aria-hidden />
+            能力发现入口
+          </div>
+          <div className="mt-4 flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+            <div>
+              <h1 className="text-3xl font-bold sm:text-4xl">技能发现与安装入口</h1>
+              <p className="mt-3 max-w-3xl text-sm leading-relaxed text-slate-400 sm:text-base">
+                技能市场现在承担“发现”阶段：先挑选合适能力，再安装到本地能力池，随后回到技能策略页配置，并在任务编排里投入使用。
+              </p>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <Link
+                href="/skills"
+                className="rounded-xl border border-slate-700 bg-slate-900/70 px-4 py-2.5 text-sm font-medium text-slate-200 transition hover:border-slate-600 hover:bg-slate-900"
+              >
+                查看技能策略
+              </Link>
+              <Link
+                href="/create"
+                className="rounded-xl border border-blue-500/40 bg-blue-500/10 px-4 py-2.5 text-sm font-medium text-blue-200 transition hover:border-blue-400 hover:bg-blue-500/20"
+              >
+                去场景编排
+              </Link>
+            </div>
+          </div>
 
-          {/* Stats */}
-          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 mt-4">
-            <div className="bg-slate-800/60 border border-slate-700 rounded-xl p-3 sm:p-4">
-              <p className="text-xs text-slate-400 uppercase tracking-wider">在架技能</p>
-              <p className="text-2xl font-bold mt-1">{skills.length}</p>
+          <div className="mt-6 grid grid-cols-2 gap-3 md:grid-cols-4">
+            <MetricCard label="在架能力" value={String(skills.length)} hint="当前可发现技能" />
+            <MetricCard label="总安装量" value={formatCount(totalInstalls)} hint="市场热度参考" />
+            <MetricCard label="我的安装" value={String(installedSet.size)} hint="已纳入本地能力池" />
+            <MetricCard label="最高评分" value={topRated > 0 ? topRated.toFixed(1) : "-"} hint="质量参考" />
+          </div>
+        </div>
+
+        <div className="mb-6 grid gap-4 xl:grid-cols-[1.05fr_0.95fr]">
+          <div className="rounded-3xl border border-slate-800 bg-slate-900/50 p-6">
+            <p className="text-xs uppercase tracking-[0.2em] text-slate-500">Discovery Flow</p>
+            <h2 className="mt-2 text-xl font-semibold text-white">能力发现闭环</h2>
+            <div className="mt-5 grid gap-3 md:grid-cols-3">
+              {discoveryTips.map((tip) => (
+                <StrategyCard key={tip.title} title={tip.title} desc={tip.desc} />
+              ))}
             </div>
-            <div className="bg-slate-800/60 border border-slate-700 rounded-xl p-3 sm:p-4">
-              <p className="text-xs text-slate-400 uppercase tracking-wider">总安装量</p>
-              <p className="text-2xl font-bold mt-1 text-blue-400">{formatCount(totalInstalls)}</p>
-            </div>
-            <div className="bg-slate-800/60 border border-slate-700 rounded-xl p-3 sm:p-4 col-span-2 sm:col-span-1">
-              <p className="text-xs text-slate-400 uppercase tracking-wider">我的安装</p>
-              <p className="text-2xl font-bold mt-1 text-green-400">{installedSet.size}</p>
+          </div>
+
+          <div className="rounded-3xl border border-slate-800 bg-slate-900/50 p-6">
+            <p className="text-xs uppercase tracking-[0.2em] text-slate-500">After Install</p>
+            <h2 className="mt-2 text-xl font-semibold text-white">安装后去哪</h2>
+            <div className="mt-5 space-y-3 text-sm leading-relaxed text-slate-400">
+              <div className="rounded-2xl border border-slate-800 bg-slate-950/60 p-4">
+                <p className="font-medium text-white">技能策略页</p>
+                <p className="mt-1">调整启用状态、编辑配置、确认版本历史，形成稳定能力池。</p>
+              </div>
+              <div className="rounded-2xl border border-slate-800 bg-slate-950/60 p-4">
+                <p className="font-medium text-white">场景编排页</p>
+                <p className="mt-1">在任务合同里声明是否携带技能策略，让能力进入执行链路。</p>
+              </div>
+              <div className="rounded-2xl border border-slate-800 bg-slate-950/60 p-4">
+                <p className="font-medium text-white">对话与工坊</p>
+                <p className="mt-1">在编排协作和结果工坊中继续使用已安装能力，形成真正闭环。</p>
+              </div>
             </div>
           </div>
         </div>
 
-        {/* Action message */}
         {actionMsg && (
           <div className="mb-4 px-4 py-3 bg-green-600/20 border border-green-600/40 rounded-lg text-green-300 text-sm">
             ✓ {actionMsg}
           </div>
         )}
 
-        {/* Error */}
         {error && (
           <div className="mb-4 px-4 py-3 bg-red-600/20 border border-red-600/40 rounded-lg text-red-300 text-sm">
             ❌ {error}
           </div>
         )}
 
-        {/* Search + Sort */}
-        <div className="flex flex-col sm:flex-row gap-3 mb-4">
-          <div className="relative flex-1">
-            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm">🔍</span>
-            <input
-              type="text"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="搜索技能名称、描述或标签…"
-              className="w-full bg-slate-800/80 border border-slate-700 rounded-lg pl-9 pr-4 py-2.5 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-blue-500 transition"
-            />
+        <section className="rounded-3xl border border-slate-800 bg-slate-900/50 p-6">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+            <div>
+              <p className="text-xs uppercase tracking-[0.2em] text-slate-500">Discover Skills</p>
+              <h2 className="mt-2 text-xl font-semibold text-white">发现、筛选并安装</h2>
+            </div>
+            <p className="text-sm text-slate-500">从热度、评分、分类与标签快速筛出适合当前任务的能力</p>
           </div>
-          <select
-            value={sortBy}
-            onChange={(e) => setSortBy(e.target.value as typeof sortBy)}
-            className="bg-slate-800/80 border border-slate-700 rounded-lg px-3 py-2.5 text-sm text-white focus:outline-none focus:border-blue-500 transition appearance-none cursor-pointer min-w-36"
-          >
-            <option value="installs">🔥 最多安装</option>
-            <option value="rating">⭐ 最高评分</option>
-            <option value="updated">🕐 最近更新</option>
-          </select>
-        </div>
 
-        {/* Category tabs */}
-        <div className="flex gap-2 overflow-x-auto pb-2 mb-6 scrollbar-hide">
-          {CATEGORIES.map((cat) => (
-            <button
-              key={cat.id}
-              onClick={() => setActiveCategory(cat.id)}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs sm:text-sm font-medium whitespace-nowrap transition ${
-                activeCategory === cat.id
-                  ? "bg-blue-600 text-white"
-                  : "bg-slate-800/80 border border-slate-700 text-slate-400 hover:text-white hover:border-slate-600"
-              }`}
+          <div className="mt-6 flex flex-col gap-3 sm:flex-row">
+            <div className="relative flex-1">
+              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-slate-400">🔍</span>
+              <input
+                type="text"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="搜索技能名称、描述或标签…"
+                className="w-full rounded-lg border border-slate-700 bg-slate-800/80 py-2.5 pl-9 pr-4 text-sm text-white placeholder-slate-500 transition focus:border-blue-500 focus:outline-none"
+              />
+            </div>
+            <select
+              value={sortBy}
+              onChange={(e) => setSortBy(e.target.value as typeof sortBy)}
+              className="min-w-36 cursor-pointer appearance-none rounded-lg border border-slate-700 bg-slate-800/80 px-3 py-2.5 text-sm text-white transition focus:border-blue-500 focus:outline-none"
             >
-              <span>{cat.icon}</span>
-              <span>{cat.label}</span>
-            </button>
-          ))}
-        </div>
+              <option value="installs">🔥 最多安装</option>
+              <option value="rating">⭐ 最高评分</option>
+              <option value="updated">🕐 最近更新</option>
+            </select>
+          </div>
 
-        {/* Skill Grid */}
-        {loading && (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-            {[...Array(6)].map((_, i) => (
-              <div key={i} className="bg-slate-800/60 border border-slate-700 rounded-xl p-5 animate-pulse">
-                <div className="h-4 bg-slate-700 rounded w-3/4 mb-3" />
-                <div className="h-3 bg-slate-700 rounded w-full mb-2" />
-                <div className="h-3 bg-slate-700 rounded w-2/3" />
-              </div>
+          <div className="mb-0 mt-4 flex gap-2 overflow-x-auto pb-2 scrollbar-hide">
+            {CATEGORIES.map((cat) => (
+              <button
+                key={cat.id}
+                onClick={() => setActiveCategory(cat.id)}
+                className={`whitespace-nowrap rounded-full px-3 py-1.5 text-xs font-medium transition sm:text-sm ${
+                  activeCategory === cat.id
+                    ? "bg-blue-600 text-white"
+                    : "border border-slate-700 bg-slate-800/80 text-slate-400 hover:border-slate-600 hover:text-white"
+                }`}
+              >
+                <span>{cat.icon}</span>
+                <span className="ml-1.5">{cat.label}</span>
+              </button>
             ))}
           </div>
-        )}
 
-        {!loading && filtered.length === 0 && (
-          <div className="text-center py-16 text-slate-500">
-            <p className="text-4xl mb-3">🔍</p>
-            <p>没有找到匹配的技能</p>
-          </div>
-        )}
-
-        {!loading && filtered.length > 0 && (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-            {filtered.map((skill) => {
-              const isInstalled = installedSet.has(skill.id);
-              const isInstalling = installing === skill.id;
-
-              return (
-                <div
-                  key={skill.id}
-                  className="bg-slate-800/60 border border-slate-700 rounded-xl p-4 sm:p-5 flex flex-col hover:border-slate-600 hover:bg-slate-800/80 transition group"
-                >
-                  {/* Card header */}
-                  <div className="flex items-start justify-between mb-3">
-                    <div className="flex items-center gap-3">
-                      <span className="text-3xl">{skill.icon}</span>
-                      <div>
-                        <h3 className="font-semibold text-sm sm:text-base leading-tight">{skill.name}</h3>
-                        <p className="text-slate-500 text-xs mt-0.5">by {skill.author} · v{skill.version}</p>
-                      </div>
-                    </div>
-                    <span className="text-xs bg-slate-700/80 text-slate-400 px-2 py-0.5 rounded-full shrink-0">
-                      {skill.category}
-                    </span>
+          <div className="mt-6">
+            {loading && (
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                {[...Array(6)].map((_, i) => (
+                  <div key={i} className="animate-pulse rounded-xl border border-slate-700 bg-slate-800/60 p-5">
+                    <div className="mb-3 h-4 w-3/4 rounded bg-slate-700" />
+                    <div className="mb-2 h-3 w-full rounded bg-slate-700" />
+                    <div className="h-3 w-2/3 rounded bg-slate-700" />
                   </div>
+                ))}
+              </div>
+            )}
 
-                  {/* Description */}
-                  <p className="text-slate-400 text-xs sm:text-sm leading-relaxed flex-1 mb-3 line-clamp-2">
-                    {skill.description}
-                  </p>
+            {!loading && filtered.length === 0 && (
+              <div className="py-16 text-center text-slate-500">
+                <p className="mb-3 text-4xl">🔍</p>
+                <p>没有找到匹配的技能</p>
+              </div>
+            )}
 
-                  {/* Tags */}
-                  <div className="flex flex-wrap gap-1 mb-3">
-                    {skill.tags.slice(0, 3).map((tag) => (
-                      <span
-                        key={tag}
-                        className="text-xs bg-slate-700/60 text-slate-400 px-2 py-0.5 rounded"
-                      >
-                        {tag}
-                      </span>
-                    ))}
-                  </div>
+            {!loading && filtered.length > 0 && (
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                {filtered.map((skill) => {
+                  const isInstalled = installedSet.has(skill.id);
+                  const isInstalling = installing === skill.id;
 
-                  {/* Stats */}
-                  <div className="flex items-center justify-between mb-3 pb-3 border-b border-slate-700/60">
-                    <div className="flex items-center gap-3">
-                      <StarRating rating={skill.rating} />
-                      <span className="text-xs text-slate-400">{skill.rating.toFixed(1)}</span>
-                    </div>
-                    <div className="flex items-center gap-1 text-xs text-slate-500">
-                      <span>↓</span>
-                      <span>{formatCount(skill.install_count)}</span>
-                    </div>
-                  </div>
-
-                  {/* Footer */}
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs text-slate-500">更新于 {skill.updated_at}</span>
-                    <button
-                      onClick={() => !isInstalled && !isInstalling && handleInstall(skill)}
-                      disabled={isInstalled || isInstalling}
-                      className={`px-3 py-1.5 rounded-lg text-xs font-medium transition ${
-                        isInstalled
-                          ? "bg-green-600/20 text-green-400 cursor-default"
-                          : isInstalling
-                          ? "bg-slate-700 text-slate-400 cursor-not-allowed"
-                          : "bg-blue-600 hover:bg-blue-500 text-white"
-                      }`}
+                  return (
+                    <div
+                      key={skill.id}
+                      className="group flex flex-col rounded-xl border border-slate-700 bg-slate-800/60 p-4 transition hover:border-slate-600 hover:bg-slate-800/80 sm:p-5"
                     >
-                      {isInstalled ? "✓ 已安装" : isInstalling ? "安装中…" : "安装"}
-                    </button>
-                  </div>
-                </div>
-              );
-            })}
+                      <div className="mb-3 flex items-start justify-between">
+                        <div className="flex items-center gap-3">
+                          <span className="text-3xl">{skill.icon}</span>
+                          <div>
+                            <h3 className="text-sm font-semibold leading-tight sm:text-base">{skill.name}</h3>
+                            <p className="mt-0.5 text-xs text-slate-500">
+                              by {skill.author} · v{skill.version}
+                            </p>
+                          </div>
+                        </div>
+                        <span className="shrink-0 rounded-full bg-slate-700/80 px-2 py-0.5 text-xs text-slate-400">
+                          {skill.category}
+                        </span>
+                      </div>
+
+                      <p className="mb-3 flex-1 line-clamp-2 text-xs leading-relaxed text-slate-400 sm:text-sm">
+                        {skill.description}
+                      </p>
+
+                      <div className="mb-3 flex flex-wrap gap-1">
+                        {skill.tags.slice(0, 3).map((tag) => (
+                          <span
+                            key={tag}
+                            className="rounded bg-slate-700/60 px-2 py-0.5 text-xs text-slate-400"
+                          >
+                            {tag}
+                          </span>
+                        ))}
+                      </div>
+
+                      <div className="mb-3 flex items-center justify-between border-b border-slate-700/60 pb-3">
+                        <div className="flex items-center gap-3">
+                          <StarRating rating={skill.rating} />
+                          <span className="text-xs text-slate-400">{skill.rating.toFixed(1)}</span>
+                        </div>
+                        <div className="flex items-center gap-1 text-xs text-slate-500">
+                          <span>↓</span>
+                          <span>{formatCount(skill.install_count)}</span>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center justify-between gap-3">
+                        <span className="text-xs text-slate-500">更新于 {skill.updated_at}</span>
+                        <button
+                          onClick={() => !isInstalled && !isInstalling && handleInstall(skill)}
+                          disabled={isInstalled || isInstalling}
+                          className={`rounded-lg px-3 py-1.5 text-xs font-medium transition ${
+                            isInstalled
+                              ? "cursor-default bg-green-600/20 text-green-400"
+                              : isInstalling
+                                ? "cursor-not-allowed bg-slate-700 text-slate-400"
+                                : "bg-blue-600 text-white hover:bg-blue-500"
+                          }`}
+                        >
+                          {isInstalled ? "✓ 已安装" : isInstalling ? "安装中…" : "安装"}
+                        </button>
+                      </div>
+
+                      {isInstalled && (
+                        <div className="mt-3 rounded-lg border border-green-600/30 bg-green-600/10 px-3 py-2 text-xs text-green-300">
+                          已进入本地能力池，下一步去“技能策略”页配置，或回到“场景编排”页使用。
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
-        )}
+        </section>
       </div>
     </main>
+  );
+}
+
+function MetricCard({
+  label,
+  value,
+  hint,
+}: {
+  label: string;
+  value: string;
+  hint: string;
+}) {
+  return (
+    <div className="rounded-2xl border border-slate-800 bg-slate-900/50 p-4">
+      <p className="text-xs uppercase tracking-[0.16em] text-slate-500">{label}</p>
+      <p className="mt-3 text-2xl font-semibold text-white">{value}</p>
+      <p className="mt-1 text-xs text-slate-500">{hint}</p>
+    </div>
+  );
+}
+
+function StrategyCard({ title, desc }: { title: string; desc: string }) {
+  return (
+    <div className="rounded-2xl border border-slate-800 bg-slate-950/60 p-4">
+      <p className="text-base font-medium text-white">{title}</p>
+      <p className="mt-2 text-sm leading-relaxed text-slate-400">{desc}</p>
+    </div>
   );
 }

@@ -26,7 +26,18 @@ fastmcp>=0.9.0,<1.0.0
 ### 本地开发
 ```bash
 pip install -r requirements.txt
-uvicorn main:app --reload --port 8000
+./start.sh
+```
+
+说明：
+
+- `./start.sh` 会同时启动后端 `:8000` 与前端 `:3000`。
+- 启动后端前，脚本会优先复用已显式传入的 `HERMES_CHAT_API_KEY`；若未设置，则自动从 `~/.hermes/.env` 读取 `API_SERVER_KEY` 并映射到后端代理配置。
+- 如果你改为手动执行 `uvicorn main:app --reload --port 8000`，则需要自行导出 `HERMES_CHAT_API_KEY`，否则 `/chat` 页调用 `Hermes-agent` 时可能出现鉴权失败。
+- 关闭本地服务可执行：
+
+```bash
+./stop.sh
 ```
 
 ### Docker

@@ -15,5 +15,9 @@ class Project(Base):
     deadline = Column(String)  # ISO8601
     constraints = Column(Text)  # JSON string stored as Text
     status = Column(String, default="active")
+    domain_profile_id = Column(String)
+    knowledge_policy_id = Column(String)
+    default_template_id = Column(String)
+    scenario_profile_id = Column(String)
     created_at = Column(String, default=lambda: datetime.now().isoformat())
     updated_at = Column(String, default=lambda: datetime.now().isoformat())

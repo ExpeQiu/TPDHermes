@@ -8,7 +8,12 @@ from typing import Optional
 
 from backend.db import get_db
 from backend.models.project import Project
+from backend.models.output_asset import OutputAsset
+from backend.models.orchestration_run import OrchestrationRun
 from pydantic import BaseModel
+
+from backend.schemas.orchestration import TaskExecuteRequest, TaskExecuteOverrides
+from backend.services.orchestration_service import assemble_payload
 
 router = APIRouter(prefix="/projects", tags=["projects"])
 
@@ -151,3 +156,156 @@ async def delete_project(project_id: str, db: AsyncSession = Depends(get_db)):
     await db.delete(project)
     await db.commit()
     return {"message": "Project deleted"}
+
+
+# --- 编排：预览与输出物 / 运行记录 ---
+
+
+class OrchestrationPreviewBody(BaseModel):
+    scenario_id: str | None = "general"
+    user_message: str = "（编排预览）"
+    scenario_preset_instructions: str | None = None
+    scenario_opening_hint: str | None = None
+    overrides: TaskExecuteOverrides | None = None
+
+
+@router.post("/{project_id}/orchestration/preview")
+async def orchestration_preview(
+    project_id: str,
+    body: OrchestrationPreviewBody,
+    db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(select(Project).where(Project.id == project_id))
+    if not result.scalar_one_or_none():
+        raise HTTPException(status_code=404, detail="Project not found")
+    req = TaskExecuteRequest(
+        entrypoint="chat",
+        project_id=project_id,
+        scenario_id=body.scenario_id,
+        user_message=body.user_message,
+        stream=False,
+        scenario_preset_instructions=body.scenario_preset_instructions,
+        scenario_opening_hint=body.scenario_opening_hint,
+        overrides=body.overrides,
+    )
+    payload, snapshot = await assemble_payload(db, req)
+    return {"payload": payload.model_dump(mode="json"), "snapshot": snapshot}
+
+
+class OutputListItem(BaseModel):
+    id: str
+    title: str | None
+    summary: str | None
+    template_id: str | None
+    run_id: str | None
+    status: str
+    created_at: str | None
+    content_preview: str
+
+
+class OutputDetailResponse(BaseModel):
+    id: str
+    project_id: str
+    title: str | None
+    summary: str | None
+    template_id: str | None
+    run_id: str | None
+    status: str
+    created_at: str | None
+    updated_at: str | None
+    content_format: str
+    content: str
+
+
+@router.get("/{project_id}/outputs", response_model=list[OutputListItem])
+async def list_project_outputs(project_id: str, db: AsyncSession = Depends(get_db)):
+    res = await db.execute(select(Project).where(Project.id == project_id))
+    if not res.scalar_one_or_none():
+        raise HTTPException(status_code=404, detail="Project not found")
+    q = await db.execute(
+        select(OutputAsset)
+        .where(OutputAsset.project_id == project_id)
+        .order_by(OutputAsset.created_at.desc())
+    )
+    rows = q.scalars().all()
+    out: list[OutputListItem] = []
+    for o in rows:
+        preview = (o.content or "")[:200]
+        out.append(
+            OutputListItem(
+                id=o.id,
+                title=o.title,
+                summary=o.summary,
+                template_id=o.template_id,
+                run_id=o.run_id,
+                status=o.status,
+                created_at=o.created_at,
+                content_preview=preview,
+            )
+        )
+    return out
+
+
+@router.get("/{project_id}/outputs/{output_id}", response_model=OutputDetailResponse)
+async def get_project_output_detail(
+    project_id: str,
+    output_id: str,
+    db: AsyncSession = Depends(get_db),
+):
+    res = await db.execute(select(Project).where(Project.id == project_id))
+    if not res.scalar_one_or_none():
+        raise HTTPException(status_code=404, detail="Project not found")
+    q = await db.execute(
+        select(OutputAsset).where(
+            OutputAsset.id == output_id,
+            OutputAsset.project_id == project_id,
+        )
+    )
+    row = q.scalar_one_or_none()
+    if not row:
+        raise HTTPException(status_code=404, detail="Output not found")
+    return OutputDetailResponse(
+        id=row.id,
+        project_id=row.project_id,
+        title=row.title,
+        summary=row.summary,
+        template_id=row.template_id,
+        run_id=row.run_id,
+        status=row.status,
+        created_at=row.created_at,
+        updated_at=row.updated_at,
+        content_format=row.content_format or "markdown",
+        content=row.content or "",
+    )
+
+
+class RunListItem(BaseModel):
+    id: str
+    entrypoint: str
+    status: str
+    created_at: str | None
+    duration_ms: int | None
+
+
+@router.get("/{project_id}/runs", response_model=list[RunListItem])
+async def list_project_runs(project_id: str, db: AsyncSession = Depends(get_db)):
+    res = await db.execute(select(Project).where(Project.id == project_id))
+    if not res.scalar_one_or_none():
+        raise HTTPException(status_code=404, detail="Project not found")
+    q = await db.execute(
+        select(OrchestrationRun)
+        .where(OrchestrationRun.project_id == project_id)
+        .order_by(OrchestrationRun.created_at.desc())
+        .limit(100)
+    )
+    rows = q.scalars().all()
+    return [
+        RunListItem(
+            id=r.id,
+            entrypoint=r.entrypoint,
+            status=r.status,
+            created_at=r.created_at,
+            duration_ms=r.duration_ms,
+        )
+        for r in rows
+    ]

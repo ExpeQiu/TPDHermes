@@ -7,12 +7,12 @@ import { useThemeStore, useUserStore } from '@/lib/store'
 
 const navLinks = [
   { href: '/', label: '首页', emoji: '🏠' },
-  { href: '/projects', label: '项目管理', emoji: '📁' },
-  { href: '/workshop', label: '输出工坊', emoji: '🛠️' },
-  { href: '/chat', label: '对话', emoji: '💬' },
-  { href: '/create', label: '快速创作', emoji: '⚡' },
-  { href: '/knowledge', label: '知识库', emoji: '📚' },
-  { href: '/skills', label: 'Skills', emoji: '📦' },
+  { href: '/projects', label: '项目中心', emoji: '📁' },
+  { href: '/create', label: '场景编排', emoji: '⚡' },
+  { href: '/chat', label: '编排协作', emoji: '💬' },
+  { href: '/workshop', label: '结果工坊', emoji: '🛠️' },
+  { href: '/knowledge', label: '知识策略', emoji: '📚' },
+  { href: '/skills', label: '技能策略', emoji: '📦' },
 ]
 
 export function Layout({ children }: { children: React.ReactNode }) {
