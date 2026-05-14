@@ -103,6 +103,7 @@ from backend.routes.kb import router as kb_router
 from backend.routes.kb_sse import router as kb_sse_router
 from backend.routes.workshop import router as workshop_router
 from backend.routes.skills_store import router as skills_store_router
+from backend.routes.chat import router as chat_router
 from backend.routes.feishu import router as feishu_router
 from backend.routes.feishu_bot import router as feishu_bot_router
 
@@ -111,6 +112,7 @@ include_router_with_version(kb_router,       strip_prefix="/kb")
 include_router_with_version(kb_sse_router,   strip_prefix="/kb")
 include_router_with_version(workshop_router, strip_prefix="/ws")
 include_router_with_version(skills_store_router, strip_prefix="/skills")
+include_router_with_version(chat_router,     strip_prefix="/chat")
 include_router_with_version(feishu_router,   strip_prefix="/feishu")
 include_router_with_version(feishu_bot_router, strip_prefix="/feishu/bot")
 

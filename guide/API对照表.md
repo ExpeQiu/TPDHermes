@@ -44,6 +44,13 @@
 | GET | `/kb/events` | SSE 订阅 |
 | POST | `/kb/events/publish` | 内部推送测试 |
 
+## 对话
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | `/chat/config` | 当前聊天承接模式与目标地址 |
+| POST | `/chat/completions` | 统一聊天补全入口；默认由后端代理到本地 `Hermes-agent` |
+
 ## 系统
 
 | 方法 | 路径 | 说明 |

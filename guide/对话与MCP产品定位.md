@@ -2,8 +2,9 @@
 
 ## 对话页（`/chat`）
 
-- **默认链路**：通过 `NEXT_PUBLIC_CHAT_API_URL`（兼容旧名 `NEXT_PUBLIC_HERMES_API_URL`）调用独立聊天补全服务（如本机 `8642`），与 TPDHermes FastAPI **解耦**。
-- **可选协同**：若需引用项目 / 知识库 / 工坊结果，应在后续版本定义「上下文注入」契约（本仓库尚未实现统一 BFF）。
+- **默认链路**：前端调用 `/api/v1/chat/completions`，由 TPDHermes FastAPI 统一代理到 `Hermes-agent`（默认目标 `http://localhost:8642/v1/chat/completions`）。
+- **显式协同**：发送前可调用项目、知识库、工坊能力，生成 `mcp_tphermes_*` 风格的上下文摘要，并以可见形式注入到用户消息中。
+- **可选覆盖**：若设置 `NEXT_PUBLIC_CHAT_API_URL`，前端仍可改连其他 OpenAI 兼容聊天补全服务。
 
 ## MCP（`backend/mcp_server.py`）
 
