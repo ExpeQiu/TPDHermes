@@ -16,6 +16,14 @@ WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 
+# Next 构建不要求必须有静态资源，但 runner 阶段会 COPY public；无目录时 Docker 构建失败
+RUN mkdir -p public
+
+ARG NEXT_PUBLIC_API_URL=http://localhost:8000
+ARG NEXT_PUBLIC_USE_MOCK_KB=
+ENV NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL}
+ENV NEXT_PUBLIC_USE_MOCK_KB=${NEXT_PUBLIC_USE_MOCK_KB}
+
 RUN npm run build
 
 # Production image

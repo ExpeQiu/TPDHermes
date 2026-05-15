@@ -1,0 +1,29 @@
+# 使用本仓库内嵌 Hermes Agent 源码构建（替代占位 stub）。
+# 前置：已将源码解压到 hermes-agent/hermes-agent-main/ 且含官方 Dockerfile。
+# 启动：docker compose -f docker-compose.yml -f docker-compose.src-hermes.yml up -d --build
+# 首次需在数据卷中配置 LLM：容器启动后编辑 /opt/data/.env（或 docker exec 进入后改 ~/.hermes 等价路径）。
+services:
+  hermes-agent:
+    build:
+      context: ./hermes-agent/hermes-agent-main
+      dockerfile: Dockerfile.alicloud
+    image: ${HERMES_AGENT_IMAGE:-tphermes-hermes-src:local}
+    container_name: hermes-agent
+    restart: unless-stopped
+    command: ["gateway", "run"]
+    environment:
+      - HERMES_UID=10000
+      - HERMES_GID=10000
+      - API_SERVER_ENABLED=true
+      - API_SERVER_HOST=0.0.0.0
+      - API_SERVER_PORT=8642
+      - API_SERVER_KEY=${HERMES_AGENT_API_SERVER_KEY:-change-me}
+    expose:
+      - "8642"
+    volumes:
+      - hermes-agent-data:/opt/data
+    networks:
+      - tphermes-net
+
+volumes:
+  hermes-agent-data:

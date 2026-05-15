@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { apiGet } from "@/lib/api";
+import { apiDelete, apiGet } from "@/lib/api";
 import { CONTENT_MAX_CLASS } from "@/lib/content-shell";
 
 interface Project {
@@ -38,6 +38,8 @@ export default function ProjectsPage() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [opError, setOpError] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   useEffect(() => {
     apiGet<Project[]>("/projects/")
@@ -141,20 +143,28 @@ export default function ProjectsPage() {
 
           {!loading && !error && projects.length > 0 && (
             <div className="mt-6 grid grid-cols-1 gap-4 xl:grid-cols-2">
+              {opError ? (
+                <div className="col-span-full rounded-lg border border-amber-700/80 bg-amber-900/20 px-4 py-3 text-sm text-amber-100">
+                  {opError}
+                </div>
+              ) : null}
               {projects.map((project) => (
                 <div
                   key={project.id}
-                  className="rounded-3xl border border-slate-700 bg-slate-800/60 p-5 transition hover:border-slate-600 hover:bg-slate-800/80"
+                  className="relative rounded-3xl border border-slate-700 bg-slate-800/60 p-5 transition hover:border-slate-600 hover:bg-slate-800/80"
                 >
-                  <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                  <Link
+                    href={`/projects/${project.id}`}
+                    className="absolute inset-0 z-0 rounded-3xl focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500/70"
+                    aria-label={`${project.name}，进入项目控制台`}
+                    tabIndex={0}
+                  />
+                  <div className="pointer-events-none relative z-10 flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
                     <div className="min-w-0">
                       <div className="mb-3 flex flex-wrap items-center gap-2">
-                        <Link
-                          href={`/projects/${project.id}`}
-                          className="text-xl font-semibold text-white transition hover:text-blue-300"
-                        >
+                        <span className="text-xl font-semibold text-white">
                           {project.name}
-                        </Link>
+                        </span>
                         <span
                           className={`rounded-full px-2.5 py-1 text-xs font-medium text-white ${
                             statusColors[project.status] ?? "bg-slate-500"
@@ -176,27 +186,54 @@ export default function ProjectsPage() {
                       </div>
                     </div>
 
-                    <div className="grid min-w-[16rem] gap-2 sm:grid-cols-2 lg:grid-cols-1">
-                      <Link
-                        href={`/projects/${project.id}`}
-                        className="rounded-xl border border-slate-700 bg-slate-900/70 px-4 py-2.5 text-center text-sm font-medium text-slate-200 transition hover:border-slate-600 hover:bg-slate-900"
-                      >
+                    <div className="relative z-20 grid min-w-[16rem] gap-2 sm:grid-cols-2 lg:grid-cols-1">
+                      <span className="rounded-xl border border-slate-700 bg-slate-900/70 px-4 py-2.5 text-center text-sm font-medium text-slate-200">
                         项目控制台
-                      </Link>
+                      </span>
                       <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-2">
                         <Link
                           href={`/workshop?project_id=${project.id}`}
-                          className="rounded-xl border border-slate-700 bg-slate-900/60 px-4 py-2.5 text-center text-sm text-slate-300 transition hover:border-slate-600 hover:bg-slate-900"
+                          className="pointer-events-auto relative z-20 rounded-xl border border-slate-700 bg-slate-900/60 px-4 py-2.5 text-center text-sm text-slate-300 transition hover:border-slate-600 hover:bg-slate-900"
                         >
                           场景输出
                         </Link>
                         <Link
                           href={`/chat?project_id=${project.id}`}
-                          className="rounded-xl border border-slate-700 bg-slate-900/60 px-4 py-2.5 text-center text-sm text-slate-300 transition hover:border-slate-600 hover:bg-slate-900"
+                          className="pointer-events-auto relative z-20 rounded-xl border border-slate-700 bg-slate-900/60 px-4 py-2.5 text-center text-sm text-slate-300 transition hover:border-slate-600 hover:bg-slate-900"
                         >
                           对话创作
                         </Link>
                       </div>
+                      <button
+                        type="button"
+                        disabled={deletingId === project.id}
+                        className="pointer-events-auto relative z-20 rounded-xl border border-red-900/60 bg-red-950/40 px-4 py-2 text-center text-sm text-red-200 transition hover:border-red-700 hover:bg-red-950/70 disabled:cursor-not-allowed disabled:opacity-50"
+                        onClick={async (e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          if (
+                            !confirm(
+                              `确定删除项目「${project.name}」？关联场景绑定、附件记录等将一并清理，不可恢复。`,
+                            )
+                          ) {
+                            return;
+                          }
+                          setOpError(null);
+                          setDeletingId(project.id);
+                          try {
+                            await apiDelete(`/projects/${project.id}`);
+                            setProjects((prev) => prev.filter((p) => p.id !== project.id));
+                          } catch (err) {
+                            setOpError(
+                              err instanceof Error ? err.message : "删除失败",
+                            );
+                          } finally {
+                            setDeletingId(null);
+                          }
+                        }}
+                      >
+                        {deletingId === project.id ? "删除中…" : "删除项目"}
+                      </button>
                     </div>
                   </div>
                 </div>

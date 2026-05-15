@@ -28,6 +28,18 @@ def _dump(d: dict[str, Any] | None) -> str:
     return json.dumps(d or {}, ensure_ascii=False)
 
 
+def _log_knowledge_policy_warnings(kp: dict[str, Any] | None) -> None:
+    """可选编排提示：restricted 且无 collections 时记录告警日志。"""
+    if not kp:
+        return
+    mode = kp.get("mode", "restricted")
+    cols = kp.get("collections")
+    if mode == "restricted" and (not isinstance(cols, list) or len(cols) == 0):
+        logger.warning(
+            "scenario knowledge_policy: mode=restricted 但 collections 为空，请确认场景知识范围"
+        )
+
+
 class ScenarioCreate(BaseModel):
     code: str
     name: str
@@ -121,6 +133,7 @@ async def create_scenario(body: ScenarioCreate, db: AsyncSession = Depends(get_d
     dup = await db.execute(select(ScenarioProfile).where(ScenarioProfile.code == body.code))
     if dup.scalar_one_or_none():
         raise HTTPException(status_code=409, detail="场景编码已存在")
+    _log_knowledge_policy_warnings(body.knowledge_policy)
     now = datetime.now().isoformat()
     row = ScenarioProfile(
         id=str(uuid.uuid4()),
@@ -216,6 +229,8 @@ async def update_scenario(
     if "domain" in data:
         row.domain_json = _dump(data.pop("domain"))
     if "knowledge_policy" in data:
+        kp = data["knowledge_policy"]
+        _log_knowledge_policy_warnings(kp if isinstance(kp, dict) else None)
         row.knowledge_policy_json = _dump(data.pop("knowledge_policy"))
     if "skills_policy" in data:
         row.skills_policy_json = _dump(data.pop("skills_policy"))

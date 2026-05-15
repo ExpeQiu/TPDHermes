@@ -1,0 +1,64 @@
+# 阿里云 / 国内构建：避免 ghcr.io、tianon/gosu  digest 经公共镜像站 403。
+# 与官方 Dockerfile 行为对齐：uv 0.11.6、gosu、Debian 13.4。
+# 使用：docker compose -f docker-compose.yml -f docker-compose.src-hermes.yml build hermes-agent
+FROM docker.m.daocloud.io/library/debian:13.4
+
+# ECS 在国内：apt 走阿里云镜像，避免 deb.debian.org 极慢
+RUN set -eux; \
+    if [ -f /etc/apt/sources.list.d/debian.sources ]; then \
+      sed -i 's|deb.debian.org|mirrors.aliyun.com|g; s|security.debian.org|mirrors.aliyun.com|g' /etc/apt/sources.list.d/debian.sources; \
+    elif [ -f /etc/apt/sources.list ]; then \
+      sed -i 's|deb.debian.org|mirrors.aliyun.com|g; s|security.debian.org|mirrors.aliyun.com|g' /etc/apt/sources.list; \
+    fi
+
+ENV PYTHONUNBUFFERED=1
+ENV PLAYWRIGHT_BROWSERS_PATH=/opt/hermes/.playwright
+
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+    build-essential curl nodejs npm python3 ripgrep ffmpeg gcc python3-dev libffi-dev procps git openssh-client docker-cli tini gosu ca-certificates && \
+    rm -rf /var/lib/apt/lists/*
+
+RUN useradd -u 10000 -m -d /opt/data hermes
+
+RUN ln -sf /usr/sbin/gosu /usr/local/bin/gosu && chmod +x /usr/local/bin/gosu
+
+ARG UV_VERSION=0.11.6
+ENV UV_INSTALL_DIR=/usr/local
+RUN curl -LsSf "https://astral.sh/uv/${UV_VERSION}/install.sh" | sh
+
+WORKDIR /opt/hermes
+
+COPY package.json package-lock.json ./
+COPY web/package.json web/package-lock.json web/
+COPY ui-tui/package.json ui-tui/package-lock.json ui-tui/
+COPY ui-tui/packages/hermes-ink/ ui-tui/packages/hermes-ink/
+
+ENV npm_config_install_links=false
+
+RUN npm install --prefer-offline --no-audit && \
+    npx playwright install --with-deps chromium --only-shell && \
+    (cd web && npm install --prefer-offline --no-audit) && \
+    (cd ui-tui && npm install --prefer-offline --no-audit) && \
+    npm cache clean --force
+
+COPY pyproject.toml uv.lock ./
+RUN touch ./README.md
+RUN uv sync --frozen --no-install-project --extra all
+
+COPY --chown=hermes:hermes . .
+
+RUN cd web && npm run build && \
+    cd ../ui-tui && npm run build
+
+USER root
+RUN chmod -R a+rX /opt/hermes && \
+    chown -R hermes:hermes /opt/hermes/.venv /opt/hermes/ui-tui /opt/hermes/node_modules
+
+RUN uv pip install --no-cache-dir --no-deps -e "."
+
+ENV HERMES_WEB_DIST=/opt/hermes/hermes_cli/web_dist
+ENV HERMES_HOME=/opt/data
+ENV PATH="/opt/data/.local/bin:${PATH}"
+VOLUME [ "/opt/data" ]
+ENTRYPOINT [ "/usr/bin/tini", "-g", "--", "/opt/hermes/docker/entrypoint.sh" ]

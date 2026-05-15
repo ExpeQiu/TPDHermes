@@ -39,19 +39,36 @@ ALLOWED_ORIGINS = os.getenv(
 
 
 # ── 启动配置校验 ──────────────────────────────────────────
+def _allow_missing_hermes_upstream() -> bool:
+    """是否允许未配置 HERMES_CHAT_API_URL（本地 SQLite 或显式 dev/test 环境）。"""
+    if os.getenv("ALLOW_MISSING_HERMES_UPSTREAM", "").strip().lower() in ("1", "true", "yes"):
+        return True
+    env = (os.getenv("APP_ENV") or os.getenv("ENVIRONMENT") or os.getenv("ENV") or "").strip().lower()
+    if env in ("production", "prod"):
+        return False
+    if env in ("development", "dev", "local", "staging", "test"):
+        return True
+    db = (os.getenv("DATABASE_URL") or "sqlite+aiosqlite:///./tphermes.db").lower()
+    if "sqlite" in db:
+        return True
+    return False
+
+
 def _validate_deployment_config() -> None:
-    """启动时强制校验关键环境变量，未配置则拒绝启动（测试可通过 conftest 预置 HERMES_CHAT_API_URL）。"""
+    """启动时校验 HERMES_CHAT_API_URL；本地 SQLite 或显式 dev 时可缺省，详见 _allow_missing_hermes_upstream。"""
     hermes_url = os.getenv("HERMES_CHAT_API_URL", "").strip()
     if not hermes_url:
-        if os.getenv("ALLOW_MISSING_HERMES_UPSTREAM", "").strip().lower() in ("1", "true", "yes"):
+        if _allow_missing_hermes_upstream():
             logger.warning(
-                "HERMES_CHAT_API_URL not set; ALLOW_MISSING_HERMES_UPSTREAM enabled — 聊天上游相关接口将不可用"
+                "HERMES_CHAT_API_URL not set — 聊天上游将不可用；"
+                "生产环境请配置该变量并将 APP_ENV=production（或 PostgreSQL 等非 SQLite 库时请配置上游）"
             )
             return
         raise RuntimeError(
             "HERMES_CHAT_API_URL is not set. "
             "Production deployment requires this environment variable. "
-            "Example: HERMES_CHAT_API_URL=https://your-hermes-agent:8642/v1/chat/completions"
+            "Example: HERMES_CHAT_API_URL=https://your-hermes-agent:8642/v1/chat/completions. "
+            "本地默认 SQLite 可免配置；非 SQLite 时请配置上游，或 APP_ENV=development / ALLOW_MISSING_HERMES_UPSTREAM=1"
         )
     logger.info("HERMES_CHAT_API_URL validated: %s", hermes_url)
 
@@ -121,7 +138,9 @@ def include_router_with_version(router, strip_prefix: str = "", **kwargs):
 # 延迟导入避免循环依赖
 from backend.routes import projects_router
 from backend.routes.kb import router as kb_router
+from backend.routes.kb_ingest import router as kb_ingest_router
 from backend.routes.kb_sse import router as kb_sse_router
+from backend.routes.kg import router as kg_router
 from backend.routes.workshop import router as workshop_router
 from backend.routes.skills_store import router as skills_store_router
 from backend.routes.chat import router as chat_router
@@ -133,7 +152,9 @@ from backend.routes.templates import router as templates_router
 
 include_router_with_version(projects_router, strip_prefix="/projects")
 include_router_with_version(kb_router,       strip_prefix="/kb")
+include_router_with_version(kb_ingest_router, strip_prefix="/kb")
 include_router_with_version(kb_sse_router,   strip_prefix="/kb")
+include_router_with_version(kg_router,         strip_prefix="/kg")
 include_router_with_version(workshop_router, strip_prefix="/ws")
 include_router_with_version(skills_store_router, strip_prefix="/skills")
 include_router_with_version(chat_router,     strip_prefix="/chat")

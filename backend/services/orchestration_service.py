@@ -243,12 +243,14 @@ def _apply_profile_knowledge(base: OrchestrationKnowledge, pol: dict[str, Any]) 
     if mode not in ("restricted", "open"):
         mode = base.mode
     cols = pol.get("collections")
+    ed = pol.get("eligible_domains")
     return OrchestrationKnowledge(
         mode=mode,  # type: ignore[arg-type]
         collections=list(cols) if isinstance(cols, list) else base.collections,
         project_bound=bool(pol.get("project_bound", base.project_bound)),
         top_k=int(pol.get("top_k", base.top_k)),
         fallback_policy=str(pol.get("fallback_policy", base.fallback_policy)),
+        eligible_domains=list(ed) if isinstance(ed, list) else base.eligible_domains,
     )
 
 
@@ -427,6 +429,9 @@ async def assemble_payload(
         project_bound=bool(knowledge_defaults.get("project_bound", True)),
         top_k=int(knowledge_defaults.get("top_k", 5)),
         fallback_policy=str(knowledge_defaults.get("fallback_policy", "cache_allowed")),
+        eligible_domains=list(knowledge_defaults.get("eligible_domains", []))
+        if isinstance(knowledge_defaults.get("eligible_domains"), list)
+        else [],
     )
 
     skills = OrchestrationSkills(
@@ -490,6 +495,8 @@ async def assemble_payload(
                 knowledge = knowledge.model_copy(update={"top_k": kd.top_k})
             if kd.project_bound is not None:
                 knowledge = knowledge.model_copy(update={"project_bound": kd.project_bound})
+            if kd.eligible_domains is not None:
+                knowledge = knowledge.model_copy(update={"eligible_domains": kd.eligible_domains})
         if overrides.skills:
             sk = overrides.skills
             if sk.mode is not None:

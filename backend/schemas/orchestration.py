@@ -64,6 +64,10 @@ class OrchestrationKnowledge(BaseModel):
     project_bound: bool = True
     top_k: int = 5
     fallback_policy: str = "cache_allowed"
+    eligible_domains: list[str] = Field(
+        default_factory=list,
+        description="可选：仅当 KB metadata.domain 属于该列表时优先纳入（上游检索支持时生效；未实现前作文档约定）",
+    )
 
 
 class OrchestrationSkills(BaseModel):
@@ -123,6 +127,7 @@ class TaskKnowledgeOverrides(BaseModel):
     mode: str | None = None
     top_k: int | None = None
     project_bound: bool | None = None
+    eligible_domains: list[str] | None = None
 
 
 class TaskSkillsOverrides(BaseModel):

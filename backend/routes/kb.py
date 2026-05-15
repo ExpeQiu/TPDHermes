@@ -2,14 +2,19 @@
 知识库路由：提供 KB 健康检查、collection 查询等接口
 """
 
-from fastapi import APIRouter, Query
-from pydantic import BaseModel
+import logging
 from typing import Optional
 
+from fastapi import APIRouter, HTTPException, Query
+from pydantic import BaseModel
+
 from backend.services.kb_proxy import kb_proxy_service
+from backend.services.kb_browse import DEFAULT_TREE_ENTRY_LIMIT, build_browse_tree
 from backend.services.kb_cache import kb_cache_service
+from backend.services.kg_service import kb_kg_link_service
 
 router = APIRouter(prefix="/kb", tags=["knowledge_base"])
+kb_route_logger = logging.getLogger("tpdx.hermes")
 
 
 # --- Pydantic Schemas ---
@@ -62,7 +67,101 @@ class SyncResponse(BaseModel):
     readonly_mode: bool
 
 
+class KbKgLinkCreate(BaseModel):
+    kb_entry_id: str
+    kb_project_id: str
+    kg_kind: str
+    kg_node_id: str
+
+
+@router.get("/browse-tree")
+async def kb_browse_tree(
+    project_id: str = Query("__all__", description="__all__ 表示跨项目汇总"),
+    domain: str | None = Query(None, description="仅返回该 metadata.domain"),
+    collection: str | None = Query(None),
+    limit: int = Query(DEFAULT_TREE_ENTRY_LIMIT, ge=1, le=8000),
+):
+    """从 kb_cache 聚合只读目录树（依赖 metadata.domain / folder_path）。"""
+    tree = await build_browse_tree(
+        project_id=project_id,
+        domain_filter=domain,
+        collection=collection,
+        limit=limit,
+    )
+    return tree
+
+
+@router.get("/kg-links")
+async def kb_list_kg_links(
+    kb_entry_id: str = Query(...),
+    kb_project_id: str | None = Query(
+        None,
+        description="省略时返回该条目在所有 project_id（含 __all__）下的关联合并",
+    ),
+):
+    if kb_project_id is not None and kb_project_id != "":
+        items = await kb_kg_link_service.list_for_entry(
+            kb_entry_id=kb_entry_id,
+            kb_project_id=kb_project_id,
+        )
+    else:
+        items = await kb_kg_link_service.list_for_entry_all_projects(
+            kb_entry_id=kb_entry_id,
+        )
+    return {"items": items}
+
+
+@router.post("/kg-links")
+async def kb_add_kg_link(body: KbKgLinkCreate):
+    try:
+        row = await kb_kg_link_service.add_link(
+            kb_entry_id=body.kb_entry_id.strip(),
+            kb_project_id=body.kb_project_id.strip(),
+            kg_kind=body.kg_kind.strip(),
+            kg_node_id=body.kg_node_id.strip(),
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    except Exception as e:
+        kb_route_logger.warning("kb kg-link duplicate: %s", e)
+        raise HTTPException(status_code=409, detail="关联已存在") from e
+    return row
+
+
+@router.delete("/kg-links/{link_id}")
+async def kb_delete_kg_link(link_id: str):
+    ok = await kb_kg_link_service.delete_link(link_id)
+    if not ok:
+        raise HTTPException(status_code=404, detail="关联不存在")
+    return {"ok": True}
+
+
 # --- Endpoints ---
+
+@router.get("/query-all", response_model=KBQueriesResponse)
+async def kb_query_all(
+    q: str = Query(..., description="检索文本"),
+    n: int = Query(10, ge=1, le=100),
+    project_id: Optional[str] = Query(None),
+    collection: Optional[str] = Query(
+        None,
+        description="可选：限定单个 collection；省略则为全库",
+    ),
+):
+    """跨 collection 合并检索（验证用）；上行可用时逐集合调 Chroma。"""
+    result = await kb_proxy_service.query_all_collections(
+        query_text=q,
+        n_results=n,
+        project_id=project_id,
+        collection=collection,
+    )
+    return KBQueriesResponse(
+        results=result.get("results", []),
+        source=result.get("source", "cache"),
+        count=int(result.get("count", 0)),
+        warning=result.get("warning"),
+    )
+
 
 @router.get("/health", response_model=KBHealthResponse)
 async def kb_health():
@@ -76,7 +175,7 @@ async def kb_health():
         external_kb=health["external_kb"],
         cache_mode=health["cache_mode"],
         cached_entries=health["cached_entries"],
-        readonly_mode=kb_proxy_service._readonly_mode,
+        readonly_mode=bool(health["cache_mode"]),
     )
 
 
@@ -137,11 +236,20 @@ async def cache_stats(project_id: str):
     return CacheStatsResponse(**stats)
 
 
+@router.get("/cache/entry/{entry_id}")
+async def get_cached_entry_by_id(entry_id: str):
+    """按主键拉取单条缓存（目录树条目可能未出现在前几页 browse 列表中）。"""
+    row = await kb_cache_service.get_cached_entry_by_id(entry_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="缓存条目不存在")
+    return row
+
+
 @router.get("/cache/entries/{project_id}")
 async def get_cached_entries(
     project_id: str,
     collection: Optional[str] = Query(None),
-    limit: int = Query(100, ge=1, le=1000),
+    limit: int = Query(100, ge=1, le=8000),
     offset: int = Query(0, ge=0),
 ):
     """

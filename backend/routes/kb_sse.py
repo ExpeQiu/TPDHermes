@@ -184,18 +184,19 @@ async def kb_events_subscribe(
     sub = await _kb_sse_manager.subscribe()
 
     async def filtered_stream():
-        async for line in _sse_stream(sub):
-            # 如果指定了 project_id，过滤不相关事件
-            if project_id:
-                # 解析 line 中的 event 数据
-                try:
-                    data_str = line.split("data: ", 1)[1].strip()
-                    evt = json.loads(data_str)
-                    if evt.get("project_id") and evt["project_id"] != project_id:
-                        continue
-                except Exception:
-                    pass
-            yield line
+        try:
+            async for line in _sse_stream(sub):
+                if project_id:
+                    try:
+                        data_str = line.split("data: ", 1)[1].strip()
+                        evt = json.loads(data_str)
+                        if evt.get("project_id") and evt["project_id"] != project_id:
+                            continue
+                    except Exception:
+                        pass
+                yield line
+        finally:
+            await _kb_sse_manager.unsubscribe(sub)
 
     return StreamingResponse(
         filtered_stream(),

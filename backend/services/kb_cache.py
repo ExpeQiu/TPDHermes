@@ -11,6 +11,7 @@ from sqlalchemy import select
 from backend.models.kb_cache import KBCache
 from backend.db import engine, async_session_maker
 from backend.db import Base
+from backend.services.kb_metadata import normalize_kb_metadata_dict
 
 
 class KBCacheService:
@@ -56,6 +57,14 @@ class KBCacheService:
         await self.ensure_table()
         results = {"synced": 0, "failed": 0, "skipped": 0}
 
+        async def _notify(event_type: str, **extra: object) -> None:
+            try:
+                from backend.routes.kb_sse import notify_kb_event
+
+                await notify_kb_event(event_type, source="kb_cache", **extra)
+            except Exception:
+                pass
+
         try:
             import httpx
             async with httpx.AsyncClient(timeout=10.0) as client:
@@ -79,18 +88,35 @@ class KBCacheService:
                             continue
                         col_resp.raise_for_status()
 
-                        # 获取所有条目
-                        query_resp = await client.post(
-                            f"{external_kb_url}/api/v1/collections/{col_name}/query",
-                            json={"query_embeddings": [], "n_results": 1000, "include": ["metadatas", "documents"]},
+                        get_resp = await client.post(
+                            f"{external_kb_url}/api/v1/collections/{col_name}/get",
+                            json={
+                                "limit": 10000,
+                                "offset": 0,
+                                "include": ["metadatas", "documents"],
+                            },
                         )
-                        query_resp.raise_for_status()
-                        query_data = query_resp.json()
+                        get_resp.raise_for_status()
+                        query_data = get_resp.json()
+
+                        docs_raw = query_data.get("documents") or []
+                        metas_raw = query_data.get("metadatas") or []
+                        if docs_raw and isinstance(docs_raw[0], list):
+                            docs_list: list = docs_raw[0]
+                        else:
+                            docs_list = docs_raw if isinstance(docs_raw, list) else []
+                        if metas_raw and isinstance(metas_raw[0], list):
+                            metas_list: list = metas_raw[0]
+                        else:
+                            metas_list = metas_raw if isinstance(metas_raw, list) else []
 
                         # 逐条写入本地缓存
                         async with async_session_maker() as db:
-                            for i, doc in enumerate(query_data.get("documents", [])):
-                                metadata = query_data.get("metadatas", [{}])[i] or {}
+                            for i, doc in enumerate(docs_list):
+                                metadata = (metas_list[i] if i < len(metas_list) else {}) or {}
+                                if not isinstance(metadata, dict):
+                                    metadata = {}
+                                metadata = normalize_kb_metadata_dict(metadata)
                                 entry_id = metadata.get("id") or str(uuid.uuid4())
 
                                 existing = await db.execute(
@@ -129,8 +155,16 @@ class KBCacheService:
         except Exception:
             # 外部 KB 不可用，降级为纯缓存模式
             self._sync_mode = True
+            await _notify("query_fallback", project_id=project_id, data={"phase": "sync_failed"})
             return results
 
+        # 同步成功：清除「仅缓存」粘性标记，并广播完成事件
+        self._sync_mode = False
+        await _notify(
+            "sync_complete",
+            project_id=project_id,
+            data={"synced": results["synced"], "failed": results["failed"], "skipped": results["skipped"]},
+        )
         return results
 
     async def get_cached_entries(
@@ -171,7 +205,9 @@ class KBCacheService:
                     "project_id": e.project_id,
                     "collection": e.collection,
                     "content": e.content,
-                    "metadata": json.loads(e.metadata_) if e.metadata_ else {},
+                    "metadata": normalize_kb_metadata_dict(
+                        json.loads(e.metadata_) if e.metadata_ else {}
+                    ),
                     "source": e.source,
                     "reliability": e.reliability,
                     "created_at": e.created_at,
@@ -179,6 +215,28 @@ class KBCacheService:
                 }
                 for e in entries
             ]
+
+    async def get_cached_entry_by_id(self, entry_id: str) -> dict | None:
+        """按主键 id 取单条（kb_cache.id 全局唯一）。"""
+        await self.ensure_table()
+        async with async_session_maker() as db:
+            row = await db.get(KBCache, entry_id)
+            if not row:
+                return None
+            e = row
+            return {
+                "id": e.id,
+                "project_id": e.project_id,
+                "collection": e.collection,
+                "content": e.content,
+                "metadata": normalize_kb_metadata_dict(
+                    json.loads(e.metadata_) if e.metadata_ else {}
+                ),
+                "source": e.source,
+                "reliability": e.reliability,
+                "created_at": e.created_at,
+                "updated_at": e.updated_at,
+            }
 
     async def get_cache_stats(self, project_id: str) -> dict:
         """获取项目缓存统计信息"""

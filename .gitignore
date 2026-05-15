@@ -31,3 +31,6 @@ out/
 # Temporary
 tmp/
 *.tmp
+
+# Hermes 源码 zip（解压到 hermes-agent/hermes-agent-main/ 后勿提交压缩包）
+hermes-agent/*.zip

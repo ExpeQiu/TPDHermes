@@ -160,6 +160,53 @@ def run_sqlite_migrations(connection: Connection) -> None:
         )
         logger.info("sqlite_migrate: created table project_attachments")
 
+    if "kb_ingest_jobs" not in names:
+        connection.execute(
+            text(
+                """
+                CREATE TABLE kb_ingest_jobs (
+                    id TEXT PRIMARY KEY,
+                    source_type TEXT NOT NULL DEFAULT 'manifest',
+                    collection TEXT NOT NULL,
+                    status TEXT NOT NULL DEFAULT 'queued',
+                    payload_json TEXT NOT NULL DEFAULT '{}',
+                    result_json TEXT,
+                    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+                    created_by TEXT
+                )
+                """
+            )
+        )
+        logger.info("sqlite_migrate: created table kb_ingest_jobs")
+
+    if "kb_source_files" not in names:
+        connection.execute(
+            text(
+                """
+                CREATE TABLE kb_source_files (
+                    id TEXT PRIMARY KEY,
+                    file_name TEXT NOT NULL,
+                    stored_path TEXT NOT NULL,
+                    checksum TEXT,
+                    mime_type TEXT,
+                    size INTEGER NOT NULL DEFAULT 0,
+                    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+                )
+                """
+            )
+        )
+        logger.info("sqlite_migrate: created table kb_source_files")
+
+    if "kb_source_files" in names:
+        _add_columns(
+            connection,
+            "kb_source_files",
+            [
+                ("doc_id_hint", "TEXT"),
+            ],
+        )
+
     _seed_builtin_scenarios(connection)
     _backfill_project_scenario_bindings(connection)
 
