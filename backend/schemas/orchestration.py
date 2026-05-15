@@ -179,6 +179,10 @@ class TaskExecuteRequest(BaseModel):
         default=None,
         description="建议开场提示，写入 scenario.opening_hint",
     )
+    source_output_id: str | None = Field(
+        default=None,
+        description="结果优化：来源输出 ID，服务端将拉取正文写入 task_input.source_material（若尚未填写）",
+    )
     overrides: TaskExecuteOverrides | None = None
     stream: bool = True
     messages: list[ChatTurnMessage] | None = None

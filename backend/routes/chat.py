@@ -30,7 +30,12 @@ class ChatCompletionRequest(BaseModel):
 
 
 def _chat_target() -> tuple[str, str]:
-    url = os.getenv("HERMES_CHAT_API_URL", "http://localhost:8642/v1/chat/completions").strip()
+    url = os.getenv("HERMES_CHAT_API_URL", "").strip()
+    if not url:
+        raise RuntimeError(
+            "HERMES_CHAT_API_URL environment variable is not set. "
+            "Cannot proxy chat requests without a configured upstream URL."
+        )
     api_key = os.getenv("HERMES_CHAT_API_KEY", "").strip()
     return url, api_key
 

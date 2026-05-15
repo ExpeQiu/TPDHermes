@@ -1,4 +1,7 @@
-/** 与 `/create` Step1 场景列表一致的内置预设（id 与服务端 scenario_profiles 对齐）。 */
+/**
+ * 内置种子数据：仅用于 `/create` 冷启动与引导卡片。
+ * 对话创作、场景输出等执行链路以服务端 `ScenarioProfile` / GET /scenarios/{id} 为准。
+ */
 
 export type Scenario = {
   id: string;

@@ -346,6 +346,9 @@ class SkillLifecycleService:
         except json.JSONDecodeError:
             pass
 
+        src = (skill.source or "local").strip().lower()
+        scope = "personal" if src in ("upload", "user") else "public"
+
         return {
             "id": skill.id,
             "name": skill.name,
@@ -354,6 +357,7 @@ class SkillLifecycleService:
             "version": skill.version,
             "enabled": bool(skill.enabled),
             "source": skill.source,
+            "scope": scope,
             "version_history": version_history,
             "installed_at": skill.installed_at,
             "updated_at": skill.updated_at,

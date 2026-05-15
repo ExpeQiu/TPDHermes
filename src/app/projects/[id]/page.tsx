@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useRef, useCallback } from "react";
+import { useEffect, useState, useRef, useCallback, useMemo } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
 import Feedback from "@/components/Feedback";
@@ -24,6 +24,13 @@ const statusColors: Record<string, string> = {
   archived: "bg-slate-500",
 };
 
+const outputStatusLabels: Record<string, string> = {
+  draft: "草稿",
+  completed: "已完成",
+  approved: "已批准",
+  archived: "已归档",
+};
+
 const statusLabels: Record<string, string> = {
   active: "进行中",
   paused: "已暂停",
@@ -37,6 +44,7 @@ interface ApiOutputRow {
   summary: string | null;
   template_id: string | null;
   run_id: string | null;
+  scenario_id?: string | null;
   status: string;
   created_at: string | null;
   content_preview: string;
@@ -73,6 +81,8 @@ interface ProjectOutput {
   created_at: string;
   word_count: number;
   tags: string[];
+  scenario_id?: string | null;
+  status: string;
 }
 
 function mapApiOutput(o: ApiOutputRow): ProjectOutput {
@@ -81,6 +91,7 @@ function mapApiOutput(o: ApiOutputRow): ProjectOutput {
     o.status,
     o.template_id ? `模板:${o.template_id}` : null,
     o.run_id ? `run:${o.run_id.slice(0, 8)}` : null,
+    o.scenario_id ? `场景:${o.scenario_id.slice(0, 8)}` : null,
   ].filter(Boolean) as string[];
   return {
     id: o.id,
@@ -91,6 +102,8 @@ function mapApiOutput(o: ApiOutputRow): ProjectOutput {
     created_at: o.created_at ?? "",
     word_count: body.replace(/\s/g, "").length,
     tags,
+    scenario_id: o.scenario_id ?? null,
+    status: o.status || "draft",
   };
 }
 
@@ -102,6 +115,28 @@ interface ApiAttachmentRow {
   size_bytes: number;
   created_at: string | null;
 }
+
+/** GET /projects/{id}/scenarios */
+interface ProjectBoundScenario {
+  binding_id: string;
+  scenario_id: string;
+  scenario_code: string;
+  scenario_name: string;
+  scenario_version: string;
+  scenario_description: string | null;
+  scenario_status: string;
+  is_default: number;
+  enabled: number;
+}
+
+type ScenarioCatalogRow = {
+  id: string;
+  code: string;
+  name: string;
+  description: string | null;
+  status: string;
+  version: string;
+};
 
 function formatFileSize(bytes: number) {
   if (bytes < 1024) return `${bytes} B`;
@@ -147,6 +182,7 @@ export default function ProjectDetailPage() {
   const [attachments, setAttachments] = useState<ApiAttachmentRow[]>([]);
   const [attachmentUploading, setAttachmentUploading] = useState(false);
   const [attachmentError, setAttachmentError] = useState<string | null>(null);
+  const [outputGovernBusy, setOutputGovernBusy] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [editOpen, setEditOpen] = useState(false);
   const [editSaving, setEditSaving] = useState(false);
@@ -160,6 +196,12 @@ export default function ProjectDetailPage() {
     status: "active" as Project["status"],
   });
 
+  const [bindSelectId, setBindSelectId] = useState("");
+  const [bindBusy, setBindBusy] = useState(false);
+  const [boundScenarios, setBoundScenarios] = useState<ProjectBoundScenario[]>([]);
+  const [boundLoading, setBoundLoading] = useState(false);
+  const [catalogScenarios, setCatalogScenarios] = useState<ScenarioCatalogRow[]>([]);
+
   const refreshAttachments = useCallback(async () => {
     if (!id) return;
     const list = await apiGet<ApiAttachmentRow[]>(
@@ -167,6 +209,103 @@ export default function ProjectDetailPage() {
     ).catch(() => [] as ApiAttachmentRow[]);
     setAttachments(list);
   }, [id]);
+
+  const refreshBoundScenarios = useCallback(async () => {
+    if (!id) return;
+    setBoundLoading(true);
+    try {
+      const rows = await apiGet<ProjectBoundScenario[]>(`/projects/${String(id)}/scenarios`);
+      setBoundScenarios(rows);
+    } catch {
+      setBoundScenarios([]);
+    } finally {
+      setBoundLoading(false);
+    }
+  }, [id]);
+
+  const refreshOutputs = useCallback(async (): Promise<ProjectOutput[]> => {
+    if (!id) return [];
+    const outRows = await apiGet<ApiOutputRow[]>(`/projects/${String(id)}/outputs`).catch(
+      () => [] as ApiOutputRow[],
+    );
+    const mapped = outRows.map(mapApiOutput);
+    setOutputs(mapped);
+    return mapped;
+  }, [id]);
+
+  const bindableScenarios = useMemo(() => {
+    const boundIds = new Set(boundScenarios.map((b) => b.scenario_id));
+    return catalogScenarios.filter((s) => {
+      if (boundIds.has(s.id)) return false;
+      const st = (s.status || "draft").toLowerCase();
+      return st === "published";
+    });
+  }, [catalogScenarios, boundScenarios]);
+
+  useEffect(() => {
+    if (!id) return;
+    void refreshBoundScenarios();
+  }, [id, refreshBoundScenarios]);
+
+  useEffect(() => {
+    apiGet<ScenarioCatalogRow[]>("/scenarios/")
+      .then(setCatalogScenarios)
+      .catch(() => setCatalogScenarios([]));
+  }, []);
+
+  const setDefaultBoundScenario = async (scenarioId: string) => {
+    if (!id) return;
+    try {
+      const res = await apiFetch(`/projects/${String(id)}/scenarios/${scenarioId}/default`, {
+        method: "POST",
+      });
+      await readJson(res);
+      await refreshBoundScenarios();
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "设置默认失败");
+    }
+  };
+
+  const unbindScenario = async (scenarioId: string) => {
+    if (!id || !window.confirm("确定解除该场景绑定？")) return;
+    try {
+      const res = await apiFetch(`/projects/${String(id)}/scenarios/${scenarioId}`, {
+        method: "DELETE",
+      });
+      await readJson<{ message?: string }>(res);
+      await refreshBoundScenarios();
+    } catch (eff) {
+      alert(eff instanceof Error ? eff.message : "解绑失败");
+    }
+  };
+
+  const bindScenarioToProject = async () => {
+    if (!id || !bindSelectId) {
+      alert("请选择要绑定的场景");
+      return;
+    }
+    const row = catalogScenarios.find((s) => s.id === bindSelectId);
+    if (!row) return;
+    setBindBusy(true);
+    try {
+      const res = await apiFetch(`/projects/${String(id)}/scenarios`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          scenario_id: row.id,
+          scenario_version: row.version,
+          is_default: boundScenarios.filter((b) => b.enabled === 1).length === 0,
+        }),
+      });
+      await readJson(res);
+      setBindSelectId("");
+      await refreshBoundScenarios();
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "绑定失败");
+    } finally {
+      setBindBusy(false);
+    }
+  };
 
   useEffect(() => {
     if (!id) return;
@@ -210,7 +349,11 @@ export default function ProjectDetailPage() {
     setOutputFullContent(null);
     apiGet<ApiOutputDetail>(`/projects/${String(id)}/outputs/${selectedOutput.id}`)
       .then((d) => {
-        if (!cancelled) setOutputFullContent(d.content);
+        if (cancelled) return;
+        setOutputFullContent(d.content);
+        setSelectedOutput((prev) =>
+          prev && prev.id === d.id ? { ...prev, status: d.status } : prev,
+        );
       })
       .catch(() => {
         if (!cancelled) setOutputFullContent(null);
@@ -228,6 +371,44 @@ export default function ProjectDetailPage() {
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     });
+  };
+
+  const handleApproveProjectOutput = async () => {
+    if (!id || !selectedOutput) return;
+    setOutputGovernBusy(true);
+    try {
+      const res = await apiFetch(`/projects/${String(id)}/outputs/${selectedOutput.id}/approve`, {
+        method: "POST",
+      });
+      await readJson(res);
+      const mapped = await refreshOutputs();
+      const next = mapped.find((o) => o.id === selectedOutput.id);
+      if (next) setSelectedOutput(next);
+      console.info("[project] 输出已批准", { project_id: id, output_id: selectedOutput.id });
+    } catch (e) {
+      alert(e instanceof Error ? e.message : "批准失败");
+    } finally {
+      setOutputGovernBusy(false);
+    }
+  };
+
+  const handleArchiveProjectOutput = async () => {
+    if (!id || !selectedOutput) return;
+    setOutputGovernBusy(true);
+    try {
+      const res = await apiFetch(`/projects/${String(id)}/outputs/${selectedOutput.id}/archive`, {
+        method: "POST",
+      });
+      await readJson(res);
+      const mapped = await refreshOutputs();
+      const next = mapped.find((o) => o.id === selectedOutput.id);
+      if (next) setSelectedOutput(next);
+      console.info("[project] 输出已归档", { project_id: id, output_id: selectedOutput.id });
+    } catch (e) {
+      alert(e instanceof Error ? e.message : "归档失败");
+    } finally {
+      setOutputGovernBusy(false);
+    }
   };
 
   const handlePickAttachment = () => {
@@ -465,10 +646,127 @@ export default function ProjectDetailPage() {
                     </p>
                     <h2 className="mt-2 text-xl font-semibold text-white">工作流入口</h2>
                     <div className="mt-5 space-y-3">
-                      <ActionLink href={`/create?project=${id}`} title="发起场景编排" desc="" />
-                      <ActionLink href={`/chat?project=${id}`} title="编排协作" desc="" />
-                      <ActionLink href={`/workshop?project_id=${id}`} title="结果工坊" desc="" />
+                      <ActionLink
+                        href={`/chat?project_id=${id}`}
+                        title="进入对话创作"
+                        desc=""
+                      />
+                      <ActionLink
+                        href={`/workshop?project_id=${id}`}
+                        title="进入场景输出"
+                        desc=""
+                      />
+                      <ActionLink href={`/create?return_project_id=${id}`} title="场景编排（全局维护）" desc="" />
                     </div>
+                  </div>
+                </div>
+
+                <div className="rounded-3xl border border-slate-700 bg-slate-800/50 p-5 sm:p-6">
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                    <div>
+                      <p className="text-xs uppercase tracking-[0.2em] text-slate-500">Scenario Bindings</p>
+                      <h2 className="mt-2 text-xl font-semibold text-white">已绑定场景</h2>
+                      <p className="mt-1 text-xs text-slate-500">
+                        「场景输出」仅可选择此处已启用绑定。维护合同请用下方入口前往场景编排。
+                      </p>
+                    </div>
+                    <Link
+                      href={`/create?return_project_id=${id}`}
+                      className="inline-flex shrink-0 items-center justify-center rounded-xl border border-slate-600 bg-slate-900/80 px-4 py-2 text-xs font-medium text-slate-200 transition hover:border-blue-500/40 hover:text-white"
+                    >
+                      场景编排
+                    </Link>
+                  </div>
+                  {boundLoading ? (
+                    <p className="mt-4 text-sm text-slate-500">加载绑定列表…</p>
+                  ) : boundScenarios.filter((b) => b.enabled === 1).length === 0 ? (
+                    <p className="mt-4 text-sm text-amber-400/90">
+                      尚未绑定可执行场景。请绑定或前往场景编排创建后回到本页添加绑定。
+                    </p>
+                  ) : (
+                    <ul className="mt-4 space-y-2">
+                      {boundScenarios
+                        .filter((b) => b.enabled === 1)
+                        .map((b) => {
+                          const bindSt = (b.scenario_status || "draft").toLowerCase();
+                          const workshopReady = bindSt === "published";
+                          return (
+                          <li
+                            key={b.binding_id}
+                            className="flex flex-col gap-2 rounded-2xl border border-slate-700 bg-slate-900/50 px-4 py-3 text-sm sm:flex-row sm:items-center sm:justify-between"
+                          >
+                            <div className="min-w-0">
+                              <p className="font-medium text-white">{b.scenario_name}</p>
+                              <p className="mt-0.5 font-mono text-xs text-slate-500">
+                                {b.scenario_code} · v{b.scenario_version} · {b.scenario_status}
+                                {b.is_default === 1 ? " · 默认" : ""}
+                              </p>
+                              {!workshopReady ? (
+                                <p className="mt-1 text-xs text-amber-400/90">
+                                  场景输出不可选：需场景为 published；当前为 {b.scenario_status || "draft"}
+                                  （请发布或解绑后重新绑定）
+                                </p>
+                              ) : null}
+                              {b.scenario_description ? (
+                                <p className="mt-1 line-clamp-2 text-xs text-slate-400">
+                                  {b.scenario_description}
+                                </p>
+                              ) : null}
+                            </div>
+                            <div className="flex shrink-0 flex-wrap gap-2">
+                              {b.is_default !== 1 ? (
+                                <button
+                                  type="button"
+                                  onClick={() => void setDefaultBoundScenario(b.scenario_id)}
+                                  className="rounded-lg border border-slate-600 px-2.5 py-1 text-xs text-slate-200 transition hover:bg-slate-800"
+                                >
+                                  设为默认
+                                </button>
+                              ) : null}
+                              <button
+                                type="button"
+                                onClick={() => void unbindScenario(b.scenario_id)}
+                                className="rounded-lg border border-red-900/50 px-2.5 py-1 text-xs text-red-300 transition hover:bg-red-950/40"
+                              >
+                                解绑
+                              </button>
+                            </div>
+                          </li>
+                          );
+                        })}
+                    </ul>
+                  )}
+                  <div className="mt-4 space-y-3 rounded-2xl border border-slate-800 bg-slate-950/40 p-4">
+                    <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
+                      <label className="block flex-1 space-y-2 text-sm">
+                        <span className="text-slate-400">绑定已有场景</span>
+                        <select
+                          value={bindSelectId}
+                          onChange={(e) => setBindSelectId(e.target.value)}
+                          className="w-full rounded-xl border border-slate-700 bg-slate-950/70 px-3 py-2 text-sm text-white outline-none focus:border-blue-500"
+                        >
+                          <option value="">选择场景…</option>
+                          {bindableScenarios.map((s) => (
+                            <option key={s.id} value={s.id}>
+                              {s.name} · v{s.version} · {s.status}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                      <button
+                        type="button"
+                        disabled={bindBusy || !bindSelectId}
+                        onClick={() => void bindScenarioToProject()}
+                        className="rounded-xl bg-blue-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-blue-500 disabled:opacity-50"
+                      >
+                        {bindBusy ? "绑定中…" : "添加绑定"}
+                      </button>
+                    </div>
+                    {bindableScenarios.length === 0 && catalogScenarios.length > 0 ? (
+                      <p className="text-xs text-slate-500">
+                        下拉仅列出已发布（published）且未绑定的场景；草稿或停用场景请先在场景编排中发布。
+                      </p>
+                    ) : null}
                   </div>
                 </div>
 
@@ -652,9 +950,14 @@ export default function ProjectDetailPage() {
                           <span className="text-2xl">{selectedOutput.skill_icon}</span>
                           <div className="min-w-0">
                             <h2 className="font-semibold text-sm sm:text-base truncate">{selectedOutput.title}</h2>
+                            <div className="mt-1 flex flex-wrap items-center gap-2">
                               <p className="text-xs text-slate-500">
                                 {selectedOutput.skill_name} · {formatDate(selectedOutput.created_at)}
                               </p>
+                              <span className="rounded bg-slate-700/80 px-2 py-0.5 text-[11px] font-medium text-slate-200">
+                                {outputStatusLabels[selectedOutput.status] ?? selectedOutput.status}
+                              </span>
+                            </div>
                           </div>
                         </div>
                         <div className="flex items-center gap-2 shrink-0 ml-3">
@@ -683,19 +986,42 @@ export default function ProjectDetailPage() {
                             : outputFullContent ?? selectedOutput.content}
                         </pre>
                       </div>
-                      <div className="p-4 border-t border-slate-700 flex gap-3">
-                        <Link
-                          href={`/workshop?project_id=${id}`}
-                          className="flex-1 px-4 py-2 bg-blue-600 hover:bg-blue-500 rounded-lg text-sm font-medium text-center transition"
-                        >
-                          基于此优化
-                        </Link>
-                        <button
-                          onClick={() => setSelectedOutput(null)}
-                          className="px-4 py-2 bg-slate-700 hover:bg-slate-600 rounded-lg text-sm transition"
-                        >
-                          关闭
-                        </button>
+                      <div className="border-t border-slate-700 p-4">
+                        <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
+                          <Link
+                            href={`/workshop?project_id=${id}&scenario_id=${encodeURIComponent(selectedOutput.scenario_id || "")}&output_id=${selectedOutput.id}&mode=refine`}
+                            className="flex-1 min-w-[10rem] px-4 py-2 bg-blue-600 hover:bg-blue-500 rounded-lg text-sm font-medium text-center transition"
+                          >
+                            基于此优化
+                          </Link>
+                          <button
+                            type="button"
+                            onClick={() => void handleApproveProjectOutput()}
+                            disabled={
+                              outputGovernBusy ||
+                              selectedOutput.status === "approved" ||
+                              selectedOutput.status === "archived"
+                            }
+                            className="px-4 py-2 rounded-lg text-sm font-medium border border-emerald-600/50 bg-emerald-500/15 text-emerald-100 hover:bg-emerald-500/25 transition disabled:opacity-40 disabled:cursor-not-allowed"
+                          >
+                            批准
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => void handleArchiveProjectOutput()}
+                            disabled={outputGovernBusy || selectedOutput.status === "archived"}
+                            className="px-4 py-2 rounded-lg text-sm font-medium border border-amber-600/50 bg-amber-500/15 text-amber-100 hover:bg-amber-500/25 transition disabled:opacity-40 disabled:cursor-not-allowed"
+                          >
+                            归档
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setSelectedOutput(null)}
+                            className="px-4 py-2 bg-slate-700 hover:bg-slate-600 rounded-lg text-sm transition sm:ml-auto"
+                          >
+                            关闭
+                          </button>
+                        </div>
                       </div>
                     </div>
                   </div>

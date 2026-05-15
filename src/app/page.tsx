@@ -4,37 +4,37 @@ import { CONTENT_MAX_CLASS } from "@/lib/content-shell";
 
 export const metadata: Metadata = {
   title: "首页",
-  description: "以项目与编排为中心，统一串联需求澄清、任务执行、结果沉淀与优化协作。",
+  description: "以项目为主入口，对话创作与场景输出为生产路径，场景编排与知识、技能为支撑层。",
 };
 
 const entries = [
   {
     href: "/projects",
-    title: "项目中心",
-    desc: "项目与任务主入口",
+    title: "项目管理",
+    desc: "主入口：进入项目后发起对话创作或场景输出",
     accent: "from-blue-600 to-indigo-600",
     eyebrow: "Project",
   },
   {
-    href: "/create",
-    title: "场景编排",
-    desc: "创建和维护可复用场景",
-    accent: "from-sky-600 to-blue-500",
-    eyebrow: "Compose",
-  },
-  {
     href: "/chat",
-    title: "编排协作",
-    desc: "对话与任务执行",
+    title: "对话创作",
+    desc: "基于项目的开放式多轮协作",
     accent: "from-violet-600 to-purple-700",
-    eyebrow: "Run",
+    eyebrow: "Chat",
   },
   {
     href: "/workshop",
-    title: "结果工坊",
-    desc: "在项目中基于场景生成结果",
+    title: "场景输出",
+    desc: "在项目内按已绑定场景生成与沉淀结果",
     accent: "from-slate-600 to-slate-800",
-    eyebrow: "Refine",
+    eyebrow: "Workshop",
+  },
+  {
+    href: "/create",
+    title: "场景编排",
+    desc: "维护场景合同（说明、技能、模板与规则）",
+    accent: "from-sky-600 to-blue-500",
+    eyebrow: "Compose",
   },
   {
     href: "/knowledge",
@@ -70,35 +70,35 @@ export default function Home() {
         <header className="home-animate-in mx-auto max-w-4xl text-center">
           <div className="inline-flex items-center gap-2 rounded-full border border-blue-500/30 bg-blue-500/10 px-3 py-1 text-xs font-medium text-blue-200">
             <span className="h-2 w-2 rounded-full bg-blue-400" aria-hidden />
-            统一任务编排工作台
+            推荐路径：项目管理 → 对话创作 / 场景输出
           </div>
           <p className="mt-5 text-xs font-medium uppercase tracking-[0.2em] text-slate-500">
             TPDHermes
           </p>
           <h1 className="mt-3 text-balance bg-gradient-to-b from-white to-slate-400 bg-clip-text text-3xl font-semibold tracking-tight text-transparent sm:text-4xl md:text-5xl">
-            项目与编排协作工作台
+            项目驱动的创作与输出工作台
           </h1>
           <p className="mx-auto mt-4 max-w-2xl text-pretty text-sm text-slate-400 sm:text-base">
-            从项目、场景编排进入对话与工坊，统一任务边界与输出沉淀。
+            从项目进入对话创作与场景输出；场景编排、知识与技能用于配置与支撑。
           </p>
           <div className="mt-8 flex flex-col items-center justify-center gap-3 sm:flex-row">
             <Link
-              href="/create"
+              href="/projects"
               className="inline-flex min-w-40 items-center justify-center rounded-xl bg-blue-600 px-5 py-3 text-sm font-medium text-white transition hover:bg-blue-500"
             >
-              发起场景编排
+              进入项目管理
+            </Link>
+            <Link
+              href="/chat"
+              className="inline-flex min-w-40 items-center justify-center rounded-xl border border-slate-700 bg-slate-900/60 px-5 py-3 text-sm font-medium text-slate-200 transition hover:border-slate-600 hover:bg-slate-900"
+            >
+              对话创作
             </Link>
             <Link
               href="/workshop"
-              className="inline-flex min-w-40 items-center justify-center rounded-xl border border-slate-700 bg-slate-900/60 px-5 py-3 text-sm font-medium text-slate-200 transition hover:border-slate-600 hover:bg-slate-900"
-            >
-              打开结果工坊
-            </Link>
-            <Link
-              href="/projects"
               className="inline-flex min-w-40 items-center justify-center rounded-xl border border-slate-800 bg-slate-950/50 px-5 py-3 text-sm font-medium text-slate-300 transition hover:border-slate-600 hover:bg-slate-900/80"
             >
-              项目中心
+              场景输出
             </Link>
           </div>
         </header>

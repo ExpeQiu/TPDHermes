@@ -576,7 +576,8 @@ export default function KnowledgePage() {
             <div>
               <h1 className="text-3xl font-bold sm:text-4xl">知识范围与检索</h1>
               <p className="mt-2 max-w-2xl text-sm text-slate-400 sm:text-base">
-                浏览集合、验证检索，供编排与对话引用。
+                面向<strong className="text-slate-200">公共知识库</strong>
+                的浏览与检索验证；条目可被对话创作与场景输出引用，与具体项目的附件/输出解耦。
               </p>
             </div>
             <div className="flex flex-wrap gap-2">
@@ -586,12 +587,12 @@ export default function KnowledgePage() {
               >
                 查看项目中心
               </Link>
-              <Link
-                href="/create"
+              <a
+                href="#kb-workspace"
                 className="rounded-xl border border-emerald-500/40 bg-emerald-500/10 px-4 py-2.5 text-sm font-medium text-emerald-200 transition hover:border-emerald-400 hover:bg-emerald-500/20"
               >
-                上传知识
-              </Link>
+                知识库工作区
+              </a>
             </div>
           </div>
         </header>
@@ -609,7 +610,7 @@ export default function KnowledgePage() {
 
         <KBDegradedBanner />
 
-        <section className="rounded-3xl border border-slate-800 bg-slate-900/50 p-6">
+        <section id="kb-workspace" className="rounded-3xl border border-slate-800 bg-slate-900/50 p-6">
           <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
             <div>
               <p className="text-xs uppercase tracking-[0.2em] text-slate-500">Knowledge Workspace</p>

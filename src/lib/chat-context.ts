@@ -220,6 +220,7 @@ export interface TaskInputPayload {
 }
 
 export interface TaskExecuteBody {
+  /** 标准入口：任务与编排请求均使用 project_id（旧版部分链接仍传 `project`，由前端读取后映射） */
   entrypoint: "chat" | "create" | "workshop" | "quick_create" | "project";
   project_id?: string | null;
   scenario_id?: string | null;
@@ -227,6 +228,8 @@ export interface TaskExecuteBody {
   task_input?: TaskInputPayload | null;
   scenario_preset_instructions?: string | null;
   scenario_opening_hint?: string | null;
+  /** 场景输出优化：来源输出 ID，后端写入 source_material */
+  source_output_id?: string | null;
   overrides?: TaskExecuteOverrides;
   stream: boolean;
   messages?: Array<{ role: "user" | "assistant"; content: string }>;
@@ -253,6 +256,51 @@ export async function fetchOrchestrationPreview(
     body: JSON.stringify(body),
   });
   return readJson<OrchestrationPreviewResponse>(res);
+}
+
+/** GET /projects/{id}/context 响应，用于对话创作注入编排。 */
+export interface ProjectContextResponse {
+  project_id: string;
+  name: string;
+  description: string | null;
+  background: string | null;
+  audience: string | null;
+  attachments: Array<{ id: string; original_filename: string }>;
+  recent_outputs: Array<{
+    id: string;
+    title: string | null;
+    summary: string | null;
+    created_at: string | null;
+  }>;
+}
+
+export async function fetchProjectContext(projectId: string): Promise<ProjectContextResponse> {
+  return apiGet<ProjectContextResponse>(`/projects/${projectId}/context`);
+}
+
+/** 写入 task_input.extra，进入编排合并块。 */
+export function formatProjectContextForTaskInput(ctx: ProjectContextResponse): string {
+  const lines: string[] = [];
+  lines.push(`[项目上下文] ${ctx.name}`);
+  const desc = ctx.description?.trim();
+  if (desc) lines.push(`说明: ${desc.slice(0, 800)}`);
+  const bg = ctx.background?.trim();
+  if (bg) lines.push(`背景: ${bg.slice(0, 800)}`);
+  const aud = ctx.audience?.trim();
+  if (aud) lines.push(`受众: ${aud.slice(0, 400)}`);
+  if (ctx.attachments.length > 0) {
+    const names = ctx.attachments.map((a) => a.original_filename).filter(Boolean);
+    if (names.length) lines.push(`附件列表: ${names.join("、")}`);
+  }
+  if (ctx.recent_outputs.length > 0) {
+    lines.push("近期项目输出（摘要，供参考，勿逐字照抄）:");
+    for (const o of ctx.recent_outputs.slice(0, 10)) {
+      const t = (o.title || "未命名").trim();
+      const s = (o.summary || "").replace(/\s+/g, " ").trim().slice(0, 160);
+      lines.push(`- ${t} (id=${o.id})${s ? ` — ${s}` : ""}`);
+    }
+  }
+  return lines.join("\n");
 }
 
 /** 将编排预览转为侧栏展示块（替代显式 MCP 注入说明）。 */

@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.db import get_db
 from backend.models.scenario_profile import ScenarioProfile
+from backend.models.template import Template
 from backend.schemas.orchestration import TaskExecuteRequest, TaskExecuteOverrides
 from backend.services.orchestration_service import assemble_payload
 
@@ -54,6 +55,23 @@ class ScenarioUpdate(BaseModel):
     output_policy: dict[str, Any] | None = None
     preset_instructions: str | None = None
     opening_hint: str | None = None
+
+
+class ScenarioContractResponse(BaseModel):
+    """供工坊/项目控制台展示的场景合同摘要（与 ScenarioResponse 策略字段一致，体量固定）。"""
+
+    id: str
+    code: str
+    name: str
+    description: str | None
+    goal: str | None
+    preset_instructions: str | None
+    opening_hint: str | None
+    knowledge_policy: dict[str, Any]
+    skills_policy: dict[str, Any]
+    output_policy: dict[str, Any]
+    version: str
+    status: str
 
 
 class ScenarioResponse(BaseModel):
@@ -156,6 +174,27 @@ async def list_scenarios(
     return [_row_to_response(r) for r in rows]
 
 
+@router.get("/{scenario_id}/contract", response_model=ScenarioContractResponse)
+async def get_scenario_contract(scenario_id: str, db: AsyncSession = Depends(get_db)):
+    row = await db.get(ScenarioProfile, scenario_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="场景不存在")
+    return ScenarioContractResponse(
+        id=row.id,
+        code=row.code,
+        name=row.name,
+        description=row.description,
+        goal=row.goal,
+        preset_instructions=row.preset_instructions,
+        opening_hint=row.opening_hint,
+        knowledge_policy=json.loads(row.knowledge_policy_json) if row.knowledge_policy_json else {},
+        skills_policy=json.loads(row.skills_policy_json) if row.skills_policy_json else {},
+        output_policy=json.loads(row.output_policy_json) if row.output_policy_json else {},
+        version=row.version,
+        status=row.status,
+    )
+
+
 @router.get("/{scenario_id}", response_model=ScenarioResponse)
 async def get_scenario(scenario_id: str, db: AsyncSession = Depends(get_db)):
     row = await db.get(ScenarioProfile, scenario_id)
@@ -191,6 +230,52 @@ async def update_scenario(
     return _row_to_response(row)
 
 
+def _parse_policy_field(raw: str | None) -> dict[str, Any]:
+    if not raw:
+        return {}
+    try:
+        v = json.loads(raw)
+        return v if isinstance(v, dict) else {}
+    except json.JSONDecodeError:
+        return {}
+
+
+async def _ensure_scenario_publishable(db: AsyncSession, row: ScenarioProfile) -> None:
+    """发布前合同校验：技能白名单、输出策略与模板引用须满足工坊可执行条件。"""
+    skills = _parse_policy_field(row.skills_policy_json)
+    allowed = skills.get("allowed")
+    if not isinstance(allowed, list):
+        allowed = []
+    allowed_n = [str(x).strip() for x in allowed if str(x).strip()]
+    if not allowed_n:
+        raise HTTPException(
+            status_code=400,
+            detail="发布前校验失败：skills_policy.allowed 须为非空列表（工坊依赖合同内技能白名单）",
+        )
+
+    output = _parse_policy_field(row.output_policy_json)
+    req_raw = output.get("required_sections")
+    if not isinstance(req_raw, list):
+        req_raw = []
+    sections = [str(s).strip() for s in req_raw if str(s).strip()]
+    must_follow = bool(output.get("must_follow_template", False))
+    if must_follow and not sections:
+        raise HTTPException(
+            status_code=400,
+            detail="发布前校验失败：已设置 must_follow_template=true 时，required_sections 不能为空",
+        )
+
+    tid = output.get("template_id")
+    if tid is not None and str(tid).strip():
+        tid_s = str(tid).strip()
+        tpl = await db.get(Template, tid_s)
+        if not tpl:
+            raise HTTPException(
+                status_code=400,
+                detail=f"发布前校验失败：output_policy.template_id 不存在于模板库（{tid_s}）",
+            )
+
+
 def _bump_version(v: str) -> str:
     parts = v.split(".")
     if len(parts) == 3 and all(p.isdigit() for p in parts):
@@ -205,6 +290,7 @@ async def publish_scenario(scenario_id: str, db: AsyncSession = Depends(get_db))
     row = await db.get(ScenarioProfile, scenario_id)
     if not row:
         raise HTTPException(status_code=404, detail="场景不存在")
+    await _ensure_scenario_publishable(db, row)
     row.version = _bump_version(row.version)
     row.status = "published"
     row.updated_at = datetime.now().isoformat()

@@ -15,11 +15,13 @@ import httpx
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.db import get_db, async_session_maker
 from backend.models.orchestration_run import OrchestrationRun
-from backend.schemas.orchestration import OrchestrationPayload, TaskExecuteRequest
+from backend.models.output_asset import OutputAsset
+from backend.schemas.orchestration import OrchestrationPayload, TaskExecuteRequest, TaskInputPayload
 from backend.services.agent_gateway import build_chat_completion_body, parse_sse_data_line
 from backend.services.orchestration_service import (
     ProjectNotFoundError,
@@ -44,7 +46,12 @@ runs_router = APIRouter(prefix="/runs", tags=["runs"])
 
 
 def _chat_target() -> tuple[str, str]:
-    url = os.getenv("HERMES_CHAT_API_URL", "http://localhost:8642/v1/chat/completions").strip()
+    url = os.getenv("HERMES_CHAT_API_URL", "").strip()
+    if not url:
+        raise RuntimeError(
+            "HERMES_CHAT_API_URL environment variable is not set. "
+            "Cannot proxy chat requests without a configured upstream URL."
+        )
     api_key = os.getenv("HERMES_CHAT_API_KEY", "").strip()
     return url, api_key
 
@@ -73,7 +80,10 @@ async def _validate_task_request(db: AsyncSession, request: TaskExecuteRequest, 
     if request.entrypoint == "workshop":
         allowed = payload.skills.allowed
         if not allowed:
-            raise HTTPException(status_code=400, detail="工坊入口需要 overrides.skills.allowed 指定技能白名单")
+            raise HTTPException(
+                status_code=400,
+                detail="工坊入口需要有效的技能白名单：请在场景编排中配置 skills_policy.allowed，或在请求中提供 overrides.skills.allowed。",
+            )
         loader = get_loader()
         names = set(loader.discover())
         for name in allowed:
@@ -104,14 +114,45 @@ def _response_meta(payload: OrchestrationPayload, *, used_skills: list[str] | No
 
 @router.post("/execute")
 async def execute_task(request: TaskExecuteRequest, db: AsyncSession = Depends(get_db)):
+    eff_request = request
+    if (
+        eff_request.entrypoint == "workshop"
+        and eff_request.source_output_id
+        and (eff_request.project_id or "").strip()
+    ):
+        oid = eff_request.source_output_id.strip()
+        pid = eff_request.project_id.strip()
+        q = await db.execute(
+            select(OutputAsset).where(
+                OutputAsset.id == oid,
+                OutputAsset.project_id == pid,
+            )
+        )
+        src_row = q.scalar_one_or_none()
+        if not src_row:
+            raise HTTPException(status_code=404, detail=f"来源输出不存在: {oid}")
+        material = (src_row.content or "").strip()
+        ti = eff_request.task_input
+        if not material:
+            raise HTTPException(status_code=400, detail="来源输出正文为空，无法优化")
+        if ti is None:
+            eff_request = eff_request.model_copy(update={"task_input": TaskInputPayload(source_material=material)})
+        elif not (ti.source_material and str(ti.source_material).strip()):
+            eff_request = eff_request.model_copy(
+                update={"task_input": ti.model_copy(update={"source_material": material})},
+            )
+
     try:
-        payload, snapshot = await assemble_payload(db, request)
+        payload, snapshot = await assemble_payload(db, eff_request)
     except ProjectNotFoundError as exc:
         raise HTTPException(status_code=404, detail=f"项目不存在: {exc.project_id}") from exc
     except WorkshopBindingError as exc:
         raise HTTPException(status_code=400, detail=exc.detail) from exc
     except ScenarioVersionMismatchError as exc:
         raise HTTPException(status_code=409, detail=exc.detail) from exc
+
+    if eff_request.source_output_id:
+        snapshot = {**snapshot, "source_output_id": eff_request.source_output_id.strip()}
 
     user_text = payload.user_input.message
 
@@ -122,29 +163,32 @@ async def execute_task(request: TaskExecuteRequest, db: AsyncSession = Depends(g
             tpl_sections = extract_required_sections(tpl)
             payload = _merge_required_sections(payload, tpl_sections)
 
-    await _validate_task_request(db, request, payload)
+    await _validate_task_request(db, eff_request, payload)
 
     run_id = str(uuid.uuid4())
     await create_run(
         db,
         run_id=run_id,
-        project_id=request.project_id,
-        scenario_id=request.scenario_id,
-        entrypoint=request.entrypoint,
-        request_json=request.model_dump_json(),
+        project_id=eff_request.project_id,
+        scenario_id=eff_request.scenario_id,
+        entrypoint=eff_request.entrypoint,
+        request_json=eff_request.model_dump_json(),
         snapshot_json=json.dumps(snapshot, ensure_ascii=False),
         skills_policy_json=json.dumps(payload.skills.model_dump(), ensure_ascii=False),
     )
 
-    if request.entrypoint == "workshop":
+    if eff_request.entrypoint == "workshop":
         skill_name = payload.skills.allowed[0]
         context = _parse_workshop_context(user_text)
+        # Inject structured task_input so the skill can access individual fields
+        if eff_request.task_input is not None:
+            context["task_input"] = eff_request.task_input.model_dump(exclude_none=True)
 
         def _must_head_ws() -> bool:
             vr = payload.output.validation_rules
             return True if vr is None else bool(vr.must_have_headings)
 
-        if not request.stream:
+        if not eff_request.stream:
             t0 = time.perf_counter()
             try:
                 text = await run_workshop_skill_async(skill_name, context)
@@ -238,11 +282,11 @@ async def execute_task(request: TaskExecuteRequest, db: AsyncSession = Depends(g
             },
         )
 
-    messages = merge_chat_messages(request.messages, user_text)
+    messages = merge_chat_messages(eff_request.messages, user_text)
     upstream_body = build_chat_completion_body(payload, messages)
-    upstream_body["stream"] = request.stream
+    upstream_body["stream"] = eff_request.stream
 
-    if not request.stream:
+    if not eff_request.stream:
         target_url, api_key = _chat_target()
         headers = {"Content-Type": "application/json"}
         if api_key:

@@ -3,37 +3,35 @@
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { apiGet, apiV1 } from "@/lib/api";
+import { apiGet, apiV1, apiFetch, readJson } from "@/lib/api";
 import type { ProjectRecord, TaskExecuteBody, TaskInputPayload } from "@/lib/chat-context";
 import { CONTENT_MAX_CLASS } from "@/lib/content-shell";
-import { LOCAL_SCENARIO_IDS, SCENARIOS, type Scenario } from "@/lib/scenario-presets";
-
-const USE_MOCK_FALLBACK = process.env.NEXT_PUBLIC_USE_MOCK_WORKSHOP === "true";
 
 type GenStatus = "idle" | "generating" | "done" | "error";
 type WorkshopMode = "refine" | "generate";
 
-interface Skill {
-  id: string;
-  name: string;
-  description: string;
-  icon: string;
-  category: string;
-}
+type BoundScenarioRow = {
+  binding_id: string;
+  scenario_id: string;
+  scenario_code: string;
+  scenario_name: string;
+  scenario_version: string;
+  scenario_description: string | null;
+  scenario_status: string;
+  is_default: number;
+  enabled: number;
+};
 
-type ScenarioApiRow = {
+type ScenarioDetailResponse = {
   id: string;
   code: string;
   name: string;
   description: string | null;
-  status: string;
+  knowledge_policy: Record<string, unknown>;
+  skills_policy: Record<string, unknown>;
+  output_policy: Record<string, unknown>;
   version: string;
-};
-
-type WorkshopScenarioOption = {
-  id: string;
-  name: string;
-  versionLine: string;
+  status: string;
 };
 
 /** 与 `GET /projects/{id}/outputs` 列表项一致（按 scenario_id 筛选） */
@@ -49,6 +47,18 @@ type ScenarioLinkedOutputRow = {
   content_preview: string;
 };
 
+type ProjectOutputDetailApi = {
+  id: string;
+  content: string;
+  scenario_id?: string | null;
+};
+
+type WorkshopScenarioOption = {
+  id: string;
+  name: string;
+  versionLine: string;
+};
+
 function formatOutputTime(iso: string | null): string {
   if (!iso) return "—";
   const d = new Date(iso);
@@ -62,74 +72,6 @@ function formatOutputTime(iso: string | null): string {
         minute: "2-digit",
       });
 }
-
-function mapApiSkillToUi(row: { id: string; name: string; description: string }): Skill {
-  const pkg = row.name;
-  let icon = "📦";
-  if (pkg.includes("speech")) icon = "🎤";
-  else if (pkg.includes("video")) icon = "🎬";
-  else if (pkg.includes("a4")) icon = "📄";
-  else if (pkg.includes("hello")) icon = "👋";
-  let category = "文档";
-  if (pkg.includes("email") || pkg.includes("social")) category = "文案";
-  return {
-    id: pkg,
-    name: pkg.replace(/_/g, " "),
-    description: row.description || pkg,
-    icon,
-    category,
-  };
-}
-
-const MOCK_SKILLS: Skill[] = [
-  {
-    id: "speech",
-    name: "发言稿",
-    description: "生成领导讲话、产品发布、技术分享等场景的正式发言稿",
-    icon: "🎤",
-    category: "文档",
-  },
-  {
-    id: "video-script",
-    name: "视频脚本",
-    description: "生成短视频/宣传片的分镜脚本，包含旁白和画面描述",
-    icon: "🎬",
-    category: "文档",
-  },
-  {
-    id: "a4-onepager",
-    name: "A4一页纸",
-    description: "单页精华文档，提炼核心信息，适合快速阅读和传播",
-    icon: "📄",
-    category: "文档",
-  },
-  {
-    id: "article",
-    name: "技术文章",
-    description: "生成深度技术文章，适合公众号、技术博客发布",
-    icon: "✍️",
-    category: "文档",
-  },
-  {
-    id: "social-post",
-    name: "社交媒体文案",
-    description: "生成微博、小红书、朋友圈等社交平台的短文案",
-    icon: "📱",
-    category: "文案",
-  },
-  {
-    id: "email",
-    name: "商务邮件",
-    description: "生成专业商务邮件，支持多种场景和语气",
-    icon: "📧",
-    category: "文档",
-  },
-];
-
-const CATEGORY_LABELS: Record<string, string> = {
-  文档: "文档类",
-  文案: "文案类",
-};
 
 export default function WorkshopPage() {
   return (
@@ -150,14 +92,20 @@ function WorkshopPageInner() {
   const projectFromUrl =
     searchParams?.get("project_id") ?? searchParams?.get("project") ?? "";
   const scenarioFromUrl = searchParams?.get("scenario_id") ?? "";
-  const [skills, setSkills] = useState<Skill[]>([]);
+  const outputFromUrl = searchParams?.get("output_id")?.trim() ?? "";
+  const modeFromUrl = searchParams?.get("mode") ?? "";
+
   const [projects, setProjects] = useState<ProjectRecord[]>([]);
-  const [remoteScenarios, setRemoteScenarios] = useState<ScenarioApiRow[]>([]);
-  const [loadingScenarios, setLoadingScenarios] = useState(true);
+  const [boundScenarios, setBoundScenarios] = useState<BoundScenarioRow[]>([]);
+  const [loadingBound, setLoadingBound] = useState(false);
+  const [scenarioDetail, setScenarioDetail] = useState<ScenarioDetailResponse | null>(null);
+  const [loadingScenarioDetail, setLoadingScenarioDetail] = useState(false);
+
   const [selectedProjectId, setSelectedProjectId] = useState("");
   const [selectedScenarioId, setSelectedScenarioId] = useState("");
   const [selectedSkill, setSelectedSkill] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
+
+  const [loadingProjects, setLoadingProjects] = useState(true);
   const [mode, setMode] = useState<WorkshopMode>("generate");
   const [genStatus, setGenStatus] = useState<GenStatus>("idle");
   const [output, setOutput] = useState("");
@@ -165,55 +113,113 @@ function WorkshopPageInner() {
   const [copied, setCopied] = useState(false);
   const outputEndRef = useRef<HTMLDivElement>(null);
   const abortRef = useRef<AbortController | null>(null);
-  const [scenarioLinkedOutputs, setScenarioLinkedOutputs] = useState<ScenarioLinkedOutputRow[]>([]);
+  const [scenarioLinkedOutputs, setScenarioLinkedOutputs] = useState<ScenarioLinkedOutputRow[]>(
+    [],
+  );
   const [scenarioOutputsLoading, setScenarioOutputsLoading] = useState(false);
+  const [sourceOutputId, setSourceOutputId] = useState<string | null>(null);
+  const [sourceMaterialPreview, setSourceMaterialPreview] = useState<string | null>(null);
+  const [sourceOutputLoading, setSourceOutputLoading] = useState(false);
+  const [lastRunMeta, setLastRunMeta] = useState<{
+    run_id?: string;
+    output_id?: string | null;
+  } | null>(null);
+  const [versionSaveStatus, setVersionSaveStatus] = useState<"idle" | "saving" | "ok" | "err">("idle");
+  const [versionSaveMsg, setVersionSaveMsg] = useState("");
+  const [outputsRefreshTick, setOutputsRefreshTick] = useState(0);
+  const [taskTitleCustom, setTaskTitleCustom] = useState("");
+  const [taskBackground, setTaskBackground] = useState("");
+  const [taskObjective, setTaskObjective] = useState("");
+  const [taskKeywords, setTaskKeywords] = useState("");
+  const [taskExtra, setTaskExtra] = useState("");
+  const [taskTone, setTaskTone] = useState("");
 
   useEffect(() => {
-    if (projectFromUrl) {
-      setSelectedProjectId(projectFromUrl);
-    }
+    if (projectFromUrl) setSelectedProjectId(projectFromUrl);
   }, [projectFromUrl]);
 
   useEffect(() => {
-    setLoadingScenarios(true);
-    apiGet<ScenarioApiRow[]>("/scenarios/")
-      .then((rows) => setRemoteScenarios(rows))
-      .catch(() => setRemoteScenarios([]))
-      .finally(() => setLoadingScenarios(false));
+    setLoadingProjects(true);
+    apiGet<ProjectRecord[]>("/projects/")
+      .then(setProjects)
+      .catch(() => setProjects([]))
+      .finally(() => setLoadingProjects(false));
   }, []);
 
-  const remoteById = useMemo(
-    () => new Map(remoteScenarios.map((r) => [r.id, r] as const)),
-    [remoteScenarios],
-  );
+  useEffect(() => {
+    if (!selectedProjectId) {
+      setBoundScenarios([]);
+      setLoadingBound(false);
+      return;
+    }
+    let cancelled = false;
+    setLoadingBound(true);
+    apiGet<BoundScenarioRow[]>(`/projects/${selectedProjectId}/scenarios`)
+      .then((rows) => {
+        if (!cancelled) setBoundScenarios(rows.filter((r) => r.enabled === 1));
+      })
+      .catch((err) => {
+        if (process.env.NODE_ENV === "development") {
+          console.warn("[workshop] 项目绑定场景加载失败", err);
+        }
+        if (!cancelled) setBoundScenarios([]);
+      })
+      .finally(() => {
+        if (!cancelled) setLoadingBound(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedProjectId]);
+
+  useEffect(() => {
+    if (!outputFromUrl || !selectedProjectId) {
+      setSourceOutputId(null);
+      setSourceMaterialPreview(null);
+      setSourceOutputLoading(false);
+      return;
+    }
+    let cancelled = false;
+    setSourceOutputLoading(true);
+    apiGet<ProjectOutputDetailApi>(`/projects/${selectedProjectId}/outputs/${outputFromUrl}`)
+      .then((d) => {
+        if (cancelled) return;
+        setSourceOutputId(outputFromUrl);
+        setSourceMaterialPreview(d.content || "");
+        if (modeFromUrl === "refine") setMode("refine");
+        if (d.scenario_id) {
+          setSelectedScenarioId((prev) =>
+            prev === d.scenario_id ? prev : d.scenario_id || prev,
+          );
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setSourceOutputId(null);
+          setSourceMaterialPreview(null);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setSourceOutputLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [outputFromUrl, selectedProjectId, modeFromUrl]);
 
   const workshopScenarioOptions = useMemo((): WorkshopScenarioOption[] => {
-    const extras = remoteScenarios.filter((r) => !LOCAL_SCENARIO_IDS.has(r.id));
-    const presetOpts: WorkshopScenarioOption[] = SCENARIOS.map((s) => {
-      const remote = remoteById.get(s.id);
-      const versionLine = remote
-        ? `${remote.status} · v${remote.version}`
-        : "预设（未同步到服务端）";
-      return { id: s.id, name: s.title, versionLine };
-    });
-    const extraOpts: WorkshopScenarioOption[] = extras.map((r) => ({
-      id: r.id,
-      name: r.name,
-      versionLine: `${r.status} · v${r.version} · 服务端`,
-    }));
-    return [...presetOpts, ...extraOpts];
-  }, [remoteScenarios, remoteById]);
-
-  const selectedScenarioContext = useMemo(() => {
-    if (!selectedScenarioId) return null;
-    const preset: Scenario | null = SCENARIOS.find((s) => s.id === selectedScenarioId) ?? null;
-    const remote = remoteById.get(selectedScenarioId);
-    const opt = workshopScenarioOptions.find((o) => o.id === selectedScenarioId);
-    const title = preset?.title ?? remote?.name ?? opt?.name ?? selectedScenarioId;
-    const versionLine =
-      opt?.versionLine ?? (remote ? `${remote.status} · v${remote.version}` : null);
-    return { preset, remote, title, versionLine };
-  }, [selectedScenarioId, remoteById, workshopScenarioOptions]);
+    return boundScenarios
+      .filter((r) => {
+        if (r.enabled !== 1) return false;
+        const st = (r.scenario_status || "draft").toLowerCase();
+        return st === "published";
+      })
+      .map((r) => ({
+        id: r.scenario_id,
+        name: r.scenario_name,
+        versionLine: `${r.scenario_status} · v${r.scenario_version}${r.is_default ? " · 默认" : ""}`,
+      }));
+  }, [boundScenarios]);
 
   useEffect(() => {
     if (workshopScenarioOptions.length === 0) {
@@ -224,16 +230,16 @@ function WorkshopPageInner() {
       setSelectedScenarioId(scenarioFromUrl);
       return;
     }
-    if (mode === "refine" && workshopScenarioOptions.some((o) => o.id === "refine")) {
-      setSelectedScenarioId("refine");
-      return;
-    }
     if (selectedScenarioId && workshopScenarioOptions.some((o) => o.id === selectedScenarioId)) {
       return;
     }
-    const first = workshopScenarioOptions[0];
-    setSelectedScenarioId(first?.id ?? "");
-  }, [workshopScenarioOptions, mode, scenarioFromUrl, selectedScenarioId]);
+    const def = boundScenarios.find((b) => b.enabled === 1 && b.is_default === 1);
+    if (def && workshopScenarioOptions.some((o) => o.id === def.scenario_id)) {
+      setSelectedScenarioId(def.scenario_id);
+      return;
+    }
+    setSelectedScenarioId(workshopScenarioOptions[0]?.id ?? "");
+  }, [workshopScenarioOptions, scenarioFromUrl, selectedScenarioId, boundScenarios]);
 
   useEffect(() => {
     if (!selectedProjectId || !selectedScenarioId) {
@@ -260,53 +266,66 @@ function WorkshopPageInner() {
     return () => {
       cancelled = true;
     };
-  }, [selectedProjectId, selectedScenarioId]);
+  }, [selectedProjectId, selectedScenarioId, outputsRefreshTick]);
 
   useEffect(() => {
-    setLoading(true);
-    Promise.allSettled([
-      apiGet<Array<{ id: string; name: string; description: string }>>("/skills/"),
-      apiGet<ProjectRecord[]>("/projects/"),
-    ])
-      .then(([skillsRes, projectsRes]) => {
-        if (skillsRes.status === "fulfilled") {
-          setSkills(skillsRes.value.map(mapApiSkillToUi));
-        } else if (USE_MOCK_FALLBACK) {
-          setSkills(MOCK_SKILLS);
-        } else {
-          setSkills([]);
-        }
-
-        if (projectsRes.status === "fulfilled") {
-          setProjects(projectsRes.value);
-        } else {
-          setProjects([]);
-        }
+    if (!selectedScenarioId) {
+      setScenarioDetail(null);
+      setLoadingScenarioDetail(false);
+      return;
+    }
+    let cancelled = false;
+    setLoadingScenarioDetail(true);
+    apiGet<ScenarioDetailResponse>(`/scenarios/${selectedScenarioId}`)
+      .then((d) => {
+        if (!cancelled) setScenarioDetail(d);
       })
-      .finally(() => setLoading(false));
-  }, []);
+      .catch(() => {
+        if (!cancelled) setScenarioDetail(null);
+      })
+      .finally(() => {
+        if (!cancelled) setLoadingScenarioDetail(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedScenarioId]);
 
-  const grouped = skills.reduce<Record<string, Skill[]>>((acc, skill) => {
-    if (!acc[skill.category]) acc[skill.category] = [];
-    acc[skill.category].push(skill);
-    return acc;
-  }, {});
+  const allowedSkills = useMemo(() => {
+    const pol = scenarioDetail?.skills_policy;
+    if (!pol || typeof pol !== "object") return [] as string[];
+    const raw = (pol as { allowed?: unknown }).allowed;
+    return Array.isArray(raw) ? raw.map((x) => String(x)).filter(Boolean) : [];
+  }, [scenarioDetail]);
 
-  const selectedSkillMeta = skills.find((s) => s.id === selectedSkill);
+  useEffect(() => {
+    if (allowedSkills.length === 0) {
+      setSelectedSkill(null);
+      return;
+    }
+    if (allowedSkills.length === 1) {
+      setSelectedSkill(allowedSkills[0]);
+      return;
+    }
+    setSelectedSkill((prev) =>
+      prev && allowedSkills.includes(prev) ? prev : allowedSkills[0] ?? null,
+    );
+  }, [allowedSkills]);
+
   const selectedProject = projects.find((project) => project.id === selectedProjectId);
 
   const derivedTaskTitle = useMemo(() => {
     const projectName = selectedProject?.name?.trim() || "项目";
     const scenarioName =
       workshopScenarioOptions.find((o) => o.id === selectedScenarioId)?.name ?? "场景";
-    const skillPart = selectedSkillMeta?.name ?? selectedSkill ?? "技能";
+    const skillPart = selectedSkill ?? allowedSkills[0] ?? "技能";
     return `${projectName} · ${scenarioName} · ${skillPart}`;
   }, [
     selectedProject?.name,
     workshopScenarioOptions,
     selectedScenarioId,
-    selectedSkillMeta?.name,
     selectedSkill,
+    allowedSkills,
   ]);
 
   useEffect(() => {
@@ -318,11 +337,28 @@ function WorkshopPageInner() {
   const buildContext = useCallback(
     () => ({
       mode,
-      title: derivedTaskTitle,
+      title: taskTitleCustom.trim() || derivedTaskTitle,
       project_name: selectedProject?.name ?? null,
     }),
-    [derivedTaskTitle, mode, selectedProject?.name],
+    [derivedTaskTitle, mode, selectedProject?.name, taskTitleCustom],
   );
+
+  const contractSummaryText = useMemo(() => {
+    if (!scenarioDetail) return "";
+    try {
+      return JSON.stringify(
+        {
+          knowledge_policy: scenarioDetail.knowledge_policy,
+          skills_policy: scenarioDetail.skills_policy,
+          output_policy: scenarioDetail.output_policy,
+        },
+        null,
+        2,
+      );
+    } catch {
+      return "";
+    }
+  }, [scenarioDetail]);
 
   const summaryItems = useMemo(
     () => [
@@ -333,15 +369,17 @@ function WorkshopPageInner() {
         value:
           workshopScenarioOptions.find((o) => o.id === selectedScenarioId)?.name ?? "—",
       },
-      { label: "技能策略", value: selectedSkillMeta?.name ?? "未选择技能" },
+      {
+        label: "技能（合同）",
+        value:
+          allowedSkills.length === 0
+            ? "场景未配置 allowed"
+            : allowedSkills.length === 1
+              ? allowedSkills[0]
+              : selectedSkill ?? allowedSkills[0] ?? "请选择",
+      },
     ],
-    [
-      mode,
-      selectedProject?.name,
-      selectedSkillMeta?.name,
-      workshopScenarioOptions,
-      selectedScenarioId,
-    ],
+    [mode, selectedProject?.name, workshopScenarioOptions, selectedScenarioId, allowedSkills, selectedSkill],
   );
 
   const agentExecutePreview = useMemo(() => {
@@ -349,6 +387,23 @@ function WorkshopPageInner() {
     const scenarioLabel = scenarioOpt?.name ?? (selectedScenarioId || "—");
     const scenarioVersion = scenarioOpt?.versionLine;
     const scenarioLine = scenarioVersion ? `${scenarioLabel} · ${scenarioVersion}` : scenarioLabel;
+    const skillRun = selectedSkill ?? allowedSkills[0] ?? "";
+    const contractSlice = contractSummaryText
+      ? contractSummaryText.slice(0, 1200) + (contractSummaryText.length > 1200 ? "…" : "")
+      : "（加载中或未选场景）";
+    const effTitle = taskTitleCustom.trim() || derivedTaskTitle;
+    const kwParts = taskKeywords
+      .split(/[,，]/)
+      .map((s) => s.trim())
+      .filter(Boolean);
+    const taskPayload: TaskInputPayload = {
+      title: effTitle,
+      ...(taskBackground.trim() ? { background: taskBackground.trim() } : {}),
+      ...(taskObjective.trim() ? { objective: taskObjective.trim() } : {}),
+      ...(kwParts.length ? { keywords: kwParts } : {}),
+      ...(taskExtra.trim() ? { extra: taskExtra.trim() } : {}),
+      ...(taskTone.trim() ? { tone: taskTone.trim() } : {}),
+    };
 
     return {
       step1Rows: [
@@ -363,28 +418,28 @@ function WorkshopPageInner() {
       step3Rows: [
         { k: "scenario_id", v: selectedScenarioId || "（未选择）" },
         { k: "场景 / 版本", v: scenarioLine },
-        { k: "skill", v: selectedSkill ?? "（未选择）" },
-        { k: "技能模板名称", v: selectedSkillMeta?.name ?? "—" },
+        { k: "skill（执行）", v: skillRun || "（合同未配置或待选）" },
+        { k: "场景合同摘要", v: contractSlice },
         {
           k: "overrides.skills",
-          v: selectedSkill
-            ? `manual_only，白名单 [${selectedSkill}]，allow_agent_free_choice: false`
-            : "需选择技能后生效",
+          v: skillRun
+            ? `manual_only，白名单 [${skillRun}]，allow_agent_free_choice: false`
+            : "需场景 skills_policy.allowed",
         },
       ],
-      taskInputJson: JSON.stringify({ title: derivedTaskTitle }, null, 2),
-      userMessageJson: selectedSkill
+      taskInputJson: JSON.stringify(taskPayload, null, 2),
+      userMessageJson: skillRun
         ? JSON.stringify(
             {
-              skill: selectedSkill,
+              skill: skillRun,
               mode,
-              title: derivedTaskTitle,
+              title: effTitle,
               project_name: selectedProject?.name ?? null,
             },
             null,
             2,
           )
-        : "// 选择技能后将写入 user_message：skill、mode、title、project_name",
+        : "// 等待场景合同与技能白名单",
     };
   }, [
     derivedTaskTitle,
@@ -394,8 +449,15 @@ function WorkshopPageInner() {
     selectedProjectId,
     selectedScenarioId,
     selectedSkill,
-    selectedSkillMeta?.name,
+    taskBackground,
+    taskExtra,
+    taskKeywords,
+    taskObjective,
+    taskTitleCustom,
+    taskTone,
+    allowedSkills,
     workshopScenarioOptions,
+    contractSummaryText,
   ]);
 
   const outputPreviewSlice = useMemo(() => {
@@ -409,15 +471,27 @@ function WorkshopPageInner() {
 
   const handleSubmit = useCallback(() => {
     if (!selectedProjectId) {
-      alert("请先选择项目；结果工坊需在项目上下文中执行。");
+      alert("请先选择项目；场景输出需在项目上下文中执行。");
       return;
     }
-    if (!selectedScenarioId || loadingScenarios) {
-      alert("请等待场景列表加载完成并选择场景");
+    if (!selectedScenarioId || loadingBound) {
+      alert("请等待项目绑定场景加载完成并选择场景");
       return;
     }
-    if (!selectedSkill) {
-      alert("请选择技能模板");
+    if (loadingScenarioDetail || !scenarioDetail) {
+      alert("场景合同加载中，请稍候");
+      return;
+    }
+    if (allowedSkills.length === 0) {
+      alert(
+        "当前场景未配置 skills_policy.allowed。请在「场景编排」中维护合同，或在项目页绑定其他场景。",
+      );
+      return;
+    }
+    const skillForRun =
+      allowedSkills.length === 1 ? allowedSkills[0] : selectedSkill ?? allowedSkills[0];
+    if (!skillForRun) {
+      alert("请选择本场景允许范围内的一项技能");
       return;
     }
 
@@ -425,26 +499,43 @@ function WorkshopPageInner() {
     setErrorMsg("");
     setGenStatus("generating");
     setCopied(false);
+    setLastRunMeta(null);
+    setVersionSaveStatus("idle");
+    setVersionSaveMsg("");
 
     if (abortRef.current) abortRef.current.abort();
     const controller = new AbortController();
     abortRef.current = controller;
 
+    const effTitle = taskTitleCustom.trim() || derivedTaskTitle;
+    const kwParts = taskKeywords
+      .split(/[,，]/)
+      .map((s) => s.trim())
+      .filter(Boolean);
     const taskInput: TaskInputPayload = {
-      title: derivedTaskTitle,
+      title: effTitle,
+      ...(taskBackground.trim() ? { background: taskBackground.trim() } : {}),
+      ...(taskObjective.trim() ? { objective: taskObjective.trim() } : {}),
+      ...(kwParts.length ? { keywords: kwParts } : {}),
+      ...(taskExtra.trim() ? { extra: taskExtra.trim() } : {}),
+      ...(taskTone.trim() ? { tone: taskTone.trim() } : {}),
+      ...(mode === "refine" && sourceMaterialPreview?.trim()
+        ? { source_material: sourceMaterialPreview }
+        : {}),
     };
 
     const body: TaskExecuteBody = {
       entrypoint: "workshop",
       project_id: selectedProjectId,
       scenario_id: selectedScenarioId,
-      user_message: JSON.stringify({ skill: selectedSkill, ...buildContext() }),
+      user_message: JSON.stringify({ skill: skillForRun, ...buildContext() }),
       task_input: taskInput,
       stream: true,
+      source_output_id: mode === "refine" && sourceOutputId ? sourceOutputId : null,
       overrides: {
         skills: {
           mode: "manual_only",
-          allowed: [selectedSkill],
+          allowed: [skillForRun],
           allow_agent_free_choice: false,
         },
       },
@@ -511,6 +602,19 @@ function WorkshopPageInner() {
                     setGenStatus("error");
                     return;
                   }
+                  const tt = event.tphermes_task;
+                  if (tt && typeof tt === "object") {
+                    const m = tt as Record<string, unknown>;
+                    setLastRunMeta({
+                      run_id: typeof m.run_id === "string" ? m.run_id : undefined,
+                      output_id:
+                        typeof m.output_id === "string"
+                          ? m.output_id
+                          : m.output_id === null
+                            ? null
+                            : undefined,
+                    });
+                  }
                 } catch {
                   // ignore malformed chunk
                 }
@@ -531,7 +635,58 @@ function WorkshopPageInner() {
         setErrorMsg(err.message);
         setGenStatus("error");
       });
-  }, [buildContext, derivedTaskTitle, loadingScenarios, selectedProjectId, selectedScenarioId, selectedSkill]);
+  }, [
+    allowedSkills,
+    buildContext,
+    derivedTaskTitle,
+    loadingBound,
+    loadingScenarioDetail,
+    scenarioDetail,
+    selectedProjectId,
+    selectedScenarioId,
+    selectedSkill,
+    mode,
+    sourceMaterialPreview,
+    sourceOutputId,
+    taskBackground,
+    taskExtra,
+    taskKeywords,
+    taskObjective,
+    taskTitleCustom,
+    taskTone,
+  ]);
+
+  const handleSaveAsNewVersion = useCallback(async () => {
+    if (!selectedProjectId || !sourceOutputId || !output.trim()) {
+      alert("需在「结果优化」链路下、且已产生正文后再保存版本。");
+      return;
+    }
+    setVersionSaveStatus("saving");
+    setVersionSaveMsg("");
+    try {
+      const res = await apiFetch(
+        `/projects/${selectedProjectId}/outputs/${sourceOutputId}/versions`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            content: output,
+            scenario_id: selectedScenarioId || undefined,
+          }),
+        },
+      );
+      await readJson<{ id: string; version?: string }>(res);
+      setVersionSaveStatus("ok");
+      setVersionSaveMsg("已写入源输出的一条新版本，可在项目详情查看。");
+      setOutputsRefreshTick((t) => t + 1);
+      if (process.env.NODE_ENV === "development") {
+        console.info("[workshop] output version created base_output_id=%s", sourceOutputId);
+      }
+    } catch (e: unknown) {
+      setVersionSaveStatus("err");
+      setVersionSaveMsg(e instanceof Error ? e.message : "保存失败");
+    }
+  }, [output, selectedProjectId, selectedScenarioId, sourceOutputId]);
 
   return (
     <main className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 p-4 text-white sm:p-6 md:p-8">
@@ -548,7 +703,7 @@ function WorkshopPageInner() {
           </div>
           <h1 className="mt-4 text-3xl font-bold sm:text-4xl">场景输出</h1>
           <p className="mt-2 max-w-2xl text-sm text-slate-400 sm:text-base">
-            基于项目与场景编排中的场景执行生成，沉淀正式输出物。请依次：选择项目、选择场景与技能模板，确认后开始执行。
+            先选择项目，仅能使用该项目已绑定的场景；场景合同（知识 / 技能 / 输出策略）来自服务端。未绑定场景时请到项目页绑定或前往场景编排维护。
           </p>
         </div>
 
@@ -682,20 +837,36 @@ function WorkshopPageInner() {
                   <h2 className="mt-2 text-xl font-semibold">场景选择</h2>
                 </div>
                 <span className="text-xs text-slate-500">
-                  {loading ? "加载中..." : `共 ${skills.length} 个技能`}
+                  {!selectedProjectId
+                    ? "先选项目"
+                    : loadingScenarioDetail
+                      ? "加载场景中…"
+                      : "合同来自 GET /scenarios/{id}"}
                 </span>
               </div>
 
+              {!selectedProjectId ? (
+                <p className="mt-5 rounded-2xl border border-dashed border-slate-700 bg-slate-950/30 px-4 py-6 text-center text-sm text-slate-500">
+                  请先选择项目后，将仅展示该项目已绑定的可执行场景。
+                </p>
+              ) : null}
+
               <label className="mt-5 block space-y-2 text-sm">
-                <span className="text-slate-300">场景（与场景编排一致）</span>
+                <span className="text-slate-300">场景（项目已绑定）</span>
                 <select
                   value={selectedScenarioId}
                   onChange={(e) => setSelectedScenarioId(e.target.value)}
-                  disabled={loadingScenarios || workshopScenarioOptions.length === 0}
+                  disabled={
+                    loadingBound || !selectedProjectId || workshopScenarioOptions.length === 0
+                  }
                   className="w-full rounded-xl border border-slate-700 bg-slate-950/70 px-4 py-3 text-sm text-white outline-none transition focus:border-blue-500 disabled:opacity-50"
                 >
                   <option value="">
-                    {loadingScenarios ? "加载场景…" : workshopScenarioOptions.length ? "选择场景…" : "无可用场景"}
+                    {loadingBound
+                      ? "加载绑定场景…"
+                      : workshopScenarioOptions.length
+                        ? "选择场景…"
+                        : "该项目未绑定已启用场景"}
                   </option>
                   {workshopScenarioOptions.map((o) => (
                     <option key={o.id} value={o.id}>
@@ -703,148 +874,182 @@ function WorkshopPageInner() {
                     </option>
                   ))}
                 </select>
+                {selectedProjectId && !loadingBound && workshopScenarioOptions.length === 0 ? (
+                  <p className="mt-2 text-xs text-amber-400/90">
+                    {boundScenarios.some((b) => b.enabled === 1)
+                      ? "已有绑定，但场景状态均非 published（已发布），工坊无法选用。请在场景编排发布场景，或解除无效绑定。"
+                      : "当前项目暂无可用绑定场景。前往 "}
+                    {!boundScenarios.some((b) => b.enabled === 1) ? (
+                      <>
+                        <Link href={`/projects/${selectedProjectId}`} className="underline">
+                          项目详情
+                        </Link>{" "}
+                        绑定，或打开{" "}
+                        <Link href="/create" className="underline">
+                          场景编排
+                        </Link>{" "}
+                        维护场景。
+                      </>
+                    ) : null}
+                  </p>
+                ) : null}
               </label>
 
-              {selectedScenarioContext && selectedScenarioId ? (
+              {selectedScenarioId && scenarioDetail ? (
                 <div className="mt-4 rounded-2xl border border-slate-800 bg-slate-950/50 p-4">
-                  <p className="text-xs uppercase tracking-[0.16em] text-slate-500">场景信息</p>
-                  <p className="mt-2 text-base font-semibold text-white">{selectedScenarioContext.title}</p>
-                  {selectedScenarioContext.versionLine ? (
-                    <p className="mt-1 text-xs text-slate-500">{selectedScenarioContext.versionLine}</p>
-                  ) : null}
-                  {selectedScenarioContext.remote?.code ? (
-                    <p className="mt-1 font-mono text-xs text-slate-500">
-                      code · {selectedScenarioContext.remote.code}
+                  <p className="text-xs uppercase tracking-[0.16em] text-slate-500">场景合同（服务端）</p>
+                  <p className="mt-2 text-base font-semibold text-white">{scenarioDetail.name}</p>
+                  <p className="mt-1 font-mono text-xs text-slate-500">code · {scenarioDetail.code}</p>
+                  {scenarioDetail.description?.trim() ? (
+                    <p className="mt-3 whitespace-pre-wrap text-sm text-slate-300">
+                      {scenarioDetail.description}
                     </p>
                   ) : null}
-
-                  {selectedScenarioContext.preset ? (
-                    <dl className="mt-4 space-y-3 text-sm">
-                      <div>
-                        <dt className="text-xs text-slate-500">场景摘要</dt>
-                        <dd className="mt-0.5 text-slate-200">{selectedScenarioContext.preset.summary}</dd>
-                      </div>
-                      <div>
-                        <dt className="text-xs text-slate-500">输出目标</dt>
-                        <dd className="mt-0.5 text-slate-200">{selectedScenarioContext.preset.goal}</dd>
-                      </div>
-                      <div>
-                        <dt className="text-xs text-slate-500">推荐文档形态</dt>
-                        <dd className="mt-0.5 text-slate-200">{selectedScenarioContext.preset.recommendedTemplate}</dd>
-                      </div>
-                      <div>
-                        <dt className="text-xs text-slate-500">知识使用策略</dt>
-                        <dd className="mt-0.5 text-slate-200">
-                          {selectedScenarioContext.preset.recommendedKnowledgeMode}
-                        </dd>
-                      </div>
-                      <div>
-                        <dt className="mb-1.5 text-xs text-slate-500">推荐章节结构</dt>
-                        <dd className="flex flex-wrap gap-1.5">
-                          {selectedScenarioContext.preset.recommendedSections.map((sec) => (
-                            <span
-                              key={sec}
-                              className="rounded-md border border-slate-700 bg-slate-900/80 px-2 py-0.5 text-xs text-slate-300"
-                            >
-                              {sec}
-                            </span>
-                          ))}
-                        </dd>
-                      </div>
-                      <details className="group border-t border-slate-800 pt-3">
-                        <summary className="cursor-pointer text-xs text-slate-400 transition hover:text-slate-200">
-                          系统角色与输出风格（编排上下文）
-                        </summary>
-                        <pre className="mt-2 max-h-36 overflow-y-auto whitespace-pre-wrap rounded-lg border border-slate-800 bg-slate-950/80 p-3 font-mono text-xs leading-relaxed text-slate-400">
-                          {selectedScenarioContext.preset.systemContext}
-                        </pre>
-                      </details>
-                    </dl>
-                  ) : selectedScenarioContext.remote?.description?.trim() ? (
-                    <div className="mt-4">
-                      <p className="text-xs text-slate-500">服务端描述</p>
-                      <p className="mt-1 whitespace-pre-wrap text-sm text-slate-200">
-                        {selectedScenarioContext.remote.description}
-                      </p>
-                    </div>
-                  ) : (
-                    <p className="mt-4 text-xs text-slate-500">
-                      该场景为服务端扩展配置；详细编排可在「场景编排」中查看与维护。
-                    </p>
-                  )}
+                  <details className="mt-4 group border-t border-slate-800 pt-3">
+                    <summary className="cursor-pointer text-xs text-slate-400 transition hover:text-slate-200">
+                      knowledge_policy / skills_policy / output_policy
+                    </summary>
+                    <pre className="mt-2 max-h-48 overflow-y-auto whitespace-pre-wrap rounded-lg border border-slate-800 bg-slate-950/80 p-3 font-mono text-xs leading-relaxed text-slate-400">
+                      {contractSummaryText || "—"}
+                    </pre>
+                  </details>
                 </div>
-              ) : !loadingScenarios && workshopScenarioOptions.length > 0 ? (
+              ) : selectedScenarioId && loadingScenarioDetail ? (
+                <p className="mt-4 text-sm text-slate-500">加载场景合同…</p>
+              ) : !loadingBound && workshopScenarioOptions.length > 0 && !selectedScenarioId ? (
                 <div className="mt-4 rounded-2xl border border-dashed border-slate-700 bg-slate-950/30 px-4 py-6 text-center text-sm text-slate-500">
-                  选择场景后，将展示与编排一致的摘要、目标与推荐结构等信息。
+                  请选择场景以加载服务端合同与技能白名单。
                 </div>
               ) : null}
 
               <div className="mt-6 border-t border-slate-800 pt-5">
                 <div className="mb-1 flex flex-wrap items-end justify-between gap-2">
                   <div>
-                    <p className="text-xs uppercase tracking-[0.16em] text-slate-500">技能模板</p>
-                    <p className="mt-1 text-sm text-slate-400">Skill · 与任务执行时允许的技能白名单一致</p>
+                    <p className="text-xs uppercase tracking-[0.16em] text-slate-500">场景允许的技能</p>
+                    <p className="mt-1 text-sm text-slate-400">
+                      源自场景合同的 <span className="font-mono text-slate-300">skills_policy.allowed</span>
+                      ，不可从全局技能库任选
+                    </p>
                   </div>
                 </div>
 
-                {loading && (
-                  <p className="py-8 text-center text-sm text-slate-400">正在加载技能与项目...</p>
-                )}
-
-                {!loading && skills.length === 0 && (
-                  <p className="py-6 text-center text-sm text-slate-500">
-                    暂无可用技能；请确认后端 `/skills/` 或设置 `NEXT_PUBLIC_USE_MOCK_WORKSHOP=true`。
+                {loadingScenarioDetail || (selectedScenarioId && !scenarioDetail) ? (
+                  <p className="py-6 text-center text-sm text-slate-400">加载合同以解析技能范围…</p>
+                ) : allowedSkills.length === 0 ? (
+                  <p className="py-6 text-center text-sm text-amber-400/90">
+                    当前场景未配置允许技能列表，请在场景编排中编辑 skills_policy.allowed。
                   </p>
-                )}
-
-                {!loading &&
-                  skills.length > 0 &&
-                  Object.entries(grouped).map(([category, categorySkills]) => (
-                  <div key={category} className="mt-5">
-                    <p className="mb-2 text-xs uppercase tracking-wider text-slate-500">
-                      {CATEGORY_LABELS[category] ?? category}
-                    </p>
-                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                      {categorySkills.map((skill) => {
-                        const active = selectedSkill === skill.id;
-                        return (
-                          <button
-                            key={skill.id}
-                            type="button"
-                            onClick={() => setSelectedSkill(skill.id)}
-                            className={`rounded-2xl border p-4 text-left transition ${
-                              active
-                                ? "border-blue-500 bg-blue-500/10"
-                                : "border-slate-700 bg-slate-950/60 hover:border-slate-600 hover:bg-slate-900/70"
-                            }`}
-                          >
-                            <div className="flex items-start gap-3">
-                              <span className="mt-0.5 text-2xl">{skill.icon}</span>
-                              <div>
-                                <div className="text-sm font-medium text-white">{skill.name}</div>
-                                <div className="mt-1 text-xs leading-relaxed text-slate-400">
-                                  {skill.description}
-                                </div>
-                              </div>
-                            </div>
-                            {active && (
-                              <div className="mt-3 flex items-center gap-1.5 text-xs font-medium text-blue-300">
-                                <span className="h-1.5 w-1.5 rounded-full bg-blue-400" />
-                                当前执行模板
-                              </div>
-                            )}
-                          </button>
-                        );
-                      })}
-                    </div>
+                ) : allowedSkills.length === 1 ? (
+                  <p className="rounded-2xl border border-slate-700 bg-slate-950/60 px-4 py-3 text-sm text-slate-200">
+                    本场景固定技能：<span className="font-mono text-blue-200">{allowedSkills[0]}</span>
+                  </p>
+                ) : (
+                  <div className="grid gap-2 sm:grid-cols-2">
+                    {allowedSkills.map((pkg) => {
+                      const active = selectedSkill === pkg;
+                      return (
+                        <button
+                          key={pkg}
+                          type="button"
+                          onClick={() => setSelectedSkill(pkg)}
+                          className={`rounded-2xl border p-4 text-left text-sm transition ${
+                            active
+                              ? "border-blue-500 bg-blue-500/10"
+                              : "border-slate-700 bg-slate-950/60 hover:border-slate-600"
+                          }`}
+                        >
+                          <span className="font-mono text-white">{pkg}</span>
+                          {active ? (
+                            <span className="mt-2 block text-xs text-blue-300">将用于本次执行</span>
+                          ) : null}
+                        </button>
+                      );
+                    })}
                   </div>
-                  ))}
+                )}
               </div>
             </div>
 
             <div className="rounded-3xl border border-slate-800 bg-slate-900/50 p-6">
               <p className="text-xs uppercase tracking-[0.2em] text-slate-500">Step 4</p>
               <h2 className="mt-2 text-xl font-semibold">任务信息</h2>
+              <p className="mt-1 text-sm text-slate-500">
+                以下为本次任务输入（task_input），将并入编排与技能上下文；标题留空则使用自动摘要。
+              </p>
+
+              <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                <label className="block space-y-1.5 text-sm sm:col-span-2">
+                  <span className="text-slate-400">任务标题</span>
+                  <input
+                    type="text"
+                    value={taskTitleCustom}
+                    onChange={(e) => setTaskTitleCustom(e.target.value)}
+                    placeholder={derivedTaskTitle}
+                    className="w-full rounded-xl border border-slate-700 bg-slate-950/70 px-3 py-2.5 text-sm text-white outline-none transition focus:border-blue-500"
+                  />
+                </label>
+                <label className="block space-y-1.5 text-sm sm:col-span-2">
+                  <span className="text-slate-400">背景补充</span>
+                  <textarea
+                    value={taskBackground}
+                    onChange={(e) => setTaskBackground(e.target.value)}
+                    rows={2}
+                    placeholder="业务背景、已知事实、引用材料说明等"
+                    className="w-full resize-y rounded-xl border border-slate-700 bg-slate-950/70 px-3 py-2.5 text-sm text-white outline-none transition focus:border-blue-500"
+                  />
+                </label>
+                <label className="block space-y-1.5 text-sm sm:col-span-2">
+                  <span className="text-slate-400">任务目标</span>
+                  <textarea
+                    value={taskObjective}
+                    onChange={(e) => setTaskObjective(e.target.value)}
+                    rows={2}
+                    placeholder="本轮要达成的结果、交付形态、读者等"
+                    className="w-full resize-y rounded-xl border border-slate-700 bg-slate-950/70 px-3 py-2.5 text-sm text-white outline-none transition focus:border-blue-500"
+                  />
+                </label>
+                <label className="block space-y-1.5 text-sm">
+                  <span className="text-slate-400">关键词</span>
+                  <input
+                    type="text"
+                    value={taskKeywords}
+                    onChange={(e) => setTaskKeywords(e.target.value)}
+                    placeholder="用逗号或中文逗号分隔"
+                    className="w-full rounded-xl border border-slate-700 bg-slate-950/70 px-3 py-2.5 text-sm text-white outline-none transition focus:border-blue-500"
+                  />
+                </label>
+                <label className="block space-y-1.5 text-sm">
+                  <span className="text-slate-400">语气 / 风格</span>
+                  <input
+                    type="text"
+                    value={taskTone}
+                    onChange={(e) => setTaskTone(e.target.value)}
+                    placeholder="如：正式、简洁、口语化"
+                    className="w-full rounded-xl border border-slate-700 bg-slate-950/70 px-3 py-2.5 text-sm text-white outline-none transition focus:border-blue-500"
+                  />
+                </label>
+                <label className="block space-y-1.5 text-sm sm:col-span-2">
+                  <span className="text-slate-400">附加要求（extra）</span>
+                  <textarea
+                    value={taskExtra}
+                    onChange={(e) => setTaskExtra(e.target.value)}
+                    rows={2}
+                    placeholder="篇幅、禁忌、格式等一次性约束"
+                    className="w-full resize-y rounded-xl border border-slate-700 bg-slate-950/70 px-3 py-2.5 text-sm text-white outline-none transition focus:border-blue-500"
+                  />
+                </label>
+              </div>
+
+              {sourceOutputLoading ? (
+                <p className="mt-2 text-sm text-slate-500">加载来源输出全文…</p>
+              ) : null}
+              {mode === "refine" && sourceOutputId && sourceMaterialPreview ? (
+                <p className="mt-2 rounded-2xl border border-amber-700/35 bg-amber-950/25 px-3 py-2 text-xs text-amber-200/90">
+                  优化来源：<span className="font-mono">{sourceOutputId}</span>
+                  ，已映射至本轮 <span className="font-mono">source_output_id</span> /
+                  <span className="font-mono">source_material</span>
+                </p>
+              ) : null}
 
               <div className="mt-5 space-y-4">
                 <div className="rounded-2xl border border-slate-800 bg-slate-950/40 p-4">
@@ -1019,6 +1224,45 @@ function WorkshopPageInner() {
                   )}
                 </div>
               </div>
+
+              {genStatus === "done" && lastRunMeta?.output_id ? (
+                <p className="mb-3 text-xs text-slate-400">
+                  本轮编排已写入项目输出{" "}
+                  <span className="font-mono text-slate-300">{lastRunMeta.output_id}</span>
+                  {selectedProjectId ? (
+                    <>
+                      {" "}
+                      ·{" "}
+                      <Link
+                        href={`/projects/${selectedProjectId}`}
+                        className="text-blue-400 hover:text-blue-300"
+                      >
+                        打开项目详情
+                      </Link>
+                    </>
+                  ) : null}
+                </p>
+              ) : null}
+
+              {mode === "refine" && sourceOutputId && genStatus === "done" && output.trim() ? (
+                <div className="mb-3 flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => void handleSaveAsNewVersion()}
+                    disabled={versionSaveStatus === "saving"}
+                    className="rounded-lg border border-amber-500/50 bg-amber-500/10 px-3 py-1.5 text-sm font-medium text-amber-100 transition hover:bg-amber-500/20 disabled:opacity-50"
+                  >
+                    {versionSaveStatus === "saving" ? "保存中…" : "保存为源输出的新版本"}
+                  </button>
+                  {versionSaveMsg ? (
+                    <span
+                      className={`text-xs ${versionSaveStatus === "err" ? "text-red-400" : "text-slate-400"}`}
+                    >
+                      {versionSaveMsg}
+                    </span>
+                  ) : null}
+                </div>
+              ) : null}
 
               <div className="mb-3 rounded-2xl border border-slate-700/90 bg-slate-900/70 p-3">
                 <p className="text-xs font-medium uppercase tracking-[0.14em] text-slate-500">产出物缩略</p>

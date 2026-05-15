@@ -38,10 +38,29 @@ ALLOWED_ORIGINS = os.getenv(
 ).split(",")
 
 
+# ── 启动配置校验 ──────────────────────────────────────────
+def _validate_deployment_config() -> None:
+    """启动时强制校验关键环境变量，未配置则拒绝启动（测试可通过 conftest 预置 HERMES_CHAT_API_URL）。"""
+    hermes_url = os.getenv("HERMES_CHAT_API_URL", "").strip()
+    if not hermes_url:
+        if os.getenv("ALLOW_MISSING_HERMES_UPSTREAM", "").strip().lower() in ("1", "true", "yes"):
+            logger.warning(
+                "HERMES_CHAT_API_URL not set; ALLOW_MISSING_HERMES_UPSTREAM enabled — 聊天上游相关接口将不可用"
+            )
+            return
+        raise RuntimeError(
+            "HERMES_CHAT_API_URL is not set. "
+            "Production deployment requires this environment variable. "
+            "Example: HERMES_CHAT_API_URL=https://your-hermes-agent:8642/v1/chat/completions"
+        )
+    logger.info("HERMES_CHAT_API_URL validated: %s", hermes_url)
+
+
 # ── 数据库初始化 ───────────────────────────────────────────
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """启动时创建表"""
+    """启动时校验配置并创建表"""
+    _validate_deployment_config()
     logger.info("Creating database tables...")
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
@@ -83,7 +102,7 @@ API_V1_PREFIX = "/api/v1"
 
 def include_router_with_version(router, strip_prefix: str = "", **kwargs):
     """
-    将路由注册到 /api/v1/{strip_prefix}/  
+    将路由注册到 /api/v1/{strip_prefix}/
     先把 router 已有 prefix 里的 strip_prefix 剥掉，再套上 /api/v1/{strip_prefix}/
     """
     if strip_prefix:

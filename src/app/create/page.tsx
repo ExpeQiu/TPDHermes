@@ -2,6 +2,7 @@
 
 import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { apiGet, apiFetch, readJson } from "@/lib/api";
 import type { TaskExecuteOverrides } from "@/lib/chat-context";
 import { CONTENT_MAX_CLASS } from "@/lib/content-shell";
@@ -90,14 +91,24 @@ export default function CreatePage() {
 }
 
 function CreatePageInner() {
+  const searchParams = useSearchParams();
+  const returnProjectId = searchParams?.get("return_project_id")?.trim() ?? "";
+
   const [collections, setCollections] = useState<string[]>([]);
   const [skillsList, setSkillsList] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedScenarioId, setSelectedScenarioId] = useState(DEFAULT_SCENARIO_ID);
   const [selectedKbKeys, setSelectedKbKeys] = useState<string[]>([]);
-  const [selectedSkillKeys, setSelectedSkillKeys] = useState<string[]>([]);
+  /** 技能合同白名单：与 skills_policy.allowed 对齐，可含当前环境未安装的技能名（不散失、不自动扩为全量） */
+  const [contractAllowedSkills, setContractAllowedSkills] = useState<string[]>([]);
   const [outputTemplates, setOutputTemplates] = useState<OutputTemplateRow[]>([]);
   const [selectedOutputTemplateId, setSelectedOutputTemplateId] = useState("");
+  /** 与 tasks 侧 must_follow_template 对齐：为 true 时工坊/任务将按模板与章节强校验 */
+  const [mustFollowTemplate, setMustFollowTemplate] = useState(false);
+  /** 与 output_policy.required_sections 对齐，与服务端回填一致，避免保存时被预设章节静默覆盖 */
+  const [requiredSections, setRequiredSections] = useState<string[]>(
+    () => SCENARIOS[0]?.recommendedSections ?? [],
+  );
   const [goal, setGoal] = useState("");
   const [deliverable, setDeliverable] = useState("");
   const [audience, setAudience] = useState("");
@@ -108,6 +119,7 @@ function CreatePageInner() {
   const [previewText, setPreviewText] = useState("");
   const [previewBusy, setPreviewBusy] = useState(false);
   const [saveBusy, setSaveBusy] = useState(false);
+  const [publishBusy, setPublishBusy] = useState(false);
   const [saveMessage, setSaveMessage] = useState("");
   const [addOpen, setAddOpen] = useState(false);
   const [newScenarioName, setNewScenarioName] = useState("");
@@ -161,7 +173,6 @@ function CreatePageInner() {
     if (loading) return;
     let cancelled = false;
     const cols = collections;
-    const skills = skillsList;
     const tpls = outputTemplatesRef.current;
     const sid = selectedScenarioId;
 
@@ -170,8 +181,13 @@ function CreatePageInner() {
         setSaveMessage("");
         const row = await apiGet<ScenarioDetail>(`/scenarios/${sid}`);
         if (cancelled) return;
-
+        
         const localCard = SCENARIOS.find((s) => s.id === sid);
+        const remoteRow = remoteList.find((r) => r.id === sid);
+        const defaultSections =
+          localCard?.recommendedSections ??
+          (remoteRow ? scenarioFromRemoteRow(remoteRow).recommendedSections : ["背景", "方案", "总结"]);
+
         setGoal(((row.goal ?? "").trim() || localCard?.goal) ?? "");
 
         const preset = (row.preset_instructions ?? "").trim();
@@ -196,19 +212,27 @@ function CreatePageInner() {
         else setSelectedKbKeys([]);
 
         const sp = row.skills_policy ?? {};
-        const allowed = Array.isArray(sp.allowed) ? (sp.allowed as string[]) : [];
+        const allowedRaw = Array.isArray(sp.allowed) ? (sp.allowed as unknown[]) : [];
+        const allowedNorm = allowedRaw.map((x) => String(x).trim()).filter(Boolean);
         const mode = typeof sp.mode === "string" ? sp.mode : "";
-        const skillsOn = mode === "allowed_list" || allowed.length > 0;
+        const skillsOn = mode === "allowed_list" || allowedNorm.length > 0;
         setIncludeSkills(skillsOn);
-        const picked = allowed.filter((n) => skills.includes(n));
-        if (picked.length > 0) setSelectedSkillKeys(picked);
-        else if (skillsOn && skills.length > 0) setSelectedSkillKeys([...skills]);
-        else setSelectedSkillKeys([]);
+        setContractAllowedSkills(allowedNorm);
 
         const op = row.output_policy ?? {};
         const tid = typeof op.template_id === "string" ? op.template_id : "";
         if (tid && tpls.some((t) => t.id === tid)) setSelectedOutputTemplateId(tid);
         else setSelectedOutputTemplateId("");
+        const mft = op.must_follow_template;
+        setMustFollowTemplate(mft === true || mft === "true");
+        if ("required_sections" in op && Array.isArray((op as { required_sections?: unknown }).required_sections)) {
+          const rs = ((op as { required_sections: unknown[] }).required_sections ?? [])
+            .map((x) => String(x).trim())
+            .filter(Boolean);
+          setRequiredSections(rs);
+        } else {
+          setRequiredSections([...defaultSections]);
+        }
       } catch {
         if (cancelled) return;
         const local = SCENARIOS.find((s) => s.id === sid);
@@ -219,15 +243,17 @@ function CreatePageInner() {
         setIncludeKnowledge(true);
         setSelectedKbKeys(cols[0] ? [cols[0]] : []);
         setIncludeSkills(false);
-        setSelectedSkillKeys([]);
+        setContractAllowedSkills([]);
         setSelectedOutputTemplateId("");
+        setMustFollowTemplate(false);
+        setRequiredSections(local?.recommendedSections ? [...local.recommendedSections] : []);
       }
     })();
 
     return () => {
       cancelled = true;
     };
-  }, [selectedScenarioId, loading, collections, skillsList]);
+  }, [selectedScenarioId, loading, collections, skillsList, remoteList]);
 
   useEffect(() => {
     if (outputTemplates.length === 0) return;
@@ -356,15 +382,10 @@ function CreatePageInner() {
     [collections, selectedKbKeys],
   );
 
-  const skillOrdered = useMemo(
-    () => skillsList.filter((s) => selectedSkillKeys.includes(s)),
-    [skillsList, selectedSkillKeys],
+  const skillsNotInstalled = useMemo(
+    () => contractAllowedSkills.filter((s) => !skillsList.includes(s)),
+    [contractAllowedSkills, skillsList],
   );
-
-  useEffect(() => {
-    if (!includeSkills || skillsList.length === 0) return;
-    setSelectedSkillKeys((prev) => (prev.length > 0 ? prev : [...skillsList]));
-  }, [includeSkills, skillsList]);
 
   function toggleKb(name: string) {
     if (!includeKnowledge) return;
@@ -379,7 +400,7 @@ function CreatePageInner() {
 
   function toggleSkill(name: string) {
     if (!includeSkills) return;
-    setSelectedSkillKeys((prev) =>
+    setContractAllowedSkills((prev) =>
       prev.includes(name) ? prev.filter((x) => x !== name) : [...prev, name],
     );
   }
@@ -392,105 +413,119 @@ function CreatePageInner() {
     return bits.join(" · ");
   }, [outputTemplates, selectedOutputTemplateId]);
 
+  /** 将当前表单写入服务端，返回可参与发布与绑定的场景 id（新建预设场景时可能生成新 id） */
+  async function persistScenarioDraftToServer(): Promise<{
+    scenarioId: string;
+    createdNew: boolean;
+    savedCode?: string | null;
+  }> {
+    if (!selectedScenario) throw new Error("未选择场景");
+    const presetInstructions = [
+      `【编排保存】场景：${selectedScenario.title}`,
+      goal.trim() ? `任务目标：${goal.trim()}` : `任务目标：${selectedScenario.goal}`,
+      deliverable.trim() ? `期望输出：${deliverable.trim()}` : null,
+      audience.trim() ? `目标受众：${audience.trim()}` : null,
+      brief.trim() ? `补充背景：\n${brief.trim()}` : null,
+      `建议章节：${requiredSections.join("、")}`,
+    ]
+      .filter(Boolean)
+      .join("\n\n");
+
+    const openingHint = [
+      `请输出：${deliverable.trim() || selectedScenario.recommendedTemplate}`,
+      audience.trim() ? `受众：${audience.trim()}` : null,
+    ]
+      .filter(Boolean)
+      .join("；");
+
+    const knowledge_policy = {
+      mode: "restricted",
+      collections: includeKnowledge ? kbOrdered : [],
+      project_bound: false,
+      top_k: 5,
+      fallback_policy: "cache_allowed",
+    };
+
+    const skills_policy = {
+      mode: includeSkills ? "allowed_list" : "manual_only",
+      allowed: includeSkills ? contractAllowedSkills : [],
+      preferred: [] as string[],
+      forbidden: [] as string[],
+      allow_agent_free_choice: includeSkills && contractAllowedSkills.length === 0,
+    };
+
+    const output_policy = {
+      template_id: selectedOutputTemplateId || null,
+      format: "markdown",
+      must_follow_template: mustFollowTemplate,
+      required_sections: requiredSections,
+      validation_rules: {
+        must_have_headings: true,
+        must_cite_sources: includeKnowledge,
+      },
+    };
+
+    const updateBody = {
+      goal: goal.trim() || selectedScenario.goal,
+      description: brief.trim() || selectedScenario.summary,
+      preset_instructions: presetInstructions,
+      opening_hint: openingHint,
+      knowledge_policy,
+      skills_policy,
+      output_policy,
+    };
+
+    let createdNew = false;
+    let res = await apiFetch(`/scenarios/${selectedScenario.id}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(updateBody),
+    });
+
+    if (res.status === 404) {
+      createdNew = true;
+      const code = `qc-${selectedScenario.id}-${Date.now().toString(36)}`;
+      res = await apiFetch("/scenarios/", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          code,
+          name: `${selectedScenario.title}（编排）`,
+          description: selectedScenario.summary,
+          goal: updateBody.goal,
+          conversation_mode: "task_oriented",
+          domain: {},
+          knowledge_policy,
+          skills_policy,
+          output_policy,
+          preset_instructions: presetInstructions,
+          opening_hint: openingHint,
+        }),
+      });
+    }
+
+    const saved = await readJson<{ id?: string; code?: string }>(res);
+    const scenarioId = saved.id ?? selectedScenario.id;
+    if (!scenarioId) throw new Error("保存未返回场景 id");
+    if (saved.id && saved.id !== selectedScenario.id) {
+      setSelectedScenarioId(saved.id);
+    }
+    return { scenarioId, createdNew, savedCode: saved.code };
+  }
+
   async function saveScenarioDraft() {
-    if (!selectedScenario) return;
     setSaveBusy(true);
     setSaveMessage("");
     try {
-      const presetInstructions = [
-        `【编排保存】场景：${selectedScenario.title}`,
-        goal.trim() ? `任务目标：${goal.trim()}` : `任务目标：${selectedScenario.goal}`,
-        deliverable.trim() ? `期望输出：${deliverable.trim()}` : null,
-        audience.trim() ? `目标受众：${audience.trim()}` : null,
-        brief.trim() ? `补充背景：\n${brief.trim()}` : null,
-        `建议章节：${selectedScenario.recommendedSections.join("、")}`,
-      ]
-        .filter(Boolean)
-        .join("\n\n");
-
-      const openingHint = [
-        `请输出：${deliverable.trim() || selectedScenario.recommendedTemplate}`,
-        audience.trim() ? `受众：${audience.trim()}` : null,
-      ]
-        .filter(Boolean)
-        .join("；");
-
-      const knowledge_policy = {
-        mode: "restricted",
-        collections: includeKnowledge ? kbOrdered : [],
-        project_bound: false,
-        top_k: 5,
-        fallback_policy: "cache_allowed",
-      };
-
-      const skills_policy = {
-        mode: includeSkills ? "allowed_list" : "manual_only",
-        allowed: includeSkills ? skillOrdered : [],
-        preferred: [] as string[],
-        forbidden: [] as string[],
-        allow_agent_free_choice: includeSkills && skillOrdered.length === 0,
-      };
-
-      const output_policy = {
-        template_id: selectedOutputTemplateId || null,
-        format: "markdown",
-        must_follow_template: false,
-        required_sections: selectedScenario.recommendedSections,
-        validation_rules: {
-          must_have_headings: true,
-          must_cite_sources: includeKnowledge,
-        },
-      };
-
-      const updateBody = {
-        goal: goal.trim() || selectedScenario.goal,
-        description: brief.trim() || selectedScenario.summary,
-        preset_instructions: presetInstructions,
-        opening_hint: openingHint,
-        knowledge_policy,
-        skills_policy,
-        output_policy,
-      };
-
-      let createdNew = false;
-      let res = await apiFetch(`/scenarios/${selectedScenario.id}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(updateBody),
-      });
-
-      if (res.status === 404) {
-        createdNew = true;
-        const code = `qc-${selectedScenario.id}-${Date.now().toString(36)}`;
-        res = await apiFetch("/scenarios/", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            code,
-            name: `${selectedScenario.title}（编排）`,
-            description: selectedScenario.summary,
-            goal: updateBody.goal,
-            conversation_mode: "task_oriented",
-            domain: {},
-            knowledge_policy,
-            skills_policy,
-            output_policy,
-            preset_instructions: presetInstructions,
-            opening_hint: openingHint,
-          }),
-        });
-      }
-
-      const saved = await readJson<{ id?: string; code?: string }>(res);
+      const { createdNew, savedCode, scenarioId } = await persistScenarioDraftToServer();
       console.info("[create] 场景保存成功", {
-        scenario_id: selectedScenario.id,
-        saved_id: saved.id,
-        saved_code: saved.code,
+        scenario_id: scenarioId,
+        saved_code: savedCode,
         createdNew,
       });
       setSaveMessage(
         createdNew
-          ? `已新建场景「${saved.code ?? saved.id ?? ""}」并写入编排`
+          ? `已新建场景「${savedCode ?? scenarioId ?? ""}」并写入编排`
           : "当前场景编排已保存到服务端",
       );
     } catch (e) {
@@ -499,6 +534,28 @@ function CreatePageInner() {
       console.warn("[create] 场景保存失败", msg);
     } finally {
       setSaveBusy(false);
+      apiGet<ScenarioApiRow[]>("/scenarios/")
+        .then(setRemoteList)
+        .catch(() => {});
+    }
+  }
+
+  /** 先持久化当前表单，再调用 POST /scenarios/{id}/publish（需通过合同校验，见后端 _ensure_scenario_publishable） */
+  async function publishScenario() {
+    setPublishBusy(true);
+    setSaveMessage("");
+    try {
+      const { scenarioId } = await persistScenarioDraftToServer();
+      const pub = await apiFetch(`/scenarios/${scenarioId}/publish`, { method: "POST" });
+      await readJson(pub);
+      setSaveMessage("已保存并发布：可在项目详情中绑定该场景后进入工坊执行。");
+      console.info("[create] 场景发布成功", { scenario_id: scenarioId });
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "发布失败";
+      setSaveMessage(msg);
+      console.warn("[create] 场景发布失败", msg);
+    } finally {
+      setPublishBusy(false);
       apiGet<ScenarioApiRow[]>("/scenarios/")
         .then(setRemoteList)
         .catch(() => {});
@@ -520,7 +577,7 @@ function CreatePageInner() {
           </div>
           <h1 className="mt-4 text-3xl font-bold sm:text-4xl">场景编排</h1>
           <p className="mt-2 max-w-2xl text-sm text-slate-400 sm:text-base">
-            定义技能、知识范围与输出合同。在左侧选择场景，配置任务与策略，保存编排并同步至服务端。
+            维护场景合同（说明、知识/技能策略、输出规则）。本页预览仅为结构化合同 JSON，不在此生成正文；执行请从项目进入「对话创作」或「场景输出」。
           </p>
         </div>
 
@@ -680,7 +737,7 @@ function CreatePageInner() {
                 <div className="rounded-2xl border border-slate-800 bg-slate-950/60 p-4 md:col-span-2 xl:col-span-1">
                   <p className="text-sm font-medium text-white">输出结果</p>
                   <p className="mt-1 text-xs leading-relaxed text-slate-500">
-                    基于输出模版：选择后将作为编排输出约束参与预览与工坊执行（未选则跟随场景默认）。
+                    基于输出模版：选择后将作为编排输出约束参与预览与场景输出页的合同（未选则跟随场景默认）。
                   </p>
                   <div className="mt-3 flex flex-wrap items-center gap-2">
                     <span className="text-xs text-slate-500">当前</span>
@@ -714,6 +771,20 @@ function CreatePageInner() {
                         </option>
                       ))}
                     </select>
+                  </label>
+                  <label className="mt-3 flex items-center justify-between gap-3 text-sm">
+                    <span className="text-slate-300">
+                      强制按模版与章节校验
+                      <span className="mt-0.5 block text-xs font-normal text-slate-500">
+                        开启后工单执行会校验模板与建议章节，不满足时输出降级为 draft（与 tasks 合同一致）。
+                      </span>
+                    </span>
+                    <input
+                      type="checkbox"
+                      checked={mustFollowTemplate}
+                      onChange={(e) => setMustFollowTemplate(e.target.checked)}
+                      aria-label="强制按模版与章节校验"
+                    />
                   </label>
                   {outputTemplates.length === 0 ? (
                     <p className="mt-2 text-xs text-amber-400/90">
@@ -787,7 +858,7 @@ function CreatePageInner() {
                     ) : (
                       <div className="flex flex-wrap gap-2">
                         {skillsList.map((name) => {
-                          const active = selectedSkillKeys.includes(name);
+                          const active = contractAllowedSkills.includes(name);
                           return (
                             <button
                               key={name}
@@ -808,10 +879,36 @@ function CreatePageInner() {
                       </div>
                     )}
                   </div>
+                  {includeSkills && skillsNotInstalled.length > 0 ? (
+                    <p className="mt-2 text-xs text-amber-400/90">
+                      以下技能不在当前环境已安装列表中，仍将按合同保留：<span className="font-mono">{skillsNotInstalled.join("、")}</span>
+                    </p>
+                  ) : null}
                   <p className="text-xs text-slate-500">
-                    先开启「携带技能策略」再点选标签；未选时进入对话将按工坊全量技能生效
+                    先开启「携带技能策略」再点选标签；保存后由场景合同约束场景输出页的可选技能范围。
                   </p>
                 </div>
+
+                <label className="space-y-2 text-sm md:col-span-2 xl:col-span-1">
+                  <span className="text-slate-300">合同章节（output required_sections）</span>
+                  <span className="block text-xs font-normal text-slate-500">
+                    每行一条章节标题，与服务端 output_policy.required_sections 一致；保存/发布时原样写回。
+                  </span>
+                  <textarea
+                    value={requiredSections.join("\n")}
+                    onChange={(e) =>
+                      setRequiredSections(
+                        e.target.value
+                          .split("\n")
+                          .map((line) => line.trim())
+                          .filter(Boolean),
+                      )
+                    }
+                    rows={5}
+                    placeholder={"背景\n方案\n总结"}
+                    className="w-full rounded-xl border border-slate-700 bg-slate-950/70 px-4 py-3 text-sm text-white placeholder:text-slate-600 outline-none transition focus:border-blue-500"
+                  />
+                </label>
               </div>
 
               <label className="mt-4 block space-y-2 text-sm">
@@ -879,27 +976,31 @@ function CreatePageInner() {
                     <span className="text-slate-500">技能</span>
                     <span className="text-right text-slate-200">
                       {includeSkills
-                        ? skillOrdered.length > 0
-                          ? `${skillOrdered.length} 项：${skillOrdered.slice(0, 4).join("、")}${
-                              skillOrdered.length > 4 ? "…" : ""
+                        ? contractAllowedSkills.length > 0
+                          ? `${contractAllowedSkills.length} 项：${contractAllowedSkills.slice(0, 4).join("、")}${
+                              contractAllowedSkills.length > 4 ? "…" : ""
                             }`
-                          : "全量（进入对话后）"
+                          : "合同 allowed 为空（未选技能）"
                         : "关闭"}
                     </span>
                   </div>
                 </div>
 
                 <div className="rounded-2xl border border-slate-800 bg-slate-950/60 p-4">
-                  <p className="text-sm font-medium text-white">建议章节</p>
+                  <p className="text-sm font-medium text-white">合同章节</p>
                   <div className="mt-3 flex flex-wrap gap-2">
-                    {selectedScenario?.recommendedSections.map((section) => (
-                      <span
-                        key={section}
-                        className="rounded-full border border-blue-500/70 bg-blue-500/15 px-3 py-1.5 text-xs font-medium text-blue-100"
-                      >
-                        {section}
-                      </span>
-                    ))}
+                    {requiredSections.length > 0 ? (
+                      requiredSections.map((section) => (
+                        <span
+                          key={section}
+                          className="rounded-full border border-blue-500/70 bg-blue-500/15 px-3 py-1.5 text-xs font-medium text-blue-100"
+                        >
+                          {section}
+                        </span>
+                      ))
+                    ) : (
+                      <span className="text-xs text-slate-500">未填写（required_sections 为空）</span>
+                    )}
                   </div>
                 </div>
 
@@ -920,11 +1021,22 @@ function CreatePageInner() {
                 <button
                   type="button"
                   onClick={saveScenarioDraft}
-                  disabled={saveBusy}
+                  disabled={saveBusy || publishBusy}
                   className="w-full rounded-2xl border border-emerald-600/50 bg-emerald-500/15 px-5 py-3 text-sm font-medium text-emerald-100 transition hover:bg-emerald-500/25 disabled:opacity-50"
                 >
                   {saveBusy ? "保存中…" : "场景保存"}
                 </button>
+                <button
+                  type="button"
+                  onClick={() => void publishScenario()}
+                  disabled={saveBusy || publishBusy}
+                  className="w-full rounded-2xl border border-amber-500/50 bg-amber-500/15 px-5 py-3 text-sm font-medium text-amber-100 transition hover:bg-amber-500/25 disabled:opacity-50"
+                >
+                  {publishBusy ? "发布中…" : "发布场景"}
+                </button>
+                <p className="text-center text-[11px] leading-snug text-slate-500">
+                  「发布场景」会先将当前表单保存再提交发布；需满足技能白名单非空等合同校验后才可纳入项目绑定。
+                </p>
                 {saveMessage ? (
                   <p
                     className={`text-center text-xs ${
@@ -935,6 +1047,17 @@ function CreatePageInner() {
                   >
                     {saveMessage}
                   </p>
+                ) : null}
+                {returnProjectId ? (
+                  <div className="rounded-2xl border border-slate-700 bg-slate-950/50 px-4 py-3 text-center text-xs text-slate-400">
+                    保存场景后，可返回项目绑定该场景：
+                    <Link
+                      href={`/projects/${returnProjectId}`}
+                      className="ml-1 font-medium text-blue-400 hover:text-blue-300"
+                    >
+                      打开项目详情 →
+                    </Link>
+                  </div>
                 ) : null}
               </div>
             </div>

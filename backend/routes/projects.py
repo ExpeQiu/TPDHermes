@@ -248,6 +248,78 @@ async def orchestration_preview(
     return {"payload": payload.model_dump(mode="json"), "snapshot": snapshot}
 
 
+class ProjectContextAttachmentItem(BaseModel):
+    id: str
+    original_filename: str
+
+
+class ProjectContextOutputItem(BaseModel):
+    id: str
+    title: str | None
+    summary: str | None
+    created_at: str | None
+
+
+class ProjectContextResponse(BaseModel):
+    project_id: str
+    name: str
+    description: Optional[str]
+    background: Optional[str]
+    audience: Optional[str]
+    attachments: list[ProjectContextAttachmentItem]
+    recent_outputs: list[ProjectContextOutputItem]
+
+
+@router.get("/{project_id}/context", response_model=ProjectContextResponse)
+async def get_project_context(project_id: str, db: AsyncSession = Depends(get_db)):
+    """聚合项目卡、附件列表与近期输出摘要，供对话创作注入 task_input（与设计文档 context 契约对齐）。"""
+    res = await db.execute(select(Project).where(Project.id == project_id))
+    project = res.scalar_one_or_none()
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    at_rows = (
+        await db.execute(
+            select(ProjectAttachment)
+            .where(ProjectAttachment.project_id == project_id)
+            .order_by(ProjectAttachment.created_at.desc())
+            .limit(64)
+        )
+    ).scalars().all()
+    attachments = [
+        ProjectContextAttachmentItem(id=a.id, original_filename=a.original_filename)
+        for a in at_rows
+    ]
+
+    out_rows = (
+        await db.execute(
+            select(OutputAsset)
+            .where(OutputAsset.project_id == project_id)
+            .order_by(OutputAsset.created_at.desc())
+            .limit(12)
+        )
+    ).scalars().all()
+    recent_outputs = [
+        ProjectContextOutputItem(
+            id=o.id,
+            title=o.title,
+            summary=(o.summary or (o.content or "")[:240]) or None,
+            created_at=o.created_at,
+        )
+        for o in out_rows
+    ]
+
+    return ProjectContextResponse(
+        project_id=project.id,
+        name=project.name,
+        description=project.description,
+        background=project.background,
+        audience=project.audience,
+        attachments=attachments,
+        recent_outputs=recent_outputs,
+    )
+
+
 class OutputListItem(BaseModel):
     id: str
     title: str | None
@@ -559,6 +631,8 @@ class ProjectScenarioItem(BaseModel):
     scenario_code: str
     scenario_name: str
     scenario_version: str
+    scenario_description: str | None = None
+    scenario_status: str = "draft"
     is_default: int
     enabled: int
 
@@ -567,6 +641,23 @@ class ProjectScenarioBind(BaseModel):
     scenario_id: str
     scenario_version: str
     is_default: bool = False
+
+
+def _project_scenario_item(ps: ProjectScenario, sp: ScenarioProfile) -> ProjectScenarioItem:
+    desc = (sp.description or "").strip()
+    if len(desc) > 240:
+        desc = desc[:239] + "…"
+    return ProjectScenarioItem(
+        binding_id=ps.id,
+        scenario_id=ps.scenario_id,
+        scenario_code=sp.code,
+        scenario_name=sp.name,
+        scenario_version=ps.scenario_version,
+        scenario_description=desc or None,
+        scenario_status=sp.status or "draft",
+        is_default=ps.is_default,
+        enabled=ps.enabled,
+    )
 
 
 @router.get("/{project_id}/scenarios", response_model=list[ProjectScenarioItem])
@@ -581,18 +672,7 @@ async def list_bound_scenarios(project_id: str, db: AsyncSession = Depends(get_d
         .order_by(ProjectScenario.is_default.desc(), ScenarioProfile.name)
     )
     rows = q.all()
-    return [
-        ProjectScenarioItem(
-            binding_id=ps.id,
-            scenario_id=ps.scenario_id,
-            scenario_code=sp.code,
-            scenario_name=sp.name,
-            scenario_version=ps.scenario_version,
-            is_default=ps.is_default,
-            enabled=ps.enabled,
-        )
-        for ps, sp in rows
-    ]
+    return [_project_scenario_item(ps, sp) for ps, sp in rows]
 
 
 @router.post("/{project_id}/scenarios", response_model=ProjectScenarioItem)
@@ -607,6 +687,14 @@ async def bind_project_scenario(
     sp = await db.get(ScenarioProfile, body.scenario_id)
     if not sp:
         raise HTTPException(status_code=404, detail="场景不存在")
+    st = (sp.status or "draft").strip().lower()
+    if st == "disabled":
+        raise HTTPException(status_code=400, detail="场景已停用，无法绑定到项目")
+    if st != "published":
+        raise HTTPException(
+            status_code=400,
+            detail=f"仅允许绑定已发布（published）场景，当前为 {sp.status or 'draft'}；请先在场景编排中发布",
+        )
     if sp.version != body.scenario_version:
         raise HTTPException(
             status_code=409,
@@ -641,15 +729,7 @@ async def bind_project_scenario(
     await db.commit()
     await db.refresh(ps)
     await db.refresh(sp)
-    return ProjectScenarioItem(
-        binding_id=ps.id,
-        scenario_id=ps.scenario_id,
-        scenario_code=sp.code,
-        scenario_name=sp.name,
-        scenario_version=ps.scenario_version,
-        is_default=ps.is_default,
-        enabled=ps.enabled,
-    )
+    return _project_scenario_item(ps, sp)
 
 
 @router.delete("/{project_id}/scenarios/{scenario_id}")
@@ -700,15 +780,7 @@ async def set_default_project_scenario(
     ps.updated_at = datetime.now().isoformat()
     await db.commit()
     await db.refresh(ps)
-    return ProjectScenarioItem(
-        binding_id=ps.id,
-        scenario_id=ps.scenario_id,
-        scenario_code=sp.code,
-        scenario_name=sp.name,
-        scenario_version=ps.scenario_version,
-        is_default=ps.is_default,
-        enabled=ps.enabled,
-    )
+    return _project_scenario_item(ps, sp)
 
 
 # --- 输出物治理 ---

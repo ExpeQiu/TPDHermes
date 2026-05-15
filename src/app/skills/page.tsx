@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback, useRef } from "react";
+import { useEffect, useState, useCallback, useRef, useMemo } from "react";
 import Link from "next/link";
 import { apiFetch, readJson } from "@/lib/api";
 import { CONTENT_MAX_CLASS } from "@/lib/content-shell";
@@ -12,6 +12,8 @@ interface Skill {
   version: string;
   enabled: boolean;
   source: string;
+  /** public：工作区/市场；personal：本地上传 */
+  scope?: string;
   config: Record<string, unknown>;
   version_history: Array<{ version: string; changelog: string; installed_at: string }>;
   installed_at: string;
@@ -154,6 +156,15 @@ export default function SkillsPage() {
   const installedCount = skills.filter((s) => s.enabled).length;
   const disabledCount = skills.length - installedCount;
 
+  const publicSkills = useMemo(
+    () => skills.filter((s) => (s.scope ?? "public") !== "personal"),
+    [skills],
+  );
+  const personalSkills = useMemo(
+    () => skills.filter((s) => (s.scope ?? "public") === "personal"),
+    [skills],
+  );
+
   return (
     <main className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 p-4 text-white sm:p-6 md:p-8">
       <div className={CONTENT_MAX_CLASS}>
@@ -171,7 +182,8 @@ export default function SkillsPage() {
             <div>
               <h1 className="text-3xl font-bold sm:text-4xl">技能策略</h1>
               <p className="mt-2 max-w-2xl text-sm text-slate-400 sm:text-base">
-                启用、配置已安装技能，并前往市场扩展能力。
+                <span className="text-slate-200">公共技能</span>（工作区与市场安装）与
+                <span className="text-slate-200">我的技能</span>（本地上传 ZIP）分区管理；启用状态参与编排白名单。
               </p>
             </div>
             <div className="flex flex-col items-stretch gap-2 sm:items-end">
@@ -232,39 +244,96 @@ export default function SkillsPage() {
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           <div className="lg:col-span-1">
-            <div className="bg-slate-800/60 border border-slate-700 rounded-xl p-4">
-              <h2 className="text-lg font-semibold mb-3">已安装技能池</h2>
-              {loading && <p className="text-slate-400 text-sm text-center py-6">加载中…</p>}
-              {!loading && skills.length === 0 && (
-                <p className="text-slate-500 text-sm text-center py-6">暂无已安装的 Skills</p>
-              )}
-              {!loading && skills.length > 0 && (
-                <div className="space-y-2">
-                  {skills.map((skill) => (
-                    <button
-                      key={skill.id}
-                      onClick={() => { setSelectedSkill(skill); setEditingConfig(false); }}
-                      className={`w-full text-left p-3 rounded-lg border transition ${
-                        selectedSkill?.id === skill.id
-                          ? "bg-blue-600/20 border-blue-500"
-                          : "bg-slate-700/40 border-slate-600 hover:border-slate-500"
-                      }`}
-                    >
-                      <div className="flex items-center justify-between">
-                        <span className="text-sm font-medium">{skill.name}</span>
-                        <span className={`text-xs px-1.5 py-0.5 rounded-full ${
-                          skill.enabled
-                            ? "bg-green-500/20 text-green-400"
-                            : "bg-orange-500/20 text-orange-400"
-                        }`}>
-                          {skill.enabled ? "启用" : "禁用"}
-                        </span>
-                      </div>
-                      <p className="mt-1 text-xs text-slate-400">v{skill.version}</p>
-                    </button>
-                  ))}
-                </div>
-              )}
+            <div className="space-y-6 rounded-xl border border-slate-700 bg-slate-800/60 p-4">
+              <section>
+                <h2 className="mb-1 text-lg font-semibold">公共 / 工作区技能</h2>
+                <p className="mb-3 text-xs text-slate-500">团队可复用的已安装能力</p>
+                {loading && (
+                  <p className="py-4 text-center text-sm text-slate-400">加载中…</p>
+                )}
+                {!loading && publicSkills.length === 0 && (
+                  <p className="py-4 text-center text-sm text-slate-500">暂无公共技能条目</p>
+                )}
+                {!loading && publicSkills.length > 0 && (
+                  <div className="space-y-2">
+                    {publicSkills.map((skill) => (
+                      <button
+                        key={skill.id}
+                        type="button"
+                        onClick={() => {
+                          setSelectedSkill(skill);
+                          setEditingConfig(false);
+                        }}
+                        className={`w-full rounded-lg border p-3 text-left transition ${
+                          selectedSkill?.id === skill.id
+                            ? "border-blue-500 bg-blue-600/20"
+                            : "border-slate-600 bg-slate-700/40 hover:border-slate-500"
+                        }`}
+                      >
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="text-sm font-medium">{skill.name}</span>
+                          <span
+                            className={`shrink-0 rounded-full px-1.5 py-0.5 text-xs ${
+                              skill.enabled
+                                ? "bg-green-500/20 text-green-400"
+                                : "bg-orange-500/20 text-orange-400"
+                            }`}
+                          >
+                            {skill.enabled ? "启用" : "禁用"}
+                          </span>
+                        </div>
+                        <p className="mt-1 text-xs text-slate-500">
+                          v{skill.version} · 公共
+                        </p>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </section>
+              <section className="border-t border-slate-700 pt-4">
+                <h2 className="mb-1 text-lg font-semibold">我的技能</h2>
+                <p className="mb-3 text-xs text-slate-500">本地上传，归属为 personal</p>
+                {!loading && personalSkills.length === 0 && (
+                  <p className="py-4 text-center text-sm text-slate-500">
+                    暂无上传技能，可使用上方「上传 Skill」
+                  </p>
+                )}
+                {!loading && personalSkills.length > 0 && (
+                  <div className="space-y-2">
+                    {personalSkills.map((skill) => (
+                      <button
+                        key={skill.id}
+                        type="button"
+                        onClick={() => {
+                          setSelectedSkill(skill);
+                          setEditingConfig(false);
+                        }}
+                        className={`w-full rounded-lg border p-3 text-left transition ${
+                          selectedSkill?.id === skill.id
+                            ? "border-blue-500 bg-blue-600/20"
+                            : "border-slate-600 bg-slate-700/40 hover:border-slate-500"
+                        }`}
+                      >
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="text-sm font-medium">{skill.name}</span>
+                          <span
+                            className={`shrink-0 rounded-full px-1.5 py-0.5 text-xs ${
+                              skill.enabled
+                                ? "bg-green-500/20 text-green-400"
+                                : "bg-orange-500/20 text-orange-400"
+                            }`}
+                          >
+                            {skill.enabled ? "启用" : "禁用"}
+                          </span>
+                        </div>
+                        <p className="mt-1 text-xs text-slate-500">
+                          v{skill.version} · 个人
+                        </p>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </section>
             </div>
           </div>
 
@@ -297,8 +366,11 @@ export default function SkillsPage() {
                     <p className="font-medium mt-0.5">v{selectedSkill.version}</p>
                   </div>
                   <div className="bg-slate-700/40 rounded-lg p-3">
-                    <p className="text-xs text-slate-400">来源</p>
-                    <p className="font-medium mt-0.5">{selectedSkill.source}</p>
+                    <p className="text-xs text-slate-400">来源 / 归属</p>
+                    <p className="font-medium mt-0.5">
+                      {selectedSkill.source}
+                      {((selectedSkill.scope ?? "public") === "personal") ? " · 个人" : " · 公共"}
+                    </p>
                   </div>
                   <div className="bg-slate-700/40 rounded-lg p-3">
                     <p className="text-xs text-slate-400">安装时间</p>

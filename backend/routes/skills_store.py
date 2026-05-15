@@ -65,6 +65,8 @@ class SkillResponse(BaseModel):
     version: str
     enabled: bool
     source: str
+    # scope：public=工作区/市场安装；personal=本地上传（ZIP）等
+    scope: str = "public"
     version_history: List[Dict[str, Any]]
     installed_at: str
     updated_at: str

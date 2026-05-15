@@ -83,6 +83,13 @@ async def finalize_run(
     validation_ok = bool((validation or {}).get("ok", True))
 
     if save_output and project_id and project_id != "none" and validation_ok and assistant_content.strip():
+        raw_st = (status or "completed").strip().lower()
+        if raw_st in ("completed", "draft", "approved"):
+            out_status = raw_st
+        elif raw_st == "failed":
+            out_status = "draft"
+        else:
+            out_status = "completed"
         out = OutputAsset(
             id=str(uuid.uuid4()),
             project_id=project_id,
@@ -93,13 +100,13 @@ async def finalize_run(
             summary=assistant_content.strip()[:280],
             content=assistant_content,
             content_format="markdown",
-            status="draft",
+            status=out_status,
             citations_json=None,
         )
         db.add(out)
         await db.flush()
         output_id = out.id
-        logger.info("output saved output_id=%s run_id=%s", output_id, run_id)
+        logger.info("output saved output_id=%s run_id=%s status=%s", output_id, run_id, out_status)
     elif save_output and not validation_ok:
         res.status = "draft"
         logger.info("output skipped due to validation run_id=%s", run_id)

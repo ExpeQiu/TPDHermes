@@ -1,13 +1,8 @@
-"""pytest 入口：保证仓库根在 sys.path，CI 不依赖隐式工作目录。"""
-import os
-import sys
-from pathlib import Path
+"""测试默认环境：避免未设置 HERMES_CHAT_API_URL 时 lifespan 拒绝启动。"""
 
-_ROOT = Path(__file__).resolve().parents[1]
-if str(_ROOT) not in sys.path:
-    sys.path.insert(0, str(_ROOT))
+import os
 
 os.environ.setdefault(
-    "DATABASE_URL",
-    "sqlite+aiosqlite:////tmp/tphermes_pytest.db",
+    "HERMES_CHAT_API_URL",
+    "http://127.0.0.1:65535/v1/chat/completions",
 )

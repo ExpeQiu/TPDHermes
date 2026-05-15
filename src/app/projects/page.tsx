@@ -63,7 +63,7 @@ export default function ProjectsPage() {
             <div>
               <h1 className="text-3xl font-bold sm:text-4xl">项目中心</h1>
               <p className="mt-2 max-w-2xl text-sm text-slate-400 sm:text-base">
-                管理项目并进入编排、对话、工坊。
+                管理项目并进入对话创作与场景输出（推荐先打开项目详情）。
               </p>
             </div>
             <Link
@@ -134,7 +134,7 @@ export default function ProjectsPage() {
               <p className="mb-3 text-4xl">📁</p>
               <p>暂无项目</p>
               <p className="mt-2 text-sm text-slate-600">
-                先新建项目，或先从场景编排页直接发起一次任务。
+                先新建项目，再从项目页进入对话创作或场景输出。
               </p>
             </div>
           )}
@@ -185,13 +185,13 @@ export default function ProjectsPage() {
                       </Link>
                       <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-2">
                         <Link
-                          href={`/workshop?project=${project.id}`}
+                          href={`/workshop?project_id=${project.id}`}
                           className="rounded-xl border border-slate-700 bg-slate-900/60 px-4 py-2.5 text-center text-sm text-slate-300 transition hover:border-slate-600 hover:bg-slate-900"
                         >
-                          场景生成
+                          场景输出
                         </Link>
                         <Link
-                          href={`/chat?project=${project.id}`}
+                          href={`/chat?project_id=${project.id}`}
                           className="rounded-xl border border-slate-700 bg-slate-900/60 px-4 py-2.5 text-center text-sm text-slate-300 transition hover:border-slate-600 hover:bg-slate-900"
                         >
                           对话创作
