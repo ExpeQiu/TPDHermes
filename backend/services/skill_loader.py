@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import importlib
 import importlib.util
+import json
 import os
 import re
 import sys
@@ -26,6 +27,9 @@ from typing import Any, Dict, List, Optional
 
 class Skill(ABC):
     """所有 Skill 必须继承此类并实现标准接口"""
+
+    # 模板内容（由 SkillLoader 自动注入）
+    template_content: str | None = None
 
     @property
     @abstractmethod
@@ -51,6 +55,10 @@ class Skill(ABC):
         子类可override
         """
         return input_data is not None
+
+    def get_template(self) -> str | None:
+        """返回关联的模板内容（来自 skill.json template_file）"""
+        return self.template_content
 
 
 # ─── SkillLoader ──────────────────────────────────────────────────────────────
@@ -122,8 +130,47 @@ class SkillLoader:
         # 从模块中提取 Skill 子类
         skill_cls = self._find_skill_class(module, name)
         instance = skill_cls()
+
+        # 自动加载 skill.json 并注入模板内容
+        meta_path = skill_path / "skill.json"
+        if meta_path.exists():
+            try:
+                with open(meta_path, "r", encoding="utf-8") as f:
+                    meta = json.load(f)
+                # 注入模板文件路径，供 Skill.generate() 自行加载
+                instance.template_file = meta.get("template")
+                instance.template_content = self._load_template_content(
+                    meta.get("template"), skill_path=skill_path
+                )
+                instance.skill_meta = meta
+            except Exception:
+                pass
+
         self._cache[name] = instance
         return instance
+
+    def _load_template_content(
+        self, template_file: str | None, *, skill_path: Path | None = None
+    ) -> str | None:
+        """根据 skill.json 中的 template 路径加载模板内容。
+
+        相对路径相对于 skill 目录（如 skills/a4_skill/template.md）。
+        """
+        if not template_file:
+            return None
+        tpl_path = Path(template_file)
+        if not tpl_path.is_absolute() and skill_path:
+            # skill 目录下的相对路径
+            tpl_path = skill_path / tpl_path
+        if tpl_path.exists():
+            try:
+                raw = tpl_path.read_text(encoding="utf-8")
+                # 去掉 YAML frontmatter（---...--- 块）
+                import re as _re
+                return _re.sub(r'^---\n[\s\S]+?\n---\n', '', raw).lstrip('\n')
+            except Exception:
+                pass
+        return None
 
     def load_from_package_root(
         self,

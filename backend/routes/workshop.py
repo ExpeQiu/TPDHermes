@@ -37,6 +37,15 @@ class GenerateRequest(BaseModel):
     context: Dict[str, Any]
 
 
+class GenerateFromKBRequest(BaseModel):
+    skill_name: str
+    query: str
+    collection_name: str
+    limit: int = 3
+    project_id: str | None = None
+    context: Dict[str, Any] = {}
+
+
 # ─── SSE Event Helpers ────────────────────────────────────────────────────────
 
 def sse_event(data: Dict[str, Any]) -> str:
@@ -145,3 +154,22 @@ async def generate_stream(
 @router.get("/skills", response_model=None)
 async def list_skills(loader: SkillLoader = Depends(_loader_dep)):
     return {"skills": loader.discover()}
+
+
+@router.post("/generate-from-kb", response_model=None)
+async def generate_from_kb(request: GenerateFromKBRequest):
+    """
+    Query KB first, map results into a Skill context, then generate content.
+
+    User-provided request.context overrides the auto-mapped fields.
+    """
+    from backend.tools.workshop_tools import workshop_generate_from_kb
+
+    return await workshop_generate_from_kb(
+        skill_name=request.skill_name,
+        query=request.query,
+        collection_name=request.collection_name,
+        limit=request.limit,
+        project_id=request.project_id,
+        context=request.context,
+    )

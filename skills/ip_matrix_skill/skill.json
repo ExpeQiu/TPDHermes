@@ -1,0 +1,18 @@
+{
+  "name": "IP矩阵图生成",
+  "description": "基于IP矩阵图七步法模板生成完整技术品牌矩阵",
+  "version": "1.0.0",
+  "author": "TPD Team",
+  "template_file": "/Users/expeqiu/Library/Mobile Documents/iCloud~md~obsidian/Documents/expe/openclaw/aima/技术推广/10-模板库/输出模版/IP矩阵图模板.md",
+  "input_schema": {
+    "tech_name": "string (技术名)",
+    "slogan": "string (Slogan一句话承诺)",
+    "positioning": "string (技术品牌定位)",
+    "vision": "string (3-5年技术品牌愿景)",
+    "experience": "object of {safety, intelligent, quality, space} (用户体验四维度)",
+    "highlights": "array of {dimension, point, params_scene_benefit} (技术亮点)",
+    "tech_stack": "object of {computing, algorithm, data, ecosystem} (技术底座)",
+    "vehicle_timeline": "array of {model, plan_level, launch_time} (车型×上市时间)"
+  },
+  "template": "template.md"
+}

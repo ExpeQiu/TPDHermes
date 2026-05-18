@@ -1,0 +1,16 @@
+{
+  "name": "发言稿生成",
+  "description": "基于发言稿模板生成发布会/活动演讲稿，含开场痛点、技术方案、用户价值、收尾CTA",
+  "version": "1.0.0",
+  "author": "TPD Team",
+  "template_file": "/Users/expeqiu/Library/Mobile Documents/iCloud~md~obsidian/Documents/expe/openclaw/aima/技术推广/10-模板库/输出模版/发言稿模板.md",
+  "input_schema": {
+    "tech_name": "string (技术名称)",
+    "scene_pain": "string (开场痛点场景描述)",
+    "tech_solution": "string (技术方案简述)",
+    "highlights": "array of {name, scene_data} (技术亮点：场景+数据)",
+    "user_value": "string (用户价值：量化指标)",
+    "cta": "string (收尾行动号召)"
+  },
+  "template": "template.md"
+}

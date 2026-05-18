@@ -96,6 +96,33 @@ async def workshop_generate(skill_name: str, context: dict) -> dict:
     return await _gen(skill_name, context)
 
 
+@mcp.tool(
+    title="Workshop Generate From KB",
+    description=(
+        "Query the knowledge base first, auto-build a Skill context, "
+        "then execute the Skill and return the KB result, mapped context, and output."
+    ),
+)
+async def workshop_generate_from_kb(
+    skill_name: str,
+    query: str,
+    collection_name: str,
+    limit: int = 3,
+    project_id: str | None = None,
+    context: dict | None = None,
+) -> dict:
+    """Execute a Skill with KB-augmented context."""
+    from backend.tools.workshop_tools import workshop_generate_from_kb as _gen_from_kb
+    return await _gen_from_kb(
+        skill_name=skill_name,
+        query=query,
+        collection_name=collection_name,
+        limit=limit,
+        project_id=project_id,
+        context=context,
+    )
+
+
 # ─── Project Tools ─────────────────────────────────────────────────────────────
 
 @mcp.tool(

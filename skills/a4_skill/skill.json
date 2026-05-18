@@ -1,0 +1,16 @@
+{
+  "name": "A4一页纸生成",
+  "description": "基于A4一页纸模板生成技术规格单页，含场景收益、技术亮点、实测数据、搭载车型",
+  "version": "1.0.0",
+  "author": "TPD Team",
+  "template_file": "/Users/expeqiu/Library/Mobile Documents/iCloud~md~obsidian/Documents/expe/openclaw/aima/技术推广/10-模板库/输出模版/A4一页纸模板.md",
+  "input_schema": {
+    "tech_name": "string (技术名称，如千里浩瀚H9)",
+    "slogan": "string (一句话承诺)",
+    "scene_benefits": "array of {scene, benefit} (场景+收益)",
+    "tech_highlights": "array of {highlight, params, user_benefit} (技术亮点)",
+    "test_data": "array of {data, source, condition} (实测数据)",
+    "vehicle_models": "array of {model, plan, rights} (车型与权益)"
+  },
+  "template": "template.md"
+}

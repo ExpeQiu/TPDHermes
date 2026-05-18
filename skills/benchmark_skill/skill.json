@@ -1,0 +1,14 @@
+{
+  "name": "竞品对标分析表生成",
+  "description": "基于竞品对标分析表模板生成多维度竞品对比数据表",
+  "version": "1.0.0",
+  "author": "TPD Team",
+  "template_file": "/Users/expeqiu/Library/Mobile Documents/iCloud~md~obsidian/Documents/expe/openclaw/aima/技术推广/10-模板库/输出模版/竞品对标分析表-模板.md",
+  "input_schema": {
+    "my_product": "string (本品名称)",
+    "my_tech": "string (本品技术方案)",
+    "competitors": "array of {name, tech, advantage, weakness} (竞品信息)",
+    "compare_dimensions": "array of string (对比维度，如续航/智驾/座舱/价格等)"
+  },
+  "template": "template.md"
+}

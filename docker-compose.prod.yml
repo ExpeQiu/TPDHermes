@@ -59,6 +59,31 @@ services:
     networks:
       - tphermes-net
 
+  tphermes-mcp:
+    build:
+      context: .
+      dockerfile: backend.Dockerfile
+    image: ${TPDHERMES_BACKEND_IMAGE:-tphermes-backend:prod}
+    container_name: tphermes-mcp
+    restart: unless-stopped
+    environment:
+      - DATABASE_URL=${DATABASE_URL:-sqlite+aiosqlite:////app/data/tphermes.db}
+      - CHROMA_HOST=${CHROMA_HOST:-http://your-chroma-host:8001}
+      - FEISHU_APP_ID=${FEISHU_APP_ID:-}
+      - FEISHU_APP_SECRET=${FEISHU_APP_SECRET:-}
+      - TPDHERMES_MCP_HOST=${TPDHERMES_MCP_HOST:-0.0.0.0}
+      - TPDHERMES_MCP_PORT=${TPDHERMES_MCP_PORT:-8801}
+      - TPDHERMES_MCP_PATH=${TPDHERMES_MCP_PATH:-/mcp}
+      - TPDHERMES_MCP_TRANSPORT=${TPDHERMES_MCP_TRANSPORT:-streamable-http}
+      - TPDHERMES_MCP_LOG_LEVEL=${TPDHERMES_MCP_LOG_LEVEL:-info}
+    command: ["python", "-m", "backend.mcp_http_server"]
+    expose:
+      - "8801"
+    volumes:
+      - tphermes-data:/app/data
+    networks:
+      - tphermes-net
+
   hermes-agent:
     # If you deploy Hermes-agent from local sources, replace `image` with:
     # build:
@@ -67,9 +92,48 @@ services:
     image: ${HERMES_AGENT_IMAGE:-ghcr.io/your-org/hermes-agent:latest}
     container_name: hermes-agent
     restart: unless-stopped
+    depends_on:
+      - tphermes-mcp
+    command: ["gateway", "run"]
     environment:
+      - HERMES_UID=${HERMES_UID:-10000}
+      - HERMES_GID=${HERMES_GID:-10000}
+      - HERMES_HOME=/opt/data
+      - API_SERVER_ENABLED=true
+      - API_SERVER_HOST=0.0.0.0
+      - API_SERVER_PORT=8642
       - PORT=8642
       - API_SERVER_KEY=${HERMES_AGENT_API_SERVER_KEY:-change-me}
+      - TPDHERMES_MCP_URL=${TPDHERMES_MCP_URL:-http://tphermes-mcp:8801/mcp}
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY:-}
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+      - NOUS_API_KEY=${NOUS_API_KEY:-}
+      - GLM_API_KEY=${GLM_API_KEY:-}
+      - KIMI_API_KEY=${KIMI_API_KEY:-}
+      - MINIMAX_API_KEY=${MINIMAX_API_KEY:-}
+      - MINIMAX_CN_API_KEY=${MINIMAX_CN_API_KEY:-}
+      - MINIMAX_CN_BASE_URL=${MINIMAX_CN_BASE_URL:-}
+      - FEISHU_APP_ID=${FEISHU_APP_ID:-}
+      - FEISHU_APP_SECRET=${FEISHU_APP_SECRET:-}
+      - FEISHU_DOMAIN=${FEISHU_DOMAIN:-feishu}
+      - FEISHU_CONNECTION_MODE=${FEISHU_CONNECTION_MODE:-websocket}
+      - FEISHU_ENCRYPT_KEY=${FEISHU_ENCRYPT_KEY:-}
+      - FEISHU_VERIFICATION_TOKEN=${FEISHU_VERIFICATION_TOKEN:-}
+      - FEISHU_ALLOWED_USERS=${FEISHU_ALLOWED_USERS:-}
+      - FEISHU_GROUP_POLICY=${FEISHU_GROUP_POLICY:-allowlist}
+      - FEISHU_ALLOW_BOTS=${FEISHU_ALLOW_BOTS:-none}
+      - FEISHU_HOME_CHANNEL=${FEISHU_HOME_CHANNEL:-}
+      - FEISHU_HOME_CHANNEL_NAME=${FEISHU_HOME_CHANNEL_NAME:-}
+      - FEISHU_HOME_CHANNEL_THREAD_ID=${FEISHU_HOME_CHANNEL_THREAD_ID:-}
+      - FEISHU_BOT_OPEN_ID=${FEISHU_BOT_OPEN_ID:-}
+      - FEISHU_BOT_USER_ID=${FEISHU_BOT_USER_ID:-}
+      - FEISHU_BOT_NAME=${FEISHU_BOT_NAME:-}
+    volumes:
+      - hermes-agent-data:/opt/data
+      - ./deploy/hermes-agent/config.yaml:/opt/data/config.yaml:ro
     expose:
       - "8642"
     networks:
@@ -77,6 +141,7 @@ services:
 
 volumes:
   tphermes-data:
+  hermes-agent-data:
 
 networks:
   tphermes-net:

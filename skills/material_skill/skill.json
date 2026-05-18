@@ -1,0 +1,16 @@
+{
+  "name": "传播素材清单生成",
+  "description": "基于传播素材清单模板生成完整物料清单，含视频/图文/KOL/媒介投放计划",
+  "version": "1.0.0",
+  "author": "TPD Team",
+  "template_file": "/Users/expeqiu/Library/Mobile Documents/iCloud~md~obsidian/Documents/expe/openclaw/aima/技术推广/10-模板库/输出模版/传播素材清单-模板.md",
+  "input_schema": {
+    "project_name": "string (推广项目名称)",
+    "vehicle_model": "string (推广车型)",
+    "tech_theme": "string (推广主题)",
+    "budget": "string (预算总额)",
+    "launch_date": "string (上市日期)",
+    "top_selling_points": "array of string (核心卖点，用于物料内容方向)"
+  },
+  "template": "template.md"
+}

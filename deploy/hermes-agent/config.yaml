@@ -1,0 +1,22 @@
+model:
+  default: "MiniMax-M2.7-highspeed"
+  provider: "minimax-cn"
+  base_url: "https://api.minimaxi.com/anthropic"
+
+mcp_servers:
+  tphermes:
+    url: http://tphermes-mcp:8801/mcp
+    enabled: true
+    timeout: 120
+    connect_timeout: 30
+
+terminal:
+  backend: "local"
+  cwd: "/opt/data/workspace"
+  timeout: 180
+  lifetime_seconds: 300
+  docker_mount_cwd_to_workspace: false
+
+display:
+  tool_progress: all
+  interim_assistant_messages: true
