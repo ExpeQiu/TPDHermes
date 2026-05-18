@@ -38,14 +38,14 @@ export const WORKFLOW_NAV_ITEMS: WorkflowNavItem[] = [
   },
   {
     href: "/knowledge",
-    label: "知识策略",
-    shortLabel: "知识策略",
+    label: "知识库",
+    shortLabel: "知识库",
     description: "配置知识范围并验证检索效果。",
   },
   {
     href: "/skills",
-    label: "技能策略",
-    shortLabel: "技能策略",
+    label: "技能工坊",
+    shortLabel: "技能工坊",
     description: "维护可用于任务执行的能力池。",
   },
 ];

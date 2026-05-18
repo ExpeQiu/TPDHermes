@@ -11,16 +11,20 @@ Feishu Service - 飞书集成服务 (M6)
 
 from __future__ import annotations
 
+import os
 import httpx
 import json
 from datetime import datetime
 from typing import Optional, Any
 
-# ── 配置 ────────────────────────────────────────────────────────────────────
+# ── 配置（与 ~/.hermes/.env 中 Hermes Gateway 使用同一飞书应用）────────────────
 
-FEISHU_APP_ID = "cli_a93a91327978dbc6"
-FEISHU_APP_SECRET = "G4QxkxWSO7zrLPrwyB3xxet00sKZZIDo"
-FEISHU_PUSH_CHAT_ID = "oc_f734d856374cfe9e228a222d02f9e75f"
+FEISHU_APP_ID = os.getenv("FEISHU_APP_ID", "")
+FEISHU_APP_SECRET = os.getenv("FEISHU_APP_SECRET", "")
+FEISHU_PUSH_CHAT_ID = os.getenv(
+    "FEISHU_PUSH_CHAT_ID",
+    os.getenv("FEISHU_HOME_CHANNEL", "oc_565cc09ccd5ca51afe45d3ae6f0efb38"),
+)
 
 FEISHU_BASE_URL = "https://open.feishu.cn/open-apis"
 TOKEN_CACHE: dict[str, tuple[str, float]] = {}  # token → (token_string, expire_ts)

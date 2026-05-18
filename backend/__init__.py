@@ -22,6 +22,7 @@ from backend.middleware.exception_handler import http_not_found_handler
 from backend.models.response import APIResponse
 from backend.db import engine, Base
 from backend.db.sqlite_migrate import run_sqlite_migrations
+from backend.env_policy import allow_missing_chat_upstream
 
 # ── 日志配置 ──────────────────────────────────────────────
 logging.basicConfig(
@@ -39,26 +40,11 @@ ALLOWED_ORIGINS = os.getenv(
 
 
 # ── 启动配置校验 ──────────────────────────────────────────
-def _allow_missing_hermes_upstream() -> bool:
-    """是否允许未配置 HERMES_CHAT_API_URL（本地 SQLite 或显式 dev/test 环境）。"""
-    if os.getenv("ALLOW_MISSING_HERMES_UPSTREAM", "").strip().lower() in ("1", "true", "yes"):
-        return True
-    env = (os.getenv("APP_ENV") or os.getenv("ENVIRONMENT") or os.getenv("ENV") or "").strip().lower()
-    if env in ("production", "prod"):
-        return False
-    if env in ("development", "dev", "local", "staging", "test"):
-        return True
-    db = (os.getenv("DATABASE_URL") or "sqlite+aiosqlite:///./tphermes.db").lower()
-    if "sqlite" in db:
-        return True
-    return False
-
-
 def _validate_deployment_config() -> None:
-    """启动时校验 HERMES_CHAT_API_URL；本地 SQLite 或显式 dev 时可缺省，详见 _allow_missing_hermes_upstream。"""
+    """启动时校验 HERMES_CHAT_API_URL；本地 SQLite 或显式 dev 时可缺省，详见 allow_missing_chat_upstream。"""
     hermes_url = os.getenv("HERMES_CHAT_API_URL", "").strip()
     if not hermes_url:
-        if _allow_missing_hermes_upstream():
+        if allow_missing_chat_upstream():
             logger.warning(
                 "HERMES_CHAT_API_URL not set — 聊天上游将不可用；"
                 "生产环境请配置该变量并将 APP_ENV=production（或 PostgreSQL 等非 SQLite 库时请配置上游）"

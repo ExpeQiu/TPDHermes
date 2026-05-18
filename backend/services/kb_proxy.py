@@ -49,6 +49,84 @@ class KBProxyService:
     def _clear_readonly_after_upstream_ok(self) -> None:
         self._readonly_mode = False
 
+    @staticmethod
+    def _extract_collection_ref(item: Any) -> str | None:
+        if isinstance(item, str):
+            return item
+        if isinstance(item, dict):
+            return str(item.get("id") or item.get("name") or "") or None
+        return None
+
+    async def _resolve_collection_ref(self, name_or_id: str) -> str:
+        try:
+            async with httpx.AsyncClient(timeout=5.0) as client:
+                resp = await client.get(f"{self.chroma_host}/api/v1/collections")
+                if resp.status_code != 200:
+                    return name_or_id
+                data = resp.json()
+                if not isinstance(data, list):
+                    return name_or_id
+                for item in data:
+                    if isinstance(item, str):
+                        if item == name_or_id:
+                            return name_or_id
+                        continue
+                    if not isinstance(item, dict):
+                        continue
+                    item_name = item.get("name")
+                    item_id = item.get("id")
+                    if item_name == name_or_id or item_id == name_or_id:
+                        return str(item_id or item_name)
+        except Exception:
+            return name_or_id
+        return name_or_id
+
+    async def _query_collection_via_get(
+        self,
+        collection_ref: str,
+        collection_name: str,
+        query_text: str,
+        n_results: int,
+    ) -> dict[str, Any] | None:
+        q = (query_text or "").strip()
+        if not q:
+            return None
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                resp = await client.post(
+                    f"{self.chroma_host}/api/v1/collections/{collection_ref}/get",
+                    json={
+                        "where_document": {"$contains": q},
+                        "limit": n_results,
+                        "offset": 0,
+                        "include": ["documents", "metadatas"],
+                    },
+                )
+                if resp.status_code != 200:
+                    return None
+                data = resp.json()
+                docs = data.get("documents") or []
+                metas = data.get("metadatas") or []
+                results = []
+                for doc, meta in zip(docs, metas):
+                    m = dict(meta or {})
+                    if "collection" not in m:
+                        m["collection"] = collection_name
+                    results.append(
+                        {
+                            "content": doc,
+                            "metadata": m,
+                            "distance": 0.0,
+                        }
+                    )
+                return {
+                    "results": results,
+                    "source": "chroma",
+                    "count": len(results),
+                }
+        except Exception:
+            return None
+
     async def _probe_chroma(self) -> bool:
         try:
             async with httpx.AsyncClient(timeout=5.0) as client:
@@ -90,9 +168,10 @@ class KBProxyService:
         优先透传到外部 ChromaDB；降级时回退到本地缓存。
         """
         try:
+            collection_ref = await self._resolve_collection_ref(collection_name)
             async with httpx.AsyncClient(timeout=10.0) as client:
                 resp = await client.post(
-                    f"{self.chroma_host}/api/v1/collections/{collection_name}/query",
+                    f"{self.chroma_host}/api/v1/collections/{collection_ref}/query",
                     json={
                         "query_texts": [query_text],
                         "n_results": n_results,
@@ -138,6 +217,16 @@ class KBProxyService:
                         "source": "chroma",
                         "count": len(results),
                     }
+                if resp.status_code == 422:
+                    fallback = await self._query_collection_via_get(
+                        collection_ref=collection_ref,
+                        collection_name=collection_name,
+                        query_text=query_text,
+                        n_results=n_results,
+                    )
+                    if fallback is not None:
+                        self._clear_readonly_after_upstream_ok()
+                        return fallback
         except Exception as e:
             logger.debug("chroma query_collection failed: %s", e)
 
@@ -194,14 +283,25 @@ class KBProxyService:
             try:
                 async with httpx.AsyncClient(timeout=15.0) as client:
                     for col_name in names:
+                        collection_ref = await self._resolve_collection_ref(col_name)
                         resp = await client.post(
-                            f"{self.chroma_host}/api/v1/collections/{col_name}/query",
+                            f"{self.chroma_host}/api/v1/collections/{collection_ref}/query",
                             json={
                                 "query_texts": [query_text],
                                 "n_results": per,
                                 "include": ["documents", "metadatas", "distances"],
                             },
                         )
+                        if resp.status_code == 422:
+                            fallback = await self._query_collection_via_get(
+                                collection_ref=collection_ref,
+                                collection_name=col_name,
+                                query_text=query_text,
+                                n_results=per,
+                            )
+                            if fallback is not None:
+                                merged.extend(fallback["results"])
+                            continue
                         if resp.status_code != 200:
                             continue
                         self._clear_readonly_after_upstream_ok()
@@ -285,7 +385,7 @@ class KBProxyService:
                     collections = resp.json()
                     return {
                         "collections": [
-                            c.get("name") or c.get("id") for c in collections
+                            self._extract_collection_ref(c) for c in collections
                         ],
                         "source": "chroma",
                     }

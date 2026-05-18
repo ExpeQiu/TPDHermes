@@ -13,6 +13,8 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, ConfigDict
 
+from backend.env_policy import allow_missing_chat_upstream
+
 router = APIRouter(prefix="/chat", tags=["chat"])
 
 
@@ -29,15 +31,33 @@ class ChatCompletionRequest(BaseModel):
     stream: bool = True
 
 
-def _chat_target() -> tuple[str, str]:
+def _resolve_chat_target() -> tuple[str, str] | None:
+    """
+    返回 (url, api_key)；若未配置 URL：
+    - 与启动策略一致允许缺省时返回 None（供 /config 与合规 503）
+    - 否则抛错（生产等应配置）
+    """
     url = os.getenv("HERMES_CHAT_API_URL", "").strip()
-    if not url:
-        raise RuntimeError(
-            "HERMES_CHAT_API_URL environment variable is not set. "
-            "Cannot proxy chat requests without a configured upstream URL."
-        )
     api_key = os.getenv("HERMES_CHAT_API_KEY", "").strip()
-    return url, api_key
+    if url:
+        return url, api_key
+    if allow_missing_chat_upstream():
+        return None
+    raise RuntimeError(
+        "HERMES_CHAT_API_URL environment variable is not set. "
+        "Cannot proxy chat requests without a configured upstream URL."
+    )
+
+
+def _chat_target_required() -> tuple[str, str]:
+    """代理请求必须存在上游。"""
+    t = _resolve_chat_target()
+    if t is None:
+        raise HTTPException(
+            status_code=503,
+            detail="聊天上游未配置。请设置环境变量 HERMES_CHAT_API_URL。",
+        )
+    return t
 
 
 def _chat_client(timeout: httpx.Timeout) -> httpx.AsyncClient:
@@ -65,18 +85,29 @@ def _format_upstream_error(status_code: int, detail: bytes) -> dict[str, Any]:
 @router.get("/config")
 async def chat_config() -> dict[str, Any]:
     """返回当前聊天代理的最小配置信息，供前端展示链路状态。"""
-    url, _api_key = _chat_target()
+    target = _resolve_chat_target()
+    model = os.getenv("HERMES_CHAT_MODEL", "hermes-agent")
+    if target is None:
+        return {
+            "mode": "backend-proxy",
+            "target": None,
+            "available": False,
+            "reason": "HERMES_CHAT_API_URL not configured",
+            "model": model,
+        }
+    url, _api_key = target
     return {
         "mode": "backend-proxy",
         "target": url,
-        "model": os.getenv("HERMES_CHAT_MODEL", "hermes-agent"),
+        "available": True,
+        "model": model,
     }
 
 
 @router.post("/completions")
 async def chat_completions(request: ChatCompletionRequest):
     """代理 OpenAI 兼容聊天补全请求到 Hermes-agent。"""
-    target_url, api_key = _chat_target()
+    target_url, api_key = _chat_target_required()
     payload = request.model_dump(exclude_none=True)
     payload.setdefault("model", os.getenv("HERMES_CHAT_MODEL", "hermes-agent"))
 

@@ -57,6 +57,21 @@ class ChromaHttpClient:
         raw = r.json()
         return raw if isinstance(raw, list) else []
 
+    def _resolve_collection_ref(self, name_or_id: str) -> str:
+        """兼容旧版 name URL 与新版 UUID URL。"""
+        for item in self.list_collections():
+            if isinstance(item, str):
+                if item == name_or_id:
+                    return name_or_id
+                continue
+            if not isinstance(item, dict):
+                continue
+            item_name = item.get("name")
+            item_id = item.get("id")
+            if item_name == name_or_id or item_id == name_or_id:
+                return str(item_id or item_name)
+        return name_or_id
+
     def collection_names(self) -> list[str]:
         names: list[str] = []
         for c in self.list_collections():
@@ -65,7 +80,7 @@ class ChromaHttpClient:
                 names.append(str(n))
         return names
 
-    def create_collection(self, name: str, metadata: Optional[dict] = None) -> None:
+    def create_collection(self, name: str, metadata: Optional[dict] = None) -> str:
         body = {"name": name, "metadata": metadata or {}}
         r = httpx.post(
             f"{self.base_url}/api/v1/collections",
@@ -73,17 +88,25 @@ class ChromaHttpClient:
             timeout=self.timeout,
         )
         if r.status_code in (200, 201):
-            return
+            try:
+                data = r.json()
+            except Exception:
+                data = None
+            if isinstance(data, dict):
+                return str(data.get("id") or data.get("name") or name)
+            return name
         # 已存在等情况
         if r.status_code == 409:
-            return
+            return self._resolve_collection_ref(name)
         r.raise_for_status()
+        return name
 
-    def ensure_collection(self, name: str) -> None:
-        if name in self.collection_names():
-            return
+    def ensure_collection(self, name: str) -> str:
+        ref = self._resolve_collection_ref(name)
+        if ref != name or name in self.collection_names():
+            return ref
         try:
-            self.create_collection(name)
+            return self.create_collection(name)
         except httpx.HTTPStatusError as e:
             logger.warning("chroma create_collection %s: %s", name, e)
             raise
@@ -95,20 +118,21 @@ class ChromaHttpClient:
         documents: list[str],
         metadatas: list[dict[str, Any]],
     ) -> None:
+        collection_ref = self._resolve_collection_ref(collection)
         payload = {
             "ids": ids,
             "documents": documents,
             "metadatas": [chroma_sanitize_metadata(m) for m in metadatas],
         }
         r = httpx.post(
-            f"{self.base_url}/api/v1/collections/{collection}/upsert",
+            f"{self.base_url}/api/v1/collections/{collection_ref}/upsert",
             json=payload,
             timeout=self.timeout,
         )
         if r.status_code == 404:
-            self.ensure_collection(collection)
+            collection_ref = self.ensure_collection(collection)
             r = httpx.post(
-                f"{self.base_url}/api/v1/collections/{collection}/upsert",
+                f"{self.base_url}/api/v1/collections/{collection_ref}/upsert",
                 json=payload,
                 timeout=self.timeout,
             )
@@ -122,6 +146,7 @@ class ChromaHttpClient:
         offset: int = 0,
         include: Optional[list[str]] = None,
     ) -> dict[str, Any]:
+        collection_ref = self._resolve_collection_ref(collection)
         body: dict[str, Any] = {
             "where": where,
             "limit": limit,
@@ -129,7 +154,7 @@ class ChromaHttpClient:
             "include": include or ["metadatas", "documents"],
         }
         r = httpx.post(
-            f"{self.base_url}/api/v1/collections/{collection}/get",
+            f"{self.base_url}/api/v1/collections/{collection_ref}/get",
             json=body,
             timeout=self.timeout,
         )
@@ -142,12 +167,13 @@ class ChromaHttpClient:
         ids: list[str],
         metadatas: list[dict[str, Any]],
     ) -> None:
+        collection_ref = self._resolve_collection_ref(collection)
         payload = {
             "ids": ids,
             "metadatas": [chroma_sanitize_metadata(m) for m in metadatas],
         }
         r = httpx.post(
-            f"{self.base_url}/api/v1/collections/{collection}/update",
+            f"{self.base_url}/api/v1/collections/{collection_ref}/update",
             json=payload,
             timeout=self.timeout,
         )
@@ -156,8 +182,9 @@ class ChromaHttpClient:
     def delete(self, collection: str, ids: list[str]) -> None:
         if not ids:
             return
+        collection_ref = self._resolve_collection_ref(collection)
         r = httpx.post(
-            f"{self.base_url}/api/v1/collections/{collection}/delete",
+            f"{self.base_url}/api/v1/collections/{collection_ref}/delete",
             json={"ids": ids},
             timeout=self.timeout,
         )

@@ -11,6 +11,7 @@ Feishu Auth Service - 飞书 OAuth 认证服务 (M6-T03)
 
 from __future__ import annotations
 
+import os
 import httpx
 import secrets
 import hashlib
@@ -19,11 +20,10 @@ from datetime import datetime, timedelta
 from typing import Optional
 from dataclasses import dataclass
 
-# ── 配置 ─────────────────────────────────────────────────────────────────────
+# ── 配置（与 ~/.hermes/.env 中 Hermes Gateway 使用同一飞书应用）────────────────
 
-FEISHU_APP_ID = "cli_a93a91327978dbc6"
-# FEISHU_APP_SECRET 从环境变量读取，兜底硬编码（仅用于开发）
-FEISHU_APP_SECRET = "G4QxkxWSO7zrLPrwyB3xxet00sKZZIDo"
+FEISHU_APP_ID = os.getenv("FEISHU_APP_ID", "")
+FEISHU_APP_SECRET = os.getenv("FEISHU_APP_SECRET", "")
 FEISHU_OAUTH_BASE = "https://open.feishu.cn/open-apis/authen"
 FEISHU_BASE_URL = "https://open.feishu.cn/open-apis"
 

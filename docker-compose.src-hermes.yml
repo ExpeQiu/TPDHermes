@@ -1,6 +1,8 @@
 # 使用本仓库内嵌 Hermes Agent 源码构建（替代占位 stub）。
 # 前置：已将源码解压到 hermes-agent/hermes-agent-main/ 且含官方 Dockerfile。
-# 启动：docker compose -f docker-compose.yml -f docker-compose.src-hermes.yml up -d --build
+# 构建（务必开启 BuildKit，否则 Dockerfile.alicloud 内缓存挂载不生效）：
+#   DOCKER_BUILDKIT=1 docker compose -f docker-compose.yml -f docker-compose.src-hermes.yml build hermes-agent
+# 启动：DOCKER_BUILDKIT=1 docker compose -f docker-compose.yml -f docker-compose.src-hermes.yml up -d --build
 # 首次需在数据卷中配置 LLM：容器启动后编辑 /opt/data/.env（或 docker exec 进入后改 ~/.hermes 等价路径）。
 services:
   hermes-agent:

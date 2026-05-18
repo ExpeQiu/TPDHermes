@@ -6,7 +6,6 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 import time
 import uuid
 from typing import Any, AsyncGenerator
@@ -21,6 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from backend.db import get_db, async_session_maker
 from backend.models.orchestration_run import OrchestrationRun
 from backend.models.output_asset import OutputAsset
+from backend.routes.chat import _chat_target_required
 from backend.schemas.orchestration import OrchestrationPayload, TaskExecuteRequest, TaskInputPayload
 from backend.services.agent_gateway import build_chat_completion_body, parse_sse_data_line
 from backend.services.orchestration_service import (
@@ -43,17 +43,6 @@ logger = logging.getLogger("tpdx.hermes")
 
 router = APIRouter(prefix="/tasks", tags=["tasks"])
 runs_router = APIRouter(prefix="/runs", tags=["runs"])
-
-
-def _chat_target() -> tuple[str, str]:
-    url = os.getenv("HERMES_CHAT_API_URL", "").strip()
-    if not url:
-        raise RuntimeError(
-            "HERMES_CHAT_API_URL environment variable is not set. "
-            "Cannot proxy chat requests without a configured upstream URL."
-        )
-    api_key = os.getenv("HERMES_CHAT_API_KEY", "").strip()
-    return url, api_key
 
 
 def _chat_client(timeout: httpx.Timeout) -> httpx.AsyncClient:
@@ -287,7 +276,7 @@ async def execute_task(request: TaskExecuteRequest, db: AsyncSession = Depends(g
     upstream_body["stream"] = eff_request.stream
 
     if not eff_request.stream:
-        target_url, api_key = _chat_target()
+        target_url, api_key = _chat_target_required()
         headers = {"Content-Type": "application/json"}
         if api_key:
             headers["Authorization"] = f"Bearer {api_key}"
@@ -362,7 +351,7 @@ async def execute_task(request: TaskExecuteRequest, db: AsyncSession = Depends(g
         return True if vr is None else bool(vr.must_have_headings)
 
     async def event_stream() -> AsyncGenerator[str, None]:
-        target_url, api_key = _chat_target()
+        target_url, api_key = _chat_target_required()
         headers = {"Content-Type": "application/json"}
         if api_key:
             headers["Authorization"] = f"Bearer {api_key}"

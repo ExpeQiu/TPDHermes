@@ -29,8 +29,17 @@ PY
   fi
 fi
 
+mkdir -p "$ROOT/logs"
+if [[ -f "$ROOT/.env.local" ]]; then
+  set -a
+  # shellcheck disable=SC1091
+  source "$ROOT/.env.local"
+  set +a
+fi
+export HERMES_CHAT_API_URL="${HERMES_CHAT_API_URL:-http://127.0.0.1:8642/v1/chat/completions}"
+export HERMES_CHAT_API_KEY="${HERMES_CHAT_API_KEY:-${API_SERVER_KEY:-}}"
 echo "[start] backend uvicorn :8000"
-uvicorn main:app --host 0.0.0.0 --port 8000 &
+"$ROOT/.venv/bin/uvicorn" main:app --host 127.0.0.1 --port 8000 >>"$ROOT/logs/backend.log" 2>&1 &
 echo $! >"$ROOT/.backend.pid"
 echo "[start] frontend next dev :3000"
 npm run dev &

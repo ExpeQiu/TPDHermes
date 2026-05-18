@@ -11,8 +11,8 @@ const navLinks = [
   { href: '/create', label: '场景编排', emoji: '⚡' },
   { href: '/chat', label: '编排协作', emoji: '💬' },
   { href: '/workshop', label: '结果工坊', emoji: '🛠️' },
-  { href: '/knowledge', label: '知识策略', emoji: '📚' },
-  { href: '/skills', label: '技能策略', emoji: '📦' },
+  { href: '/knowledge', label: '知识库', emoji: '📚' },
+  { href: '/skills', label: '技能工坊', emoji: '📦' },
 ]
 
 export function Layout({ children }: { children: React.ReactNode }) {
