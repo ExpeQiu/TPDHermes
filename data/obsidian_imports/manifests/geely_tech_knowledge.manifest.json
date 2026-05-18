@@ -1,0 +1,470 @@
+{
+  "batch_id": "obsidian_import_geely_tech_knowledge_20260518_054846",
+  "collection": "public.structured_tech.geely_tech",
+  "defaults": {
+    "domain": "structured_tech",
+    "folder_path": "02-知识库/吉利技术知识库",
+    "published": true,
+    "source": "obsidian_import",
+    "source_type": "file",
+    "language": "zh",
+    "tags": [
+      "知识库",
+      "吉利技术知识库"
+    ]
+  },
+  "documents": [
+    {
+      "doc_id": "obs_geely_tech_knowledge_doc_ea60c9e8172f",
+      "file_path": "/Users/expeqiu/Library/Mobile Documents/iCloud~md~obsidian/Documents/expe/myKW/4.Knowledge/02-知识库/吉利技术知识库/01整车架构/吉利健康循环材料.md",
+      "title": "⚙️ ​**​一、健康材料技术体系：从抗菌防护到生态设计​**​",
+      "folder_path": "02-知识库/吉利技术知识库/01整车架构",
+      "tags": [
+        "知识库",
+        "吉利技术知识库",
+        "01整车架构"
+      ],
+      "source_url": ""
+    },
+    {
+      "doc_id": "obs_geely_tech_knowledge_doc_fa126b637781",
+      "file_path": "/Users/expeqiu/Library/Mobile Documents/iCloud~md~obsidian/Documents/expe/myKW/4.Knowledge/02-知识库/吉利技术知识库/01整车架构/吉利全域安全.md",
+      "title": "🛡️ ​**​一、全域安全体系框架​**​",
+      "folder_path": "02-知识库/吉利技术知识库/01整车架构",
+      "tags": [
+        "知识库",
+        "吉利技术知识库",
+        "01整车架构"
+      ],
+      "source_url": ""
+    },
+    {
+      "doc_id": "obs_geely_tech_knowledge_doc_b2ad11da1cb0",
+      "file_path": "/Users/expeqiu/Library/Mobile Documents/iCloud~md~obsidian/Documents/expe/myKW/4.Knowledge/02-知识库/吉利技术知识库/01整车架构/吉利安全白车身.md",
+      "title": "⚙️ ​**​一、核心技术架构：笼式车身与传力设计​**​",
+      "folder_path": "02-知识库/吉利技术知识库/01整车架构",
+      "tags": [
+        "知识库",
+        "吉利技术知识库",
+        "01整车架构"
+      ],
+      "source_url": ""
+    },
+    {
+      "doc_id": "obs_geely_tech_knowledge_gea_dc6e922244ed",
+      "file_path": "/Users/expeqiu/Library/Mobile Documents/iCloud~md~obsidian/Documents/expe/myKW/4.Knowledge/02-知识库/吉利技术知识库/02电子电气/GEA全球智能新能源架构.md",
+      "title": "⚙️ ​**​一、技术定位：四位一体的AI智能架构​**​",
+      "folder_path": "02-知识库/吉利技术知识库/02电子电气",
+      "tags": [
+        "知识库",
+        "吉利技术知识库",
+        "02电子电气"
+      ],
+      "source_url": ""
+    },
+    {
+      "doc_id": "obs_geely_tech_knowledge_ai_d9f008711ddf",
+      "file_path": "/Users/expeqiu/Library/Mobile Documents/iCloud~md~obsidian/Documents/expe/myKW/4.Knowledge/02-知识库/吉利技术知识库/02电子电气/吉利AI数字底盘.md",
+      "title": "⚙️ ​**​一、技术架构：全域融合的智能控制​**​",
+      "folder_path": "02-知识库/吉利技术知识库/02电子电气",
+      "tags": [
+        "知识库",
+        "吉利技术知识库",
+        "02电子电气"
+      ],
+      "source_url": ""
+    },
+    {
+      "doc_id": "obs_geely_tech_knowledge_bma_dcdc0366d8ad",
+      "file_path": "/Users/expeqiu/Library/Mobile Documents/iCloud~md~obsidian/Documents/expe/myKW/4.Knowledge/02-知识库/吉利技术知识库/02电子电气/吉利BMA.md",
+      "title": "⚙️ ​**​一、技术定位与核心优势​**​",
+      "folder_path": "02-知识库/吉利技术知识库/02电子电气",
+      "tags": [
+        "知识库",
+        "吉利技术知识库",
+        "02电子电气"
+      ],
+      "source_url": ""
+    },
+    {
+      "doc_id": "obs_geely_tech_knowledge_doc_5c57d465f9d9",
+      "file_path": "/Users/expeqiu/Library/Mobile Documents/iCloud~md~obsidian/Documents/expe/myKW/4.Knowledge/02-知识库/吉利技术知识库/02电子电气/吉利架构世家.md",
+      "title": "⚙️ ​**​一、架构技术演进：从单一平台到全域智能​**​",
+      "folder_path": "02-知识库/吉利技术知识库/02电子电气",
+      "tags": [
+        "知识库",
+        "吉利技术知识库",
+        "02电子电气"
+      ],
+      "source_url": ""
+    },
+    {
+      "doc_id": "obs_geely_tech_knowledge_doc_a8183de1428a",
+      "file_path": "/Users/expeqiu/Library/Mobile Documents/iCloud~md~obsidian/Documents/expe/myKW/4.Knowledge/02-知识库/吉利技术知识库/03智能驾驶/千里浩瀚/千里浩瀚.md",
+      "title": "⚙️ ​**​一、系统定位与架构层级​**​",
+      "folder_path": "02-知识库/吉利技术知识库/03智能驾驶/千里浩瀚",
+      "tags": [
+        "知识库",
+        "吉利技术知识库",
+        "03智能驾驶",
+        "千里浩瀚"
+      ],
+      "source_url": ""
+    },
+    {
+      "doc_id": "obs_geely_tech_knowledge_doc_53756e81b86c",
+      "file_path": "/Users/expeqiu/Library/Mobile Documents/iCloud~md~obsidian/Documents/expe/myKW/4.Knowledge/02-知识库/吉利技术知识库/03智能驾驶/千里浩瀚/千里浩瀚智能安全辅助驾驶系统.md",
+      "title": "干里浩瀚：更安全的智能辅助驾驶系统",
+      "folder_path": "02-知识库/吉利技术知识库/03智能驾驶/千里浩瀚",
+      "tags": [
+        "知识库",
+        "吉利技术知识库",
+        "03智能驾驶",
+        "千里浩瀚"
+      ],
+      "source_url": ""
+    },
+    {
+      "doc_id": "obs_geely_tech_knowledge_doc_ca4a6b1e9795",
+      "file_path": "/Users/expeqiu/Library/Mobile Documents/iCloud~md~obsidian/Documents/expe/myKW/4.Knowledge/02-知识库/吉利技术知识库/03智能驾驶/千里浩瀚/吉利千里浩瀚平台.md",
+      "title": "一、技术架构：全域AI驱动的三层体系",
+      "folder_path": "02-知识库/吉利技术知识库/03智能驾驶/千里浩瀚",
+      "tags": [
+        "知识库",
+        "吉利技术知识库",
+        "03智能驾驶",
+        "千里浩瀚"
+      ],
+      "source_url": ""
+    },
+    {
+      "doc_id": "obs_geely_tech_knowledge_doc_f932ac50589e",
+      "file_path": "/Users/expeqiu/Library/Mobile Documents/iCloud~md~obsidian/Documents/expe/myKW/4.Knowledge/02-知识库/吉利技术知识库/03智能驾驶/千里浩瀚/基于吉利“千里浩瀚”智驾系统的技术实力与用户情绪价值需求.md",
+      "title": "🌟 ​**一、科技信仰感：算力碾压与“数字奢侈品”身份**​",
+      "folder_path": "02-知识库/吉利技术知识库/03智能驾驶/千里浩瀚",
+      "tags": [
+        "知识库",
+        "吉利技术知识库",
+        "03智能驾驶",
+        "千里浩瀚"
+      ],
+      "source_url": ""
+    },
+    {
+      "doc_id": "obs_geely_tech_knowledge_flyme_sound_c573842803ff",
+      "file_path": "/Users/expeqiu/Library/Mobile Documents/iCloud~md~obsidian/Documents/expe/myKW/4.Knowledge/02-知识库/吉利技术知识库/04智能座舱/Flyme Sound无界之声.md",
+      "title": "🎛️ ​**​一、硬件架构：突破性声学配置​**​",
+      "folder_path": "02-知识库/吉利技术知识库/04智能座舱",
+      "tags": [
+        "知识库",
+        "吉利技术知识库",
+        "04智能座舱"
+      ],
+      "source_url": ""
+    },
+    {
+      "doc_id": "obs_geely_tech_knowledge_flyme_auto_2_b9e60641f8cc",
+      "file_path": "/Users/expeqiu/Library/Mobile Documents/iCloud~md~obsidian/Documents/expe/myKW/4.Knowledge/02-知识库/吉利技术知识库/04智能座舱/吉利Flyme Auto 2.md",
+      "title": "⚙️ ​**​一、技术架构：全域AI驱动的5层原生系统​**​",
+      "folder_path": "02-知识库/吉利技术知识库/04智能座舱",
+      "tags": [
+        "知识库",
+        "吉利技术知识库",
+        "04智能座舱"
+      ],
+      "source_url": ""
+    },
+    {
+      "doc_id": "obs_geely_tech_knowledge_doc_857605c60a64",
+      "file_path": "/Users/expeqiu/Library/Mobile Documents/iCloud~md~obsidian/Documents/expe/myKW/4.Knowledge/02-知识库/吉利技术知识库/04智能座舱/吉利无界空间.md",
+      "title": "⚙️ ​**​一、技术架构：云端驱动，打破硬件限制​**​",
+      "folder_path": "02-知识库/吉利技术知识库/04智能座舱",
+      "tags": [
+        "知识库",
+        "吉利技术知识库",
+        "04智能座舱"
+      ],
+      "source_url": ""
+    },
+    {
+      "doc_id": "obs_geely_tech_knowledge_flyme_auto_5fa71cee0160",
+      "file_path": "/Users/expeqiu/Library/Mobile Documents/iCloud~md~obsidian/Documents/expe/myKW/4.Knowledge/02-知识库/吉利技术知识库/04智能座舱/银河Flyme Auto 智能座舱系统.md",
+      "title": "⚙️ ​**​一、硬件基础：自研芯片与算力支撑​**​",
+      "folder_path": "02-知识库/吉利技术知识库/04智能座舱",
+      "tags": [
+        "知识库",
+        "吉利技术知识库",
+        "04智能座舱"
+      ],
+      "source_url": ""
+    },
+    {
+      "doc_id": "obs_geely_tech_knowledge_ai_1f669e278999",
+      "file_path": "/Users/expeqiu/Library/Mobile Documents/iCloud~md~obsidian/Documents/expe/myKW/4.Knowledge/02-知识库/吉利技术知识库/05电驱系统/雷神AI电驱2.0/吉利全域AI技术赋能.md",
+      "title": "⚙️ ​**​一、全域AI技术架构：云-端-生态协同​**​",
+      "folder_path": "02-知识库/吉利技术知识库/05电驱系统/雷神AI电驱2.0",
+      "tags": [
+        "知识库",
+        "吉利技术知识库",
+        "05电驱系统",
+        "雷神AI电驱2.0"
+      ],
+      "source_url": ""
+    },
+    {
+      "doc_id": "obs_geely_tech_knowledge_em_p_ai_172f27be9aa5",
+      "file_path": "/Users/expeqiu/Library/Mobile Documents/iCloud~md~obsidian/Documents/expe/myKW/4.Knowledge/02-知识库/吉利技术知识库/05电驱系统/雷神AI电驱2.0/雷神EM-P AI超级电混.md",
+      "title": "⚙️ ​**​一、技术架构：全域AI驱动的高性能混动系统​**​",
+      "folder_path": "02-知识库/吉利技术知识库/05电驱系统/雷神AI电驱2.0",
+      "tags": [
+        "知识库",
+        "吉利技术知识库",
+        "05电驱系统",
+        "雷神AI电驱2.0"
+      ],
+      "source_url": ""
+    },
+    {
+      "doc_id": "obs_geely_tech_knowledge_em_i_ai_294d8c828647",
+      "file_path": "/Users/expeqiu/Library/Mobile Documents/iCloud~md~obsidian/Documents/expe/myKW/4.Knowledge/02-知识库/吉利技术知识库/05电驱系统/雷神AI电驱2.0/雷神EM-i AI电混.md",
+      "title": "⚙️ ​**​一、技术架构：全域AI驱动的智能混动系统​**​",
+      "folder_path": "02-知识库/吉利技术知识库/05电驱系统/雷神AI电驱2.0",
+      "tags": [
+        "知识库",
+        "吉利技术知识库",
+        "05电驱系统",
+        "雷神AI电驱2.0"
+      ],
+      "source_url": ""
+    },
+    {
+      "doc_id": "obs_geely_tech_knowledge_ef_759bed1fb5bc",
+      "file_path": "/Users/expeqiu/Library/Mobile Documents/iCloud~md~obsidian/Documents/expe/myKW/4.Knowledge/02-知识库/吉利技术知识库/05电驱系统/雷神AI电驱2.0/雷神醇氢EF.md",
+      "title": "⚙️ ​**​一、三大全球独创技术​**​",
+      "folder_path": "02-知识库/吉利技术知识库/05电驱系统/雷神AI电驱2.0",
+      "tags": [
+        "知识库",
+        "吉利技术知识库",
+        "05电驱系统",
+        "雷神AI电驱2.0"
+      ],
+      "source_url": ""
+    },
+    {
+      "doc_id": "obs_geely_tech_knowledge_111_1c4acd43e7b5",
+      "file_path": "/Users/expeqiu/Library/Mobile Documents/iCloud~md~obsidian/Documents/expe/myKW/4.Knowledge/02-知识库/吉利技术知识库/05电驱系统/雷霆电驱家庭/雷霆11合1双电机.md",
+      "title": "⚙️ ​**​一、技术架构：高度集成与智能协同​**​",
+      "folder_path": "02-知识库/吉利技术知识库/05电驱系统/雷霆电驱家庭",
+      "tags": [
+        "知识库",
+        "吉利技术知识库",
+        "05电驱系统",
+        "雷霆电驱家庭"
+      ],
+      "source_url": ""
+    },
+    {
+      "doc_id": "obs_geely_tech_knowledge_111_06da2d2f84e2",
+      "file_path": "/Users/expeqiu/Library/Mobile Documents/iCloud~md~obsidian/Documents/expe/myKW/4.Knowledge/02-知识库/吉利技术知识库/05电驱系统/雷霆电驱家庭/雷霆11合1智能电驱.md",
+      "title": "⚙️ ​**​一、技术架构：高度集成与智能协同​**​",
+      "folder_path": "02-知识库/吉利技术知识库/05电驱系统/雷霆电驱家庭",
+      "tags": [
+        "知识库",
+        "吉利技术知识库",
+        "05电驱系统",
+        "雷霆电驱家庭"
+      ],
+      "source_url": ""
+    },
+    {
+      "doc_id": "obs_geely_tech_knowledge_111_88451f5ecff5",
+      "file_path": "/Users/expeqiu/Library/Mobile Documents/iCloud~md~obsidian/Documents/expe/myKW/4.Knowledge/02-知识库/吉利技术知识库/05电驱系统/雷霆电驱家庭/雷霆11合1混动电驱.md",
+      "title": "⚙️ ​**​一、技术架构：高度集成与智能协同​**​",
+      "folder_path": "02-知识库/吉利技术知识库/05电驱系统/雷霆电驱家庭",
+      "tags": [
+        "知识库",
+        "吉利技术知识库",
+        "05电驱系统",
+        "雷霆电驱家庭"
+      ],
+      "source_url": ""
+    },
+    {
+      "doc_id": "obs_geely_tech_knowledge_800v_fa1a02a0ad40",
+      "file_path": "/Users/expeqiu/Library/Mobile Documents/iCloud~md~obsidian/Documents/expe/myKW/4.Knowledge/02-知识库/吉利技术知识库/05电驱系统/雷霆电驱家庭/雷霆800V碳化硅电驱.md",
+      "title": "⚙️ ​**​一、技术架构：高压平台与碳化硅的协同创新​**​",
+      "folder_path": "02-知识库/吉利技术知识库/05电驱系统/雷霆电驱家庭",
+      "tags": [
+        "知识库",
+        "吉利技术知识库",
+        "05电驱系统",
+        "雷霆电驱家庭"
+      ],
+      "source_url": ""
+    },
+    {
+      "doc_id": "obs_geely_tech_knowledge_doc_9f0a8e23e35d",
+      "file_path": "/Users/expeqiu/Library/Mobile Documents/iCloud~md~obsidian/Documents/expe/myKW/4.Knowledge/02-知识库/吉利技术知识库/06电池技术/神盾电池/神盾电池安全系统.md",
+      "title": "⚙️ ​**​一、技术架构：五维融合防护体系​**​",
+      "folder_path": "02-知识库/吉利技术知识库/06电池技术/神盾电池",
+      "tags": [
+        "知识库",
+        "吉利技术知识库",
+        "06电池技术",
+        "神盾电池"
+      ],
+      "source_url": ""
+    },
+    {
+      "doc_id": "obs_geely_tech_knowledge_doc_a78b84b3ea90",
+      "file_path": "/Users/expeqiu/Library/Mobile Documents/iCloud~md~obsidian/Documents/expe/myKW/4.Knowledge/02-知识库/吉利技术知识库/06电池技术/神盾电池/神盾短刀电池.md",
+      "title": "⚡️ ​**​一、安全性能：军工级防护标准​**​",
+      "folder_path": "02-知识库/吉利技术知识库/06电池技术/神盾电池",
+      "tags": [
+        "知识库",
+        "吉利技术知识库",
+        "06电池技术",
+        "神盾电池"
+      ],
+      "source_url": ""
+    },
+    {
+      "doc_id": "obs_geely_tech_knowledge_doc_a10dfa0690b2",
+      "file_path": "/Users/expeqiu/Library/Mobile Documents/iCloud~md~obsidian/Documents/expe/myKW/4.Knowledge/02-知识库/吉利技术知识库/06电池技术/神盾电池/神盾金砖电池.md",
+      "title": "⚡️ ​**​一、技术架构：安全与性能的双重突破​**​",
+      "folder_path": "02-知识库/吉利技术知识库/06电池技术/神盾电池",
+      "tags": [
+        "知识库",
+        "吉利技术知识库",
+        "06电池技术",
+        "神盾电池"
+      ],
+      "source_url": ""
+    },
+    {
+      "doc_id": "obs_geely_tech_knowledge_em_i_5c4c6ca7513e",
+      "file_path": "/Users/expeqiu/Library/Mobile Documents/iCloud~md~obsidian/Documents/expe/myKW/4.Knowledge/02-知识库/吉利技术知识库/07混动系统/雷神EM-P/吉利雷神EM-i超级电混.md",
+      "title": "⚙️ ​**​一、技术架构：全域集成与AI驱动​**​",
+      "folder_path": "02-知识库/吉利技术知识库/07混动系统/雷神EM-P",
+      "tags": [
+        "知识库",
+        "吉利技术知识库",
+        "07混动系统",
+        "雷神EM-P"
+      ],
+      "source_url": ""
+    },
+    {
+      "doc_id": "obs_geely_tech_knowledge_em_p_12fca585cf5d",
+      "file_path": "/Users/expeqiu/Library/Mobile Documents/iCloud~md~obsidian/Documents/expe/myKW/4.Knowledge/02-知识库/吉利技术知识库/07混动系统/雷神EM-P/雷神EM-P超级电混系统.md",
+      "title": "⚙️ ​**​一、技术架构：全域AI驱动的智能混动系统​**​",
+      "folder_path": "02-知识库/吉利技术知识库/07混动系统/雷神EM-P",
+      "tags": [
+        "知识库",
+        "吉利技术知识库",
+        "07混动系统",
+        "雷神EM-P"
+      ],
+      "source_url": ""
+    },
+    {
+      "doc_id": "obs_geely_tech_knowledge_doc_a2a2fed0f15c",
+      "file_path": "/Users/expeqiu/Library/Mobile Documents/iCloud~md~obsidian/Documents/expe/myKW/4.Knowledge/02-知识库/吉利技术知识库/08Ai赋能架构进化/天地一体化/天地一体化.md",
+      "title": "🛰️ ​**​一、技术架构：天-空-地三级联动​**​",
+      "folder_path": "02-知识库/吉利技术知识库/08Ai赋能架构进化/天地一体化",
+      "tags": [
+        "知识库",
+        "吉利技术知识库",
+        "08Ai赋能架构进化",
+        "天地一体化"
+      ],
+      "source_url": ""
+    },
+    {
+      "doc_id": "obs_geely_tech_knowledge_ai_e22df928cc9f",
+      "file_path": "/Users/expeqiu/Library/Mobile Documents/iCloud~md~obsidian/Documents/expe/myKW/4.Knowledge/02-知识库/吉利技术知识库/08Ai赋能架构进化/星睿AI大模型/吉利星睿AI大模型.md",
+      "title": "⚙️ ​**​一、技术架构与核心能力​**​",
+      "folder_path": "02-知识库/吉利技术知识库/08Ai赋能架构进化/星睿AI大模型",
+      "tags": [
+        "知识库",
+        "吉利技术知识库",
+        "08Ai赋能架构进化",
+        "星睿AI大模型"
+      ],
+      "source_url": ""
+    },
+    {
+      "doc_id": "obs_geely_tech_knowledge_doc_b0ff35117678",
+      "file_path": "/Users/expeqiu/Library/Mobile Documents/iCloud~md~obsidian/Documents/expe/myKW/4.Knowledge/02-知识库/吉利技术知识库/08Ai赋能架构进化/星睿智算中心/星睿智算中心.md",
+      "title": "⚙️ ​**​一、技术架构与性能突破​**​",
+      "folder_path": "02-知识库/吉利技术知识库/08Ai赋能架构进化/星睿智算中心",
+      "tags": [
+        "知识库",
+        "吉利技术知识库",
+        "08Ai赋能架构进化",
+        "星睿智算中心"
+      ],
+      "source_url": ""
+    },
+    {
+      "doc_id": "obs_geely_tech_knowledge_2_0_f728b5633645",
+      "file_path": "/Users/expeqiu/Library/Mobile Documents/iCloud~md~obsidian/Documents/expe/myKW/4.Knowledge/02-知识库/吉利技术知识库/08Ai赋能架构进化/星睿智算中心/星睿智算中心2.0.md",
+      "title": "⚙️ ​**​一、技术架构与性能突破​**​",
+      "folder_path": "02-知识库/吉利技术知识库/08Ai赋能架构进化/星睿智算中心",
+      "tags": [
+        "知识库",
+        "吉利技术知识库",
+        "08Ai赋能架构进化",
+        "星睿智算中心"
+      ],
+      "source_url": ""
+    },
+    {
+      "doc_id": "obs_geely_tech_knowledge_doc_1887c6115c03",
+      "file_path": "/Users/expeqiu/Library/Mobile Documents/iCloud~md~obsidian/Documents/expe/myKW/4.Knowledge/02-知识库/吉利技术知识库/09吉利综合研发能力/吉利技术协同.md",
+      "title": "🧠 ​**​二、技术整合：“两横七纵”战略重构​**​",
+      "folder_path": "02-知识库/吉利技术知识库/09吉利综合研发能力",
+      "tags": [
+        "知识库",
+        "吉利技术知识库",
+        "09吉利综合研发能力"
+      ],
+      "source_url": ""
+    },
+    {
+      "doc_id": "obs_geely_tech_knowledge_doc_24fa2fb51199",
+      "file_path": "/Users/expeqiu/Library/Mobile Documents/iCloud~md~obsidian/Documents/expe/myKW/4.Knowledge/02-知识库/吉利技术知识库/09吉利综合研发能力/吉利试验基地/吉利全球试验基地.md",
+      "title": "🌍 ​**​一、全球试验基地布局与技术定位​**​",
+      "folder_path": "02-知识库/吉利技术知识库/09吉利综合研发能力/吉利试验基地",
+      "tags": [
+        "知识库",
+        "吉利技术知识库",
+        "09吉利综合研发能力",
+        "吉利试验基地"
+      ],
+      "source_url": ""
+    },
+    {
+      "doc_id": "obs_geely_tech_knowledge_jlgf_2b6b52f038d1",
+      "file_path": "/Users/expeqiu/Library/Mobile Documents/iCloud~md~obsidian/Documents/expe/myKW/4.Knowledge/02-知识库/吉利技术知识库/JLGF.md",
+      "title": "原始",
+      "folder_path": "02-知识库/吉利技术知识库",
+      "tags": [
+        "知识库",
+        "吉利技术知识库"
+      ],
+      "source_url": ""
+    },
+    {
+      "doc_id": "obs_geely_tech_knowledge_doc_8c850717f48d",
+      "file_path": "/Users/expeqiu/Library/Mobile Documents/iCloud~md~obsidian/Documents/expe/myKW/4.Knowledge/02-知识库/吉利技术知识库/！知识库结构.md",
+      "title": "吉利汽车技术知识库索引",
+      "folder_path": "02-知识库/吉利技术知识库",
+      "tags": [
+        "知识库",
+        "吉利技术知识库"
+      ],
+      "source_url": ""
+    }
+  ]
+}

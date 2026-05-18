@@ -1,0 +1,422 @@
+{
+  "target": "geely_tech_knowledge",
+  "collection": "public.structured_tech.geely_tech",
+  "status": "completed",
+  "group_count": 14,
+  "doc_total": 36,
+  "doc_succeeded": 36,
+  "doc_failed": 0,
+  "chunk_total": 245,
+  "chunk_upserted": 245,
+  "chunk_skipped": 0,
+  "cache_sync_triggered": true,
+  "errors": [],
+  "jobs": [
+    {
+      "domain": "structured_tech",
+      "folder_path": "02-知识库/吉利技术知识库/01整车架构",
+      "doc_count": 3,
+      "result": {
+        "job_id": "ing_20260518_062233_28002a19",
+        "batch_id": "ing_20260518_062233_28002a19",
+        "collection": "public.structured_tech.geely_tech",
+        "status": "completed",
+        "doc_total": 3,
+        "doc_succeeded": 3,
+        "doc_failed": 0,
+        "chunk_total": 18,
+        "chunk_upserted": 18,
+        "chunk_skipped": 0,
+        "chunks_deleted_stale": 0,
+        "cache_sync_triggered": true,
+        "cache_sync_error": null,
+        "started_at": "2026-05-18T06:22:33+0000",
+        "finished_at": "2026-05-18T06:22:34+0000",
+        "errors": [],
+        "dry_run": false,
+        "cache_sync_detail": {
+          "synced": 18,
+          "failed": 0,
+          "skipped": 0
+        }
+      }
+    },
+    {
+      "domain": "structured_tech",
+      "folder_path": "02-知识库/吉利技术知识库/02电子电气",
+      "doc_count": 4,
+      "result": {
+        "job_id": "ing_20260518_062234_4ce99bfe",
+        "batch_id": "ing_20260518_062234_4ce99bfe",
+        "collection": "public.structured_tech.geely_tech",
+        "status": "completed",
+        "doc_total": 4,
+        "doc_succeeded": 4,
+        "doc_failed": 0,
+        "chunk_total": 24,
+        "chunk_upserted": 24,
+        "chunk_skipped": 0,
+        "chunks_deleted_stale": 0,
+        "cache_sync_triggered": true,
+        "cache_sync_error": null,
+        "started_at": "2026-05-18T06:22:34+0000",
+        "finished_at": "2026-05-18T06:22:35+0000",
+        "errors": [],
+        "dry_run": false,
+        "cache_sync_detail": {
+          "synced": 42,
+          "failed": 0,
+          "skipped": 0
+        }
+      }
+    },
+    {
+      "domain": "structured_tech",
+      "folder_path": "02-知识库/吉利技术知识库/03智能驾驶/千里浩瀚",
+      "doc_count": 4,
+      "result": {
+        "job_id": "ing_20260518_062235_589a8c80",
+        "batch_id": "ing_20260518_062235_589a8c80",
+        "collection": "public.structured_tech.geely_tech",
+        "status": "completed",
+        "doc_total": 4,
+        "doc_succeeded": 4,
+        "doc_failed": 0,
+        "chunk_total": 21,
+        "chunk_upserted": 21,
+        "chunk_skipped": 0,
+        "chunks_deleted_stale": 0,
+        "cache_sync_triggered": true,
+        "cache_sync_error": null,
+        "started_at": "2026-05-18T06:22:35+0000",
+        "finished_at": "2026-05-18T06:22:36+0000",
+        "errors": [],
+        "dry_run": false,
+        "cache_sync_detail": {
+          "synced": 63,
+          "failed": 0,
+          "skipped": 0
+        }
+      }
+    },
+    {
+      "domain": "structured_tech",
+      "folder_path": "02-知识库/吉利技术知识库/04智能座舱",
+      "doc_count": 4,
+      "result": {
+        "job_id": "ing_20260518_062236_d87b94cb",
+        "batch_id": "ing_20260518_062236_d87b94cb",
+        "collection": "public.structured_tech.geely_tech",
+        "status": "completed",
+        "doc_total": 4,
+        "doc_succeeded": 4,
+        "doc_failed": 0,
+        "chunk_total": 25,
+        "chunk_upserted": 25,
+        "chunk_skipped": 0,
+        "chunks_deleted_stale": 0,
+        "cache_sync_triggered": true,
+        "cache_sync_error": null,
+        "started_at": "2026-05-18T06:22:36+0000",
+        "finished_at": "2026-05-18T06:22:36+0000",
+        "errors": [],
+        "dry_run": false,
+        "cache_sync_detail": {
+          "synced": 88,
+          "failed": 0,
+          "skipped": 0
+        }
+      }
+    },
+    {
+      "domain": "structured_tech",
+      "folder_path": "02-知识库/吉利技术知识库/05电驱系统/雷神AI电驱2.0",
+      "doc_count": 4,
+      "result": {
+        "job_id": "ing_20260518_062239_077d128e",
+        "batch_id": "ing_20260518_062239_077d128e",
+        "collection": "public.structured_tech.geely_tech",
+        "status": "completed",
+        "doc_total": 4,
+        "doc_succeeded": 4,
+        "doc_failed": 0,
+        "chunk_total": 24,
+        "chunk_upserted": 24,
+        "chunk_skipped": 0,
+        "chunks_deleted_stale": 0,
+        "cache_sync_triggered": true,
+        "cache_sync_error": null,
+        "started_at": "2026-05-18T06:22:39+0000",
+        "finished_at": "2026-05-18T06:22:39+0000",
+        "errors": [],
+        "dry_run": false,
+        "cache_sync_detail": {
+          "synced": 112,
+          "failed": 0,
+          "skipped": 0
+        }
+      }
+    },
+    {
+      "domain": "structured_tech",
+      "folder_path": "02-知识库/吉利技术知识库/05电驱系统/雷霆电驱家庭",
+      "doc_count": 4,
+      "result": {
+        "job_id": "ing_20260518_062240_298cfa4d",
+        "batch_id": "ing_20260518_062240_298cfa4d",
+        "collection": "public.structured_tech.geely_tech",
+        "status": "completed",
+        "doc_total": 4,
+        "doc_succeeded": 4,
+        "doc_failed": 0,
+        "chunk_total": 27,
+        "chunk_upserted": 27,
+        "chunk_skipped": 0,
+        "chunks_deleted_stale": 0,
+        "cache_sync_triggered": true,
+        "cache_sync_error": null,
+        "started_at": "2026-05-18T06:22:40+0000",
+        "finished_at": "2026-05-18T06:22:40+0000",
+        "errors": [],
+        "dry_run": false,
+        "cache_sync_detail": {
+          "synced": 139,
+          "failed": 0,
+          "skipped": 0
+        }
+      }
+    },
+    {
+      "domain": "structured_tech",
+      "folder_path": "02-知识库/吉利技术知识库/06电池技术/神盾电池",
+      "doc_count": 3,
+      "result": {
+        "job_id": "ing_20260518_062240_445d7cf4",
+        "batch_id": "ing_20260518_062240_445d7cf4",
+        "collection": "public.structured_tech.geely_tech",
+        "status": "completed",
+        "doc_total": 3,
+        "doc_succeeded": 3,
+        "doc_failed": 0,
+        "chunk_total": 20,
+        "chunk_upserted": 20,
+        "chunk_skipped": 0,
+        "chunks_deleted_stale": 0,
+        "cache_sync_triggered": true,
+        "cache_sync_error": null,
+        "started_at": "2026-05-18T06:22:40+0000",
+        "finished_at": "2026-05-18T06:22:41+0000",
+        "errors": [],
+        "dry_run": false,
+        "cache_sync_detail": {
+          "synced": 159,
+          "failed": 0,
+          "skipped": 0
+        }
+      }
+    },
+    {
+      "domain": "structured_tech",
+      "folder_path": "02-知识库/吉利技术知识库/07混动系统/雷神EM-P",
+      "doc_count": 2,
+      "result": {
+        "job_id": "ing_20260518_062242_39ffc14e",
+        "batch_id": "ing_20260518_062242_39ffc14e",
+        "collection": "public.structured_tech.geely_tech",
+        "status": "completed",
+        "doc_total": 2,
+        "doc_succeeded": 2,
+        "doc_failed": 0,
+        "chunk_total": 13,
+        "chunk_upserted": 13,
+        "chunk_skipped": 0,
+        "chunks_deleted_stale": 0,
+        "cache_sync_triggered": true,
+        "cache_sync_error": null,
+        "started_at": "2026-05-18T06:22:42+0000",
+        "finished_at": "2026-05-18T06:22:42+0000",
+        "errors": [],
+        "dry_run": false,
+        "cache_sync_detail": {
+          "synced": 172,
+          "failed": 0,
+          "skipped": 0
+        }
+      }
+    },
+    {
+      "domain": "structured_tech",
+      "folder_path": "02-知识库/吉利技术知识库/08Ai赋能架构进化/天地一体化",
+      "doc_count": 1,
+      "result": {
+        "job_id": "ing_20260518_062243_7d15ec99",
+        "batch_id": "ing_20260518_062243_7d15ec99",
+        "collection": "public.structured_tech.geely_tech",
+        "status": "completed",
+        "doc_total": 1,
+        "doc_succeeded": 1,
+        "doc_failed": 0,
+        "chunk_total": 7,
+        "chunk_upserted": 7,
+        "chunk_skipped": 0,
+        "chunks_deleted_stale": 0,
+        "cache_sync_triggered": true,
+        "cache_sync_error": null,
+        "started_at": "2026-05-18T06:22:43+0000",
+        "finished_at": "2026-05-18T06:22:43+0000",
+        "errors": [],
+        "dry_run": false,
+        "cache_sync_detail": {
+          "synced": 179,
+          "failed": 0,
+          "skipped": 0
+        }
+      }
+    },
+    {
+      "domain": "structured_tech",
+      "folder_path": "02-知识库/吉利技术知识库/08Ai赋能架构进化/星睿AI大模型",
+      "doc_count": 1,
+      "result": {
+        "job_id": "ing_20260518_062243_76c699b8",
+        "batch_id": "ing_20260518_062243_76c699b8",
+        "collection": "public.structured_tech.geely_tech",
+        "status": "completed",
+        "doc_total": 1,
+        "doc_succeeded": 1,
+        "doc_failed": 0,
+        "chunk_total": 7,
+        "chunk_upserted": 7,
+        "chunk_skipped": 0,
+        "chunks_deleted_stale": 0,
+        "cache_sync_triggered": true,
+        "cache_sync_error": null,
+        "started_at": "2026-05-18T06:22:43+0000",
+        "finished_at": "2026-05-18T06:22:43+0000",
+        "errors": [],
+        "dry_run": false,
+        "cache_sync_detail": {
+          "synced": 186,
+          "failed": 0,
+          "skipped": 0
+        }
+      }
+    },
+    {
+      "domain": "structured_tech",
+      "folder_path": "02-知识库/吉利技术知识库/08Ai赋能架构进化/星睿智算中心",
+      "doc_count": 2,
+      "result": {
+        "job_id": "ing_20260518_062244_a82023ef",
+        "batch_id": "ing_20260518_062244_a82023ef",
+        "collection": "public.structured_tech.geely_tech",
+        "status": "completed",
+        "doc_total": 2,
+        "doc_succeeded": 2,
+        "doc_failed": 0,
+        "chunk_total": 11,
+        "chunk_upserted": 11,
+        "chunk_skipped": 0,
+        "chunks_deleted_stale": 0,
+        "cache_sync_triggered": true,
+        "cache_sync_error": null,
+        "started_at": "2026-05-18T06:22:44+0000",
+        "finished_at": "2026-05-18T06:22:44+0000",
+        "errors": [],
+        "dry_run": false,
+        "cache_sync_detail": {
+          "synced": 197,
+          "failed": 0,
+          "skipped": 0
+        }
+      }
+    },
+    {
+      "domain": "structured_tech",
+      "folder_path": "02-知识库/吉利技术知识库/09吉利综合研发能力",
+      "doc_count": 1,
+      "result": {
+        "job_id": "ing_20260518_062245_0932a690",
+        "batch_id": "ing_20260518_062245_0932a690",
+        "collection": "public.structured_tech.geely_tech",
+        "status": "completed",
+        "doc_total": 1,
+        "doc_succeeded": 1,
+        "doc_failed": 0,
+        "chunk_total": 3,
+        "chunk_upserted": 3,
+        "chunk_skipped": 0,
+        "chunks_deleted_stale": 0,
+        "cache_sync_triggered": true,
+        "cache_sync_error": null,
+        "started_at": "2026-05-18T06:22:45+0000",
+        "finished_at": "2026-05-18T06:22:45+0000",
+        "errors": [],
+        "dry_run": false,
+        "cache_sync_detail": {
+          "synced": 200,
+          "failed": 0,
+          "skipped": 0
+        }
+      }
+    },
+    {
+      "domain": "structured_tech",
+      "folder_path": "02-知识库/吉利技术知识库/09吉利综合研发能力/吉利试验基地",
+      "doc_count": 1,
+      "result": {
+        "job_id": "ing_20260518_062246_d2062520",
+        "batch_id": "ing_20260518_062246_d2062520",
+        "collection": "public.structured_tech.geely_tech",
+        "status": "completed",
+        "doc_total": 1,
+        "doc_succeeded": 1,
+        "doc_failed": 0,
+        "chunk_total": 5,
+        "chunk_upserted": 5,
+        "chunk_skipped": 0,
+        "chunks_deleted_stale": 0,
+        "cache_sync_triggered": true,
+        "cache_sync_error": null,
+        "started_at": "2026-05-18T06:22:46+0000",
+        "finished_at": "2026-05-18T06:22:46+0000",
+        "errors": [],
+        "dry_run": false,
+        "cache_sync_detail": {
+          "synced": 205,
+          "failed": 0,
+          "skipped": 0
+        }
+      }
+    },
+    {
+      "domain": "structured_tech",
+      "folder_path": "02-知识库/吉利技术知识库",
+      "doc_count": 2,
+      "result": {
+        "job_id": "ing_20260518_062246_f3932b5e",
+        "batch_id": "ing_20260518_062246_f3932b5e",
+        "collection": "public.structured_tech.geely_tech",
+        "status": "completed",
+        "doc_total": 2,
+        "doc_succeeded": 2,
+        "doc_failed": 0,
+        "chunk_total": 40,
+        "chunk_upserted": 40,
+        "chunk_skipped": 0,
+        "chunks_deleted_stale": 0,
+        "cache_sync_triggered": true,
+        "cache_sync_error": null,
+        "started_at": "2026-05-18T06:22:46+0000",
+        "finished_at": "2026-05-18T06:22:47+0000",
+        "errors": [],
+        "dry_run": false,
+        "cache_sync_detail": {
+          "synced": 245,
+          "failed": 0,
+          "skipped": 0
+        }
+      }
+    }
+  ]
+}

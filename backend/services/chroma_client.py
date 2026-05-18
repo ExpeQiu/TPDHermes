@@ -81,7 +81,9 @@ class ChromaHttpClient:
         return names
 
     def create_collection(self, name: str, metadata: Optional[dict] = None) -> str:
-        body = {"name": name, "metadata": metadata or {}}
+        body: dict[str, Any] = {"name": name}
+        if metadata:
+            body["metadata"] = metadata
         r = httpx.post(
             f"{self.base_url}/api/v1/collections",
             json=body,
@@ -118,7 +120,11 @@ class ChromaHttpClient:
         documents: list[str],
         metadatas: list[dict[str, Any]],
     ) -> None:
-        collection_ref = self._resolve_collection_ref(collection)
+        existing_names = self.collection_names()
+        if collection in existing_names:
+            collection_ref = self._resolve_collection_ref(collection)
+        else:
+            collection_ref = self.ensure_collection(collection)
         payload = {
             "ids": ids,
             "documents": documents,
@@ -129,7 +135,7 @@ class ChromaHttpClient:
             json=payload,
             timeout=self.timeout,
         )
-        if r.status_code == 404:
+        if r.status_code in (400, 404):
             collection_ref = self.ensure_collection(collection)
             r = httpx.post(
                 f"{self.base_url}/api/v1/collections/{collection_ref}/upsert",

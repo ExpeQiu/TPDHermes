@@ -54,7 +54,7 @@ class KBProxyService:
         if isinstance(item, str):
             return item
         if isinstance(item, dict):
-            return str(item.get("id") or item.get("name") or "") or None
+            return str(item.get("name") or item.get("id") or "") or None
         return None
 
     async def _resolve_collection_ref(self, name_or_id: str) -> str:
@@ -142,7 +142,7 @@ class KBProxyService:
         Returns:
             {"external_kb": "up"|"down", "cache_mode": bool, "cached_entries": int}
         """
-        cache_stats = await kb_cache_service.get_cache_stats(project_id="__health__")
+        cache_stats = await kb_cache_service.get_cache_stats(project_id="__all__")
 
         external_ok = await self._probe_chroma()
         if external_ok:

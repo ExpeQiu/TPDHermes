@@ -1,0 +1,144 @@
+{
+  "batch_id": "obsidian_import_release_speeches_20260518_054846",
+  "collection": "public.release_assets.speeches",
+  "defaults": {
+    "domain": "release_assets",
+    "folder_path": "03-发布成果",
+    "published": true,
+    "source": "obsidian_import",
+    "source_type": "file",
+    "language": "zh",
+    "tags": [
+      "发布成果",
+      "发言稿"
+    ]
+  },
+  "documents": [
+    {
+      "doc_id": "obs_release_speeches_g_asd_9739fdc807af",
+      "file_path": "/Users/expeqiu/Library/Mobile Documents/iCloud~md~obsidian/Documents/expe/myKW/4.Knowledge/03-发布成果/领导人稿件/DaH发言稿/新技术发布稿/G-ASD.md",
+      "title": "G-ASD",
+      "folder_path": "03-发布成果/领导人稿件/DaH发言稿/新技术发布稿",
+      "tags": [
+        "发布成果",
+        "发言稿",
+        "领导人稿件",
+        "DaH发言稿",
+        "新技术发布稿"
+      ],
+      "source_url": ""
+    },
+    {
+      "doc_id": "obs_release_speeches_p185_83faae8296af",
+      "file_path": "/Users/expeqiu/Library/Mobile Documents/iCloud~md~obsidian/Documents/expe/myKW/4.Knowledge/03-发布成果/领导人稿件/DaH发言稿/新技术发布稿/P185.md",
+      "title": "P185",
+      "folder_path": "03-发布成果/领导人稿件/DaH发言稿/新技术发布稿",
+      "tags": [
+        "发布成果",
+        "发言稿",
+        "领导人稿件",
+        "DaH发言稿",
+        "新技术发布稿"
+      ],
+      "source_url": ""
+    },
+    {
+      "doc_id": "obs_release_speeches_ai_96c317f77387",
+      "file_path": "/Users/expeqiu/Library/Mobile Documents/iCloud~md~obsidian/Documents/expe/myKW/4.Knowledge/03-发布成果/领导人稿件/DaH发言稿/新技术发布稿/吉利 AI 座舱发布会讲稿提词器内容.md",
+      "title": "吉利 AI 座舱发布会讲稿提词器内容",
+      "folder_path": "03-发布成果/领导人稿件/DaH发言稿/新技术发布稿",
+      "tags": [
+        "发布成果",
+        "发言稿",
+        "领导人稿件",
+        "DaH发言稿",
+        "新技术发布稿"
+      ],
+      "source_url": ""
+    },
+    {
+      "doc_id": "obs_release_speeches_ai_759e3c78095a",
+      "file_path": "/Users/expeqiu/Library/Mobile Documents/iCloud~md~obsidian/Documents/expe/myKW/4.Knowledge/03-发布成果/领导人稿件/DaH发言稿/新技术发布稿/雷神AI电混发布.md",
+      "title": "雷神AI电混发布",
+      "folder_path": "03-发布成果/领导人稿件/DaH发言稿/新技术发布稿",
+      "tags": [
+        "发布成果",
+        "发言稿",
+        "领导人稿件",
+        "DaH发言稿",
+        "新技术发布稿"
+      ],
+      "source_url": ""
+    },
+    {
+      "doc_id": "obs_release_speeches_p181_0bb79a6449d8",
+      "file_path": "/Users/expeqiu/Library/Mobile Documents/iCloud~md~obsidian/Documents/expe/myKW/4.Knowledge/03-发布成果/领导人稿件/DaH发言稿/直播互动稿/P181.md",
+      "title": "P181德研直播大海内容 20250707",
+      "folder_path": "03-发布成果/领导人稿件/DaH发言稿/直播互动稿",
+      "tags": [
+        "发布成果",
+        "发言稿",
+        "领导人稿件",
+        "DaH发言稿",
+        "直播互动稿"
+      ],
+      "source_url": ""
+    },
+    {
+      "doc_id": "obs_release_speeches_p187_c02007a694ef",
+      "file_path": "/Users/expeqiu/Library/Mobile Documents/iCloud~md~obsidian/Documents/expe/myKW/4.Knowledge/03-发布成果/领导人稿件/DaH发言稿/直播互动稿/P187.md",
+      "title": "726发布会内容提纲 完整版",
+      "folder_path": "03-发布成果/领导人稿件/DaH发言稿/直播互动稿",
+      "tags": [
+        "发布成果",
+        "发言稿",
+        "领导人稿件",
+        "DaH发言稿",
+        "直播互动稿"
+      ],
+      "source_url": ""
+    },
+    {
+      "doc_id": "obs_release_speeches_p189_16e11d5d2f07",
+      "file_path": "/Users/expeqiu/Library/Mobile Documents/iCloud~md~obsidian/Documents/expe/myKW/4.Knowledge/03-发布成果/领导人稿件/DaH发言稿/直播互动稿/P189.md",
+      "title": "P189",
+      "folder_path": "03-发布成果/领导人稿件/DaH发言稿/直播互动稿",
+      "tags": [
+        "发布成果",
+        "发言稿",
+        "领导人稿件",
+        "DaH发言稿",
+        "直播互动稿"
+      ],
+      "source_url": ""
+    },
+    {
+      "doc_id": "obs_release_speeches_6_32e2a5bf7581",
+      "file_path": "/Users/expeqiu/Library/Mobile Documents/iCloud~md~obsidian/Documents/expe/myKW/4.Knowledge/03-发布成果/领导人稿件/DaH发言稿/直播互动稿/互动稿6.md",
+      "title": "互动稿6",
+      "folder_path": "03-发布成果/领导人稿件/DaH发言稿/直播互动稿",
+      "tags": [
+        "发布成果",
+        "发言稿",
+        "领导人稿件",
+        "DaH发言稿",
+        "直播互动稿"
+      ],
+      "source_url": ""
+    },
+    {
+      "doc_id": "obs_release_speeches_7_b36eefb1bcd1",
+      "file_path": "/Users/expeqiu/Library/Mobile Documents/iCloud~md~obsidian/Documents/expe/myKW/4.Knowledge/03-发布成果/领导人稿件/DaH发言稿/直播互动稿/互动稿7.md",
+      "title": "互动稿7",
+      "folder_path": "03-发布成果/领导人稿件/DaH发言稿/直播互动稿",
+      "tags": [
+        "发布成果",
+        "发言稿",
+        "领导人稿件",
+        "DaH发言稿",
+        "直播互动稿"
+      ],
+      "source_url": ""
+    }
+  ]
+}

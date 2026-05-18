@@ -136,60 +136,91 @@ async def build_browse_tree(
     聚合 kb_cache 条目为「域 → 路径树 → 文档」结构。
     """
     lim = max(1, min(limit or DEFAULT_TREE_ENTRY_LIMIT, MAX_TREE_ENTRY_LIMIT))
-    entries = await kb_cache_service.get_cached_entries(
-        project_id=project_id,
-        collection=collection,
-        limit=lim,
-        offset=0,
-    )
-
     domains: dict[str, dict[str, Any]] = {}
-    truncated = len(entries) >= lim
+    matched_count = 0
+    entry_count_scanned = 0
+    offset = 0
+    batch_size = min(1000, max(200, lim))
+    truncated = False
 
-    for row in entries:
-        meta_raw = row.get("metadata") or {}
-        if isinstance(meta_raw, str):
-            try:
-                meta_raw = json.loads(meta_raw)
-            except json.JSONDecodeError:
-                meta_raw = {}
-        parsed = _parse_metadata(meta_raw if isinstance(meta_raw, dict) else {})
+    while True:
+        fetch_size = min(batch_size, MAX_TREE_ENTRY_LIMIT - entry_count_scanned)
+        if fetch_size <= 0:
+            truncated = True
+            break
+        batch = await kb_cache_service.get_cached_entries(
+            project_id=project_id,
+            collection=collection,
+            limit=fetch_size,
+            offset=offset,
+        )
+        if not batch:
+            break
 
-        if domain_filter and parsed["domain"] != domain_filter:
-            continue
+        entry_count_scanned += len(batch)
+        offset += len(batch)
 
-        dom_name = parsed["domain"]
-        if dom_name not in domains:
-            domains[dom_name] = {
+        for row in batch:
+            meta_raw = row.get("metadata") or {}
+            if isinstance(meta_raw, str):
+                try:
+                    meta_raw = json.loads(meta_raw)
+                except json.JSONDecodeError:
+                    meta_raw = {}
+            parsed = _parse_metadata(meta_raw if isinstance(meta_raw, dict) else {})
+
+            if domain_filter and parsed["domain"] != domain_filter:
+                continue
+
+            matched_count += 1
+            if matched_count > lim:
+                truncated = True
+                break
+
+            dom_name = parsed["domain"]
+            if dom_name not in domains:
+                domains[dom_name] = {
+                    "domain": dom_name,
+                    "segment": "",
+                    "path": "",
+                    "children": {},
+                    "documents": [],
+                }
+
+            folder_parts = [p for p in parsed["folder_path"].split("/") if p] if parsed["folder_path"] else []
+
+            title = parsed["title"] or (row.get("content") or "")[:80] or row.get("id", "未命名")
+
+            doc = {
+                "id": row.get("id"),
+                "project_id": row.get("project_id"),
+                "collection": row.get("collection"),
+                "title": title,
+                "folder_path": parsed["folder_path"],
                 "domain": dom_name,
-                "segment": "",
-                "path": "",
-                "children": {},
-                "documents": [],
+                "tags": parsed["tags"],
+                "published": parsed["published"],
+                "linked_kg_ids": parsed["linked_kg_ids"],
+                "source_url": parsed["source_url"],
+                "source": row.get("source"),
+                "updated_at": row.get("updated_at"),
+                "summary": (row.get("content") or "")[:280],
             }
 
-        folder_parts = [p for p in parsed["folder_path"].split("/") if p] if parsed["folder_path"] else []
+            dom_root = domains[dom_name]
+            _tree_insert(dom_root, folder_parts, doc, path_prefix="")
 
-        title = parsed["title"] or (row.get("content") or "")[:80] or row.get("id", "未命名")
+            if not domain_filter and matched_count >= lim:
+                truncated = True
+                break
 
-        doc = {
-            "id": row.get("id"),
-            "project_id": row.get("project_id"),
-            "collection": row.get("collection"),
-            "title": title,
-            "folder_path": parsed["folder_path"],
-            "domain": dom_name,
-            "tags": parsed["tags"],
-            "published": parsed["published"],
-            "linked_kg_ids": parsed["linked_kg_ids"],
-            "source_url": parsed["source_url"],
-            "source": row.get("source"),
-            "updated_at": row.get("updated_at"),
-            "summary": (row.get("content") or "")[:280],
-        }
-
-        dom_root = domains[dom_name]
-        _tree_insert(dom_root, folder_parts, doc, path_prefix="")
+        if truncated:
+            break
+        if len(batch) < fetch_size:
+            break
+        if entry_count_scanned >= MAX_TREE_ENTRY_LIMIT:
+            truncated = True
+            break
 
     domain_list = []
     for _dkey, dom in sorted(domains.items(), key=lambda x: x[0]):
@@ -200,7 +231,7 @@ async def build_browse_tree(
 
     return {
         "domains": domain_list,
-        "entry_count_scanned": len(entries),
+        "entry_count_scanned": entry_count_scanned,
         "truncated": truncated,
         "limit": lim,
     }

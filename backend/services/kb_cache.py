@@ -13,6 +13,8 @@ from backend.db import engine, async_session_maker
 from backend.db import Base
 from backend.services.kb_metadata import normalize_kb_metadata_dict
 
+ALL_PROJECT_IDS = {"__all__", "*", "all"}
+
 
 class KBCacheService:
     """
@@ -68,28 +70,39 @@ class KBCacheService:
         try:
             import httpx
             async with httpx.AsyncClient(timeout=10.0) as client:
+                resp = await client.get(f"{external_kb_url}/api/v1/collections")
+                resp.raise_for_status()
+                collections_data = resp.json()
+                ref_map: dict[str, tuple[str, str]] = {}
+                for item in collections_data:
+                    if not isinstance(item, dict):
+                        continue
+                    name = str(item.get("name") or item.get("id") or "").strip()
+                    ref = str(item.get("id") or item.get("name") or "").strip()
+                    if not name or not ref:
+                        continue
+                    ref_map[name] = (name, ref)
+                    ref_map[ref] = (name, ref)
+
                 if collections is None:
-                    # 获取所有 collection
-                    resp = await client.get(f"{external_kb_url}/api/v1/collections")
-                    resp.raise_for_status()
-                    collections_data = resp.json()
-                    collections = [c.get("name", c.get("id")) for c in collections_data]
+                    collections = list(
+                        {
+                            pair[0]: pair[1]
+                            for pair in ref_map.values()
+                        }.keys()
+                    )
                 else:
                     pass  # 使用传入的 collections 列表
 
                 for col_name in collections:
                     try:
-                        # 从外部 ChromaDB 获取 collection 内容
-                        col_resp = await client.get(
-                            f"{external_kb_url}/api/v1/collections/{col_name}/info"
-                        )
-                        if col_resp.status_code == 404:
+                        display_name, collection_ref = ref_map.get(str(col_name), (str(col_name), str(col_name)))
+                        if collection_ref == display_name and display_name not in ref_map:
                             results["skipped"] += 1
                             continue
-                        col_resp.raise_for_status()
 
                         get_resp = await client.post(
-                            f"{external_kb_url}/api/v1/collections/{col_name}/get",
+                            f"{external_kb_url}/api/v1/collections/{collection_ref}/get",
                             json={
                                 "limit": 10000,
                                 "offset": 0,
@@ -137,7 +150,7 @@ class KBCacheService:
                                     new_entry = KBCache(
                                         id=entry_id,
                                         project_id=project_id,
-                                        collection=col_name,
+                                        collection=display_name,
                                         content=doc,
                                         metadata_=json.dumps(metadata),
                                         source=metadata.get("source", ""),
@@ -189,7 +202,7 @@ class KBCacheService:
         await self.ensure_table()
         async with async_session_maker() as db:
             query = select(KBCache)
-            if project_id not in ("__all__", "*", "all"):
+            if project_id not in ALL_PROJECT_IDS:
                 query = query.where(KBCache.project_id == project_id)
             if collection:
                 query = query.where(KBCache.collection == collection)
@@ -242,19 +255,20 @@ class KBCacheService:
         """获取项目缓存统计信息"""
         await self.ensure_table()
         async with async_session_maker() as db:
-            result = await db.execute(
-                select(KBCache).where(KBCache.project_id == project_id)
-            )
+            query = select(KBCache)
+            if project_id not in ALL_PROJECT_IDS:
+                query = query.where(KBCache.project_id == project_id)
+            result = await db.execute(query)
             entries = result.scalars().all()
 
-        collections_set = {e.collection for e in entries}
+        collections_set = {e.collection for e in entries if e.collection}
         total = len(entries)
         synced = sum(1 for e in entries if e.sync_status == "synced")
         return {
             "project_id": project_id,
             "total_entries": total,
             "synced_entries": synced,
-            "collections": list(collections_set),
+            "collections": sorted(collections_set),
             "readonly_mode": self._sync_mode,
         }
 

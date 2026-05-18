@@ -1,0 +1,19 @@
+{
+  "job_id": "ing_20260518_054859_e6ae6258",
+  "batch_id": "obsidian_import_release_speeches_20260518_054846",
+  "collection": "public.release_assets.speeches",
+  "status": "completed",
+  "doc_total": 9,
+  "doc_succeeded": 9,
+  "doc_failed": 0,
+  "chunk_total": 38,
+  "chunk_upserted": 0,
+  "chunk_skipped": 38,
+  "chunks_deleted_stale": 0,
+  "cache_sync_triggered": false,
+  "cache_sync_error": null,
+  "started_at": "2026-05-18T05:48:59+0000",
+  "finished_at": "2026-05-18T05:48:59+0000",
+  "errors": [],
+  "dry_run": true
+}

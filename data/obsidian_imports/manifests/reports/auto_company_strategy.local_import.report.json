@@ -1,0 +1,19 @@
+{
+  "job_id": "ing_20260518_055529_5a55f4b4",
+  "batch_id": "obsidian_import_auto_company_strategy_20260518_054846",
+  "collection": "public.public_intel.auto_company_strategy",
+  "status": "completed",
+  "doc_total": 8,
+  "doc_succeeded": 8,
+  "doc_failed": 0,
+  "chunk_total": 96,
+  "chunk_upserted": 96,
+  "chunk_skipped": 0,
+  "chunks_deleted_stale": 0,
+  "cache_sync_triggered": true,
+  "cache_sync_error": null,
+  "started_at": "2026-05-18T05:55:29+0000",
+  "finished_at": "2026-05-18T05:55:30+0000",
+  "errors": [],
+  "dry_run": false
+}

@@ -1,0 +1,19 @@
+{
+  "job_id": "ing_20260518_055532_cc1aae8e",
+  "batch_id": "obsidian_import_geely_tech_knowledge_20260518_054846",
+  "collection": "public.structured_tech.geely_tech",
+  "status": "completed",
+  "doc_total": 36,
+  "doc_succeeded": 36,
+  "doc_failed": 0,
+  "chunk_total": 245,
+  "chunk_upserted": 245,
+  "chunk_skipped": 0,
+  "chunks_deleted_stale": 0,
+  "cache_sync_triggered": true,
+  "cache_sync_error": null,
+  "started_at": "2026-05-18T05:55:32+0000",
+  "finished_at": "2026-05-18T05:55:36+0000",
+  "errors": [],
+  "dry_run": false
+}

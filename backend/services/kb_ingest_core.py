@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import os
 import re
 import uuid
 from datetime import datetime, timezone
@@ -100,8 +101,16 @@ def trigger_cache_sync_http(
         "external_kb_url": external_kb_url,
         "collections": collections,
     }
+    headers: dict[str, str] = {}
+    api_key = (
+        os.getenv("HERMES_API_KEY", "").strip()
+        or os.getenv("X_API_KEY", "").strip()
+        or os.getenv("API_SERVER_KEY", "").strip()
+    )
+    if api_key:
+        headers["X-API-Key"] = api_key
     try:
-        r = httpx.post(url, json=body, timeout=timeout)
+        r = httpx.post(url, json=body, headers=headers, timeout=timeout)
         if r.status_code == 200:
             return True, None
         return False, f"HTTP {r.status_code}: {r.text[:500]}"

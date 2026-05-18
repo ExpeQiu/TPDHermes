@@ -1,0 +1,62 @@
+{
+  "batch_id": "obsidian_import_vehicle_model_library_20260518_054846",
+  "collection": "public.public_intel.vehicle_model_library",
+  "defaults": {
+    "domain": "public_intel",
+    "folder_path": "01-汽车信息库/车型库",
+    "published": true,
+    "source": "obsidian_import",
+    "source_type": "file",
+    "language": "zh",
+    "tags": [
+      "汽车信息库",
+      "车型库"
+    ]
+  },
+  "documents": [
+    {
+      "doc_id": "obs_vehicle_model_library_readme_78b8983782b5",
+      "file_path": "/Users/expeqiu/Library/Mobile Documents/iCloud~md~obsidian/Documents/expe/myKW/4.Knowledge/01-汽车信息库/车型库/README.md",
+      "title": "车型监测索引",
+      "folder_path": "01-汽车信息库/车型库",
+      "tags": [
+        "汽车信息库",
+        "车型库"
+      ],
+      "source_url": ""
+    },
+    {
+      "doc_id": "obs_vehicle_model_library_doc_f7f8b05c3f14",
+      "file_path": "/Users/expeqiu/Library/Mobile Documents/iCloud~md~obsidian/Documents/expe/myKW/4.Knowledge/01-汽车信息库/车型库/发布会前跟踪.md",
+      "title": "发布会前跟踪",
+      "folder_path": "01-汽车信息库/车型库",
+      "tags": [
+        "汽车信息库",
+        "车型库"
+      ],
+      "source_url": ""
+    },
+    {
+      "doc_id": "obs_vehicle_model_library_doc_97a707c66413",
+      "file_path": "/Users/expeqiu/Library/Mobile Documents/iCloud~md~obsidian/Documents/expe/myKW/4.Knowledge/01-汽车信息库/车型库/发布会后技术挖掘.md",
+      "title": "发布会后技术挖掘",
+      "folder_path": "01-汽车信息库/车型库",
+      "tags": [
+        "汽车信息库",
+        "车型库"
+      ],
+      "source_url": ""
+    },
+    {
+      "doc_id": "obs_vehicle_model_library_doc_6df4f558ef3f",
+      "file_path": "/Users/expeqiu/Library/Mobile Documents/iCloud~md~obsidian/Documents/expe/myKW/4.Knowledge/01-汽车信息库/车型库/实时重点关注车型.md",
+      "title": "实时重点关注车型",
+      "folder_path": "01-汽车信息库/车型库",
+      "tags": [
+        "汽车信息库",
+        "车型库"
+      ],
+      "source_url": ""
+    }
+  ]
+}
