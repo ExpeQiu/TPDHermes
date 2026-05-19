@@ -68,15 +68,11 @@ export default function Home() {
         className={`relative flex min-h-dvh flex-col px-4 pb-16 pt-12 sm:px-6 sm:pt-16 md:px-8 md:pt-20 ${CONTENT_MAX_CLASS}`}
       >
         <header className="home-animate-in mx-auto max-w-4xl text-center">
-          <div className="inline-flex items-center gap-2 rounded-full border border-blue-500/30 bg-blue-500/10 px-3 py-1 text-xs font-medium text-blue-200">
-            <span className="h-2 w-2 rounded-full bg-blue-400" aria-hidden />
-            推荐路径：项目管理 → 对话创作 / 场景输出
-          </div>
-          <p className="mt-5 text-xs font-medium uppercase tracking-[0.2em] text-slate-500">
+          <p className="text-xs font-medium uppercase tracking-[0.2em] text-slate-500">
             TPDHermes
           </p>
           <h1 className="mt-3 text-balance bg-gradient-to-b from-white to-slate-400 bg-clip-text text-3xl font-semibold tracking-tight text-transparent sm:text-4xl md:text-5xl">
-            项目驱动的创作与输出工作台
+            技术推广内容共创平台
           </h1>
           <p className="mx-auto mt-4 max-w-2xl text-pretty text-sm text-slate-400 sm:text-base">
             从项目进入对话创作与场景输出；场景编排、知识与技能用于配置与支撑。
