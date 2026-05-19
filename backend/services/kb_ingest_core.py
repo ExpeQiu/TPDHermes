@@ -17,6 +17,7 @@ from typing import Any, Callable, Optional
 import httpx
 
 from backend.services.chroma_client import ChromaHttpClient, flatten_chroma_get_ids
+from backend.services.kb_vault_assets import vault_relative_file
 from backend.services.kb_contract import KB_DOMAIN_ENUM, KB_REQUIRED_METADATA_KEYS
 
 logger = logging.getLogger("tpdx.hermes")
@@ -227,6 +228,7 @@ def run_kb_ingestion(
         chunks = chunk_markdown_text(body)
         chunk_count = len(chunks)
         checksum = sha256_file(path)
+        source_vault_file = vault_relative_file(path)
 
         ids: list[str] = []
         docs_out: list[str] = []
@@ -258,6 +260,8 @@ def run_kb_ingestion(
                 "created_at": started,
                 "updated_at": started,
             }
+            if source_vault_file:
+                base_meta["source_vault_file"] = source_vault_file
             if ingest_job_id_in_meta:
                 base_meta["ingest_job_id"] = job_id
             if merged.get("authors"):

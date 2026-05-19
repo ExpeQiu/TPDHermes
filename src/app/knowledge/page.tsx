@@ -11,8 +11,8 @@ import KBDegradedBanner from "@/components/kb/KBDegradedBanner";
 import Link from "next/link";
 import { apiDelete, apiFetch, apiGet, apiPost, getPublicApiBase } from "@/lib/api";
 import { CONTENT_MAX_CLASS } from "@/lib/content-shell";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
+import { KbMarkdown } from "@/components/kb-markdown";
+import type { KbMarkdownAssetContext } from "@/lib/kb-markdown-assets";
 
 // ============== 类型 ==============
 interface KBEntry {
@@ -26,6 +26,8 @@ interface KBEntry {
   collection: string;
   domain?: string;
   folder_path?: string;
+  /** 相对 Obsidian Vault 根的源 .md 路径（导入时写入 metadata） */
+  source_vault_file?: string;
   published?: boolean;
   linked_kg_ids?: string[];
   created_at: string;
@@ -152,6 +154,10 @@ function mapCacheRow(row: Record<string, unknown>): KBEntry {
   const domain = typeof meta.domain === "string" ? meta.domain : undefined;
   const folder_path =
     typeof meta.folder_path === "string" ? meta.folder_path : undefined;
+  const source_vault_file =
+    typeof meta.source_vault_file === "string" && meta.source_vault_file
+      ? meta.source_vault_file
+      : undefined;
   const lkArr = coerceJsonArrayUnknown(meta.linked_kg_ids);
   let linked_kg_ids: string[] | undefined;
   if (lkArr) {
@@ -195,12 +201,22 @@ function mapCacheRow(row: Record<string, unknown>): KBEntry {
     projects,
     domain,
     folder_path,
+    source_vault_file,
     linked_kg_ids,
     published,
     source_type,
     conversation_id,
     confidence,
     harvested_from_user_confirmed: harvested,
+  };
+}
+
+function kbAssetContextFromEntry(
+  entry: Pick<KBEntry, "folder_path" | "source_vault_file">,
+): KbMarkdownAssetContext {
+  return {
+    folderPath: entry.folder_path,
+    sourceVaultFile: entry.source_vault_file,
   };
 }
 
@@ -216,6 +232,10 @@ function mapQueryResult(
     `结果 ${i + 1}`;
   const folder_path =
     typeof meta.folder_path === "string" ? meta.folder_path : undefined;
+  const source_vault_file =
+    typeof meta.source_vault_file === "string" && meta.source_vault_file
+      ? meta.source_vault_file
+      : undefined;
   const domain = typeof meta.domain === "string" ? meta.domain : undefined;
   const projArrQ = coerceJsonArrayUnknown(meta.projects ?? meta.project_ids);
   const projects = projArrQ
@@ -245,6 +265,7 @@ function mapQueryResult(
     projects,
     domain,
     folder_path,
+    source_vault_file,
     linked_kg_ids,
     source_type: st,
     published:
@@ -268,6 +289,14 @@ function collectDocsFromTree(node: TreeNode): BrowseDoc[] {
   return out;
 }
 
+/** 树节点 React key：顶层域节点 path/segment 均为空，需用 domain 区分 */
+function treeNodeKey(node: TreeNode, depth: number, index: number): string {
+  if (node.path) return node.path;
+  if (node.domain) return `domain:${node.domain}`;
+  if (node.segment) return `${depth}:${node.segment}`;
+  return `${depth}:node:${index}`;
+}
+
 // ============== 树节点组件 ==============
 function TreeNav({
   nodes,
@@ -281,13 +310,15 @@ function TreeNav({
   onSelect: (path: string, node: TreeNode) => void;
 }) {
   const [open, setOpen] = useState<Record<string, boolean>>(() =>
-    depth === 0 ? Object.fromEntries(nodes.map((n) => [n.path || n.segment, true])) : {},
+    depth === 0
+      ? Object.fromEntries(nodes.map((n, i) => [treeNodeKey(n, depth, i), true]))
+      : {},
   );
 
   return (
     <ul className={depth === 0 ? "space-y-0.5" : "mt-0.5 space-y-0.5 border-l border-slate-700 pl-2 ml-1"}>
-      {nodes.map((n) => {
-        const key = n.path || `${depth}:${n.segment}`;
+      {nodes.map((n, i) => {
+        const key = treeNodeKey(n, depth, i);
         const label = n.segment || "(本域根)";
         const isSelected = selectedPath === (n.path || key);
         const hasKids = (n.children?.length ?? 0) > 0;
@@ -963,7 +994,13 @@ export default function KnowledgePage() {
                 const md = `# ${d.title}\n\n${body}`;
                 return (
                   <div key={d.id} className="mb-6 border-b border-slate-700 pb-4">
-                    <ReactMarkdown remarkPlugins={[remarkGfm]}>{md}</ReactMarkdown>
+                    <KbMarkdown
+                      assetContext={kbAssetContextFromEntry(
+                        full ?? { folder_path: d.folder_path },
+                      )}
+                    >
+                      {md}
+                    </KbMarkdown>
                   </div>
                 );
               })}
@@ -1814,7 +1851,9 @@ export default function KnowledgePage() {
           <div>
             <p className="text-xs text-slate-500 uppercase tracking-wide mb-1">正文预览</p>
             <div className="prose prose-invert prose-sm max-w-none text-slate-300">
-              <ReactMarkdown remarkPlugins={[remarkGfm]}>{mdBody || "—"}</ReactMarkdown>
+              <KbMarkdown assetContext={kbAssetContextFromEntry(fromEntry)}>
+                {mdBody || "—"}
+              </KbMarkdown>
             </div>
           </div>
           <div>

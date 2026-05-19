@@ -12,6 +12,7 @@ from backend.services.kb_proxy import kb_proxy_service
 from backend.services.kb_browse import DEFAULT_TREE_ENTRY_LIMIT, build_browse_tree
 from backend.services.kb_cache import kb_cache_service
 from backend.services.kg_service import kb_kg_link_service
+from backend.services.kb_vault_assets import serve_vault_asset
 
 router = APIRouter(prefix="/kb", tags=["knowledge_base"])
 kb_route_logger = logging.getLogger("tpdx.hermes")
@@ -89,6 +90,26 @@ async def kb_browse_tree(
         limit=limit,
     )
     return tree
+
+
+@router.get("/vault-asset")
+async def kb_vault_asset(
+    path: str = Query(..., description="Obsidian 笔记内相对资源路径"),
+    note_folder: str | None = Query(
+        None,
+        description="条目 metadata.folder_path，用于解析相对当前笔记目录的图片",
+    ),
+    source_vault_file: str | None = Query(
+        None,
+        description="条目 metadata.source_vault_file（相对 Vault 根的 .md 路径）",
+    ),
+):
+    """只读返回 Obsidian Vault 内的图片/附件（需配置 OBSIDIAN_VAULT_ROOT）。"""
+    return serve_vault_asset(
+        path,
+        note_folder=note_folder,
+        source_vault_file=source_vault_file,
+    )
 
 
 @router.get("/kg-links")
