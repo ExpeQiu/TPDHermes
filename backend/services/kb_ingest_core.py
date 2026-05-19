@@ -267,6 +267,21 @@ def run_kb_ingestion(
             if merged.get("project_ids") is not None:
                 base_meta["project_ids"] = merged["project_ids"]
 
+            # conversation_harvest / 扩展 tracing 字段（不落 REQUIRED 校验范围）
+            for _hk in (
+                "dedupe_key",
+                "conversation_id",
+                "confidence",
+                "harvested_from_user_confirmed",
+                "trace_id",
+                "created_by",
+                "scenario_id",
+            ):
+                if merged.get(_hk) is not None:
+                    base_meta[_hk] = merged[_hk]
+            if merged.get("message_ids") is not None:
+                base_meta["message_ids"] = merged["message_ids"]
+
             verr = validate_chunk_metadata(base_meta, strict_domain=strict_domain)
             if verr:
                 doc_failed += 1
@@ -385,4 +400,23 @@ def build_manifest_from_uploads(
         "collection": collection,
         "defaults": defaults,
         "documents": documents,
+    }
+
+
+def build_manifest_from_harvest(
+    batch_id: str,
+    collection: str,
+    doc_id: str,
+    file_path: str,
+    title: str,
+    defaults: dict[str, Any],
+) -> dict[str, Any]:
+    """
+    单次对话摘录导入：documents 一项，manifest.defaults 承载 domain/tags/source/source_type 等。
+    """
+    return {
+        "batch_id": batch_id,
+        "collection": collection,
+        "defaults": dict(defaults or {}),
+        "documents": [{"doc_id": doc_id, "file_path": str(file_path), "title": title}],
     }

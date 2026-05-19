@@ -4,10 +4,11 @@ Knowledge Base Tools for TPDHermes MCP Server
 Wraps kb_proxy_service and kb_cache_service for MCP access.
 """
 
-from typing import Optional
+from typing import Any, Optional
 
 from backend.services.kb_proxy import kb_proxy_service
 from backend.services.kb_cache import kb_cache_service
+from backend.services.kb_write import add_kb_harvest_entry
 
 
 async def kb_query(
@@ -84,3 +85,37 @@ async def kb_get_entry(
         if entry.get("id") == entry_id:
             return entry
     return {}
+
+
+async def kb_add_entry(
+    collection_name: str,
+    project_id: str,
+    title: str,
+    content: str,
+    summary: str = "",
+    tags: Optional[list[str]] = None,
+    domain: str = "internal_methodology",
+    source: str = "hermes_chat",
+    published: bool = False,
+    metadata: Optional[dict[str, Any]] = None,
+    scenario_id: Optional[str] = None,
+) -> dict:
+    """
+    将对话中已确认的摘录写入知识库（默认草稿 unpublished）。
+
+    禁止在未取得用户明确同意时调用。须先展示草稿并请用户确认「是否存入知识库」。
+    """
+    return await add_kb_harvest_entry(
+        collection_name=collection_name,
+        project_id=project_id,
+        title=title,
+        content=content,
+        summary=summary or None,
+        tags=tags,
+        domain=domain,
+        source=source,
+        published=published,
+        metadata=metadata,
+        scenario_id=scenario_id,
+        strict_domain=False,
+    )

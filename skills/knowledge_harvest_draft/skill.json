@@ -1,0 +1,12 @@
+{
+  "name": "knowledge_harvest_draft",
+  "description": "从对话摘录生成结构化知识收割草稿（不写入 KB、不替代用户确认）",
+  "version": "1.0.0",
+  "author": "TPD Team",
+  "input_schema": {
+    "conversation_excerpt": "string，待沉淀的对话或技术说明原文",
+    "project_id": "string，可选",
+    "collection_hint": "string，建议 collection 名，可选",
+    "domain_hint": "string，可选，如 structured_tech"
+  }
+}

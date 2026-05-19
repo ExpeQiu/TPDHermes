@@ -136,6 +136,7 @@ services:
     volumes:
       - hermes-agent-data:/opt/data
       - ./deploy/hermes-agent/config.yaml:/opt/data/config.yaml:ro
+      - ./deploy/hermes-agent/SOUL.md:/opt/data/SOUL.md:ro
     expose:
       - "8642"
     networks:

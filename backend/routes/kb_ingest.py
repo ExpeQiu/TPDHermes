@@ -29,6 +29,7 @@ from backend.services.kb_ingest_core import (
     sha256_file,
 )
 from backend.services.kb_proxy import CHROMA_HOST
+from backend.services.kb_write import add_kb_harvest_entry
 
 router = APIRouter(prefix="/kb", tags=["knowledge_base"])
 log = logging.getLogger("tpdx.hermes")
@@ -62,8 +63,46 @@ class KbPublishRequest(BaseModel):
     chroma_url: Optional[str] = None
 
 
+class KbHarvestEntryRequest(BaseModel):
+    """对话收割原子写入"""
+
+    collection_name: str
+    project_id: str
+    title: str
+    content: str
+    summary: Optional[str] = None
+    tags: Optional[list[str]] = None
+    domain: str = "internal_methodology"
+    source: str = "hermes_chat"
+    published: bool = False
+    metadata: Optional[dict[str, Any]] = None
+    scenario_id: Optional[str] = None
+    chroma_url: Optional[str] = None
+    strict_domain: bool = False
+
+
 def _flatten_get_ids(data: dict[str, Any]) -> list[str]:
     return flatten_chroma_get_ids(data)
+
+
+@router.post("/entries")
+async def kb_create_harvest_entry(body: KbHarvestEntryRequest):
+    """对话确认的摘录入库：默认 unpublished 草稿。"""
+    return await add_kb_harvest_entry(
+        collection_name=body.collection_name.strip(),
+        project_id=body.project_id.strip(),
+        title=body.title,
+        content=body.content,
+        summary=body.summary,
+        tags=body.tags,
+        domain=body.domain,
+        source=body.source,
+        published=body.published,
+        metadata=body.metadata,
+        scenario_id=body.scenario_id,
+        chroma_url=body.chroma_url,
+        strict_domain=body.strict_domain,
+    )
 
 
 @router.post("/upload")

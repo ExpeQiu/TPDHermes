@@ -217,6 +217,17 @@ mcp_servers:
         - get_prompt
 ```
 
+如果飞书群里希望机器人在**不需要 `@`** 的情况下也能回复，请再补上：
+
+```yaml
+platforms:
+  feishu:
+    extra:
+      require_mention: false
+```
+
+对应挂载到容器内的路径是 `/opt/data/config.yaml`。修改后重启 `hermes-agent` 即可生效。
+
 如果后续确认需要开放更强的联网能力，再按需把 `tavily_crawl / tavily_map / tavily_research` 加回 `include` 白名单。
 
 ## 5. Hermes-agent 接入方式
@@ -527,6 +538,28 @@ docker exec hermes-agent sh -lc "stat -c '%A %U:%G %n' /opt/data/config.yaml"
 ```bash
 chmod 644 /opt/tpdhermes/TPDHermes/deploy/hermes-agent/config.yaml
 docker compose -f docker-compose.prod.yml -f docker-compose.src-hermes.yml restart hermes-agent
+```
+
+如果飞书群里出现“必须 `@` 机器人才能回复”，通常不是权限问题，而是 `platforms.feishu.extra.require_mention` 仍为默认值 `true`。建议直接检查宿主机和容器内的实际配置：
+
+```bash
+tail -n 8 /opt/tpdhermes/TPDHermes/deploy/hermes-agent/config.yaml
+docker exec hermes-agent sh -lc "tail -n 8 /opt/data/config.yaml"
+```
+
+期望看到：
+
+```yaml
+platforms:
+  feishu:
+    extra:
+      require_mention: false
+```
+
+如果宿主机文件已更新，但容器内还没变，说明挂载内容尚未重新加载，执行：
+
+```bash
+docker restart hermes-agent
 ```
 
 异常日志通常会在 `/opt/data/logs/agent.log` 或 `docker logs hermes-agent` 里看到：

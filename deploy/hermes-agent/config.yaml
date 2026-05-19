@@ -14,6 +14,7 @@ mcp_servers:
         - kb_query
         - kb_list_collections
         - kb_get_entry
+        - kb_add_entry
         - workshop_list_skills
         - workshop_get_skill_info
         - workshop_generate
@@ -38,3 +39,8 @@ terminal:
 display:
   tool_progress: all
   interim_assistant_messages: true
+
+platforms:
+  feishu:
+    extra:
+      require_mention: false

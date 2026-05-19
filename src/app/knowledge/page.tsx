@@ -17,6 +17,7 @@ import remarkGfm from "remark-gfm";
 // ============== 类型 ==============
 interface KBEntry {
   id: string;
+  doc_id?: string;
   title: string;
   source: string;
   summary: string;
@@ -29,6 +30,10 @@ interface KBEntry {
   linked_kg_ids?: string[];
   created_at: string;
   projects: number[];
+  source_type?: string;
+  conversation_id?: string;
+  confidence?: number | string;
+  harvested_from_user_confirmed?: boolean;
 }
 
 interface Collection {
@@ -111,6 +116,12 @@ const KG_KINDS = [
   "PlannedVehicle",
 ] as const;
 
+type SourceTypeFilter =
+  | "all"
+  | "conversation_harvest"
+  | "file"
+  | "upload";
+
 /** Chroma 写入时序列化成的 JSON 数组字符串恢复为数组（兼容旧缓存） */
 function coerceJsonArrayUnknown(v: unknown): unknown[] | null {
   if (Array.isArray(v)) return v;
@@ -154,8 +165,27 @@ function mapCacheRow(row: Record<string, unknown>): KBEntry {
   } else if (typeof meta.published === "string") {
     published = ["1", "true", "yes", "on"].includes(meta.published.toLowerCase());
   }
+  const source_type =
+    typeof meta.source_type === "string" && meta.source_type
+      ? meta.source_type
+      : undefined;
+  const doc_id = typeof meta.doc_id === "string" && meta.doc_id ? meta.doc_id : undefined;
+  const conversation_id =
+    typeof meta.conversation_id === "string" && meta.conversation_id
+      ? meta.conversation_id
+      : undefined;
+  let confidence: number | string | undefined = meta.confidence as number | string | undefined;
+  if (confidence === undefined || confidence === null || confidence === "") {
+    confidence = undefined;
+  }
+  let harvested: boolean | undefined;
+  const h = meta.harvested_from_user_confirmed;
+  if (typeof h === "boolean") harvested = h;
+  else if (typeof h === "string")
+    harvested = ["1", "true", "yes", "on"].includes(h.toLowerCase());
   return {
     id: String(row.id ?? ""),
+    doc_id,
     title,
     source: String(row.source ?? meta.source ?? "缓存"),
     summary: String(row.content ?? "").slice(0, 280),
@@ -167,6 +197,10 @@ function mapCacheRow(row: Record<string, unknown>): KBEntry {
     folder_path,
     linked_kg_ids,
     published,
+    source_type,
+    conversation_id,
+    confidence,
+    harvested_from_user_confirmed: harvested,
   };
 }
 
@@ -194,8 +228,13 @@ function mapQueryResult(
   } else if (Array.isArray(meta.linked_kg_ids)) {
     linked_kg_ids = (meta.linked_kg_ids as unknown[]).map(String);
   }
+  const st =
+    typeof meta.source_type === "string" && meta.source_type ? meta.source_type : undefined;
+  const dq = typeof meta.doc_id === "string" && meta.doc_id ? meta.doc_id : undefined;
+
   return {
     id: String(meta.id ?? `hit_${i}`),
+    doc_id: dq,
     title,
     source: String(meta.source ?? "知识库"),
     summary: (r.content || "").slice(0, 280),
@@ -207,6 +246,13 @@ function mapQueryResult(
     domain,
     folder_path,
     linked_kg_ids,
+    source_type: st,
+    published:
+      typeof meta.published === "boolean"
+        ? meta.published
+        : typeof meta.published === "string"
+          ? ["1", "true", "yes", "on"].includes(meta.published.toLowerCase())
+          : undefined,
   };
 }
 
@@ -298,7 +344,7 @@ function TreeNav({
 // ============== 页面 ==============
 export default function KnowledgePage() {
   const [workspaceMode, setWorkspaceMode] = useState<
-    "tree" | "collections" | "search" | "graph" | "ingest"
+    "tree" | "collections" | "search" | "graph" | "ingest" | "harvest"
   >("tree");
 
   const [searchScopeCollection, setSearchScopeCollection] = useState<string>("");
@@ -314,6 +360,9 @@ export default function KnowledgePage() {
   const [browseEntries, setBrowseEntries] = useState<KBEntry[]>([]);
   const [kbLoadError, setKbLoadError] = useState<string | null>(null);
   const [filterCollection, setFilterCollection] = useState<string | null>(null);
+  const [filterSourceType, setFilterSourceType] = useState<SourceTypeFilter>("all");
+  const [publishBusy, setPublishBusy] = useState(false);
+  const [publishMessage, setPublishMessage] = useState<string | null>(null);
   const [lastSseMessage, setLastSseMessage] = useState<string | null>(null);
   const [projects, setProjects] = useState<ProjectLite[]>([]);
   const sseRef = useRef<EventSource | null>(null);
@@ -564,6 +613,11 @@ export default function KnowledgePage() {
   }, [selectedEntry, entryById, loadKgLinks]);
 
   const handleWorkspaceMode = (m: typeof workspaceMode) => {
+    if (m === "harvest") {
+      setFilterSourceType("conversation_harvest");
+    } else if (workspaceMode === "harvest") {
+      setFilterSourceType("all");
+    }
     setWorkspaceMode(m);
     setSelectedEntry(null);
     setPage(0);
@@ -624,6 +678,7 @@ export default function KnowledgePage() {
   }, [searchQuery, searchScopeCollection]);
 
   const handleEntryClick = (entry: KBEntry) => {
+    setPublishMessage(null);
     if (selectedEntry?.id === entry.id) {
       setSelectedEntry(null);
       return;
@@ -631,9 +686,43 @@ export default function KnowledgePage() {
     setSelectedEntry(entry);
   };
 
-  const visibleBrowseEntries = browseEntries.filter(
-    (e) => !filterCollection || e.collection === filterCollection,
-  );
+  const publishHarvestEntry = async (entry: KBEntry, published: boolean) => {
+    const docId = entry.doc_id?.trim();
+    if (!docId || USE_MOCK_KB || publishBusy) return;
+    const projectId =
+      entry.projects[0] != null ? String(entry.projects[0]) : "__all__";
+    setPublishBusy(true);
+    setPublishMessage(null);
+    try {
+      await apiPost("/kb/publish", {
+        collection: entry.collection,
+        doc_ids: [docId],
+        published,
+        project_id: projectId,
+        sync_cache: true,
+      });
+      setPublishMessage(published ? "已发布并完成缓存同步。" : "已保持草稿（未对外发布）。");
+      await reloadKbBrowse();
+      setSelectedEntry((prev) =>
+        prev && prev.id === entry.id ? { ...prev, published } : prev,
+      );
+    } catch {
+      setPublishMessage("发布状态更新失败。");
+    } finally {
+      setPublishBusy(false);
+    }
+  };
+
+  function entryMatchesSourceFilter(e: KBEntry): boolean {
+    if (filterSourceType === "all") return true;
+    const st = e.source_type ?? "file";
+    return st === filterSourceType;
+  }
+
+  const visibleBrowseEntries = browseEntries.filter((e) => {
+    if (filterCollection && e.collection !== filterCollection) return false;
+    return entryMatchesSourceFilter(e);
+  });
   const projectBoundCount = browseEntries.filter(
     (entry) => entry.projects.length > 0,
   ).length;
@@ -932,7 +1021,7 @@ export default function KnowledgePage() {
             {USE_MOCK_KB ? "" : "（可设置 NEXT_PUBLIC_USE_MOCK_KB=true 启用演示数据）"}
           </p>
         )}
-        <div className="flex gap-2 mb-6 flex-wrap">
+        <div className="flex gap-2 mb-6 flex-wrap items-center">
           <button
             type="button"
             onClick={() => setFilterCollection(null)}
@@ -964,6 +1053,27 @@ export default function KnowledgePage() {
             </button>
           ))}
         </div>
+        {workspaceMode === "harvest" ? (
+          <p className="text-sm text-emerald-300 mb-4">
+            对话收割条目（source_type=conversation_harvest），草稿默认未发布，可在详情面板审核发布。
+          </p>
+        ) : (
+          <div className="flex flex-wrap items-center gap-2 mb-4">
+            <span className="text-xs text-slate-400">知识点来源：</span>
+            <select
+              value={filterSourceType}
+              onChange={(ev) =>
+                setFilterSourceType(ev.target.value as SourceTypeFilter)
+              }
+              className="rounded-lg border border-slate-700 bg-slate-900 text-sm px-3 py-1.5 text-slate-200"
+            >
+              <option value="all">全部</option>
+              <option value="conversation_harvest">对话收割</option>
+              <option value="file">文件导入</option>
+              <option value="upload">上传导入</option>
+            </select>
+          </div>
+        )}
         <div className="space-y-3">
           {rows.length === 0 && (
             <p className="text-slate-500 text-center py-8 text-sm">
@@ -980,10 +1090,23 @@ export default function KnowledgePage() {
                   : "border-slate-700 hover:bg-slate-700/40 hover:border-slate-600"
               }`}
             >
-              <div className="flex items-start justify-between mb-2">
+              <div className="flex items-start justify-between mb-2 gap-2 flex-wrap">
                 <h3 className="text-lg font-semibold text-white">{entry.title}</h3>
-                <span className="text-xs text-slate-500 bg-slate-700 px-2 py-1 rounded">
-                  {entry.collection}
+                <span className="flex flex-wrap gap-1 justify-end">
+                  {entry.source_type === "conversation_harvest" &&
+                  entry.published === false ? (
+                    <span className="text-xs bg-amber-500/25 text-amber-200 px-2 py-1 rounded">
+                      待审核
+                    </span>
+                  ) : null}
+                  {entry.source_type ? (
+                    <span className="text-[10px] uppercase tracking-wide text-emerald-200/90 bg-emerald-500/15 px-2 py-1 rounded shrink-0 max-w-[120px] truncate" title={entry.source_type}>
+                      {entry.source_type}
+                    </span>
+                  ) : null}
+                  <span className="text-xs text-slate-500 bg-slate-700 px-2 py-1 rounded shrink-0">
+                    {entry.collection}
+                  </span>
                 </span>
               </div>
               <p className="text-slate-400 text-sm mb-3 line-clamp-2">{entry.summary}</p>
@@ -1576,9 +1699,20 @@ export default function KnowledgePage() {
 
     return (
       <div className="bg-slate-800/60 border border-blue-500 rounded-xl p-6 mt-4">
-        <div className="flex items-start justify-between mb-4">
-          <h3 className="text-xl font-bold text-white">{entry.title}</h3>
+        <div className="flex items-start justify-between mb-4 gap-2 flex-wrap">
+          <div className="flex flex-col gap-1">
+            <h3 className="text-xl font-bold text-white">{entry.title}</h3>
+            <div className="flex gap-2 flex-wrap">
+              {entry.source_type === "conversation_harvest" &&
+              entry.published === false ? (
+                <span className="text-xs px-2 py-0.5 rounded bg-amber-500/25 text-amber-100 border border-amber-500/30">
+                  待审核 · 草稿
+                </span>
+              ) : null}
+            </div>
+          </div>
           <button
+            type="button"
             onClick={() => setSelectedEntry(null)}
             className="text-slate-400 hover:text-white text-xl leading-none"
           >
@@ -1602,6 +1736,81 @@ export default function KnowledgePage() {
               {entry.published === false ? "否（仅治理）" : "是 / 未标注"}
             </p>
           </div>
+          {entry.doc_id ? (
+            <div>
+              <p className="text-xs text-slate-500 uppercase tracking-wide mb-1">doc_id</p>
+              <p className="text-slate-300 font-mono text-xs break-all">{entry.doc_id}</p>
+            </div>
+          ) : null}
+          {entry.source_type ? (
+            <div>
+              <p className="text-xs text-slate-500 uppercase tracking-wide mb-1">source_type</p>
+              <p className="text-slate-300 text-sm font-mono">{entry.source_type}</p>
+            </div>
+          ) : null}
+          {entry.conversation_id ? (
+            <div>
+              <p className="text-xs text-slate-500 uppercase tracking-wide mb-1">conversation_id</p>
+              <p className="text-slate-300 text-sm font-mono break-all">{entry.conversation_id}</p>
+            </div>
+          ) : null}
+          {entry.confidence !== undefined && entry.confidence !== null && entry.confidence !== "" ? (
+            <div>
+              <p className="text-xs text-slate-500 uppercase tracking-wide mb-1">confidence</p>
+              <p className="text-slate-300 text-sm">{String(entry.confidence)}</p>
+            </div>
+          ) : null}
+          {entry.harvested_from_user_confirmed !== undefined ? (
+            <div>
+              <p className="text-xs text-slate-500 uppercase tracking-wide mb-1">
+                harvested_from_user_confirmed
+              </p>
+              <p className="text-slate-300 text-sm">
+                {entry.harvested_from_user_confirmed ? "是" : "否"}
+              </p>
+            </div>
+          ) : null}
+          {entry.source_type === "conversation_harvest" && entry.doc_id ? (
+            <div className="rounded-lg border border-slate-600 bg-slate-900/70 p-3">
+              <p className="text-xs uppercase text-slate-500 mb-2">草稿审核</p>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  disabled={USE_MOCK_KB || publishBusy}
+                  className="rounded-lg bg-emerald-600 px-3 py-1.5 text-sm font-medium text-white disabled:opacity-40"
+                  onClick={(ev) => {
+                    ev.stopPropagation();
+                    void publishHarvestEntry(fromEntry, true);
+                  }}
+                >
+                  {publishBusy ? "处理中…" : "发布后可见"}
+                </button>
+                <button
+                  type="button"
+                  disabled={USE_MOCK_KB || publishBusy || entry.published === false}
+                  className={`rounded-lg border px-3 py-1.5 text-sm disabled:opacity-40 ${
+                    entry.published === false
+                      ? "border-slate-700 text-slate-500 cursor-not-allowed"
+                      : "border-slate-600 text-slate-200 hover:bg-slate-800"
+                  }`}
+                  title={entry.published === false ? "当前已是草稿" : "恢复为草稿态"}
+                  onClick={(ev) => {
+                    ev.stopPropagation();
+                    if (entry.published === false) return;
+                    void publishHarvestEntry(fromEntry, false);
+                  }}
+                >
+                  降为草稿
+                </button>
+              </div>
+              {publishMessage ? (
+                <p className="text-xs text-slate-400 mt-2">{publishMessage}</p>
+              ) : null}
+              <p className="text-xs text-slate-600 mt-2">
+                调用 `POST /api/v1/kb/publish`，project_id={projectId}
+              </p>
+            </div>
+          ) : null}
           <div>
             <p className="text-xs text-slate-500 uppercase tracking-wide mb-1">正文预览</p>
             <div className="prose prose-invert prose-sm max-w-none text-slate-300">
@@ -1759,6 +1968,7 @@ export default function KnowledgePage() {
                 [
                   ["tree", "目录浏览"],
                   ["collections", "按集合"],
+                  ["harvest", "对话收割"],
                   ["search", "检索验证"],
                   ["graph", "知识图谱"],
                   ["ingest", "上传导入"],
@@ -1783,6 +1993,7 @@ export default function KnowledgePage() {
           <div className="mt-6">
             {workspaceMode === "tree" && renderTreeWorkspace()}
             {workspaceMode === "collections" && renderCollectionWorkspace()}
+            {workspaceMode === "harvest" && renderCollectionWorkspace()}
             {workspaceMode === "search" && renderSearchView()}
             {workspaceMode === "graph" && renderGraphWorkspace()}
             {workspaceMode === "ingest" && renderIngestWorkspace()}

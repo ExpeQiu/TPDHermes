@@ -15,7 +15,7 @@ mcp = FastMCP(
     name="TPDHermes",
     instructions=(
         "TPDHermes MCP Server — provides access to:\n"
-        "- Knowledge Base: query, list collections, get entries\n"
+        "- Knowledge Base: query, list collections, get entries, add harvest entries (with user confirmation)\n"
         "- Workshop: list skills, execute skill generation\n"
         "- Projects: list, create, get project details\n"
     ),
@@ -65,6 +65,45 @@ async def kb_get_entry(
     """Get a specific KB entry."""
     from backend.tools.kb_tools import kb_get_entry as _kb_get
     return await _kb_get(collection_name, entry_id, project_id)
+
+
+@mcp.tool(
+    title="KB Add Entry",
+    description=(
+        "Write a user-confirmed knowledge excerpt to the KB (conversation harvest). "
+        "Requires explicit user confirmation in the dialogue before calling. "
+        "Default published=false (draft); use KB publish workflow to approve. "
+        "Never call without the user agreeing to save."
+    ),
+)
+async def kb_add_entry(
+    collection_name: str,
+    project_id: str,
+    title: str,
+    content: str,
+    summary: str = "",
+    tags: list[str] | None = None,
+    domain: str = "internal_methodology",
+    source: str = "hermes_chat",
+    published: bool = False,
+    metadata: dict | None = None,
+    scenario_id: str | None = None,
+) -> dict:
+    """Add an excerpt as a KB document."""
+    from backend.tools.kb_tools import kb_add_entry as _kb_add
+    return await _kb_add(
+        collection_name=collection_name,
+        project_id=project_id,
+        title=title,
+        content=content,
+        summary=summary,
+        tags=tags,
+        domain=domain,
+        source=source,
+        published=published,
+        metadata=metadata,
+        scenario_id=scenario_id,
+    )
 
 
 # ─── Workshop / Skill Tools ───────────────────────────────────────────────────
