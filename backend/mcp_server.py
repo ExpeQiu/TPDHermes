@@ -1,11 +1,14 @@
 """
 TPDHermes MCP Server
 
-FastMCP Server exposing TPDHermes core capabilities via stdio MCP protocol.
-hermes-agent connects via stdio to access Knowledge Base, Workshop, and Project tools.
+FastMCP Server exposing TPDHermes core capabilities via stdio/HTTP MCP transport.
+Hermes-agent connects to this server to access Knowledge Base, Workshop, Project,
+and mounted external MCP capabilities such as Tavily Remote MCP.
 """
 
 from fastmcp import FastMCP
+
+from backend.mcp_tavily import mount_tavily_remote_mcp
 
 # Initialize FastMCP server
 mcp = FastMCP(
@@ -157,6 +160,10 @@ async def project_get(id: str) -> dict:
     """Get a project by ID."""
     from backend.tools.project_tools import project_get as _get
     return await _get(id)
+
+
+# Optional external MCP mounts
+mount_tavily_remote_mcp(mcp)
 
 
 # ─── Run ─────────────────────────────────────────────────────────────────────

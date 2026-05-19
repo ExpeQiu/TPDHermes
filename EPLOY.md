@@ -129,6 +129,8 @@ HERMES_AGENT_IMAGE=ghcr.io/your-org/hermes-agent:latest
 HERMES_AGENT_API_SERVER_KEY=请替换为真实值
 MINIMAX_CN_API_KEY=请替换为真实值
 MINIMAX_CN_BASE_URL=https://api.minimaxi.com/anthropic
+TAVILY_API_KEY=请替换为真实值
+TAVILY_REMOTE_MCP_URL=https://mcp.tavily.com/mcp/
 
 TPDHERMES_FRONTEND_IMAGE=tphermes-frontend:prod
 TPDHERMES_BACKEND_IMAGE=tphermes-backend:prod
@@ -154,6 +156,8 @@ TPDHERMES_MCP_URL=http://tphermes-mcp:8801/mcp
 - 如果两边走同一套 key，可以把这两个值设置成一样
 - 如果 `Hermes-agent` 走 MiniMax 中国区，请直接使用标准变量名 `MINIMAX_CN_API_KEY`
 - MiniMax 中国区 Anthropic 兼容地址建议固定写成 `MINIMAX_CN_BASE_URL=https://api.minimaxi.com/anthropic`
+- 如果你希望 `Hermes-agent` 具备 Tavily 联网能力，建议同时在项目 `.env` 中维护 `TAVILY_API_KEY`
+- 当前推荐方式不是让 `Hermes-agent` 直接启用 Tavily `web backend`，而是让 `tphermes-mcp` 代理 Tavily Remote MCP，再由 `Hermes-agent` 通过 `TPDHERMES_MCP_URL` 统一调用
 - `CHROMA_HOST` 如果暂时没有知识库服务，请改成你实际可用的地址；没有可用服务时，知识库相关能力会受影响
 - `TPDHERMES_MCP_URL` 默认走容器内网地址，供 `Hermes-agent` 通过 MCP 调用 `TPDHermes` 的 KB、Workshop、Project 工具
 - `TPDHERMES_MCP_PATH` 需要与 `tphermes-mcp` 服务启动参数保持一致，默认使用 `/mcp`
@@ -168,6 +172,52 @@ model:
 ```
 
 这样后续即使重建容器，只要项目 `.env` 仍保留 `MINIMAX_CN_API_KEY/MINIMAX_CN_BASE_URL`，就不需要再做自定义变量映射。
+
+如果你同时希望把联网搜索能力也标准化，建议把 Tavily 的来源统一收敛到 `tphermes-mcp`：
+
+- `tphermes-mcp` 读取 `TAVILY_API_KEY`
+- `tphermes-mcp` 读取 `TAVILY_REMOTE_MCP_URL`
+- `tphermes-mcp` 在启动时挂载 Tavily Remote MCP
+- `Hermes-agent` 只连接 `TPDHERMES_MCP_URL=http://tphermes-mcp:8801/mcp`
+
+这样后续即使迁移机器或重建容器，只要项目 `.env` 仍保留 `TAVILY_API_KEY`，Hermes 仍可通过 `mcp_tphermes_*` 方式继续使用 Tavily 提供的联网工具。
+
+当前推荐的生产收口策略是：
+
+- 由 `tphermes-mcp` 统一代理 Tavily Remote MCP
+- `Hermes-agent` 通过 `mcp_servers.tphermes.tools.include` 只开放 `tavily_search` 与 `tavily_extract`
+- `tavily_crawl / tavily_map / tavily_research` 默认先不暴露，避免模型在生产环境里无约束地扩大搜索面
+
+对应的 `config.yaml` 建议写成：
+
+```yaml
+mcp_servers:
+  tphermes:
+    url: http://tphermes-mcp:8801/mcp
+    enabled: true
+    timeout: 120
+    connect_timeout: 30
+    tools:
+      include:
+        - kb_query
+        - kb_list_collections
+        - kb_get_entry
+        - workshop_list_skills
+        - workshop_get_skill_info
+        - workshop_generate
+        - workshop_generate_from_kb
+        - project_list
+        - project_create
+        - project_get
+        - tavily_search
+        - tavily_extract
+        - list_resources
+        - read_resource
+        - list_prompts
+        - get_prompt
+```
+
+如果后续确认需要开放更强的联网能力，再按需把 `tavily_crawl / tavily_map / tavily_research` 加回 `include` 白名单。
 
 ## 5. Hermes-agent 接入方式
 
@@ -303,11 +353,26 @@ docker exec hermes-agent sh -lc "grep -n 'MCP server .*tphermes\\|MCP:' /opt/dat
 正常情况下会看到类似：
 
 ```text
-INFO tools.mcp_tool: MCP server 'tphermes' (HTTP): registered 13 tool(s): ...
-INFO tools.mcp_tool: MCP: registered 13 tool(s) from 1 server(s)
+INFO tools.mcp_tool: MCP server 'tphermes' (HTTP): registered 16 tool(s): ...
+INFO tools.mcp_tool: MCP: registered 16 tool(s) from 1 server(s)
 ```
 
 注意：这类注册日志不一定会稳定出现在 `docker logs hermes-agent` 标准输出里，更可靠的位置是 `/opt/data/logs/agent.log`。
+
+如果你已经切到 Tavily MCP 白名单模式，日志里应看到：
+
+```text
+mcp_tphermes_tavily_search
+mcp_tphermes_tavily_extract
+```
+
+且不应再看到：
+
+```text
+mcp_tphermes_tavily_crawl
+mcp_tphermes_tavily_map
+mcp_tphermes_tavily_research
+```
 
 ### 7.4 验证前端是否正确走公网入口
 
@@ -556,6 +621,96 @@ INFO [api-...] run_agent: tool mcp_tphermes_kb_query completed (0.06s, 1970 char
 
 这说明真实 `/chat` 会话里，模型不只是“看得到工具”，而是已经实际选用并执行了该 MCP KB 工具。
 
+### 10.12 切换到 Tavily MCP
+
+如果你已经在线上验证过 Tavily 直连可用，建议继续把它收敛到：
+
+- `tphermes-mcp` 持有 `TAVILY_API_KEY`
+- `tphermes-mcp` 挂载 Tavily Remote MCP
+- `Hermes-agent` 不再直接持有 `TAVILY_API_KEY`
+- `Hermes-agent` 只通过 `mcp_tphermes_*` 使用 Tavily 能力
+
+推荐操作顺序：
+
+1. 在项目 `.env` 中保留：
+
+```env
+TAVILY_API_KEY=请替换为真实值
+TAVILY_REMOTE_MCP_URL=https://mcp.tavily.com/mcp/
+```
+
+2. 在 `deploy/hermes-agent/config.yaml` 中对 `tphermes` 增加 `tools.include`，只保留：
+
+```yaml
+- tavily_search
+- tavily_extract
+```
+
+3. 重建并重启：
+
+```bash
+cd /opt/tpdhermes/TPDHermes
+docker compose -f docker-compose.prod.yml -f docker-compose.src-hermes.yml build backend
+docker compose -f docker-compose.prod.yml -f docker-compose.src-hermes.yml up -d --force-recreate backend tphermes-mcp hermes-agent
+```
+
+4. 清理 `Hermes-agent` 持久化环境中的旧 Tavily 变量，避免同时保留“直连 Tavily”和“MCP Tavily”两条入口：
+
+```bash
+docker exec hermes-agent sh -lc 'if [ -f /opt/data/.env ]; then grep -v -E "^(TAVILY_API_KEY|TAVILY_REMOTE_MCP_URL)=" /opt/data/.env > /opt/data/.env.clean && mv /opt/data/.env.clean /opt/data/.env; fi'
+docker restart hermes-agent
+```
+
+5. 检查当前 `Hermes-agent` 运行环境中已不再持有 `TAVILY_*`：
+
+```bash
+docker exec hermes-agent sh -lc 'env | grep -E "^TAVILY_" || true; echo ---; [ -f /opt/data/.env ] && grep -E "^TAVILY_" /opt/data/.env || true'
+```
+
+6. 检查 MCP 工具注册结果：
+
+```bash
+docker exec hermes-agent sh -lc 'grep -nE "MCP server .*tphermes|MCP: registered .*tool\(s\)" /opt/data/logs/agent.log | tail -n 20'
+```
+
+正常情况下应看到 `registered 16 tool(s)`，并包含：
+
+```text
+mcp_tphermes_tavily_search
+mcp_tphermes_tavily_extract
+```
+
+7. 用真实 `/chat` 验证模型已实际调用 Tavily MCP 工具：
+
+```bash
+curl -sS -X POST http://127.0.0.1:8033/api/v1/chat/completions \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "model":"hermes-agent",
+    "stream":false,
+    "messages":[
+      {
+        "role":"user",
+        "content":"请必须使用 tphermes 里的 Tavily MCP 搜索工具查询 example.com 是什么网站，并用一句话回答。"
+      }
+    ]
+  }'
+```
+
+再看日志：
+
+```bash
+docker exec hermes-agent sh -lc 'grep -n "tool mcp_tphermes_tavily_search completed" /opt/data/logs/agent.log | tail -n 5'
+```
+
+如果这里出现：
+
+```text
+INFO [api-...] run_agent: tool mcp_tphermes_tavily_search completed (...)
+```
+
+说明当前线上已经完全切换为 `TPDHermes MCP -> Tavily MCP` 路径。
+
 ### 10.11 直接上传 `skills/` 后，为什么 `/skills` 页面还是看不到
 
 这是今天实际验证中最容易混淆的一点：
@@ -675,10 +830,11 @@ docker compose -f docker-compose.prod.yml up -d --build
 1. 在 `47.113.225.93` 安装 Docker 与 Compose
 2. 上传 `TPDHermes` 和可选的 `Hermes-agent`
 3. 复制 `.env.production.example` 为 `.env`
-4. 按 IP 填好 `.env`
+4. 按 IP 填好 `.env`，至少确认 `MINIMAX_CN_API_KEY`、`TAVILY_API_KEY`、`TAVILY_REMOTE_MCP_URL` 等关键项
 5. 执行 `docker compose -f docker-compose.prod.yml up -d --build`
 6. 验证 `http://47.113.225.93:8033/health`
 7. 打开首页并实际发一轮对话
+8. 额外验证一次 `Hermes-agent` 是否能调用 `mcp_tphermes_*` 下的 Tavily 工具
 
 如果你需要，我下一步可以继续补：
 

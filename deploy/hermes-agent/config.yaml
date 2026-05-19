@@ -9,6 +9,24 @@ mcp_servers:
     enabled: true
     timeout: 120
     connect_timeout: 30
+    tools:
+      include:
+        - kb_query
+        - kb_list_collections
+        - kb_get_entry
+        - workshop_list_skills
+        - workshop_get_skill_info
+        - workshop_generate
+        - workshop_generate_from_kb
+        - project_list
+        - project_create
+        - project_get
+        - tavily_search
+        - tavily_extract
+        - list_resources
+        - read_resource
+        - list_prompts
+        - get_prompt
 
 terminal:
   backend: "local"

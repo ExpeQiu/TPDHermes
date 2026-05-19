@@ -16,6 +16,14 @@ def _do_all_replacements(text: str, ctx: dict) -> str:
     vehicle = ctx.get("vehicle_model", "")
     tech_brand = ctx.get("tech_brand", "")
     selling_points = ctx.get("top_selling_points", [])
+    # 兼容 dict list 和 string list
+    normalized = []
+    for sp in selling_points:
+        if isinstance(sp, dict):
+            normalized.append(sp.get('name', '') or sp.get('desc', ''))
+        elif isinstance(sp, str):
+            normalized.append(sp)
+    selling_points = normalized
     target_users = ctx.get("target_users", [])
     target_competitors = ctx.get("target_competitors", [])
 

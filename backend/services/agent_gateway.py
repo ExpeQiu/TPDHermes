@@ -18,6 +18,54 @@ def orchestration_mode() -> str:
     return os.getenv("HERMES_ORCHESTRATION_MODE", "prompt").strip().lower()
 
 
+def _build_orchestration_guidance(payload: OrchestrationPayload) -> str:
+    knowledge_collections = [c for c in payload.knowledge.collections if c]
+    preferred_skills = [s for s in payload.skills.preferred if s]
+    allowed_skills = [s for s in payload.skills.allowed if s]
+    candidate_skills = preferred_skills or allowed_skills
+
+    lines = [
+        "你是 TPDHermes 编排执行代理。你必须优先遵循 orchestration 中的边界、模板和技能策略。",
+        "用户自然语言需求在对话消息中给出；不要在未授权时编造事实。",
+    ]
+
+    if knowledge_collections:
+        lines.append(
+            "当前知识检索范围仅限于这些 collections："
+            + ", ".join(knowledge_collections)
+            + "。"
+        )
+
+    if candidate_skills:
+        lines.append(
+            "当前可优先使用的 skills："
+            + ", ".join(candidate_skills)
+            + "。"
+        )
+
+    should_prefer_kb_skill = bool(knowledge_collections and candidate_skills)
+    if should_prefer_kb_skill:
+        lines.extend(
+            [
+                "当用户要求生成模板化内容、结构化文稿、发言稿、一页纸、短视频脚本，或明确要求结合知识库生成内容时，优先调用 `workshop_generate_from_kb`。",
+                "调用要求：`collection_name` 必须从 orchestration.knowledge.collections 中选择，`skill_name` 必须从 orchestration.skills.preferred/allowed 中选择。",
+                "为 `query` 提炼一个简洁检索词；仅在 `context` 中传入需要覆盖或补充的字段，例如 tone、cta、style、required_sections。",
+                "如果 `workshop_generate_from_kb` 失败，再降级为 `kb_query` + `workshop_generate`，不要跳过工具直接编造最终内容。",
+            ]
+        )
+
+    if payload.output.must_follow_template or payload.output.template_id:
+        lines.append("当前输出必须尽量遵循模板或结构要求，优先产出结构完整的模板化结果。")
+    if payload.output.required_sections:
+        lines.append(
+            "输出至少覆盖这些 section："
+            + ", ".join(payload.output.required_sections)
+            + "。"
+        )
+
+    return " ".join(lines)
+
+
 def build_chat_completion_body(
     payload: OrchestrationPayload,
     messages: list[dict[str, Any]],
@@ -32,10 +80,7 @@ def build_chat_completion_body(
     mode = orchestration_mode()
     model_name = model or os.getenv("HERMES_CHAT_MODEL", "hermes-agent")
 
-    system_intro = (
-        "你是 TPDHermes 编排执行代理。你必须优先遵循 orchestration 中的边界、模板和技能策略。"
-        "用户自然语言需求在对话消息中给出；不要在未授权时编造事实。"
-    )
+    system_intro = _build_orchestration_guidance(payload)
 
     if mode == "extra":
         body: dict[str, Any] = {

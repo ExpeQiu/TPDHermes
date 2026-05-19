@@ -25,6 +25,13 @@ def _do_all_replacements(text: str, ctx: dict) -> str:
     # 基础字段
     text = text.replace("[技术名]", tech_name)
     text = text.replace("Slogan（一句话承诺）", slogan)
+
+    # 单独的中文占位符（在slogan整体替换之后做兜底）
+    text = text.replace("[技术]", ctx.get("tech", tech_name))
+    text = text.replace("[场景]", ctx.get("scene", ctx.get("target_user", "")))
+    text = text.replace("[可感知收益]", ctx.get("perceivable_benefit", ctx.get("core_value", "")))
+    text = text.replace("[目标用户]", ctx.get("target_user", "目标用户"))
+    text = text.replace("[价值形容词]", ctx.get("value_adj", ctx.get("core_value", "更安全")))
     text = text.replace("**[技术名]**", f"**{tech_name}**")
 
     # 第一步：Slogan
