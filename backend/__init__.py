@@ -135,7 +135,9 @@ from backend.routes.feishu_bot import router as feishu_bot_router
 from backend.routes.tasks import router as tasks_router, runs_router as runs_router
 from backend.routes.scenarios import router as scenarios_router
 from backend.routes.templates import router as templates_router
+from backend.routes.me import router as me_router
 
+include_router_with_version(me_router)
 include_router_with_version(projects_router, strip_prefix="/projects")
 include_router_with_version(kb_router,       strip_prefix="/kb")
 include_router_with_version(kb_ingest_router, strip_prefix="/kb")

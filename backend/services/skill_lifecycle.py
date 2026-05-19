@@ -21,12 +21,14 @@ from typing import Any, Dict, List, Optional, Tuple
 from datetime import datetime
 import uuid
 
-from sqlalchemy import select
+from sqlalchemy import select, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.models.skill import Skill
 from backend.services.skill_loader import SkillLoader, SkillNotFoundError, SkillLoadError
 from backend.services.skill_version import SkillVersionService, bump_version
+from backend.services.user_identity import is_global_admin_user
+from backend.services.resource_visibility import skill_dict_visibility_fields
 
 logger = logging.getLogger("tpdx.hermes.skills")
 
@@ -83,11 +85,19 @@ class SkillLifecycleService:
 
     # ── 基础 CRUD ────────────────────────────────────────────────────────────
 
-    async def list_skills(self, enabled_only: bool = False) -> List[Dict[str, Any]]:
-        """列出所有已安装的 Skill"""
+    async def list_skills(self, enabled_only: bool = False, viewer_user_id: str | None = None) -> List[Dict[str, Any]]:
+        """列出已安装的 Skill；viewer_user_id 非空时按 owner 过滤。"""
         query = select(Skill)
         if enabled_only:
             query = query.where(Skill.enabled == 1)
+        if viewer_user_id is not None and not is_global_admin_user(viewer_user_id):
+            vu = viewer_user_id.strip()
+            query = query.where(
+                or_(
+                    Skill.owner_id == "",
+                    Skill.owner_id == vu,
+                )
+            )
         result = await self.db.execute(query)
         skills = result.scalars().all()
         return [self._skill_to_dict(s) for s in skills]
@@ -107,6 +117,7 @@ class SkillLifecycleService:
         description: str = "",
         config: Optional[Dict[str, Any]] = None,
         source: str = "upload",
+        owner_id: str = "",
     ) -> Dict[str, Any]:
         """
         将已校验的目录复制到 skills/<skill_name>/ 并执行 install（失败时回滚磁盘目录）。
@@ -137,6 +148,7 @@ class SkillLifecycleService:
                 description=description,
                 config=config,
                 source=source,
+                owner_id=owner_id,
             )
             logger.info("skill_upload installed name=%s", skill_name)
             return out
@@ -154,6 +166,7 @@ class SkillLifecycleService:
         name_override: Optional[str] = None,
         description: str = "",
         config: Optional[Dict[str, Any]] = None,
+        owner_id: str = "",
     ) -> Dict[str, Any]:
         """解压 ZIP 并安装到 skills/（结构规则见 resolve_zip_package_root）。"""
         trimmed = name_override.strip() if name_override else ""
@@ -183,6 +196,7 @@ class SkillLifecycleService:
                 description=description,
                 config=config,
                 source="upload",
+                owner_id=owner_id,
             )
 
     async def install(
@@ -191,6 +205,7 @@ class SkillLifecycleService:
         description: str = "",
         config: Optional[Dict[str, Any]] = None,
         source: str = "local",
+        owner_id: str = "",
     ) -> Dict[str, Any]:
         """
         安装一个新 Skill
@@ -226,6 +241,7 @@ class SkillLifecycleService:
             version=version,
             enabled=1,
             source=source,
+            owner_id=(owner_id or "").strip(),
             version_history=json.dumps([{
                 "version": version,
                 "changelog": "Initial install",
@@ -348,8 +364,9 @@ class SkillLifecycleService:
 
         src = (skill.source or "local").strip().lower()
         scope = "personal" if src in ("upload", "user") else "public"
+        own = getattr(skill, "owner_id", None) or ""
 
-        return {
+        base = {
             "id": skill.id,
             "name": skill.name,
             "description": skill.description or "",
@@ -362,6 +379,8 @@ class SkillLifecycleService:
             "installed_at": skill.installed_at,
             "updated_at": skill.updated_at,
         }
+        base.update(skill_dict_visibility_fields(str(own)))
+        return base
 
     def _parse_version_history(self, raw: str) -> List[Dict[str, Any]]:
         try:

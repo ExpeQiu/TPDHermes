@@ -27,6 +27,8 @@ from backend.db import get_db
 from backend.services.skill_lifecycle import SkillLifecycleService
 from backend.services.skill_version import SkillVersionService
 from backend.services.skill_loader import SkillNotFoundError, get_loader
+from backend.services.resource_visibility import skill_installation_visible
+from backend.services.user_identity import get_effective_user_id
 
 
 router = APIRouter(prefix="/skills", tags=["skills"])
@@ -67,6 +69,9 @@ class SkillResponse(BaseModel):
     source: str
     # scope：public=工作区/市场安装；personal=本地上传（ZIP）等
     scope: str = "public"
+    owner_id: str = ""
+    owner_type: str = "platform"
+    visibility: str = "global"
     version_history: List[Dict[str, Any]]
     installed_at: str
     updated_at: str
@@ -132,10 +137,11 @@ MARKETPLACE_CATALOG = [
 async def list_skills(
     enabled_only: bool = Query(False, description="仅返回已启用的 Skill"),
     db: AsyncSession = Depends(get_db),
+    effective_uid: str = Depends(get_effective_user_id),
 ):
     """列出所有已安装的 Skills"""
     svc = SkillLifecycleService(db, get_loader())
-    skills = await svc.list_skills(enabled_only=enabled_only)
+    skills = await svc.list_skills(enabled_only=enabled_only, viewer_user_id=effective_uid)
     return skills
 
 
@@ -173,6 +179,7 @@ async def upload_skill_package(
     name: Optional[str] = Form(None, description="ZIP 根目录为包时必填；单文件夹 ZIP 须留空"),
     description: str = Form(""),
     db: AsyncSession = Depends(get_db),
+    effective_uid: str = Depends(get_effective_user_id),
 ):
     """
     上传 ZIP 安装技能：须含可加载的 Python 包（__init__.py），结构见 SkillLifecycleService.install_from_zip_bytes。
@@ -183,10 +190,11 @@ async def upload_skill_package(
     if len(raw) > SKILL_UPLOAD_MAX_BYTES:
         raise HTTPException(status_code=400, detail=f"文件过大，上限 {SKILL_UPLOAD_MAX_BYTES // (1024 * 1024)}MB")
     logger.info(
-        "skill_upload request filename=%s size=%s name_form=%s",
+        "skill_upload request filename=%s size=%s name_form=%s user_id=%s",
         file.filename,
         len(raw),
         name,
+        effective_uid[:24],
     )
     svc = SkillLifecycleService(db, get_loader())
     try:
@@ -195,6 +203,7 @@ async def upload_skill_package(
             name_override=name,
             description=description or "",
             config=None,
+            owner_id=effective_uid,
         )
     except ValueError as e:
         logger.warning("skill_upload rejected: %s", e)
@@ -202,11 +211,17 @@ async def upload_skill_package(
 
 
 @router.get("/{name}", response_model=SkillResponse)
-async def get_skill(name: str, db: AsyncSession = Depends(get_db)):
+async def get_skill(
+    name: str,
+    db: AsyncSession = Depends(get_db),
+    effective_uid: str = Depends(get_effective_user_id),
+):
     """获取单个 Skill 详情"""
     svc = SkillLifecycleService(db, get_loader())
     skill = await svc.get_skill(name)
     if not skill:
+        raise HTTPException(status_code=404, detail=f"Skill '{name}' not found")
+    if not skill_installation_visible(skill.get("owner_id"), effective_uid):
         raise HTTPException(status_code=404, detail=f"Skill '{name}' not found")
     return skill
 
@@ -221,6 +236,7 @@ async def install_skill(data: SkillInstallRequest, db: AsyncSession = Depends(ge
             description=data.description,
             config=data.config,
             source=data.source,
+            owner_id="",
         )
         return skill
     except ValueError as e:

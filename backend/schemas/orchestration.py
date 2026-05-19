@@ -103,6 +103,13 @@ class OrchestrationExecution(BaseModel):
     save_run_log: bool = True
 
 
+class OrchestrationActor(BaseModel):
+    """当前调用者（审计、下游限权）。"""
+
+    user_id: str
+    role: str = "tenant_admin"
+
+
 class OrchestrationUserInput(BaseModel):
     message: str
 
@@ -120,6 +127,7 @@ class OrchestrationPayload(BaseModel):
     output: OrchestrationOutput = Field(default_factory=OrchestrationOutput)
     execution: OrchestrationExecution = Field(default_factory=OrchestrationExecution)
     user_input: OrchestrationUserInput
+    actor: OrchestrationActor | None = None
 
 
 class TaskKnowledgeOverrides(BaseModel):
@@ -172,6 +180,8 @@ class TaskExecuteRequest(BaseModel):
     """POST /tasks/execute 请求体（对齐方案第十八章）。"""
 
     entrypoint: Literal["chat", "create", "workshop", "quick_create", "project"] = "chat"
+    user_id: str | None = Field(default=None, description="显式用户 ID（可与 X-User-ID 双写）")
+    user_role: str | None = Field(default=None, description="可选，默认取 X-User-Role")
     project_id: str | None = None
     scenario_id: str | None = "general"
     user_message: str = ""

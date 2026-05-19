@@ -13,6 +13,7 @@ CREATE TABLE IF NOT EXISTS projects (
     deadline    TEXT,                    -- ISO8601 日期字符串
     constraints TEXT,                    -- JSON 约束条件
     status      TEXT NOT NULL DEFAULT 'active',  -- active | paused | completed | archived
+    owner_id    TEXT NOT NULL DEFAULT 'default',
     created_at  TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
 );
@@ -20,6 +21,7 @@ CREATE TABLE IF NOT EXISTS projects (
 CREATE INDEX IF NOT EXISTS idx_projects_status   ON projects(status);
 CREATE INDEX IF NOT EXISTS idx_projects_deadline ON projects(deadline);
 CREATE INDEX IF NOT EXISTS idx_projects_created  ON projects(created_at);
+CREATE INDEX IF NOT EXISTS idx_projects_owner    ON projects(owner_id);
 
 -- ============================================================
 -- templates 表：模板库（先于 outputs 定义，因 outputs 引用它）
@@ -45,6 +47,7 @@ CREATE TABLE IF NOT EXISTS outputs (
     project_id  TEXT NOT NULL,
     template_id TEXT,
     content     TEXT NOT NULL,          -- 产出内容
+    owner_id    TEXT NOT NULL DEFAULT 'default',
     status      TEXT NOT NULL DEFAULT 'draft',  -- draft | reviewing | approved | published
     created_at  TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at  TEXT NOT NULL DEFAULT (datetime('now')),
@@ -67,6 +70,7 @@ CREATE TABLE IF NOT EXISTS skills (
     config      TEXT NOT NULL DEFAULT '{}',  -- JSON 配置
     version     TEXT NOT NULL DEFAULT '1.0.0',
     enabled     INTEGER NOT NULL DEFAULT 1,  -- 0=禁用, 1=启用
+    owner_id    TEXT NOT NULL DEFAULT '',
     created_at  TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
 );

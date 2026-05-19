@@ -10,6 +10,62 @@
 
 如果后续切换到域名和 HTTPS，只需要更新 `.env` 中的公网访问地址，并在入口层补证书即可。当前容器内 `nginx` 监听 `80`，宿主机通过端口映射对外暴露 `8033`。
 
+## 增量部署原则（日常更新必读）
+
+日常发版与问题修复请遵守以下原则，避免无谓停机与长时间构建：
+
+1. **非必要不要重新构建 `hermes-agent`**  
+   - `hermes-agent` 使用 `docker-compose.src-hermes.yml` 时，镜像构建包含 `npm install`、`uv sync` 等步骤，通常需 **30 分钟以上**。  
+   - 仅修改 TPDHermes 业务代码（`src/`、`backend/`、`skills/` 等）时，**不要**触发 Hermes 镜像构建。  
+   - 仅当确实升级 Hermes 源码、`Dockerfile.alicloud` 或 Agent 依赖时，才单独执行 `build hermes-agent`。
+
+2. **不要整体 `up -d --build` 所有服务**  
+   - 避免 `docker compose ... up -d --build` 不带服务名，尤其在同时叠加 `docker-compose.src-hermes.yml` 时，会因依赖链误触发 `hermes-agent` 构建。  
+   - **改哪部分就只构建、只重启那部分**（见下表）。
+
+3. **变更范围与对应操作**
+
+| 变更内容 | 需要构建 | 需要重启/拉起 |
+| --- | --- | --- |
+| 前端页面 `src/` | `frontend` | `frontend`、`nginx` |
+| 后端 API `backend/` | `backend` | `backend` |
+| 技能 `skills/` | `backend`、`tphermes-mcp` | `backend`、`tphermes-mcp` |
+| `nginx/nginx.conf` | 否 | `nginx` |
+| `deploy/hermes-agent/config.yaml` | 否 | `hermes-agent`（`restart` 即可） |
+| Hermes 源码 / Agent Dockerfile | `hermes-agent` | `hermes-agent` |
+
+4. **推荐：日常 TPDHermes 增量发布命令**（不构建 Hermes）
+
+```bash
+cd /opt/tpdhermes/TPDHermes
+
+# 仅构建 TPDHermes 相关镜像（勿加 docker-compose.src-hermes.yml）
+DOCKER_BUILDKIT=1 docker compose -f docker-compose.prod.yml build frontend backend tphermes-mcp
+
+# 拉起变更服务；hermes-agent 使用已有镜像，--no-build 禁止误触发构建
+docker compose -f docker-compose.prod.yml -f docker-compose.src-hermes.yml \
+  up -d --no-build frontend backend tphermes-mcp nginx hermes-agent
+```
+
+按变更裁剪服务名，例如只改前端：
+
+```bash
+docker compose -f docker-compose.prod.yml build frontend
+docker compose -f docker-compose.prod.yml -f docker-compose.src-hermes.yml up -d --no-build frontend nginx
+```
+
+仅更新 Hermes 配置（不构建镜像）：
+
+```bash
+docker compose -f docker-compose.prod.yml -f docker-compose.src-hermes.yml restart hermes-agent
+```
+
+5. **本地上传代码时**  
+   - `rsync` / `scp` 可排除 `hermes-agent/` 目录，除非本次确需升级 Agent 源码。  
+   - 服务器上的 `.env` 不要被本地 `.env.local` 覆盖。
+
+6. **仅首次上线或 Hermes 大版本升级** 才使用全量构建（见 §6「首次全量部署」）。
+
 ## 1. 服务器准备
 
 ### 1.1 登录服务器
@@ -283,10 +339,13 @@ HERMES_AGENT_IMAGE=ghcr.io/your-org/hermes-agent:latest
 
 ### 方案 B：Hermes-agent 使用本地源码构建
 
-如果 `Hermes-agent` 源码放在 **TPDHermes 仓库内**（推荐路径 `hermes-agent/hermes-agent-main/`，与官方 Dockerfile 同级），可直接使用仓库里的 **`docker-compose.src-hermes.yml`** 覆盖构建，无需手改 `image`：
+如果 `Hermes-agent` 源码放在 **TPDHermes 仓库内**（推荐路径 `hermes-agent/hermes-agent-main/`，与官方 Dockerfile 同级），可直接使用仓库里的 **`docker-compose.src-hermes.yml`** 覆盖构建，无需手改 `image`。
+
+首次或升级 Agent 时单独构建（日常 TPDHermes 更新见文首 **「增量部署原则」**）：
 
 ```bash
-docker compose -f docker-compose.yml -f docker-compose.src-hermes.yml up -d --build
+DOCKER_BUILDKIT=1 docker compose -f docker-compose.prod.yml -f docker-compose.src-hermes.yml build hermes-agent
+docker compose -f docker-compose.prod.yml -f docker-compose.src-hermes.yml up -d --no-build hermes-agent
 ```
 
 若 Hermes 与 TPDHermes **并列目录**（例如 `/opt/tpdhermes/Hermes-agent`），则把 `docker-compose.prod.yml` 里的 `hermes-agent` 从 `image` 改为 `build`：
@@ -318,12 +377,28 @@ docker compose -f docker-compose.yml -f docker-compose.src-hermes.yml up -d --bu
 
 ## 6. 构建并启动
 
-推荐先用显式生产编排文件：
+### 6.1 首次全量部署
+
+仅**第一次**在服务器上架、或需要一次性拉起全部容器时使用。日常更新请改走上文 **「增量部署原则」**，不要重复全量 `--build`。
+
+```bash
+cd /opt/tpdhermes/TPDHermes
+# 若 Hermes 走仓库内源码，首次需构建 Agent（耗时长，仅首次或升级 Agent 时执行）
+DOCKER_BUILDKIT=1 docker compose -f docker-compose.prod.yml -f docker-compose.src-hermes.yml build hermes-agent
+DOCKER_BUILDKIT=1 docker compose -f docker-compose.prod.yml build frontend backend tphermes-mcp
+docker compose -f docker-compose.prod.yml -f docker-compose.src-hermes.yml up -d --no-build
+```
+
+若 Hermes 使用远程镜像、无需本地构建，可简化为：
 
 ```bash
 cd /opt/tpdhermes/TPDHermes
 docker compose -f docker-compose.prod.yml up -d --build
 ```
+
+### 6.2 日常增量部署
+
+见上文 **「增量部署原则」**；默认只 `build` + `up --no-build` 本次变更涉及的服务。
 
 查看容器状态：
 
@@ -337,11 +412,7 @@ docker compose -f docker-compose.prod.yml ps
 docker compose -f docker-compose.prod.yml logs -f
 ```
 
-如果你后续只维护默认 `docker-compose.yml`，也可以直接：
-
-```bash
-docker compose up -d --build
-```
+如果你后续只维护默认 `docker-compose.yml`，日常同样**不要**无差别全量 `--build`，应按变更服务名单独构建（原则同上）。
 
 ## 7. 部署后验证
 
@@ -431,18 +502,20 @@ mcp_tphermes_tavily_research
 - 页面请求的是 `http://47.113.225.93:8033/api/v1/...`
 - 不是 `http://localhost:8000/...`
 
-如果仍然出现 `localhost:8000`，说明前端镜像没有重新构建，需要重新执行：
+如果仍然出现 `localhost:8000`，说明前端镜像没有重新构建，只需重建前端：
 
 ```bash
-docker compose -f docker-compose.prod.yml up -d --build
+docker compose -f docker-compose.prod.yml build frontend
+docker compose -f docker-compose.prod.yml -f docker-compose.src-hermes.yml up -d --no-build frontend nginx
 ```
 
 ## 8. 日常维护命令
 
-重启服务：
+重启**单个**服务（优先于全量 `restart`）：
 
 ```bash
-docker compose -f docker-compose.prod.yml restart
+docker compose -f docker-compose.prod.yml restart backend
+docker compose -f docker-compose.prod.yml -f docker-compose.src-hermes.yml restart hermes-agent
 ```
 
 停止服务：
@@ -451,20 +524,22 @@ docker compose -f docker-compose.prod.yml restart
 docker compose -f docker-compose.prod.yml down
 ```
 
-停止并删除镜像重新构建：
+停止并**按需**无缓存重建（仅针对出问题的服务，勿默认全栈 `--no-cache`）：
 
 ```bash
 docker compose -f docker-compose.prod.yml down
-docker compose -f docker-compose.prod.yml build --no-cache
-docker compose -f docker-compose.prod.yml up -d
+docker compose -f docker-compose.prod.yml build --no-cache frontend backend tphermes-mcp
+docker compose -f docker-compose.prod.yml -f docker-compose.src-hermes.yml up -d --no-build
 ```
 
-更新代码后重新部署：
+更新代码后重新部署（**增量**，不构建 Hermes）：
 
 ```bash
 cd /opt/tpdhermes/TPDHermes
 git pull
-docker compose -f docker-compose.prod.yml up -d --build
+DOCKER_BUILDKIT=1 docker compose -f docker-compose.prod.yml build frontend backend tphermes-mcp
+docker compose -f docker-compose.prod.yml -f docker-compose.src-hermes.yml \
+  up -d --no-build frontend backend tphermes-mcp nginx hermes-agent
 ```
 
 ## 9. 回滚建议
@@ -473,7 +548,7 @@ docker compose -f docker-compose.prod.yml up -d --build
 
 1. 切回上一个 Git 提交
 2. 保留 `.env` 不变
-3. 重新执行 `docker compose -f docker-compose.prod.yml up -d --build`
+3. 仅对回滚涉及的服务重新 `build` + `up --no-build`（原则同增量部署）
 
 示例：
 
@@ -481,7 +556,9 @@ docker compose -f docker-compose.prod.yml up -d --build
 cd /opt/tpdhermes/TPDHermes
 git log --oneline -n 5
 git checkout <上一个稳定提交>
-docker compose -f docker-compose.prod.yml up -d --build
+docker compose -f docker-compose.prod.yml build frontend backend tphermes-mcp
+docker compose -f docker-compose.prod.yml -f docker-compose.src-hermes.yml \
+  up -d --no-build frontend backend tphermes-mcp nginx hermes-agent
 ```
 
 如果你之后希望走更规范的回滚流程，建议改为固定镜像 tag 发布，而不是直接在服务器现拉代码构建。
@@ -926,10 +1003,11 @@ docker compose -f docker-compose.prod.yml -f docker-compose.src-hermes.yml up -d
 - `.env` 中 `CORS_ALLOWED_ORIGINS`
 - `Nginx` 改为监听 `443` 并挂载证书
 
-改完后重新构建前端：
+改完后仅重新构建前端：
 
 ```bash
-docker compose -f docker-compose.prod.yml up -d --build
+docker compose -f docker-compose.prod.yml build frontend
+docker compose -f docker-compose.prod.yml up -d --no-build frontend nginx
 ```
 
 ## 12. 建议的首轮上线顺序
@@ -939,13 +1017,8 @@ docker compose -f docker-compose.prod.yml up -d --build
 3. 复制 `.env.production.example` 为 `.env`
 4. 按 IP 填好 `.env`，至少确认 `MINIMAX_CN_API_KEY`、`TAVILY_API_KEY`、`TAVILY_REMOTE_MCP_URL` 等关键项
 5. 核对 `deploy/hermes-agent/config.yaml`（含 `approvals.mode: off` 与 `security.tirith_enabled: false`，见 §4）
-6. 执行 `docker compose -f docker-compose.prod.yml -f docker-compose.src-hermes.yml up -d --build`
+6. 按 §6.1 **首次全量部署** 构建并启动（Hermes 仅首次或升级时构建）
 7. 验证 `http://47.113.225.93:8033/health`
-8. 打开首页并实际发一轮对话
-9. 额外验证一次 `Hermes-agent` 是否能调用 `mcp_tphermes_*` 下的 Tavily 工具
-
-如果你需要，我下一步可以继续补：
-
-- `DEPLOY_HTTPS.md`，用于域名 + SSL 版本
-- `deploy.sh`，一键部署脚本
-- `systemd` 守护脚本或镜像发布规范
+8. 此后日常发版遵循文首 **「增量部署原则」**，勿全栈 `up -d --build`
+9. 打开首页并实际发一轮对话
+10. 额外验证一次 `Hermes-agent` 是否能调用 `mcp_tphermes_*` 下的 Tavily 工具

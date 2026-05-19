@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException, Depends, UploadFile, File
+from fastapi import APIRouter, HTTPException, Depends, UploadFile, File, Request
 from fastapi.responses import FileResponse
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -21,6 +21,8 @@ from pydantic import BaseModel
 
 from backend.schemas.orchestration import TaskExecuteRequest, TaskExecuteOverrides
 from backend.services.orchestration_service import assemble_payload
+from backend.services.project_access import require_project_for_user
+from backend.services.user_identity import get_effective_user_id, is_global_admin_user, viewer_role
 from backend.data.builtin_scenarios import BUILTIN_SCENARIOS, BUILTIN_VERSION
 
 router = APIRouter(prefix="/projects", tags=["projects"])
@@ -131,7 +133,11 @@ def _project_to_response(project: Project) -> ProjectResponse:
 # --- Endpoints ---
 
 @router.post("/", response_model=ProjectResponse)
-async def create_project(data: ProjectCreate, db: AsyncSession = Depends(get_db)):
+async def create_project(
+    data: ProjectCreate,
+    db: AsyncSession = Depends(get_db),
+    effective_uid: str = Depends(get_effective_user_id),
+):
     constraints_str = json.dumps(data.constraints) if data.constraints else None
     project = Project(
         id=str(uuid.uuid4()),
@@ -142,6 +148,7 @@ async def create_project(data: ProjectCreate, db: AsyncSession = Depends(get_db)
         deadline=data.deadline,
         constraints=constraints_str,
         status="active",
+        owner_id=effective_uid,
         created_at=datetime.now().isoformat(),
         updated_at=datetime.now().isoformat(),
     )
@@ -150,6 +157,7 @@ async def create_project(data: ProjectCreate, db: AsyncSession = Depends(get_db)
     await _seed_default_scenario_bindings(db, project.id)
     await db.commit()
     await db.refresh(project)
+    logger.info("project created id=%s owner=%s", project.id, effective_uid[:24])
     return _project_to_response(project)
 
 
@@ -157,22 +165,27 @@ async def create_project(data: ProjectCreate, db: AsyncSession = Depends(get_db)
 async def list_projects(
     status: Optional[str] = None,
     db: AsyncSession = Depends(get_db),
+    effective_uid: str = Depends(get_effective_user_id),
 ):
     query = select(Project)
+    if not is_global_admin_user(effective_uid):
+        query = query.where(Project.owner_id == effective_uid)
     if status:
         query = query.where(Project.status == status)
     query = query.order_by(Project.created_at.desc())
     result = await db.execute(query)
     projects = result.scalars().all()
+    logger.info("projects list count=%s user_id=%s", len(projects), effective_uid[:24])
     return [_project_to_response(p) for p in projects]
 
 
 @router.get("/{project_id}", response_model=ProjectResponse)
-async def get_project(project_id: str, db: AsyncSession = Depends(get_db)):
-    result = await db.execute(select(Project).where(Project.id == project_id))
-    project = result.scalar_one_or_none()
-    if not project:
-        raise HTTPException(status_code=404, detail="Project not found")
+async def get_project(
+    project_id: str,
+    db: AsyncSession = Depends(get_db),
+    effective_uid: str = Depends(get_effective_user_id),
+):
+    project = await require_project_for_user(db, project_id, effective_uid)
     return _project_to_response(project)
 
 
@@ -181,12 +194,9 @@ async def update_project(
     project_id: str,
     data: ProjectUpdate,
     db: AsyncSession = Depends(get_db),
+    effective_uid: str = Depends(get_effective_user_id),
 ):
-    result = await db.execute(select(Project).where(Project.id == project_id))
-    project = result.scalar_one_or_none()
-    if not project:
-        raise HTTPException(status_code=404, detail="Project not found")
-
+    project = await require_project_for_user(db, project_id, effective_uid)
     update_data = data.model_dump(exclude_unset=True)
     if "constraints" in update_data:
         update_data["constraints"] = (
@@ -203,11 +213,12 @@ async def update_project(
 
 
 @router.delete("/{project_id}")
-async def delete_project(project_id: str, db: AsyncSession = Depends(get_db)):
-    result = await db.execute(select(Project).where(Project.id == project_id))
-    project = result.scalar_one_or_none()
-    if not project:
-        raise HTTPException(status_code=404, detail="Project not found")
+async def delete_project(
+    project_id: str,
+    db: AsyncSession = Depends(get_db),
+    effective_uid: str = Depends(get_effective_user_id),
+):
+    project = await require_project_for_user(db, project_id, effective_uid)
 
     await db.delete(project)
     await db.commit()
@@ -229,12 +240,12 @@ class OrchestrationPreviewBody(BaseModel):
 async def orchestration_preview(
     project_id: str,
     body: OrchestrationPreviewBody,
+    req: Request,
     db: AsyncSession = Depends(get_db),
+    effective_uid: str = Depends(get_effective_user_id),
 ):
-    result = await db.execute(select(Project).where(Project.id == project_id))
-    if not result.scalar_one_or_none():
-        raise HTTPException(status_code=404, detail="Project not found")
-    req = TaskExecuteRequest(
+    await require_project_for_user(db, project_id, effective_uid)
+    rtask = TaskExecuteRequest(
         entrypoint="chat",
         project_id=project_id,
         scenario_id=body.scenario_id,
@@ -244,7 +255,12 @@ async def orchestration_preview(
         scenario_opening_hint=body.scenario_opening_hint,
         overrides=body.overrides,
     )
-    payload, snapshot = await assemble_payload(db, req)
+    payload, snapshot = await assemble_payload(
+        db,
+        rtask,
+        effective_user_id=effective_uid,
+        actor_role=viewer_role(req),
+    )
     return {"payload": payload.model_dump(mode="json"), "snapshot": snapshot}
 
 
@@ -271,13 +287,13 @@ class ProjectContextResponse(BaseModel):
 
 
 @router.get("/{project_id}/context", response_model=ProjectContextResponse)
-async def get_project_context(project_id: str, db: AsyncSession = Depends(get_db)):
+async def get_project_context(
+    project_id: str,
+    db: AsyncSession = Depends(get_db),
+    effective_uid: str = Depends(get_effective_user_id),
+):
     """聚合项目卡、附件列表与近期输出摘要，供对话创作注入 task_input（与设计文档 context 契约对齐）。"""
-    res = await db.execute(select(Project).where(Project.id == project_id))
-    project = res.scalar_one_or_none()
-    if not project:
-        raise HTTPException(status_code=404, detail="Project not found")
-
+    project = await require_project_for_user(db, project_id, effective_uid)
     at_rows = (
         await db.execute(
             select(ProjectAttachment)
@@ -354,10 +370,9 @@ async def list_project_outputs(
     status: Optional[str] = None,
     limit: int = 100,
     db: AsyncSession = Depends(get_db),
+    effective_uid: str = Depends(get_effective_user_id),
 ):
-    res = await db.execute(select(Project).where(Project.id == project_id))
-    if not res.scalar_one_or_none():
-        raise HTTPException(status_code=404, detail="Project not found")
+    await require_project_for_user(db, project_id, effective_uid)
     query = select(OutputAsset).where(OutputAsset.project_id == project_id)
     if scenario_id:
         query = query.where(OutputAsset.scenario_id == scenario_id)
@@ -390,10 +405,9 @@ async def get_project_output_detail(
     project_id: str,
     output_id: str,
     db: AsyncSession = Depends(get_db),
+    effective_uid: str = Depends(get_effective_user_id),
 ):
-    res = await db.execute(select(Project).where(Project.id == project_id))
-    if not res.scalar_one_or_none():
-        raise HTTPException(status_code=404, detail="Project not found")
+    await require_project_for_user(db, project_id, effective_uid)
     q = await db.execute(
         select(OutputAsset).where(
             OutputAsset.id == output_id,
@@ -435,10 +449,9 @@ async def list_project_runs(
     status: Optional[str] = None,
     limit: int = 100,
     db: AsyncSession = Depends(get_db),
+    effective_uid: str = Depends(get_effective_user_id),
 ):
-    res = await db.execute(select(Project).where(Project.id == project_id))
-    if not res.scalar_one_or_none():
-        raise HTTPException(status_code=404, detail="Project not found")
+    await require_project_for_user(db, project_id, effective_uid)
     query = select(OrchestrationRun).where(OrchestrationRun.project_id == project_id)
     if scenario_id:
         query = query.where(OrchestrationRun.scenario_id == scenario_id)
@@ -474,10 +487,12 @@ class AttachmentListItem(BaseModel):
 
 
 @router.get("/{project_id}/attachments", response_model=list[AttachmentListItem])
-async def list_project_attachments(project_id: str, db: AsyncSession = Depends(get_db)):
-    res = await db.execute(select(Project).where(Project.id == project_id))
-    if not res.scalar_one_or_none():
-        raise HTTPException(status_code=404, detail="Project not found")
+async def list_project_attachments(
+    project_id: str,
+    db: AsyncSession = Depends(get_db),
+    effective_uid: str = Depends(get_effective_user_id),
+):
+    await require_project_for_user(db, project_id, effective_uid)
     q = await db.execute(
         select(ProjectAttachment)
         .where(ProjectAttachment.project_id == project_id)
@@ -502,10 +517,9 @@ async def upload_project_attachment(
     project_id: str,
     file: UploadFile = File(...),
     db: AsyncSession = Depends(get_db),
+    effective_uid: str = Depends(get_effective_user_id),
 ):
-    res = await db.execute(select(Project).where(Project.id == project_id))
-    if not res.scalar_one_or_none():
-        raise HTTPException(status_code=404, detail="Project not found")
+    await require_project_for_user(db, project_id, effective_uid)
     content = await file.read()
     size = len(content)
     if size == 0:
@@ -557,10 +571,9 @@ async def download_project_attachment(
     project_id: str,
     attachment_id: str,
     db: AsyncSession = Depends(get_db),
+    effective_uid: str = Depends(get_effective_user_id),
 ):
-    res = await db.execute(select(Project).where(Project.id == project_id))
-    if not res.scalar_one_or_none():
-        raise HTTPException(status_code=404, detail="Project not found")
+    await require_project_for_user(db, project_id, effective_uid)
     q = await db.execute(
         select(ProjectAttachment).where(
             ProjectAttachment.id == attachment_id,
@@ -592,10 +605,9 @@ async def delete_project_attachment(
     project_id: str,
     attachment_id: str,
     db: AsyncSession = Depends(get_db),
+    effective_uid: str = Depends(get_effective_user_id),
 ):
-    res = await db.execute(select(Project).where(Project.id == project_id))
-    if not res.scalar_one_or_none():
-        raise HTTPException(status_code=404, detail="Project not found")
+    await require_project_for_user(db, project_id, effective_uid)
     q = await db.execute(
         select(ProjectAttachment).where(
             ProjectAttachment.id == attachment_id,
@@ -661,10 +673,12 @@ def _project_scenario_item(ps: ProjectScenario, sp: ScenarioProfile) -> ProjectS
 
 
 @router.get("/{project_id}/scenarios", response_model=list[ProjectScenarioItem])
-async def list_bound_scenarios(project_id: str, db: AsyncSession = Depends(get_db)):
-    res = await db.execute(select(Project).where(Project.id == project_id))
-    if not res.scalar_one_or_none():
-        raise HTTPException(status_code=404, detail="Project not found")
+async def list_bound_scenarios(
+    project_id: str,
+    db: AsyncSession = Depends(get_db),
+    effective_uid: str = Depends(get_effective_user_id),
+):
+    await require_project_for_user(db, project_id, effective_uid)
     q = await db.execute(
         select(ProjectScenario, ScenarioProfile)
         .join(ScenarioProfile, ScenarioProfile.id == ProjectScenario.scenario_id)
@@ -680,10 +694,9 @@ async def bind_project_scenario(
     project_id: str,
     body: ProjectScenarioBind,
     db: AsyncSession = Depends(get_db),
+    effective_uid: str = Depends(get_effective_user_id),
 ):
-    res = await db.execute(select(Project).where(Project.id == project_id))
-    if not res.scalar_one_or_none():
-        raise HTTPException(status_code=404, detail="Project not found")
+    await require_project_for_user(db, project_id, effective_uid)
     sp = await db.get(ScenarioProfile, body.scenario_id)
     if not sp:
         raise HTTPException(status_code=404, detail="场景不存在")
@@ -737,7 +750,9 @@ async def unbind_project_scenario(
     project_id: str,
     scenario_id: str,
     db: AsyncSession = Depends(get_db),
+    effective_uid: str = Depends(get_effective_user_id),
 ):
+    await require_project_for_user(db, project_id, effective_uid)
     res = await db.execute(
         select(ProjectScenario).where(
             ProjectScenario.project_id == project_id,
@@ -757,7 +772,9 @@ async def set_default_project_scenario(
     project_id: str,
     scenario_id: str,
     db: AsyncSession = Depends(get_db),
+    effective_uid: str = Depends(get_effective_user_id),
 ):
+    await require_project_for_user(db, project_id, effective_uid)
     res = await db.execute(
         select(ProjectScenario, ScenarioProfile)
         .join(ScenarioProfile, ScenarioProfile.id == ProjectScenario.scenario_id)
@@ -798,10 +815,9 @@ async def create_output_version(
     output_id: str,
     body: OutputVersionCreate,
     db: AsyncSession = Depends(get_db),
+    effective_uid: str = Depends(get_effective_user_id),
 ):
-    res = await db.execute(select(Project).where(Project.id == project_id))
-    if not res.scalar_one_or_none():
-        raise HTTPException(status_code=404, detail="Project not found")
+    await require_project_for_user(db, project_id, effective_uid)
     q = await db.execute(
         select(OutputAsset).where(
             OutputAsset.id == output_id,
@@ -832,6 +848,7 @@ async def create_output_version(
         version=str(vnum),
         status=prev.status,
         citations_json=prev.citations_json,
+        owner_id=(getattr(prev, "owner_id", None) or effective_uid or "default"),
         created_at=now,
         updated_at=now,
     )
@@ -859,7 +876,9 @@ async def approve_output(
     project_id: str,
     output_id: str,
     db: AsyncSession = Depends(get_db),
+    effective_uid: str = Depends(get_effective_user_id),
 ):
+    await require_project_for_user(db, project_id, effective_uid)
     q = await db.execute(
         select(OutputAsset).where(
             OutputAsset.id == output_id,
@@ -894,7 +913,9 @@ async def archive_output(
     project_id: str,
     output_id: str,
     db: AsyncSession = Depends(get_db),
+    effective_uid: str = Depends(get_effective_user_id),
 ):
+    await require_project_for_user(db, project_id, effective_uid)
     q = await db.execute(
         select(OutputAsset).where(
             OutputAsset.id == output_id,

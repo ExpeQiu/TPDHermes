@@ -21,7 +21,8 @@ import {
   type QuickCreateFlowOverrides,
   type TaskExecuteBody,
 } from "@/lib/chat-context";
-import { ChatMarkdownBody } from "@/components/chat-markdown-body";
+import { getApiHeaders } from "@/lib/api-headers";
+import { useEffectiveUserScopeId } from "@/lib/use-effective-user-scope-id";
 import { CONTENT_MAX_CLASS } from "@/lib/content-shell";
 import { chatTransportLabel } from "@/lib/ui-labels";
 
@@ -47,29 +48,34 @@ interface ChatSession {
   quickCreateOverrides?: QuickCreateFlowOverrides;
 }
 
-const STORAGE_KEY = "tphermes-chat-sessions";
-const ACTIVE_KEY = "tphermes-chat-active";
+function chatSessionsStorageKey(scopeUserId: string): string {
+  return `tphermes-chat-sessions:${scopeUserId}`;
+}
+
+function chatActiveStorageKey(scopeUserId: string): string {
+  return `tphermes-chat-active:${scopeUserId}`;
+}
+
+function loadSessions(scopeUserId: string): ChatSession[] {
+  if (typeof window === "undefined") return [];
+  try {
+    return JSON.parse(localStorage.getItem(chatSessionsStorageKey(scopeUserId)) ?? "[]");
+  } catch {
+    return [];
+  }
+}
+
+function saveSessions(scopeUserId: string, sessions: ChatSession[]) {
+  if (typeof window === "undefined") return;
+  localStorage.setItem(chatSessionsStorageKey(scopeUserId), JSON.stringify(sessions));
+}
+
 const CHAT_INIT_KEY = "tphermes-chat-init";
 
 function uuid() {
   return Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
 }
 
-function loadSessions(): ChatSession[] {
-  if (typeof window === "undefined") return [];
-  try {
-    return JSON.parse(localStorage.getItem(STORAGE_KEY) ?? "[]");
-  } catch {
-    return [];
-  }
-}
-
-function saveSessions(sessions: ChatSession[]) {
-  if (typeof window === "undefined") return;
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(sessions));
-}
-
-/** Hermes / OpenAI 兼容流：单条 data 解析 */
 function parseSSEDataPayload(data: string): {
   content: string;
   finishReason: string | null;
@@ -519,6 +525,7 @@ function ChatPageInner() {
     validation_ok?: boolean;
   } | null>(null);
   const taskMetaRef = useRef<{ output_id?: string | null; validation?: unknown } | null>(null);
+  const scopeUserId = useEffectiveUserScopeId();
 
   useEffect(() => {
     if (!useOrchestration || !includeProjectContext || !selectedProjectId) {
@@ -564,11 +571,14 @@ function ChatPageInner() {
 
   const activeSession = sessions.find((s) => s.id === activeId);
 
-  const saveAndSet = useCallback((updated: ChatSession[]) => {
-    sessionsRef.current = updated;
-    setSessions(updated);
-    saveSessions(updated);
-  }, []);
+  const saveAndSet = useCallback(
+    (updated: ChatSession[]) => {
+      sessionsRef.current = updated;
+      setSessions(updated);
+      saveSessions(scopeUserId, updated);
+    },
+    [scopeUserId],
+  );
 
   const updateSession = useCallback(
     (sessionId: string, updater: (session: ChatSession) => ChatSession) => {
@@ -590,8 +600,8 @@ function ChatPageInner() {
   }, [activeId]);
 
   useEffect(() => {
-    const saved = loadSessions();
-    const active = localStorage.getItem(ACTIVE_KEY);
+    const saved = loadSessions(scopeUserId);
+    const active = localStorage.getItem(chatActiveStorageKey(scopeUserId));
     if (saved.length === 0) {
       const first: ChatSession = {
         id: uuid(),
@@ -599,7 +609,7 @@ function ChatPageInner() {
         messages: [],
         createdAt: Date.now(),
       };
-      saveSessions([first]);
+      saveSessions(scopeUserId, [first]);
       sessionsRef.current = [first];
       setSessions([first]);
       setActiveId(first.id);
@@ -608,7 +618,7 @@ function ChatPageInner() {
       setSessions(saved);
       setActiveId(active && saved.find((s) => s.id === active) ? active : saved[0].id);
     }
-  }, []);
+  }, [scopeUserId]);
 
   useEffect(() => {
     fetchChatBootstrap()
@@ -723,7 +733,7 @@ function ChatPageInner() {
 
   const selectSession = (id: string) => {
     setActiveId(id);
-    localStorage.setItem(ACTIVE_KEY, id);
+    localStorage.setItem(chatActiveStorageKey(scopeUserId), id);
   };
 
   const createSession = () => {
@@ -736,7 +746,7 @@ function ChatPageInner() {
     const next = [session, ...sessionsRef.current];
     saveAndSet(next);
     setActiveId(session.id);
-    localStorage.setItem(ACTIVE_KEY, session.id);
+    localStorage.setItem(chatActiveStorageKey(scopeUserId), session.id);
   };
 
   const deleteSession = (id: string) => {
@@ -748,7 +758,7 @@ function ChatPageInner() {
     saveAndSet(next);
     if (activeIdRef.current === id) {
       setActiveId(next[0].id);
-      localStorage.setItem(ACTIVE_KEY, next[0].id);
+      localStorage.setItem(chatActiveStorageKey(scopeUserId), next[0].id);
     }
   };
 
@@ -960,6 +970,7 @@ function ChatPageInner() {
     try {
       const headers: Record<string, string> = {
         "Content-Type": "application/json",
+        ...getApiHeaders(),
       };
       if (chatApiKey) headers.Authorization = `Bearer ${chatApiKey}`;
 
@@ -1015,6 +1026,7 @@ function ChatPageInner() {
           stream: true,
           messages: priorMessages.length > 0 ? priorMessages : undefined,
           overrides: Object.keys(overrides).length > 0 ? overrides : undefined,
+          user_id: scopeUserId,
         };
         if (ctxExtra.trim()) {
           body.task_input = { extra: ctxExtra };

@@ -48,6 +48,12 @@ export const WORKFLOW_NAV_ITEMS: WorkflowNavItem[] = [
     shortLabel: "技能工坊",
     description: "维护可用于任务执行的能力池。",
   },
+  {
+    href: "/settings",
+    label: "用户设置",
+    shortLabel: "设置",
+    description: "本地用户 ID、角色与飞书会话键。",
+  },
 ];
 
 export function getWorkflowNavItem(pathname: string) {

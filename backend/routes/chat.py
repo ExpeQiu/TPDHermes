@@ -9,7 +9,7 @@ import json
 from typing import Any
 
 import httpx
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, ConfigDict
 
@@ -105,7 +105,7 @@ async def chat_config() -> dict[str, Any]:
 
 
 @router.post("/completions")
-async def chat_completions(request: ChatCompletionRequest):
+async def chat_completions(req: Request, request: ChatCompletionRequest):
     """代理 OpenAI 兼容聊天补全请求到 Hermes-agent。"""
     target_url, api_key = _chat_target_required()
     payload = request.model_dump(exclude_none=True)
@@ -114,6 +114,15 @@ async def chat_completions(request: ChatCompletionRequest):
     headers = {"Content-Type": "application/json"}
     if api_key:
         headers["Authorization"] = f"Bearer {api_key}"
+    uid = (req.headers.get("X-User-ID") or req.headers.get("x-user-id") or "").strip()
+    if uid:
+        headers["X-User-ID"] = uid
+    role = (req.headers.get("X-User-Role") or req.headers.get("x-user-role") or "").strip()
+    if role:
+        headers["X-User-Role"] = role
+    tok = (req.headers.get("X-Feishu-Session-Token") or req.headers.get("x-feishu-session-token") or "").strip()
+    if tok:
+        headers["X-Feishu-Session-Token"] = tok
 
     timeout = httpx.Timeout(connect=10.0, read=120.0, write=30.0, pool=10.0)
 

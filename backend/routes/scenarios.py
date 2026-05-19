@@ -8,7 +8,7 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -19,6 +19,8 @@ from backend.models.scenario_profile import ScenarioProfile
 from backend.models.template import Template
 from backend.schemas.orchestration import TaskExecuteRequest, TaskExecuteOverrides
 from backend.services.orchestration_service import assemble_payload
+from backend.services.project_access import require_project_for_user
+from backend.services.user_identity import get_effective_user_id, viewer_role
 
 logger = logging.getLogger("tpdx.hermes")
 
@@ -366,12 +368,17 @@ class ScenarioPreviewBody(BaseModel):
 async def preview_scenario(
     scenario_id: str,
     body: ScenarioPreviewBody,
+    req: Request,
     db: AsyncSession = Depends(get_db),
+    effective_uid: str = Depends(get_effective_user_id),
 ):
     row = await db.get(ScenarioProfile, scenario_id)
     if not row:
         raise HTTPException(status_code=404, detail="场景不存在")
-    req = TaskExecuteRequest(
+    pid_strip = (body.project_id or "").strip()
+    if pid_strip and pid_strip != "none":
+        await require_project_for_user(db, pid_strip, effective_uid)
+    task_req = TaskExecuteRequest(
         entrypoint="chat",
         project_id=body.project_id,
         scenario_id=scenario_id,
@@ -379,7 +386,12 @@ async def preview_scenario(
         stream=False,
         overrides=body.overrides,
     )
-    payload, snapshot = await assemble_payload(db, req)
+    payload, snapshot = await assemble_payload(
+        db,
+        task_req,
+        effective_user_id=effective_uid,
+        actor_role=viewer_role(req),
+    )
     return {
         "scenario_id": scenario_id,
         "scenario_version": row.version,

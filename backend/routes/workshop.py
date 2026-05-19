@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any, AsyncGenerator, Dict
 
@@ -22,8 +23,10 @@ from backend.services.skill_loader import (
     SkillLoadError,
     get_loader,
 )
+from backend.services.user_identity import get_effective_user_id
 
 router = APIRouter(prefix="/ws", tags=["workshop"])
+logger = logging.getLogger("tpdx.hermes.workshop")
 
 
 def _loader_dep() -> SkillLoader:
@@ -119,6 +122,7 @@ async def _generate_stream(
 async def generate_stream(
     request: GenerateRequest,
     loader: SkillLoader = Depends(_loader_dep),
+    effective_uid: str = Depends(get_effective_user_id),
 ):
     """
     SSE 流式生成端点。
@@ -138,6 +142,11 @@ async def generate_stream(
           -H "Content-Type: application/json" \\
           -d '{"skill_name": "hello_skill", "context": {"name": "Alice"}}'
     """
+    logger.info(
+        "workshop generate stream user_id=%s skill=%s",
+        effective_uid[:24],
+        request.skill_name,
+    )
     return StreamingResponse(
         _generate_stream(request.skill_name, request.context, loader),
         media_type="text/event-stream",
@@ -163,12 +172,20 @@ async def list_skills_metadata(loader: SkillLoader = Depends(_loader_dep)):
 
 
 @router.post("/generate-from-kb", response_model=None)
-async def generate_from_kb(request: GenerateFromKBRequest):
+async def generate_from_kb(
+    request: GenerateFromKBRequest,
+    effective_uid: str = Depends(get_effective_user_id),
+):
     """
     Query KB first, map results into a Skill context, then generate content.
 
     User-provided request.context overrides the auto-mapped fields.
     """
+    logger.info(
+        "workshop generate-from-kb user_id=%s skill=%s",
+        effective_uid[:24],
+        request.skill_name,
+    )
     from backend.tools.workshop_tools import workshop_generate_from_kb
 
     return await workshop_generate_from_kb(

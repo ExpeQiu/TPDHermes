@@ -1,5 +1,5 @@
 from sqlalchemy import Column, String, Text, Integer
-from backend.models.project import Base
+from backend.db import Base
 import uuid
 from datetime import datetime
 
@@ -14,6 +14,7 @@ class Skill(Base):
     version = Column(String, default="1.0.0")
     enabled = Column(Integer, default=1)        # 0=禁用, 1=启用
     source = Column(String, default="local")   # local | marketplace
+    owner_id = Column(String, default="")      # 空=公共技能；非空=仅该用户
     installed_at = Column(String, default=lambda: datetime.now().isoformat())
     updated_at = Column(String, default=lambda: datetime.now().isoformat())
 

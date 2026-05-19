@@ -50,6 +50,7 @@ def run_sqlite_migrations(connection: Connection) -> None:
                 ("knowledge_policy_id", "TEXT"),
                 ("default_template_id", "TEXT"),
                 ("scenario_profile_id", "TEXT"),
+                ("owner_id", "TEXT NOT NULL DEFAULT 'default'"),
             ],
         )
 
@@ -65,6 +66,15 @@ def run_sqlite_migrations(connection: Connection) -> None:
             ],
         )
 
+    if "skills" in names:
+        _add_columns(
+            connection,
+            "skills",
+            [
+                ("owner_id", "TEXT NOT NULL DEFAULT ''"),
+            ],
+        )
+
     if "outputs" in names:
         _add_columns(
             connection,
@@ -76,6 +86,8 @@ def run_sqlite_migrations(connection: Connection) -> None:
                 ("run_id", "TEXT"),
                 ("version", "TEXT DEFAULT '1'"),
                 ("citations_json", "TEXT"),
+                ("scenario_id", "TEXT"),
+                ("owner_id", "TEXT NOT NULL DEFAULT 'default'"),
             ],
         )
 
@@ -124,15 +136,7 @@ def run_sqlite_migrations(connection: Connection) -> None:
             "orchestration_runs",
             [
                 ("scenario_id", "TEXT"),
-            ],
-        )
-
-    if "outputs" in names:
-        _add_columns(
-            connection,
-            "outputs",
-            [
-                ("scenario_id", "TEXT"),
+                ("user_id", "TEXT NOT NULL DEFAULT 'default'"),
             ],
         )
 
@@ -206,6 +210,25 @@ def run_sqlite_migrations(connection: Connection) -> None:
                 ("doc_id_hint", "TEXT"),
             ],
         )
+
+    if "projects" in names:
+        connection.execute(
+            text("CREATE INDEX IF NOT EXISTS idx_projects_owner ON projects (owner_id)")
+        )
+
+    if "user_preferences" not in names:
+        connection.execute(
+            text(
+                """
+                CREATE TABLE user_preferences (
+                    user_id TEXT PRIMARY KEY,
+                    preferences_json TEXT NOT NULL DEFAULT '{}',
+                    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+                )
+                """
+            )
+        )
+        logger.info("sqlite_migrate: created table user_preferences")
 
     _seed_builtin_scenarios(connection)
     _backfill_project_scenario_bindings(connection)

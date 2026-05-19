@@ -13,14 +13,16 @@ from sqlalchemy import select
 
 from backend.db import async_session_maker
 from backend.models.project import Project
+from backend.services.user_identity import is_global_admin_user
 
 
-async def project_list(status: Optional[str] = None) -> dict:
+async def project_list(status: Optional[str] = None, user_id: str = "") -> dict:
     """
-    List all projects.
+    List projects visible to user_id (owner match; global admin sees all).
 
     Args:
         status: Optional filter by project status (e.g. "active")
+        user_id: Effective user id from MCP caller (header / context)
 
     Returns:
         {
@@ -28,10 +30,13 @@ async def project_list(status: Optional[str] = None) -> dict:
             "count": int
         }
     """
+    uid = (user_id or "").strip() or "default"
     async with async_session_maker() as db:
         query = select(Project)
         if status:
             query = query.where(Project.status == status)
+        if not is_global_admin_user(uid):
+            query = query.where(Project.owner_id == uid)
         query = query.order_by(Project.created_at.desc())
         result = await db.execute(query)
         projects = result.scalars().all()
@@ -46,6 +51,7 @@ async def project_create(
     name: str,
     description: Optional[str] = None,
     background: Optional[str] = None,
+    user_id: str = "default",
 ) -> dict:
     """
     Create a new project.
@@ -59,12 +65,14 @@ async def project_create(
         The created project as a dict
     """
     async with async_session_maker() as db:
+        owner = (user_id or "").strip() or "default"
         project = Project(
             id=str(uuid.uuid4()),
             name=name,
             description=description,
             background=background,
             status="active",
+            owner_id=owner,
             created_at=datetime.now().isoformat(),
             updated_at=datetime.now().isoformat(),
         )
@@ -76,7 +84,7 @@ async def project_create(
     return result
 
 
-async def project_get(id: str) -> dict:
+async def project_get(id: str, user_id: str = "") -> dict:
     """
     Get a project by ID.
 
@@ -91,6 +99,10 @@ async def project_get(id: str) -> dict:
         project = result.scalar_one_or_none()
 
     if not project:
+        return {}
+    uid = (user_id or "").strip() or "default"
+    owner = (getattr(project, "owner_id", None) or "default").strip()
+    if not is_global_admin_user(uid) and owner != uid:
         return {}
     return _project_to_dict(project)
 
@@ -114,6 +126,7 @@ def _project_to_dict(project: Project) -> dict:
         "deadline": project.deadline,
         "constraints": constraints_val,
         "status": project.status,
+        "owner_id": getattr(project, "owner_id", None) or "default",
         "created_at": project.created_at,
         "updated_at": project.updated_at,
     }

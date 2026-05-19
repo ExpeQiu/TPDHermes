@@ -25,6 +25,7 @@ async def create_run(
     project_id: str | None,
     scenario_id: str | None = None,
     entrypoint: str,
+    user_id: str | None = None,
     request_json: str,
     snapshot_json: str,
     skills_policy_json: str | None = None,
@@ -34,6 +35,7 @@ async def create_run(
         project_id=project_id,
         scenario_id=scenario_id,
         entrypoint=entrypoint,
+        user_id=(user_id or "default"),
         status="running",
         request_json=request_json,
         snapshot_json=snapshot_json,
@@ -63,6 +65,7 @@ async def finalize_run(
     template_id: str | None,
     save_output: bool,
     output_title: str | None = None,
+    output_owner_id: str | None = None,
 ) -> tuple[OrchestrationRun, str | None]:
     """
     更新 run；若 save_output 且校验通过则写入 outputs，返回 output_id。
@@ -102,6 +105,7 @@ async def finalize_run(
             content_format="markdown",
             status=out_status,
             citations_json=None,
+            owner_id=(output_owner_id or "default"),
         )
         db.add(out)
         await db.flush()

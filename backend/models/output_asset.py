@@ -25,5 +25,6 @@ class OutputAsset(Base):
     version = Column(String, default="1")
     status = Column(String, nullable=False, default="draft")
     citations_json = Column(Text)
+    owner_id = Column(String, default="default")
     created_at = Column(String, default=lambda: datetime.now().isoformat())
     updated_at = Column(String, default=lambda: datetime.now().isoformat())

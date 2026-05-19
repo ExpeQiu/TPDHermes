@@ -19,5 +19,6 @@ class Project(Base):
     knowledge_policy_id = Column(String)
     default_template_id = Column(String)
     scenario_profile_id = Column(String)
+    owner_id = Column(String, default="default")
     created_at = Column(String, default=lambda: datetime.now().isoformat())
     updated_at = Column(String, default=lambda: datetime.now().isoformat())

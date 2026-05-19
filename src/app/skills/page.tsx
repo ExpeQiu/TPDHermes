@@ -7,15 +7,18 @@ import { CONTENT_MAX_CLASS } from "@/lib/content-shell";
 import { skillScopeLabel } from "@/lib/ui-labels";
 
 interface Skill {
-  id: string;
-  name: string;
-  description: string;
-  version: string;
-  enabled: boolean;
-  source: string;
-  /** public：工作区/市场；personal：本地上传 */
-  scope?: string;
-  config: Record<string, unknown>;
+    id: string;
+    name: string;
+    description: string;
+    version: string;
+    enabled: boolean;
+    source: string;
+    /** public：工作区/市场；personal：本地上传 */
+    scope?: string;
+    owner_id?: string;
+    owner_type?: string;
+    visibility?: string;
+    config: Record<string, unknown>;
   version_history: Array<{ version: string; changelog: string; installed_at: string }>;
   installed_at: string;
   updated_at: string;
@@ -158,11 +161,11 @@ export default function SkillsPage() {
   const disabledCount = skills.length - installedCount;
 
   const publicSkills = useMemo(
-    () => skills.filter((s) => (s.scope ?? "public") !== "personal"),
+    () => skills.filter((s) => !(s.owner_id && String(s.owner_id).trim())),
     [skills],
   );
   const personalSkills = useMemo(
-    () => skills.filter((s) => (s.scope ?? "public") === "personal"),
+    () => skills.filter((s) => !!(s.owner_id && String(s.owner_id).trim())),
     [skills],
   );
 

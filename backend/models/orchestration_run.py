@@ -26,5 +26,6 @@ class OrchestrationRun(Base):
     skills_policy_json = Column(Text)
     error_message = Column(Text)
     duration_ms = Column(Integer)
+    user_id = Column(String, default="default")
     created_at = Column(String, default=lambda: datetime.now().isoformat())
     updated_at = Column(String, default=lambda: datetime.now().isoformat())

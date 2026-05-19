@@ -18,6 +18,7 @@ from backend.models.project_scenario import ProjectScenario
 from backend.models.scenario_profile import ScenarioProfile
 from backend.schemas.orchestration import (
     ChatTurnMessage,
+    OrchestrationActor,
     OrchestrationDomain,
     OrchestrationExecution,
     OrchestrationKnowledge,
@@ -295,6 +296,9 @@ def _apply_profile_output(base: OrchestrationOutput, pol: dict[str, Any]) -> Orc
 async def assemble_payload(
     db: AsyncSession,
     request: TaskExecuteRequest,
+    *,
+    effective_user_id: str = "default",
+    actor_role: str = "tenant_admin",
 ) -> tuple[OrchestrationPayload, dict[str, Any]]:
     """
     assemble_payload 返回 (payload, snapshot_dict) 用于 orchestration_runs.snapshot_json。
@@ -527,6 +531,7 @@ async def assemble_payload(
         output=output,
         execution=execution,
         user_input=OrchestrationUserInput(message=effective_message),
+        actor=OrchestrationActor(user_id=effective_user_id, role=actor_role),
     )
 
     snapshot = {
@@ -536,14 +541,16 @@ async def assemble_payload(
         "scenario_version": scenario_profile_version,
         "template_id": output.template_id,
         "entrypoint": entrypoint,
+        "user_id": effective_user_id[:24],
     }
     logger.info(
-        "orchestration assembled request_id=%s entrypoint=%s project=%s scenario=%s ver=%s",
+        "orchestration assembled request_id=%s entrypoint=%s project=%s scenario=%s ver=%s user_id=%s",
         request_id,
         entrypoint,
         proj.id,
         scenario_id,
         scenario_profile_version,
+        effective_user_id[:24],
     )
     return payload, snapshot
 

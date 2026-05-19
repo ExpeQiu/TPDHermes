@@ -1,3 +1,5 @@
+import { mergeApiHeaders } from "./api-headers";
+
 /** 后端 API v1 前缀（与 FastAPI `backend/__init__.py` 一致） */
 export const API_V1 = "/api/v1";
 
@@ -21,21 +23,24 @@ export async function readJson<T>(res: Response): Promise<T> {
 }
 
 export async function apiGet<T>(path: string): Promise<T> {
-  const res = await fetch(apiV1(path));
+  const res = await fetch(apiV1(path), mergeApiHeaders());
   return readJson<T>(res);
 }
 
 export async function apiPost<T>(path: string, body: unknown): Promise<T> {
-  const res = await fetch(apiV1(path), {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
+  const res = await fetch(
+    apiV1(path),
+    mergeApiHeaders({
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }),
+  );
   return readJson<T>(res);
 }
 
 export async function apiDelete<T = unknown>(path: string): Promise<T> {
-  const res = await fetch(apiV1(path), { method: "DELETE" });
+  const res = await fetch(apiV1(path), mergeApiHeaders({ method: "DELETE" }));
   return readJson<T>(res);
 }
 
@@ -43,7 +48,7 @@ export async function apiFetch(
   path: string,
   init?: RequestInit,
 ): Promise<Response> {
-  return fetch(apiV1(path), init);
+  return fetch(apiV1(path), mergeApiHeaders(init));
 }
 
 /** 根路径 `/health` 返回 `{ code, data, ... }` 时使用 */

@@ -11,7 +11,7 @@ import uuid
 from typing import Any, AsyncGenerator
 
 import httpx
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy import select
@@ -30,6 +30,7 @@ from backend.services.orchestration_service import (
     assemble_payload,
     merge_chat_messages,
 )
+from backend.services.project_access import require_project_for_user
 from backend.services.run_log_service import create_run, finalize_run, mark_run_failed
 from backend.services.skill_loader import get_loader
 from backend.services.template_service import extract_required_sections, get_template_by_id, validate_markdown_sections
@@ -38,6 +39,7 @@ from backend.services.workshop_task_runner import (
     run_workshop_skill_async,
     sse_openai_delta,
 )
+from backend.services.user_identity import effective_user_id_for_api, viewer_role
 
 logger = logging.getLogger("tpdx.hermes")
 
@@ -102,8 +104,16 @@ def _response_meta(payload: OrchestrationPayload, *, used_skills: list[str] | No
 
 
 @router.post("/execute")
-async def execute_task(request: TaskExecuteRequest, db: AsyncSession = Depends(get_db)):
-    eff_request = request
+async def execute_task(req: Request, task_req: TaskExecuteRequest, db: AsyncSession = Depends(get_db)):
+    effective_uid = effective_user_id_for_api(req, body_user_id=task_req.user_id)
+    actor_role = (task_req.user_role or "").strip() or viewer_role(req)
+    logger.info(
+        "tasks execute user_id=%s entrypoint=%s project_id=%s",
+        effective_uid[:24],
+        task_req.entrypoint,
+        task_req.project_id,
+    )
+    eff_request = task_req
     if (
         eff_request.entrypoint == "workshop"
         and eff_request.source_output_id
@@ -131,8 +141,17 @@ async def execute_task(request: TaskExecuteRequest, db: AsyncSession = Depends(g
                 update={"task_input": ti.model_copy(update={"source_material": material})},
             )
 
+    pid_strip = (eff_request.project_id or "").strip()
+    if pid_strip and pid_strip != "none":
+        await require_project_for_user(db, pid_strip, effective_uid, detail="项目不存在")
+
     try:
-        payload, snapshot = await assemble_payload(db, eff_request)
+        payload, snapshot = await assemble_payload(
+            db,
+            eff_request,
+            effective_user_id=effective_uid,
+            actor_role=actor_role,
+        )
     except ProjectNotFoundError as exc:
         raise HTTPException(status_code=404, detail=f"项目不存在: {exc.project_id}") from exc
     except WorkshopBindingError as exc:
@@ -161,6 +180,7 @@ async def execute_task(request: TaskExecuteRequest, db: AsyncSession = Depends(g
         project_id=eff_request.project_id,
         scenario_id=eff_request.scenario_id,
         entrypoint=eff_request.entrypoint,
+        user_id=effective_uid,
         request_json=eff_request.model_dump_json(),
         snapshot_json=json.dumps(snapshot, ensure_ascii=False),
         skills_policy_json=json.dumps(payload.skills.model_dump(), ensure_ascii=False),
@@ -206,6 +226,7 @@ async def execute_task(request: TaskExecuteRequest, db: AsyncSession = Depends(g
                     template_id=payload.output.template_id,
                     save_output=payload.execution.save_output,
                     output_title=payload.scenario.name,
+                    output_owner_id=effective_uid,
                 )
             return JSONResponse(
                 content={
@@ -254,6 +275,7 @@ async def execute_task(request: TaskExecuteRequest, db: AsyncSession = Depends(g
                         template_id=payload.output.template_id,
                         save_output=payload.execution.save_output,
                         output_title=payload.scenario.name,
+                        output_owner_id=effective_uid,
                     )
             except Exception as exc:
                 logger.exception("finalize_run failed run_id=%s err=%s", run_id, exc)
@@ -335,6 +357,7 @@ async def execute_task(request: TaskExecuteRequest, db: AsyncSession = Depends(g
                 template_id=payload.output.template_id,
                 save_output=payload.execution.save_output,
                 output_title=payload.scenario.name,
+                output_owner_id=effective_uid,
             )
 
         return JSONResponse(
@@ -435,6 +458,7 @@ async def execute_task(request: TaskExecuteRequest, db: AsyncSession = Depends(g
                     template_id=payload.output.template_id,
                     save_output=payload.execution.save_output,
                     output_title=payload.scenario.name,
+                    output_owner_id=effective_uid,
                 )
         except Exception as exc:
             logger.exception("finalize_run failed run_id=%s err=%s", run_id, exc)

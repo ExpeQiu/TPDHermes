@@ -272,6 +272,7 @@ async def oauth_callback(
     return {
         "ok": True,
         "session_token": session_token,
+        "suggested_user_id": f"feishu:{user.open_id}",
         "user": {
             "open_id": user.open_id,
             "union_id": user.union_id,

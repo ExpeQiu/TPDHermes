@@ -1,4 +1,5 @@
 import { apiFetch, apiGet, readJson, apiV1 } from "@/lib/api";
+import { getApiHeaders } from "@/lib/api-headers";
 
 export type QuickCreateOutputPreset = "markdown" | "plain" | "structured";
 
@@ -228,6 +229,8 @@ export interface TaskExecuteBody {
   task_input?: TaskInputPayload | null;
   scenario_preset_instructions?: string | null;
   scenario_opening_hint?: string | null;
+  /** 与 X-User-ID 双写，防止网关剥离头 */
+  user_id?: string | null;
   /** 场景输出优化：来源输出 ID，后端写入 source_material */
   source_output_id?: string | null;
   overrides?: TaskExecuteOverrides;
@@ -391,7 +394,7 @@ export async function buildToolsContext(options: BuildContextOptions): Promise<B
       Promise.resolve(options.skillSnapshot ?? [])
         .then(async (skills) => {
           if (skills.length > 0) return skills;
-          const res = await fetch(apiV1("/ws/skills"));
+          const res = await fetch(apiV1("/ws/skills"), { headers: { ...getApiHeaders() } });
           return readJson<WorkshopSkillsResponse>(res).then((body) => body.skills);
         })
         .then((skills) => {

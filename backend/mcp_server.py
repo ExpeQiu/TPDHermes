@@ -171,10 +171,10 @@ async def workshop_generate_from_kb(
     title="Project List",
     description="List all projects, optionally filtered by status.",
 )
-async def project_list(status: str | None = None) -> dict:
+async def project_list(status: str | None = None, user_id: str = "") -> dict:
     """List all projects."""
     from backend.tools.project_tools import project_list as _list
-    return await _list(status)
+    return await _list(status, user_id=user_id)
 
 
 @mcp.tool(
@@ -185,20 +185,21 @@ async def project_create(
     name: str,
     description: str | None = None,
     background: str | None = None,
+    user_id: str = "default",
 ) -> dict:
     """Create a new project."""
     from backend.tools.project_tools import project_create as _create
-    return await _create(name, description, background)
+    return await _create(name, description, background, user_id=user_id)
 
 
 @mcp.tool(
     title="Project Get",
     description="Get a project by its ID.",
 )
-async def project_get(id: str) -> dict:
+async def project_get(id: str, user_id: str = "") -> dict:
     """Get a project by ID."""
     from backend.tools.project_tools import project_get as _get
-    return await _get(id)
+    return await _get(id, user_id=user_id)
 
 
 # Optional external MCP mounts
