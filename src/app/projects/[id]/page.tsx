@@ -6,6 +6,13 @@ import Link from "next/link";
 import Feedback from "@/components/Feedback";
 import { apiGet, apiV1, apiFetch, readJson } from "@/lib/api";
 import { CONTENT_MAX_CLASS } from "@/lib/content-shell";
+import {
+  entrypointLabel,
+  outputStatusLabel,
+  projectStatusLabel,
+  runStatusLabel,
+  scenarioStatusLabel,
+} from "@/lib/ui-labels";
 
 interface Project {
   id: string;
@@ -88,9 +95,9 @@ interface ProjectOutput {
 function mapApiOutput(o: ApiOutputRow): ProjectOutput {
   const body = [o.summary, o.content_preview].filter(Boolean).join("\n\n") || "";
   const tags = [
-    o.status,
-    o.template_id ? `模板:${o.template_id}` : null,
-    o.run_id ? `run:${o.run_id.slice(0, 8)}` : null,
+    outputStatusLabel(o.status),
+    o.template_id ? `模版:${o.template_id}` : null,
+    o.run_id ? `执行:${o.run_id.slice(0, 8)}` : null,
     o.scenario_id ? `场景:${o.scenario_id.slice(0, 8)}` : null,
   ].filter(Boolean) as string[];
   return {
@@ -201,6 +208,7 @@ export default function ProjectDetailPage() {
   const [boundScenarios, setBoundScenarios] = useState<ProjectBoundScenario[]>([]);
   const [boundLoading, setBoundLoading] = useState(false);
   const [catalogScenarios, setCatalogScenarios] = useState<ScenarioCatalogRow[]>([]);
+  const [scenarioBindingOpen, setScenarioBindingOpen] = useState(false);
 
   const refreshAttachments = useCallback(async () => {
     if (!id) return;
@@ -544,7 +552,7 @@ export default function ProjectDetailPage() {
           <>
             <div className="mb-6 flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
               <div>
-                <p className="text-xs uppercase tracking-[0.2em] text-slate-500">Project Console</p>
+                <p className="text-xs uppercase tracking-[0.2em] text-slate-500">项目控制台</p>
                 <h1 className="mt-2 text-2xl font-bold leading-tight sm:text-3xl md:text-4xl">
                   {project.name}
                 </h1>
@@ -553,7 +561,7 @@ export default function ProjectDetailPage() {
               <span
                 className={`self-start rounded-full px-3 py-1 text-xs font-medium text-white sm:text-sm ${statusColors[project.status] ?? "bg-slate-500"}`}
               >
-                {statusLabels[project.status] ?? project.status}
+                {projectStatusLabel(project.status)}
               </span>
             </div>
 
@@ -564,7 +572,7 @@ export default function ProjectDetailPage() {
               <MetricCard
                 label="最新活动"
                 value={latestRun ? formatDate(latestRun.created_at) : "暂无"}
-                hint={latestRun ? latestRun.status : "等待执行"}
+                hint={latestRun ? runStatusLabel(latestRun.status) : "等待执行"}
               />
             </div>
 
@@ -601,7 +609,7 @@ export default function ProjectDetailPage() {
                     <div className="flex items-center justify-between">
                       <div>
                         <p className="text-xs uppercase tracking-[0.2em] text-slate-500">
-                          Project Boundary
+                          项目边界
                         </p>
                         <h2 className="mt-2 text-xl font-semibold text-white">项目边界</h2>
                       </div>
@@ -642,7 +650,7 @@ export default function ProjectDetailPage() {
 
                   <div className="rounded-3xl border border-slate-700 bg-slate-800/50 p-5 sm:p-6">
                     <p className="text-xs uppercase tracking-[0.2em] text-slate-500">
-                      Quick Actions
+                      快捷操作
                     </p>
                     <h2 className="mt-2 text-xl font-semibold text-white">工作流入口</h2>
                     <div className="mt-5 space-y-3">
@@ -656,15 +664,26 @@ export default function ProjectDetailPage() {
                         title="进入场景输出"
                         desc=""
                       />
-                      <ActionLink href={`/create?return_project_id=${id}`} title="场景编排（全局维护）" desc="" />
+                      <button
+                        type="button"
+                        onClick={() => setScenarioBindingOpen((open) => !open)}
+                        className={`block w-full rounded-2xl border bg-slate-900/60 p-4 text-left transition hover:border-slate-600 hover:bg-slate-900 ${
+                          scenarioBindingOpen
+                            ? "border-blue-500/50 bg-slate-900"
+                            : "border-slate-700"
+                        }`}
+                      >
+                        <p className="text-sm font-medium text-white">默认场景编排</p>
+                      </button>
                     </div>
                   </div>
                 </div>
 
+                {scenarioBindingOpen ? (
                 <div className="rounded-3xl border border-slate-700 bg-slate-800/50 p-5 sm:p-6">
                   <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                     <div>
-                      <p className="text-xs uppercase tracking-[0.2em] text-slate-500">Scenario Bindings</p>
+                      <p className="text-xs uppercase tracking-[0.2em] text-slate-500">场景绑定</p>
                       <h2 className="mt-2 text-xl font-semibold text-white">已绑定场景</h2>
                       <p className="mt-1 text-xs text-slate-500">
                         「场景输出」仅可选择此处已启用绑定。维护合同请用下方入口前往场景编排。
@@ -698,12 +717,14 @@ export default function ProjectDetailPage() {
                             <div className="min-w-0">
                               <p className="font-medium text-white">{b.scenario_name}</p>
                               <p className="mt-0.5 font-mono text-xs text-slate-500">
-                                {b.scenario_code} · v{b.scenario_version} · {b.scenario_status}
+                                {b.scenario_code} · v{b.scenario_version} ·{" "}
+                                {scenarioStatusLabel(b.scenario_status)}
                                 {b.is_default === 1 ? " · 默认" : ""}
                               </p>
                               {!workshopReady ? (
                                 <p className="mt-1 text-xs text-amber-400/90">
-                                  场景输出不可选：需场景为 published；当前为 {b.scenario_status || "draft"}
+                                  场景输出不可选：需场景已发布；当前为{" "}
+                                  {scenarioStatusLabel(b.scenario_status)}
                                   （请发布或解绑后重新绑定）
                                 </p>
                               ) : null}
@@ -748,7 +769,7 @@ export default function ProjectDetailPage() {
                           <option value="">选择场景…</option>
                           {bindableScenarios.map((s) => (
                             <option key={s.id} value={s.id}>
-                              {s.name} · v{s.version} · {s.status}
+                              {s.name} · v{s.version} · {scenarioStatusLabel(s.status)}
                             </option>
                           ))}
                         </select>
@@ -764,17 +785,18 @@ export default function ProjectDetailPage() {
                     </div>
                     {bindableScenarios.length === 0 && catalogScenarios.length > 0 ? (
                       <p className="text-xs text-slate-500">
-                        下拉仅列出已发布（published）且未绑定的场景；草稿或停用场景请先在场景编排中发布。
+                        下拉仅列出已发布且未绑定的场景；草稿或停用场景请先在场景编排中发布。
                       </p>
                     ) : null}
                   </div>
                 </div>
+                ) : null}
 
                 <div className="grid gap-4 lg:grid-cols-2">
                   <div className="rounded-3xl border border-slate-700 bg-slate-800/50 p-5 sm:p-6">
                     <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                       <div>
-                        <p className="text-xs uppercase tracking-[0.2em] text-slate-500">Project Files</p>
+                        <p className="text-xs uppercase tracking-[0.2em] text-slate-500">项目文件</p>
                         <h2 className="mt-2 text-xl font-semibold text-white">项目文件</h2>
                         <p className="mt-1 text-xs text-slate-500">
                           上传需求说明、素材等，供编排与协作时参考。
@@ -847,7 +869,7 @@ export default function ProjectDetailPage() {
                   </div>
 
                   <div className="rounded-3xl border border-slate-700 bg-slate-800/50 p-5 sm:p-6">
-                    <p className="text-xs uppercase tracking-[0.2em] text-slate-500">Latest Output</p>
+                    <p className="text-xs uppercase tracking-[0.2em] text-slate-500">最新输出</p>
                     <h2 className="mt-2 text-xl font-semibold text-white">最近输出沉淀</h2>
                     {latestOutput ? (
                       <div className="mt-4 rounded-2xl border border-slate-700 bg-slate-900/60 p-4">
@@ -955,7 +977,7 @@ export default function ProjectDetailPage() {
                                 {selectedOutput.skill_name} · {formatDate(selectedOutput.created_at)}
                               </p>
                               <span className="rounded bg-slate-700/80 px-2 py-0.5 text-[11px] font-medium text-slate-200">
-                                {outputStatusLabels[selectedOutput.status] ?? selectedOutput.status}
+                                {outputStatusLabel(selectedOutput.status)}
                               </span>
                             </div>
                           </div>
@@ -1053,13 +1075,13 @@ export default function ProjectDetailPage() {
                       </div>
                       <div className="mt-4 flex flex-wrap items-center gap-2 text-xs">
                         <span className="rounded bg-slate-700 px-2 py-0.5 text-slate-200">
-                          {r.entrypoint}
+                          {entrypointLabel(r.entrypoint)}
                         </span>
                         <span className="rounded bg-blue-900/40 px-2 py-0.5 text-blue-200">
-                          {r.status}
+                          {runStatusLabel(r.status)}
                         </span>
                         {r.duration_ms != null && (
-                          <span className="text-slate-500">耗时 {r.duration_ms} ms</span>
+                          <span className="text-slate-500">耗时 {r.duration_ms} 毫秒</span>
                         )}
                       </div>
                     </div>

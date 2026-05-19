@@ -6,6 +6,56 @@ import { useSearchParams } from "next/navigation";
 import { apiGet, apiV1, apiFetch, readJson } from "@/lib/api";
 import type { ProjectRecord, TaskExecuteBody, TaskInputPayload } from "@/lib/chat-context";
 import { CONTENT_MAX_CLASS } from "@/lib/content-shell";
+import {
+  buildScenarioListItems,
+  countLocalTemplates,
+  isScenarioPublished,
+  loadDismissedPresetIds,
+  type ScenarioApiRow,
+  type ScenarioListItem,
+} from "@/lib/scenario-list";
+import {
+  parseScenarioSkills,
+  skillsPolicyModeLabel,
+  type ParsedScenarioSkills,
+  type ScenarioSkillBinding,
+} from "@/lib/scenario-skills";
+import {
+  formatFromOutputPolicy,
+  normalizeWorkshopOutputFormat,
+  type WorkshopOutputFormat,
+} from "@/lib/workshop-output-artifact";
+import { WorkshopOutputPanel } from "@/components/workshop-output-panel";
+import {
+  POLICY_SECTION_SUMMARY,
+  TASK_EXECUTE_HINT,
+  entrypointLabel,
+  fieldLabel,
+  outputStatusLabel,
+  projectStatusLabel,
+  scenarioStatusLabel,
+  stepLabel,
+  stepRangeLabel,
+  taskInputSectionTitle,
+  userMessageSectionTitle,
+  skillsOverrideSummary,
+  workshopModeLabel,
+} from "@/lib/ui-labels";
+
+type SkillTemplateMeta = {
+  id: string;
+  label: string;
+  path: string;
+  tags?: string[];
+  sections?: string[];
+};
+
+type SkillMetaRow = {
+  name: string;
+  display_name: string;
+  description: string;
+  templates: SkillTemplateMeta[];
+};
 
 type GenStatus = "idle" | "generating" | "done" | "error";
 type WorkshopMode = "refine" | "generate";
@@ -96,6 +146,8 @@ function WorkshopPageInner() {
   const modeFromUrl = searchParams?.get("mode") ?? "";
 
   const [projects, setProjects] = useState<ProjectRecord[]>([]);
+  const [remoteScenarios, setRemoteScenarios] = useState<ScenarioApiRow[]>([]);
+  const [dismissedPresetIds] = useState(loadDismissedPresetIds);
   const [boundScenarios, setBoundScenarios] = useState<BoundScenarioRow[]>([]);
   const [loadingBound, setLoadingBound] = useState(false);
   const [scenarioDetail, setScenarioDetail] = useState<ScenarioDetailResponse | null>(null);
@@ -124,6 +176,7 @@ function WorkshopPageInner() {
     run_id?: string;
     output_id?: string | null;
   } | null>(null);
+  const [savedOutputFormat, setSavedOutputFormat] = useState<WorkshopOutputFormat | null>(null);
   const [versionSaveStatus, setVersionSaveStatus] = useState<"idle" | "saving" | "ok" | "err">("idle");
   const [versionSaveMsg, setVersionSaveMsg] = useState("");
   const [outputsRefreshTick, setOutputsRefreshTick] = useState(0);
@@ -133,10 +186,17 @@ function WorkshopPageInner() {
   const [taskKeywords, setTaskKeywords] = useState("");
   const [taskExtra, setTaskExtra] = useState("");
   const [taskTone, setTaskTone] = useState("");
+  const [skillMeta, setSkillMeta] = useState<SkillMetaRow[]>([]);
 
   useEffect(() => {
     if (projectFromUrl) setSelectedProjectId(projectFromUrl);
   }, [projectFromUrl]);
+
+  useEffect(() => {
+    apiGet<{ skills: SkillMetaRow[] }>("/ws/skills/metadata")
+      .then((r) => setSkillMeta(r.skills ?? []))
+      .catch(() => setSkillMeta([]));
+  }, []);
 
   useEffect(() => {
     setLoadingProjects(true);
@@ -145,6 +205,37 @@ function WorkshopPageInner() {
       .catch(() => setProjects([]))
       .finally(() => setLoadingProjects(false));
   }, []);
+
+  useEffect(() => {
+    apiGet<ScenarioApiRow[]>("/scenarios/")
+      .then(setRemoteScenarios)
+      .catch(() => setRemoteScenarios([]));
+  }, []);
+
+  const scenarioListItems = useMemo(
+    () => buildScenarioListItems(remoteScenarios, dismissedPresetIds),
+    [remoteScenarios, dismissedPresetIds],
+  );
+
+  const localTemplateCount = useMemo(
+    () => countLocalTemplates(remoteScenarios, dismissedPresetIds),
+    [remoteScenarios, dismissedPresetIds],
+  );
+
+  const boundByScenarioId = useMemo(
+    () => new Map(boundScenarios.map((b) => [b.scenario_id, b] as const)),
+    [boundScenarios],
+  );
+
+  const isWorkshopExecutable = useCallback(
+    (item: ScenarioListItem): boolean => {
+      const binding = boundByScenarioId.get(item.id);
+      if (!binding || binding.enabled !== 1) return false;
+      const st = (binding.scenario_status || item.remote?.status || "draft").toLowerCase();
+      return st === "published";
+    },
+    [boundByScenarioId],
+  );
 
   useEffect(() => {
     if (!selectedProjectId) {
@@ -208,18 +299,19 @@ function WorkshopPageInner() {
   }, [outputFromUrl, selectedProjectId, modeFromUrl]);
 
   const workshopScenarioOptions = useMemo((): WorkshopScenarioOption[] => {
-    return boundScenarios
-      .filter((r) => {
-        if (r.enabled !== 1) return false;
-        const st = (r.scenario_status || "draft").toLowerCase();
-        return st === "published";
-      })
-      .map((r) => ({
-        id: r.scenario_id,
-        name: r.scenario_name,
-        versionLine: `${r.scenario_status} · v${r.scenario_version}${r.is_default ? " · 默认" : ""}`,
-      }));
-  }, [boundScenarios]);
+    return scenarioListItems
+      .filter((item) => isWorkshopExecutable(item))
+      .map((item) => {
+        const binding = boundByScenarioId.get(item.id)!;
+        return {
+          id: item.id,
+          name: item.title,
+          versionLine: `${scenarioStatusLabel(binding.scenario_status)} · v${binding.scenario_version}${
+            binding.is_default ? " · 默认" : ""
+          }`,
+        };
+      });
+  }, [scenarioListItems, boundByScenarioId, isWorkshopExecutable]);
 
   useEffect(() => {
     if (workshopScenarioOptions.length === 0) {
@@ -291,26 +383,47 @@ function WorkshopPageInner() {
     };
   }, [selectedScenarioId]);
 
-  const allowedSkills = useMemo(() => {
-    const pol = scenarioDetail?.skills_policy;
-    if (!pol || typeof pol !== "object") return [] as string[];
-    const raw = (pol as { allowed?: unknown }).allowed;
-    return Array.isArray(raw) ? raw.map((x) => String(x)).filter(Boolean) : [];
-  }, [scenarioDetail]);
+  const parsedScenarioSkills = useMemo(
+    () =>
+      parseScenarioSkills(scenarioDetail?.skills_policy, scenarioDetail?.output_policy),
+    [scenarioDetail],
+  );
+
+  const runSkillNames = parsedScenarioSkills.runSkillNames;
+
+  const scenarioSkillBindings = useMemo((): (ScenarioSkillBinding & {
+    displayName: string;
+    description: string;
+    resolvedTemplateLabel?: string;
+  })[] => {
+    return parsedScenarioSkills.bindings.map((b) => {
+      const meta = skillMeta.find((m) => m.name === b.name);
+      const tpl =
+        b.templatePath && meta
+          ? meta.templates.find((t) => t.path === b.templatePath)
+          : undefined;
+      return {
+        ...b,
+        displayName: meta?.display_name?.trim() || b.name,
+        description: meta?.description?.trim() || "",
+        resolvedTemplateLabel: b.templateLabel ?? tpl?.label,
+      };
+    });
+  }, [parsedScenarioSkills.bindings, skillMeta]);
 
   useEffect(() => {
-    if (allowedSkills.length === 0) {
+    if (runSkillNames.length === 0) {
       setSelectedSkill(null);
       return;
     }
-    if (allowedSkills.length === 1) {
-      setSelectedSkill(allowedSkills[0]);
+    if (runSkillNames.length === 1) {
+      setSelectedSkill(runSkillNames[0]);
       return;
     }
     setSelectedSkill((prev) =>
-      prev && allowedSkills.includes(prev) ? prev : allowedSkills[0] ?? null,
+      prev && runSkillNames.includes(prev) ? prev : runSkillNames[0] ?? null,
     );
-  }, [allowedSkills]);
+  }, [runSkillNames]);
 
   const selectedProject = projects.find((project) => project.id === selectedProjectId);
 
@@ -318,14 +431,14 @@ function WorkshopPageInner() {
     const projectName = selectedProject?.name?.trim() || "项目";
     const scenarioName =
       workshopScenarioOptions.find((o) => o.id === selectedScenarioId)?.name ?? "场景";
-    const skillPart = selectedSkill ?? allowedSkills[0] ?? "技能";
+    const skillPart = selectedSkill ?? runSkillNames[0] ?? "技能";
     return `${projectName} · ${scenarioName} · ${skillPart}`;
   }, [
     selectedProject?.name,
     workshopScenarioOptions,
     selectedScenarioId,
     selectedSkill,
-    allowedSkills,
+    runSkillNames,
   ]);
 
   useEffect(() => {
@@ -362,7 +475,7 @@ function WorkshopPageInner() {
 
   const summaryItems = useMemo(
     () => [
-      { label: "工作模式", value: mode === "refine" ? "结果优化" : "定向生成" },
+      { label: "工作模式", value: workshopModeLabel(mode) },
       { label: "关联项目", value: selectedProject?.name ?? "请先选择项目" },
       {
         label: "场景",
@@ -370,16 +483,26 @@ function WorkshopPageInner() {
           workshopScenarioOptions.find((o) => o.id === selectedScenarioId)?.name ?? "—",
       },
       {
-        label: "技能（合同）",
+        label: "绑定技能",
         value:
-          allowedSkills.length === 0
-            ? "场景未配置 allowed"
-            : allowedSkills.length === 1
-              ? allowedSkills[0]
-              : selectedSkill ?? allowedSkills[0] ?? "请选择",
+          runSkillNames.length === 0
+            ? skillsPolicyModeLabel(parsedScenarioSkills.mode) || "未绑定"
+            : runSkillNames.length === 1
+              ? scenarioSkillBindings.find((b) => b.name === runSkillNames[0])?.displayName ??
+                runSkillNames[0]
+              : selectedSkill ?? runSkillNames[0] ?? "请选择",
       },
     ],
-    [mode, selectedProject?.name, workshopScenarioOptions, selectedScenarioId, allowedSkills, selectedSkill],
+    [
+      mode,
+      selectedProject?.name,
+      workshopScenarioOptions,
+      selectedScenarioId,
+      runSkillNames,
+      selectedSkill,
+      parsedScenarioSkills.mode,
+      scenarioSkillBindings,
+    ],
   );
 
   const agentExecutePreview = useMemo(() => {
@@ -387,7 +510,7 @@ function WorkshopPageInner() {
     const scenarioLabel = scenarioOpt?.name ?? (selectedScenarioId || "—");
     const scenarioVersion = scenarioOpt?.versionLine;
     const scenarioLine = scenarioVersion ? `${scenarioLabel} · ${scenarioVersion}` : scenarioLabel;
-    const skillRun = selectedSkill ?? allowedSkills[0] ?? "";
+    const skillRun = selectedSkill ?? runSkillNames[0] ?? "";
     const contractSlice = contractSummaryText
       ? contractSummaryText.slice(0, 1200) + (contractSummaryText.length > 1200 ? "…" : "")
       : "（加载中或未选场景）";
@@ -407,24 +530,22 @@ function WorkshopPageInner() {
 
     return {
       step1Rows: [
-        { k: "工作模式", v: mode === "refine" ? "结果优化（refine）" : "定向生成（generate）" },
-        { k: "entrypoint", v: "workshop" },
+        { k: "工作模式", v: workshopModeLabel(mode) },
+        { k: fieldLabel("entrypoint"), v: entrypointLabel("workshop") },
       ],
       step2Rows: [
-        { k: "project_id", v: selectedProjectId || "（未选择）" },
-        { k: "project_name", v: selectedProject?.name ?? "—" },
-        { k: "项目状态", v: selectedProject?.status ?? "—" },
+        { k: fieldLabel("project_id"), v: selectedProjectId || "（未选择）" },
+        { k: fieldLabel("project_name"), v: selectedProject?.name ?? "—" },
+        { k: "项目状态", v: projectStatusLabel(selectedProject?.status) },
       ],
       step3Rows: [
-        { k: "scenario_id", v: selectedScenarioId || "（未选择）" },
+        { k: fieldLabel("scenario_id"), v: selectedScenarioId || "（未选择）" },
         { k: "场景 / 版本", v: scenarioLine },
-        { k: "skill（执行）", v: skillRun || "（合同未配置或待选）" },
+        { k: "执行技能", v: skillRun || "（合同未配置或待选）" },
         { k: "场景合同摘要", v: contractSlice },
         {
-          k: "overrides.skills",
-          v: skillRun
-            ? `manual_only，白名单 [${skillRun}]，allow_agent_free_choice: false`
-            : "需场景 skills_policy.allowed",
+          k: fieldLabel("overrides.skills"),
+          v: skillsOverrideSummary(skillRun),
         },
       ],
       taskInputJson: JSON.stringify(taskPayload, null, 2),
@@ -455,19 +576,35 @@ function WorkshopPageInner() {
     taskObjective,
     taskTitleCustom,
     taskTone,
-    allowedSkills,
+    runSkillNames,
     workshopScenarioOptions,
     contractSummaryText,
   ]);
 
-  const outputPreviewSlice = useMemo(() => {
-    if (errorMsg) return `❌ ${errorMsg}`;
-    if (!output) {
-      if (genStatus === "generating") return "执行中，等待首段输出…";
-      return "尚未执行。开始生成后，上方缩略与下方正文将同步更新。";
+  const outputArtifactFormat = useMemo((): WorkshopOutputFormat => {
+    if (savedOutputFormat) return savedOutputFormat;
+    return formatFromOutputPolicy(scenarioDetail?.output_policy);
+  }, [savedOutputFormat, scenarioDetail?.output_policy]);
+
+  useEffect(() => {
+    if (!selectedProjectId || !lastRunMeta?.output_id) {
+      setSavedOutputFormat(null);
+      return;
     }
-    return output.length > 8000 ? `${output.slice(0, 8000)}\n\n…（正文较长，缩略已截断）` : output;
-  }, [errorMsg, genStatus, output]);
+    let cancelled = false;
+    apiGet<{ content_format: string }>(
+      `/projects/${selectedProjectId}/outputs/${lastRunMeta.output_id}`,
+    )
+      .then((d) => {
+        if (!cancelled) setSavedOutputFormat(normalizeWorkshopOutputFormat(d.content_format));
+      })
+      .catch(() => {
+        if (!cancelled) setSavedOutputFormat(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedProjectId, lastRunMeta?.output_id]);
 
   const handleSubmit = useCallback(() => {
     if (!selectedProjectId) {
@@ -482,14 +619,14 @@ function WorkshopPageInner() {
       alert("场景合同加载中，请稍候");
       return;
     }
-    if (allowedSkills.length === 0) {
+    if (runSkillNames.length === 0) {
       alert(
-        "当前场景未配置 skills_policy.allowed。请在「场景编排」中维护合同，或在项目页绑定其他场景。",
+        "当前场景未绑定可执行技能。请在「场景编排」中开启强制绑定技能并选择技能包，或配置输出模版对应技能后重新发布。",
       );
       return;
     }
     const skillForRun =
-      allowedSkills.length === 1 ? allowedSkills[0] : selectedSkill ?? allowedSkills[0];
+      runSkillNames.length === 1 ? runSkillNames[0] : selectedSkill ?? runSkillNames[0];
     if (!skillForRun) {
       alert("请选择本场景允许范围内的一项技能");
       return;
@@ -636,7 +773,7 @@ function WorkshopPageInner() {
         setGenStatus("error");
       });
   }, [
-    allowedSkills,
+    runSkillNames,
     buildContext,
     derivedTaskTitle,
     loadingBound,
@@ -713,12 +850,12 @@ function WorkshopPageInner() {
           ))}
         </section>
 
-        <section className="grid gap-6 xl:grid-cols-[1.15fr_0.85fr]">
-          <div className="space-y-6">
+        <section className="grid gap-6 xl:grid-cols-[minmax(0,22rem)_minmax(0,1fr)]">
+          <div className="w-full min-w-0 space-y-6 xl:max-w-[22rem]">
             <div className="rounded-3xl border border-slate-800 bg-slate-900/50 p-6">
               <div className="flex items-center justify-between gap-3">
                 <div>
-                  <p className="text-xs uppercase tracking-[0.2em] text-slate-500">Step 1</p>
+                  <p className="text-xs uppercase tracking-[0.2em] text-slate-500">{stepLabel(1)}</p>
                   <h2 className="mt-2 text-xl font-semibold">选择结果处理模式</h2>
                 </div>
                 <span className="text-xs text-slate-500">工作流后段</span>
@@ -741,7 +878,7 @@ function WorkshopPageInner() {
             </div>
 
             <div className="rounded-3xl border border-slate-800 bg-slate-900/50 p-6">
-              <p className="text-xs uppercase tracking-[0.2em] text-slate-500">Step 2</p>
+              <p className="text-xs uppercase tracking-[0.2em] text-slate-500">{stepLabel(2)}</p>
               <h2 className="mt-2 text-xl font-semibold">项目选择</h2>
 
               <div className="mt-5 space-y-4">
@@ -778,7 +915,9 @@ function WorkshopPageInner() {
                     <dl className="mt-4 space-y-3 text-sm">
                       <div>
                         <dt className="text-xs text-slate-500">状态</dt>
-                        <dd className="mt-0.5 text-slate-200">{selectedProject.status || "—"}</dd>
+                        <dd className="mt-0.5 text-slate-200">
+                          {projectStatusLabel(selectedProject.status)}
+                        </dd>
                       </div>
                       {selectedProject.description?.trim() ? (
                         <div>
@@ -833,7 +972,7 @@ function WorkshopPageInner() {
             <div className="rounded-3xl border border-slate-800 bg-slate-900/50 p-6">
               <div className="flex items-center justify-between gap-3">
                 <div>
-                  <p className="text-xs uppercase tracking-[0.2em] text-slate-500">Step 3</p>
+                  <p className="text-xs uppercase tracking-[0.2em] text-slate-500">{stepLabel(3)}</p>
                   <h2 className="mt-2 text-xl font-semibold">场景选择</h2>
                 </div>
                 <span className="text-xs text-slate-500">
@@ -847,59 +986,122 @@ function WorkshopPageInner() {
 
               {!selectedProjectId ? (
                 <p className="mt-5 rounded-2xl border border-dashed border-slate-700 bg-slate-950/30 px-4 py-6 text-center text-sm text-slate-500">
-                  请先选择项目后，将仅展示该项目已绑定的可执行场景。
+                  请先选择项目；场景列表与「场景编排」同源，仅已绑定且已发布的场景可执行。
                 </p>
-              ) : null}
-
-              <label className="mt-5 block space-y-2 text-sm">
-                <span className="text-slate-300">场景（项目已绑定）</span>
-                <select
-                  value={selectedScenarioId}
-                  onChange={(e) => setSelectedScenarioId(e.target.value)}
-                  disabled={
-                    loadingBound || !selectedProjectId || workshopScenarioOptions.length === 0
-                  }
-                  className="w-full rounded-xl border border-slate-700 bg-slate-950/70 px-4 py-3 text-sm text-white outline-none transition focus:border-blue-500 disabled:opacity-50"
-                >
-                  <option value="">
-                    {loadingBound
-                      ? "加载绑定场景…"
-                      : workshopScenarioOptions.length
-                        ? "选择场景…"
-                        : "该项目未绑定已启用场景"}
-                  </option>
-                  {workshopScenarioOptions.map((o) => (
-                    <option key={o.id} value={o.id}>
-                      {o.name} · {o.versionLine}
-                    </option>
-                  ))}
-                </select>
+              ) : (
+              <div className="mt-5 space-y-3 text-sm">
+                <div className="flex flex-wrap items-end justify-between gap-2">
+                  <span className="text-slate-300">场景（与场景编排列表同源）</span>
+                  <span className="text-xs text-slate-500">
+                    服务端 {remoteScenarios.length} · 内置模板 {localTemplateCount}
+                  </span>
+                </div>
+                {loadingBound ? (
+                  <p className="rounded-2xl border border-dashed border-slate-700 bg-slate-950/30 px-4 py-6 text-center text-sm text-slate-500">
+                    加载项目绑定…
+                  </p>
+                ) : (
+                  <div className="grid max-h-[min(22rem,50vh)] gap-3 overflow-y-auto pr-1">
+                    {scenarioListItems.map((scenario) => {
+                      const active = scenario.id === selectedScenarioId;
+                      const binding = boundByScenarioId.get(scenario.id);
+                      const executable = isWorkshopExecutable(scenario);
+                      const remote = scenario.remote;
+                      return (
+                        <button
+                          key={scenario.id}
+                          type="button"
+                          disabled={!executable}
+                          onClick={() => {
+                            if (executable) setSelectedScenarioId(scenario.id);
+                          }}
+                          className={`rounded-2xl border p-4 text-left transition ${
+                            active && executable
+                              ? "border-blue-500 bg-blue-500/10"
+                              : executable
+                                ? "border-slate-700 bg-slate-950/60 hover:border-slate-600"
+                                : "cursor-not-allowed border-slate-800 bg-slate-950/40 opacity-75"
+                          }`}
+                        >
+                          <div className="flex items-start justify-between gap-2">
+                            <h3 className="font-semibold text-white">{scenario.title}</h3>
+                            <span
+                              className={`h-2 w-2 shrink-0 rounded-full ${
+                                active && executable ? "bg-blue-400" : "bg-slate-600"
+                              }`}
+                            />
+                          </div>
+                          <p className="mt-1 line-clamp-2 text-xs text-slate-400">{scenario.summary}</p>
+                          <div className="mt-2 flex flex-wrap gap-2">
+                            {remote ? (
+                              <span className="rounded-full border border-emerald-700/50 bg-emerald-500/10 px-2 py-0.5 text-[10px] text-emerald-200">
+                                {scenarioStatusLabel(remote.status)} · v{remote.version}
+                              </span>
+                            ) : null}
+                            {scenario.isLocalTemplate ? (
+                              <span className="rounded-full border border-slate-600 px-2 py-0.5 text-[10px] text-slate-400">
+                                内置模板
+                              </span>
+                            ) : null}
+                            {binding?.enabled === 1 ? (
+                              <span className="rounded-full border border-blue-600/50 bg-blue-500/10 px-2 py-0.5 text-[10px] text-blue-200">
+                                已绑定{binding.is_default ? " · 默认" : ""}
+                              </span>
+                            ) : remote && isScenarioPublished(remote) ? (
+                              <span className="rounded-full border border-amber-700/50 bg-amber-500/10 px-2 py-0.5 text-[10px] text-amber-200">
+                                未绑定本项目
+                              </span>
+                            ) : null}
+                            {!executable && !scenario.isLocalTemplate && remote && !isScenarioPublished(remote) ? (
+                              <span className="rounded-full border border-slate-600 px-2 py-0.5 text-[10px] text-slate-500">
+                                未发布
+                              </span>
+                            ) : null}
+                            {scenario.isLocalTemplate && !remote ? (
+                              <span className="rounded-full border border-slate-600 px-2 py-0.5 text-[10px] text-slate-500">
+                                需在编排中保存并发布
+                              </span>
+                            ) : null}
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
                 {selectedProjectId && !loadingBound && workshopScenarioOptions.length === 0 ? (
-                  <p className="mt-2 text-xs text-amber-400/90">
+                  <p className="text-xs text-amber-400/90">
                     {boundScenarios.some((b) => b.enabled === 1)
-                      ? "已有绑定，但场景状态均非 published（已发布），工坊无法选用。请在场景编排发布场景，或解除无效绑定。"
-                      : "当前项目暂无可用绑定场景。前往 "}
+                      ? "已有绑定，但场景均未发布。请在场景编排中发布，或到项目详情解绑无效场景。"
+                      : "当前项目尚无可执行场景：请在 "}
                     {!boundScenarios.some((b) => b.enabled === 1) ? (
                       <>
                         <Link href={`/projects/${selectedProjectId}`} className="underline">
                           项目详情
                         </Link>{" "}
-                        绑定，或打开{" "}
+                        绑定已发布场景，或在{" "}
                         <Link href="/create" className="underline">
                           场景编排
                         </Link>{" "}
-                        维护场景。
+                        发布后再绑定。
                       </>
                     ) : null}
                   </p>
                 ) : null}
-              </label>
+                {selectedProjectId && !loadingBound && workshopScenarioOptions.length > 0 ? (
+                  <p className="text-xs text-slate-500">
+                    仅「已绑定本项目」且「已发布」的场景可执行；其余项与场景编排列表一致，便于对照维护。
+                  </p>
+                ) : null}
+              </div>
+              )}
 
               {selectedScenarioId && scenarioDetail ? (
                 <div className="mt-4 rounded-2xl border border-slate-800 bg-slate-950/50 p-4">
                   <p className="text-xs uppercase tracking-[0.16em] text-slate-500">场景合同（服务端）</p>
                   <p className="mt-2 text-base font-semibold text-white">{scenarioDetail.name}</p>
-                  <p className="mt-1 font-mono text-xs text-slate-500">code · {scenarioDetail.code}</p>
+                  <p className="mt-1 text-xs text-slate-500">
+                    场景编码 · <span className="font-mono text-slate-400">{scenarioDetail.code}</span>
+                  </p>
                   {scenarioDetail.description?.trim() ? (
                     <p className="mt-3 whitespace-pre-wrap text-sm text-slate-300">
                       {scenarioDetail.description}
@@ -907,7 +1109,7 @@ function WorkshopPageInner() {
                   ) : null}
                   <details className="mt-4 group border-t border-slate-800 pt-3">
                     <summary className="cursor-pointer text-xs text-slate-400 transition hover:text-slate-200">
-                      knowledge_policy / skills_policy / output_policy
+                      {POLICY_SECTION_SUMMARY}
                     </summary>
                     <pre className="mt-2 max-h-48 overflow-y-auto whitespace-pre-wrap rounded-lg border border-slate-800 bg-slate-950/80 p-3 font-mono text-xs leading-relaxed text-slate-400">
                       {contractSummaryText || "—"}
@@ -923,62 +1125,50 @@ function WorkshopPageInner() {
               ) : null}
 
               <div className="mt-6 border-t border-slate-800 pt-5">
-                <div className="mb-1 flex flex-wrap items-end justify-between gap-2">
+                <div className="mb-3 flex flex-wrap items-end justify-between gap-2">
                   <div>
-                    <p className="text-xs uppercase tracking-[0.16em] text-slate-500">场景允许的技能</p>
+                    <p className="text-xs uppercase tracking-[0.16em] text-slate-500">场景绑定技能</p>
                     <p className="mt-1 text-sm text-slate-400">
-                      源自场景合同的 <span className="font-mono text-slate-300">skills_policy.allowed</span>
-                      ，不可从全局技能库任选
+                      来自场景编排中的技能绑定与输出模版配置
                     </p>
                   </div>
+                  {scenarioDetail && !loadingScenarioDetail ? (
+                    <Link
+                      href={`/create?return_project_id=${encodeURIComponent(selectedProjectId)}`}
+                      className="text-xs text-blue-400 hover:text-blue-300"
+                    >
+                      去场景编排调整 →
+                    </Link>
+                  ) : null}
                 </div>
 
                 {loadingScenarioDetail || (selectedScenarioId && !scenarioDetail) ? (
-                  <p className="py-6 text-center text-sm text-slate-400">加载合同以解析技能范围…</p>
-                ) : allowedSkills.length === 0 ? (
-                  <p className="py-6 text-center text-sm text-amber-400/90">
-                    当前场景未配置允许技能列表，请在场景编排中编辑 skills_policy.allowed。
-                  </p>
-                ) : allowedSkills.length === 1 ? (
-                  <p className="rounded-2xl border border-slate-700 bg-slate-950/60 px-4 py-3 text-sm text-slate-200">
-                    本场景固定技能：<span className="font-mono text-blue-200">{allowedSkills[0]}</span>
-                  </p>
+                  <p className="py-6 text-center text-sm text-slate-400">加载场景合同…</p>
                 ) : (
-                  <div className="grid gap-2 sm:grid-cols-2">
-                    {allowedSkills.map((pkg) => {
-                      const active = selectedSkill === pkg;
-                      return (
-                        <button
-                          key={pkg}
-                          type="button"
-                          onClick={() => setSelectedSkill(pkg)}
-                          className={`rounded-2xl border p-4 text-left text-sm transition ${
-                            active
-                              ? "border-blue-500 bg-blue-500/10"
-                              : "border-slate-700 bg-slate-950/60 hover:border-slate-600"
-                          }`}
-                        >
-                          <span className="font-mono text-white">{pkg}</span>
-                          {active ? (
-                            <span className="mt-2 block text-xs text-blue-300">将用于本次执行</span>
-                          ) : null}
-                        </button>
-                      );
-                    })}
-                  </div>
+                  <ScenarioSkillsBlock
+                    parsed={parsedScenarioSkills}
+                    bindings={scenarioSkillBindings}
+                    runSkillNames={runSkillNames}
+                    selectedSkill={selectedSkill}
+                    onSelectSkill={setSelectedSkill}
+                  />
                 )}
               </div>
             </div>
 
-            <div className="rounded-3xl border border-slate-800 bg-slate-900/50 p-6">
-              <p className="text-xs uppercase tracking-[0.2em] text-slate-500">Step 4</p>
+          </div>
+
+          <aside className="min-h-0 xl:sticky xl:top-6 xl:self-start">
+            <div className="grid gap-6 xl:grid-cols-2">
+            <div className="min-h-0 rounded-3xl border border-slate-800 bg-slate-900/50 p-6 xl:max-h-[calc(100vh-3rem)] xl:overflow-y-auto">
+              <p className="text-xs uppercase tracking-[0.2em] text-slate-500">{stepLabel(4)}</p>
               <h2 className="mt-2 text-xl font-semibold">任务信息</h2>
               <p className="mt-1 text-sm text-slate-500">
-                以下为本次任务输入（task_input），将并入编排与技能上下文；标题留空则使用自动摘要。
+                以下为本次任务输入，将并入编排与技能上下文；标题留空则使用自动摘要。
               </p>
 
-              <div className="mt-4 grid gap-3 sm:grid-cols-2">
-                <label className="block space-y-1.5 text-sm sm:col-span-2">
+              <div className="mt-4 grid grid-cols-1 gap-3">
+                <label className="block space-y-1.5 text-sm">
                   <span className="text-slate-400">任务标题</span>
                   <input
                     type="text"
@@ -988,7 +1178,7 @@ function WorkshopPageInner() {
                     className="w-full rounded-xl border border-slate-700 bg-slate-950/70 px-3 py-2.5 text-sm text-white outline-none transition focus:border-blue-500"
                   />
                 </label>
-                <label className="block space-y-1.5 text-sm sm:col-span-2">
+                <label className="block space-y-1.5 text-sm">
                   <span className="text-slate-400">背景补充</span>
                   <textarea
                     value={taskBackground}
@@ -998,7 +1188,7 @@ function WorkshopPageInner() {
                     className="w-full resize-y rounded-xl border border-slate-700 bg-slate-950/70 px-3 py-2.5 text-sm text-white outline-none transition focus:border-blue-500"
                   />
                 </label>
-                <label className="block space-y-1.5 text-sm sm:col-span-2">
+                <label className="block space-y-1.5 text-sm">
                   <span className="text-slate-400">任务目标</span>
                   <textarea
                     value={taskObjective}
@@ -1028,8 +1218,8 @@ function WorkshopPageInner() {
                     className="w-full rounded-xl border border-slate-700 bg-slate-950/70 px-3 py-2.5 text-sm text-white outline-none transition focus:border-blue-500"
                   />
                 </label>
-                <label className="block space-y-1.5 text-sm sm:col-span-2">
-                  <span className="text-slate-400">附加要求（extra）</span>
+                <label className="block space-y-1.5 text-sm">
+                  <span className="text-slate-400">附加要求</span>
                   <textarea
                     value={taskExtra}
                     onChange={(e) => setTaskExtra(e.target.value)}
@@ -1045,32 +1235,34 @@ function WorkshopPageInner() {
               ) : null}
               {mode === "refine" && sourceOutputId && sourceMaterialPreview ? (
                 <p className="mt-2 rounded-2xl border border-amber-700/35 bg-amber-950/25 px-3 py-2 text-xs text-amber-200/90">
-                  优化来源：<span className="font-mono">{sourceOutputId}</span>
-                  ，已映射至本轮 <span className="font-mono">source_output_id</span> /
-                  <span className="font-mono">source_material</span>
+                  优化来源输出 ID：<span className="font-mono">{sourceOutputId}</span>
+                  ，已作为本轮的来源输出与来源素材参与编排。
                 </p>
               ) : null}
 
               <div className="mt-5 space-y-4">
-                <div className="rounded-2xl border border-slate-800 bg-slate-950/40 p-4">
-                  <div>
-                    <p className="text-xs uppercase tracking-[0.16em] text-slate-500">Hermes 编排下发汇总</p>
-                    <p className="mt-1 text-sm text-slate-400">
-                      Step 1–3 对应信息；与点击「开始生成」时 POST <span className="font-mono text-slate-300">/tasks/execute</span>{" "}
-                      中的 <span className="font-mono text-slate-300">project_id</span>、
-                      <span className="font-mono text-slate-300">scenario_id</span>、
-                      <span className="font-mono text-slate-300">task_input</span>、
-                      <span className="font-mono text-slate-300">user_message</span>、
-                      <span className="font-mono text-slate-300">overrides</span> 一致
-                    </p>
-                  </div>
+                <details className="group rounded-2xl border border-slate-800 bg-slate-950/40 p-4 [&_summary::-webkit-details-marker]:hidden">
+                  <summary className="cursor-pointer list-none outline-none marker:content-none">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="text-xs uppercase tracking-[0.16em] text-slate-500">编排下发汇总</p>
+                        <p className="mt-1 text-sm text-slate-400">
+                          {stepRangeLabel(1, 3)} 对应信息；{TASK_EXECUTE_HINT}
+                        </p>
+                      </div>
+                      <span className="shrink-0 pt-0.5 text-xs text-slate-500 transition group-open:text-slate-400">
+                        <span className="group-open:hidden">展开</span>
+                        <span className="hidden group-open:inline">收起</span>
+                      </span>
+                    </div>
+                  </summary>
 
                   <div className="mt-4 space-y-4 border-t border-slate-800/80 pt-4">
                     {(
                       [
-                        { title: "Step 1", subtitle: "结果处理模式", rows: agentExecutePreview.step1Rows },
-                        { title: "Step 2", subtitle: "项目上下文", rows: agentExecutePreview.step2Rows },
-                        { title: "Step 3", subtitle: "场景与技能", rows: agentExecutePreview.step3Rows },
+                        { title: stepLabel(1), subtitle: "结果处理模式", rows: agentExecutePreview.step1Rows },
+                        { title: stepLabel(2), subtitle: "项目上下文", rows: agentExecutePreview.step2Rows },
+                        { title: stepLabel(3), subtitle: "场景与技能", rows: agentExecutePreview.step3Rows },
                       ] as const
                     ).map((block) => (
                       <div key={block.title}>
@@ -1095,23 +1287,23 @@ function WorkshopPageInner() {
                   </div>
 
                   <div className="mt-4 border-t border-slate-800/80 pt-4">
-                    <p className="text-xs font-medium text-slate-400">task_input（JSON）</p>
+                    <p className="text-xs font-medium text-slate-400">{taskInputSectionTitle()}</p>
                     <pre className="mt-1 max-h-28 overflow-auto rounded-lg border border-slate-800 bg-slate-950/80 p-2 font-mono text-[11px] leading-relaxed text-slate-300">
                       {agentExecutePreview.taskInputJson}
                     </pre>
-                    <p className="mt-3 text-xs font-medium text-slate-400">user_message（JSON 内容）</p>
+                    <p className="mt-3 text-xs font-medium text-slate-400">{userMessageSectionTitle()}</p>
                     <pre className="mt-1 max-h-36 overflow-auto rounded-lg border border-slate-800 bg-slate-950/80 p-2 font-mono text-[11px] leading-relaxed text-slate-300">
                       {agentExecutePreview.userMessageJson}
                     </pre>
                   </div>
-                </div>
+                </details>
 
                 <div className="rounded-2xl border border-slate-800 bg-slate-950/40 p-4">
                   <div className="flex flex-wrap items-start justify-between gap-2">
                     <div>
                       <p className="text-xs uppercase tracking-[0.16em] text-slate-500">已沉淀输出</p>
                       <p className="mt-1 text-sm text-slate-400">
-                        当前项目下，与 Step 3 所选场景关联的 outputs 历史记录
+                        当前项目下，与{stepLabel(3)}所选场景关联的历史输出记录
                       </p>
                     </div>
                     {selectedProjectId ? (
@@ -1129,7 +1321,7 @@ function WorkshopPageInner() {
                     <p className="mt-3 text-sm text-slate-400">加载产出列表…</p>
                   ) : scenarioLinkedOutputs.length === 0 ? (
                     <p className="mt-3 text-sm text-slate-500">
-                      该场景下尚无已沉淀输出；编排执行成功并写入 outputs 后将显示在此。
+                      该场景下尚无已沉淀输出；编排执行成功并写入后将显示在此。
                     </p>
                   ) : (
                     <ul className="mt-3 max-h-56 space-y-2 overflow-y-auto pr-1">
@@ -1150,7 +1342,7 @@ function WorkshopPageInner() {
                             </div>
                             <div className="mt-1 flex flex-wrap gap-2 text-xs text-slate-500">
                               <span className="rounded border border-slate-700 px-1.5 py-0.5 text-slate-400">
-                                {o.status}
+                                {outputStatusLabel(o.status)}
                               </span>
                               {o.template_id ? (
                                 <span className="text-slate-500">模板 {o.template_id}</span>
@@ -1179,10 +1371,7 @@ function WorkshopPageInner() {
               </button>
             </div>
 
-          </div>
-
-          <aside className="min-h-0 space-y-6 xl:sticky xl:top-6 xl:self-start">
-            <section className="rounded-3xl border border-slate-800 bg-slate-900/50 p-6">
+            <section className="min-h-0 rounded-3xl border border-slate-800 bg-slate-900/50 p-6 xl:max-h-[calc(100vh-3rem)] xl:overflow-y-auto">
               <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
                 <h2 className="text-xl font-semibold">执行结果</h2>
                 <div className="flex flex-wrap items-center gap-2 sm:gap-3">
@@ -1264,52 +1453,136 @@ function WorkshopPageInner() {
                 </div>
               ) : null}
 
-              <div className="mb-3 rounded-2xl border border-slate-700/90 bg-slate-900/70 p-3">
-                <p className="text-xs font-medium uppercase tracking-[0.14em] text-slate-500">产出物缩略</p>
-                <p className="mt-0.5 text-[11px] text-slate-500">与下方「内容详情」同一正文，缩放展示便于扫版</p>
-                <div className="relative mt-2 flex h-44 items-start justify-center overflow-hidden rounded-xl border border-slate-600/80 bg-gradient-to-b from-slate-900 to-slate-950 shadow-inner">
-                  <div
-                    className="pointer-events-none absolute inset-x-0 bottom-0 z-[1] h-12 bg-gradient-to-t from-slate-950 via-slate-950/90 to-transparent"
-                    aria-hidden
-                  />
-                  <div
-                    className="origin-top border border-slate-600/60 bg-slate-900/95 shadow-md"
-                    style={{
-                      transform: "scale(0.26)",
-                      width: "min(42rem, 92vw)",
-                    }}
-                  >
-                    <pre className="max-h-[32rem] whitespace-pre-wrap break-words px-4 py-3 font-mono text-sm leading-relaxed text-slate-200">
-                      {outputPreviewSlice}
-                    </pre>
-                  </div>
-                </div>
-              </div>
-
-              <p className="mb-2 text-xs font-medium uppercase tracking-[0.14em] text-slate-500">内容详情</p>
-              <div className="min-h-48 max-h-[min(32rem,calc(100vh-12rem))] overflow-y-auto rounded-2xl border border-slate-700 bg-slate-950/60 p-5 xl:min-h-72">
-                {genStatus === "idle" && !output && (
-                  <p className="text-sm text-slate-500">点击「开始」后在此查看输出</p>
-                )}
-                {genStatus === "generating" && !output && (
-                  <p className="text-sm text-slate-400">正在执行，请稍候…</p>
-                )}
-                {errorMsg && <p className="text-sm text-red-400">❌ {errorMsg}</p>}
-                {output && (
-                  <pre className="whitespace-pre-wrap font-mono text-sm leading-relaxed text-slate-200">
-                    {output}
-                    {genStatus === "generating" && (
-                      <span className="ml-1 inline-block h-4 w-2 animate-pulse bg-blue-400 align-middle" />
-                    )}
-                  </pre>
-                )}
-                <div ref={outputEndRef} />
-              </div>
+              <WorkshopOutputPanel
+                content={output}
+                format={outputArtifactFormat}
+                genStatus={genStatus}
+                errorMsg={errorMsg}
+                downloadTitle={taskTitleCustom.trim() || derivedTaskTitle}
+                outputEndRef={outputEndRef}
+              />
             </section>
+            </div>
           </aside>
         </section>
       </div>
     </main>
+  );
+}
+
+type EnrichedSkillBinding = ScenarioSkillBinding & {
+  displayName: string;
+  description: string;
+  resolvedTemplateLabel?: string;
+};
+
+function ScenarioSkillsBlock({
+  parsed,
+  bindings,
+  runSkillNames,
+  selectedSkill,
+  onSelectSkill,
+}: {
+  parsed: ParsedScenarioSkills;
+  bindings: EnrichedSkillBinding[];
+  runSkillNames: string[];
+  selectedSkill: string | null;
+  onSelectSkill: (name: string) => void;
+}) {
+  return (
+    <div className="space-y-3">
+      <div className="rounded-2xl border border-slate-800 bg-slate-950/50 px-4 py-3 text-sm">
+        <span className="text-slate-500">绑定模式</span>
+        <p className="mt-1 text-slate-200">
+          {skillsPolicyModeLabel(parsed.mode)}
+          {parsed.allowAgentFreeChoice
+            ? " · 允许智能体在合同范围内自选"
+            : " · 须按下列绑定执行"}
+        </p>
+      </div>
+
+      {bindings.length > 0 ? (
+        <div className="grid gap-2 sm:grid-cols-2">
+          {bindings.map((binding) => {
+            const canRun = runSkillNames.includes(binding.name);
+            const active = selectedSkill === binding.name;
+            const sourceLabel =
+              binding.source === "allowed"
+                ? "强制绑定"
+                : binding.source === "preferred"
+                  ? "偏好"
+                  : "输出模版";
+            const body = (
+              <>
+                <div className="flex flex-wrap items-start justify-between gap-2">
+                  <span className="font-medium text-white">{binding.displayName}</span>
+                  <span className="rounded-full border border-slate-600 px-2 py-0.5 text-[10px] text-slate-400">
+                    {sourceLabel}
+                  </span>
+                </div>
+                <p className="mt-1 font-mono text-xs text-slate-500">{binding.name}</p>
+                {binding.description ? (
+                  <p className="mt-2 line-clamp-3 text-xs leading-relaxed text-slate-400">
+                    {binding.description}
+                  </p>
+                ) : null}
+                {binding.resolvedTemplateLabel || binding.templatePath ? (
+                  <p className="mt-2 text-xs text-slate-400">
+                    输出模版：
+                    <span className="text-slate-200">
+                      {binding.resolvedTemplateLabel ?? binding.templatePath}
+                    </span>
+                  </p>
+                ) : null}
+                {canRun && runSkillNames.length > 1 && active ? (
+                  <span className="mt-2 block text-xs text-blue-300">将用于本次执行</span>
+                ) : null}
+                {canRun && runSkillNames.length === 1 ? (
+                  <span className="mt-2 block text-xs text-blue-300/90">本次执行使用该技能</span>
+                ) : null}
+              </>
+            );
+            if (canRun && runSkillNames.length > 1) {
+              return (
+                <button
+                  key={`${binding.name}-${binding.source}`}
+                  type="button"
+                  onClick={() => onSelectSkill(binding.name)}
+                  className={`rounded-2xl border p-4 text-left text-sm transition ${
+                    active
+                      ? "border-blue-500 bg-blue-500/10"
+                      : "border-slate-700 bg-slate-950/60 hover:border-slate-600"
+                  }`}
+                >
+                  {body}
+                </button>
+              );
+            }
+            return (
+              <div
+                key={`${binding.name}-${binding.source}`}
+                className="rounded-2xl border border-slate-800 bg-slate-950/60 p-4 text-sm"
+              >
+                {body}
+              </div>
+            );
+          })}
+        </div>
+      ) : (
+        <p className="rounded-2xl border border-dashed border-slate-700 bg-slate-950/30 px-4 py-6 text-center text-sm text-slate-400">
+          本场景未强制绑定具体技能。
+          {parsed.mode === "agent_select" || parsed.allowAgentFreeChoice
+            ? " 若需固定技能，请在场景编排中开启「强制绑定技能」并选择技能包后发布。"
+            : " 请在场景编排中配置技能或输出模版后重新发布。"}
+        </p>
+      )}
+
+      {bindings.length > 0 && runSkillNames.length === 0 ? (
+        <p className="text-xs text-amber-400/90">
+          已展示绑定信息，但尚无可执行白名单。请在场景编排中将技能加入「强制绑定 Skill」并发布后，再在本页执行。
+        </p>
+      ) : null}
+    </div>
   );
 }
 

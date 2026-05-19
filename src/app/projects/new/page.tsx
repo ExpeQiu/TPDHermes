@@ -153,7 +153,7 @@ export default function NewProjectPage() {
               onChange={(e) =>
                 setForm({ ...form, constraints: e.target.value })
               }
-              placeholder='如：{"字数": 2000, "格式": "JSON"} 或普通文本描述'
+              placeholder='如：{"字数": 2000, "格式": "结构化"} 或普通文本描述'
               rows={3}
               className={inputCls + " resize-none"}
             />

@@ -13,6 +13,12 @@ import { apiDelete, apiFetch, apiGet, apiPost, getPublicApiBase } from "@/lib/ap
 import { CONTENT_MAX_CLASS } from "@/lib/content-shell";
 import { KbMarkdown } from "@/components/kb-markdown";
 import type { KbMarkdownAssetContext } from "@/lib/kb-markdown-assets";
+import {
+  fieldLabel,
+  kbSourceTypeLabel,
+  kgKindLabel,
+  runStatusLabel,
+} from "@/lib/ui-labels";
 
 // ============== 类型 ==============
 interface KBEntry {
@@ -1092,7 +1098,7 @@ export default function KnowledgePage() {
         </div>
         {workspaceMode === "harvest" ? (
           <p className="text-sm text-emerald-300 mb-4">
-            对话收割条目（source_type=conversation_harvest），草稿默认未发布，可在详情面板审核发布。
+            对话收割条目，草稿默认未发布，可在详情面板审核发布。
           </p>
         ) : (
           <div className="flex flex-wrap items-center gap-2 mb-4">
@@ -1137,8 +1143,8 @@ export default function KnowledgePage() {
                     </span>
                   ) : null}
                   {entry.source_type ? (
-                    <span className="text-[10px] uppercase tracking-wide text-emerald-200/90 bg-emerald-500/15 px-2 py-1 rounded shrink-0 max-w-[120px] truncate" title={entry.source_type}>
-                      {entry.source_type}
+                    <span className="text-[10px] uppercase tracking-wide text-emerald-200/90 bg-emerald-500/15 px-2 py-1 rounded shrink-0 max-w-[120px] truncate" title={kbSourceTypeLabel(entry.source_type)}>
+                      {kbSourceTypeLabel(entry.source_type)}
                     </span>
                   ) : null}
                   <span className="text-xs text-slate-500 bg-slate-700 px-2 py-1 rounded shrink-0">
@@ -1330,7 +1336,7 @@ export default function KnowledgePage() {
             onClick={() => void doKgExport()}
             className="rounded-lg border border-slate-600 px-4 py-2 text-sm"
           >
-            导出 JSON
+            导出数据
           </button>
         </div>
         {nodesBlock ? (
@@ -1365,8 +1371,7 @@ export default function KnowledgePage() {
         ) : null}
         <div>
           <p className="text-sm text-slate-400 mb-2">
-            批量导入（JSON：brands / vehicles / tech_insights / planned_vehicles / core_techs /
-            relations）
+            批量导入（品牌、车型、技术洞察、规划车型、核心技术及关系等结构化字段）
           </p>
           <textarea
             value={kgImportText}
@@ -1393,7 +1398,7 @@ export default function KnowledgePage() {
               >
                 {KG_KINDS.map((k) => (
                   <option key={k} value={k}>
-                    {k}
+                    {kgKindLabel(k)}
                   </option>
                 ))}
               </select>
@@ -1417,7 +1422,7 @@ export default function KnowledgePage() {
             <div className="grid gap-2 sm:grid-cols-2">
               <input
                 className="rounded border border-slate-700 bg-slate-900 px-2 py-1 text-sm"
-                placeholder="rel_type"
+                placeholder="关系类型，如 HAS_INSIGHT"
                 value={relForm.rel_type}
                 onChange={(e) =>
                   setRelForm((f) => ({ ...f, rel_type: e.target.value }))
@@ -1425,7 +1430,7 @@ export default function KnowledgePage() {
               />
               <input
                 className="rounded border border-slate-700 bg-slate-900 px-2 py-1 text-sm"
-                placeholder="src_kind"
+                placeholder="源实体类型，如 Vehicle"
                 value={relForm.src_kind}
                 onChange={(e) =>
                   setRelForm((f) => ({ ...f, src_kind: e.target.value }))
@@ -1433,7 +1438,7 @@ export default function KnowledgePage() {
               />
               <input
                 className="rounded border border-slate-700 bg-slate-900 px-2 py-1 text-sm"
-                placeholder="src_id"
+                placeholder="源实体 ID"
                 value={relForm.src_id}
                 onChange={(e) =>
                   setRelForm((f) => ({ ...f, src_id: e.target.value }))
@@ -1441,7 +1446,7 @@ export default function KnowledgePage() {
               />
               <input
                 className="rounded border border-slate-700 bg-slate-900 px-2 py-1 text-sm"
-                placeholder="dst_kind"
+                placeholder="目标实体类型"
                 value={relForm.dst_kind}
                 onChange={(e) =>
                   setRelForm((f) => ({ ...f, dst_kind: e.target.value }))
@@ -1449,7 +1454,7 @@ export default function KnowledgePage() {
               />
               <input
                 className="rounded border border-slate-700 bg-slate-900 px-2 py-1 text-sm"
-                placeholder="dst_id"
+                placeholder="目标实体 ID"
                 value={relForm.dst_id}
                 onChange={(e) =>
                   setRelForm((f) => ({ ...f, dst_id: e.target.value }))
@@ -1543,7 +1548,7 @@ export default function KnowledgePage() {
               throw new Error("需为对象");
             }
           } catch {
-            setIngestMessage("upload_doc_ids JSON 须为 { upload_id: doc_id } 对象");
+            setIngestMessage("上传 ID 映射须为「上传 ID → 文档 ID」的 JSON 对象");
             setIngestBusy(false);
             return;
           }
@@ -1572,7 +1577,9 @@ export default function KnowledgePage() {
         setIngestJobId(jid);
         setIngestJobView(report);
         setIngestMessage(
-          typeof report.status === "string" ? `任务状态：${report.status}` : "导入已完成",
+          typeof report.status === "string"
+            ? `任务状态：${runStatusLabel(report.status)}`
+            : "导入已完成",
         );
         void reloadKbBrowse();
         void reloadBrowseTree();
@@ -1591,7 +1598,7 @@ export default function KnowledgePage() {
           result: Record<string, unknown> | null;
         }>(`/kb/ingest-jobs/${encodeURIComponent(ingestJobId)}`);
         setIngestJobView(row.result ?? { status: row.status });
-        setIngestMessage(`任务 ${ingestJobId}：${row.status}`);
+        setIngestMessage(`任务 ${ingestJobId}：${runStatusLabel(row.status)}`);
       } catch (e) {
         setIngestMessage(e instanceof Error ? e.message : "查询任务失败");
       }
@@ -1601,20 +1608,20 @@ export default function KnowledgePage() {
       <div className="space-y-6 max-w-3xl">
         <p className="text-sm text-slate-400">
           上传 Markdown / 纯文本 → 写入外部 Chroma → 同步 kb_cache。需后端可访问{" "}
-          <code className="text-emerald-200/90">CHROMA_HOST</code>。
+          外部向量库服务。
         </p>
         <div className="grid gap-4 sm:grid-cols-2">
           <label className="block text-sm">
-            <span className="text-slate-400">collection</span>
+            <span className="text-slate-400">知识集合</span>
             <input
               value={ingestCollection}
               onChange={(e) => setIngestCollection(e.target.value)}
-              placeholder="public.structured_tech.topic"
+              placeholder="如：public.structured_tech.topic"
               className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm"
             />
           </label>
           <label className="block text-sm">
-            <span className="text-slate-400">domain</span>
+            <span className="text-slate-400">业务域</span>
             <input
               value={ingestDomain}
               onChange={(e) => setIngestDomain(e.target.value)}
@@ -1622,7 +1629,7 @@ export default function KnowledgePage() {
             />
           </label>
           <label className="block text-sm sm:col-span-2">
-            <span className="text-slate-400">folder_path</span>
+            <span className="text-slate-400">目录路径</span>
             <input
               value={ingestFolderPath}
               onChange={(e) => setIngestFolderPath(e.target.value)}
@@ -1630,7 +1637,7 @@ export default function KnowledgePage() {
             />
           </label>
           <label className="block text-sm sm:col-span-2">
-            <span className="text-slate-400">cache sync project_id</span>
+            <span className="text-slate-400">缓存同步项目 ID</span>
             <input
               value={ingestProjectId}
               onChange={(e) => setIngestProjectId(e.target.value)}
@@ -1638,7 +1645,7 @@ export default function KnowledgePage() {
             />
           </label>
           <label className="block text-sm">
-            <span className="text-slate-400">上传时 doc_id（可选，写入服务器）</span>
+            <span className="text-slate-400">上传时文档 ID（可选，写入服务器）</span>
             <input
               value={ingestDocIdOnUpload}
               onChange={(e) => setIngestDocIdOnUpload(e.target.value)}
@@ -1660,7 +1667,7 @@ export default function KnowledgePage() {
             </select>
           </label>
           <label className="block text-sm sm:col-span-2">
-            <span className="text-slate-400">导入时 upload_id → doc_id 映射（JSON 可选）</span>
+            <span className="text-slate-400">导入时上传 ID → 文档 ID 映射（JSON 可选）</span>
             <input
               value={ingestUploadDocIdsJson}
               onChange={(e) => setIngestUploadDocIdsJson(e.target.value)}
@@ -1680,7 +1687,7 @@ export default function KnowledgePage() {
           />
           {ingestUploadIds.length > 0 ? (
             <p className="text-xs text-slate-500 mt-2">
-              已选 upload_id：{ingestUploadIds.join(", ")}
+              已选上传 ID：{ingestUploadIds.join(", ")}
             </p>
           ) : null}
         </div>
@@ -1775,32 +1782,32 @@ export default function KnowledgePage() {
           </div>
           {entry.doc_id ? (
             <div>
-              <p className="text-xs text-slate-500 uppercase tracking-wide mb-1">doc_id</p>
+              <p className="text-xs text-slate-500 uppercase tracking-wide mb-1">{fieldLabel("doc_id")}</p>
               <p className="text-slate-300 font-mono text-xs break-all">{entry.doc_id}</p>
             </div>
           ) : null}
           {entry.source_type ? (
             <div>
-              <p className="text-xs text-slate-500 uppercase tracking-wide mb-1">source_type</p>
-              <p className="text-slate-300 text-sm font-mono">{entry.source_type}</p>
+              <p className="text-xs text-slate-500 uppercase tracking-wide mb-1">{fieldLabel("source_type")}</p>
+              <p className="text-slate-300 text-sm">{kbSourceTypeLabel(entry.source_type)}</p>
             </div>
           ) : null}
           {entry.conversation_id ? (
             <div>
-              <p className="text-xs text-slate-500 uppercase tracking-wide mb-1">conversation_id</p>
+              <p className="text-xs text-slate-500 uppercase tracking-wide mb-1">{fieldLabel("conversation_id")}</p>
               <p className="text-slate-300 text-sm font-mono break-all">{entry.conversation_id}</p>
             </div>
           ) : null}
           {entry.confidence !== undefined && entry.confidence !== null && entry.confidence !== "" ? (
             <div>
-              <p className="text-xs text-slate-500 uppercase tracking-wide mb-1">confidence</p>
+              <p className="text-xs text-slate-500 uppercase tracking-wide mb-1">{fieldLabel("confidence")}</p>
               <p className="text-slate-300 text-sm">{String(entry.confidence)}</p>
             </div>
           ) : null}
           {entry.harvested_from_user_confirmed !== undefined ? (
             <div>
               <p className="text-xs text-slate-500 uppercase tracking-wide mb-1">
-                harvested_from_user_confirmed
+                {fieldLabel("harvested_from_user_confirmed")}
               </p>
               <p className="text-slate-300 text-sm">
                 {entry.harvested_from_user_confirmed ? "是" : "否"}
@@ -1844,7 +1851,7 @@ export default function KnowledgePage() {
                 <p className="text-xs text-slate-400 mt-2">{publishMessage}</p>
               ) : null}
               <p className="text-xs text-slate-600 mt-2">
-                调用 `POST /api/v1/kb/publish`，project_id={projectId}
+                通过知识库发布接口同步，当前项目 ID：{projectId}
               </p>
             </div>
           ) : null}
@@ -1857,11 +1864,11 @@ export default function KnowledgePage() {
             </div>
           </div>
           <div>
-            <p className="text-xs text-slate-500 uppercase tracking-wide mb-1">Collection</p>
+            <p className="text-xs text-slate-500 uppercase tracking-wide mb-1">{fieldLabel("collection")}</p>
             <p className="text-slate-300">{entry.collection}</p>
           </div>
           <div>
-            <p className="text-xs text-slate-500 uppercase tracking-wide mb-1">linked_kg_ids（metadata）</p>
+            <p className="text-xs text-slate-500 uppercase tracking-wide mb-1">关联图谱 ID（元数据）</p>
             <p className="text-slate-300 text-sm font-mono">
               {entry.linked_kg_ids?.length
                 ? entry.linked_kg_ids.join(", ")
@@ -1870,7 +1877,7 @@ export default function KnowledgePage() {
           </div>
           <div>
             <p className="text-xs text-slate-500 uppercase tracking-wide mb-2">
-              图谱关联（kb_kg_link）
+              图谱关联
             </p>
             <div className="flex gap-2 flex-wrap mb-2">
               <select
@@ -1880,7 +1887,7 @@ export default function KnowledgePage() {
               >
                 {KG_KINDS.map((k) => (
                   <option key={k} value={k}>
-                    {k}
+                    {kgKindLabel(k)}
                   </option>
                 ))}
               </select>
@@ -1916,7 +1923,7 @@ export default function KnowledgePage() {
                 </li>
               ))}
             </ul>
-            <p className="text-xs text-slate-600 mt-2">project_id 上下文：{projectId}</p>
+            <p className="text-xs text-slate-600 mt-2">当前项目 ID：{projectId}</p>
           </div>
           {entry.projects.length > 0 && (
             <div>
@@ -1955,7 +1962,7 @@ export default function KnowledgePage() {
                 公共知识库：<strong className="text-slate-200">目录树</strong>治理与{" "}
                 <strong className="text-slate-200">知识图谱</strong>
                 信息点；执行侧仍只消费场景{" "}
-                <code className="text-emerald-200/90">knowledge_policy.collections</code>。
+                场景合同中的知识集合配置。
               </p>
             </div>
             <div className="flex flex-wrap gap-2">
@@ -1999,7 +2006,7 @@ export default function KnowledgePage() {
         <section id="kb-workspace" className="rounded-3xl border border-slate-800 bg-slate-900/50 p-6">
           <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
             <div>
-              <p className="text-xs uppercase tracking-[0.2em] text-slate-500">Knowledge Workspace</p>
+              <p className="text-xs uppercase tracking-[0.2em] text-slate-500">知识工作台</p>
               <h2 className="mt-2 text-xl font-semibold text-white">目录 · 集合 · 检索 · 图谱 · 导入</h2>
             </div>
             <div className="flex flex-wrap gap-1 rounded-lg border border-slate-700 bg-slate-800/60 p-1">

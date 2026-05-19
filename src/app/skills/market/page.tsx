@@ -381,7 +381,7 @@ export default function SkillMarketPage() {
         <section className="rounded-3xl border border-slate-800 bg-slate-900/50 p-6">
           <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
             <div>
-              <p className="text-xs uppercase tracking-[0.2em] text-slate-500">Discover Skills</p>
+              <p className="text-xs uppercase tracking-[0.2em] text-slate-500">发现技能</p>
               <h2 className="mt-2 text-xl font-semibold text-white">浏览与安装</h2>
             </div>
           </div>

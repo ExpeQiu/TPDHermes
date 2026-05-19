@@ -1,77 +1,69 @@
 "use client";
 
-import { Suspense, useEffect, useMemo, useRef, useState } from "react";
+import { Suspense, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { apiGet, apiFetch, readJson } from "@/lib/api";
-import type { TaskExecuteOverrides } from "@/lib/chat-context";
+import { apiGet, apiFetch, apiDelete, readJson } from "@/lib/api";
 import { CONTENT_MAX_CLASS } from "@/lib/content-shell";
-import { LOCAL_SCENARIO_IDS, SCENARIOS, type Scenario } from "@/lib/scenario-presets";
+import { SCENARIOS, type Scenario } from "@/lib/scenario-presets";
+import { scenarioStatusLabel, stepLabel } from "@/lib/ui-labels";
+import {
+  buildScenarioListItems,
+  countLocalTemplates,
+  DISMISSED_PRESETS_KEY,
+  loadDismissedPresetIds,
+  type ScenarioApiRow,
+} from "@/lib/scenario-list";
 
-type OutputTemplateRow = {
+type SkillTemplateMeta = {
   id: string;
-  name: string;
-  category: string | null;
-  format: string | null;
-  version: string;
-  status: string | null;
+  label: string;
+  path: string;
+  tags?: string[];
+  sections?: string[];
 };
 
-type ScenarioApiRow = {
-  id: string;
-  code: string;
+type SkillMetaRow = {
   name: string;
-  description: string | null;
-  status: string;
-  version: string;
+  display_name: string;
+  description: string;
+  templates: SkillTemplateMeta[];
 };
 
-/** GET /scenarios/:id 与保存/回填对齐的字段子集 */
+function resolveTemplateOutputTags(tpl: SkillTemplateMeta | null | undefined): string[] {
+  if (!tpl) return [];
+  if (tpl.tags?.length) return tpl.tags;
+  if (tpl.sections?.length) return tpl.sections;
+  return [];
+}
+
+function resolveTemplateContractSections(tpl: SkillTemplateMeta | null | undefined): string[] {
+  if (!tpl) return [];
+  if (tpl.sections?.length) return tpl.sections;
+  if (tpl.tags?.length) return tpl.tags;
+  return [];
+}
+
 type ScenarioDetail = {
   id: string;
   goal: string | null;
   description: string | null;
   preset_instructions: string | null;
-  opening_hint: string | null;
   knowledge_policy: Record<string, unknown>;
   skills_policy: Record<string, unknown>;
   output_policy: Record<string, unknown>;
 };
 
-function parseOpeningHint(h: string | null | undefined): { deliverable: string; audience: string } {
-  if (!h?.trim()) return { deliverable: "", audience: "" };
-  const dMatch = h.match(/请输出：([^；]*)/);
-  const aMatch = h.match(/受众：(.+)/);
-  return {
-    deliverable: (dMatch?.[1] ?? "").trim(),
-    audience: (aMatch?.[1] ?? "").trim(),
-  };
+const SKILL_TEMPLATE_SEP = "::";
+
+function encodeSkillTemplate(skillName: string, templatePath: string): string {
+  return `${skillName}${SKILL_TEMPLATE_SEP}${templatePath}`;
 }
 
-function parseAudienceDeliverableFromPreset(preset: string): { audience: string; deliverable: string } {
-  let audience = "";
-  let deliverable = "";
-  for (const raw of preset.split("\n")) {
-    const line = raw.trim();
-    if (line.startsWith("目标受众：")) audience = line.slice("目标受众：".length).trim();
-    if (line.startsWith("期望输出：")) deliverable = line.slice("期望输出：".length).trim();
-  }
-  return { audience, deliverable };
-}
-
-function scenarioFromRemoteRow(row: ScenarioApiRow): Scenario {
-  return {
-    id: row.id,
-    title: row.name,
-    summary: row.description ?? "服务端场景，可在右侧完善任务与策略后保存。",
-    goal: "请在「任务目标」中描述本场景要达成的结果。",
-    recommendedTemplate: "自定义",
-    recommendedKnowledgeMode: "按右侧编排中的知识策略",
-    recommendedSections: ["背景", "方案", "总结"],
-    systemContext:
-      row.description?.trim() ||
-      `你协助完成「${row.name}」相关产出：回答专业、结构清晰，并遵守右侧编排中的策略与输出模版约束。`,
-  };
+function decodeSkillTemplate(value: string): { skillName: string; templatePath: string } | null {
+  const i = value.indexOf(SKILL_TEMPLATE_SEP);
+  if (i <= 0) return null;
+  return { skillName: value.slice(0, i), templatePath: value.slice(i + SKILL_TEMPLATE_SEP.length) };
 }
 
 const DEFAULT_SCENARIO_ID = SCENARIOS[0]?.id ?? "general";
@@ -96,26 +88,19 @@ function CreatePageInner() {
 
   const [collections, setCollections] = useState<string[]>([]);
   const [skillsList, setSkillsList] = useState<string[]>([]);
+  const [skillMeta, setSkillMeta] = useState<SkillMetaRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedScenarioId, setSelectedScenarioId] = useState(DEFAULT_SCENARIO_ID);
-  const [selectedKbKeys, setSelectedKbKeys] = useState<string[]>([]);
-  /** 技能合同白名单：与 skills_policy.allowed 对齐，可含当前环境未安装的技能名（不散失、不自动扩为全量） */
-  const [contractAllowedSkills, setContractAllowedSkills] = useState<string[]>([]);
-  const [outputTemplates, setOutputTemplates] = useState<OutputTemplateRow[]>([]);
-  const [selectedOutputTemplateId, setSelectedOutputTemplateId] = useState("");
-  /** 与 tasks 侧 must_follow_template 对齐：为 true 时工坊/任务将按模板与章节强校验 */
-  const [mustFollowTemplate, setMustFollowTemplate] = useState(false);
-  /** 与 output_policy.required_sections 对齐，与服务端回填一致，避免保存时被预设章节静默覆盖 */
-  const [requiredSections, setRequiredSections] = useState<string[]>(
-    () => SCENARIOS[0]?.recommendedSections ?? [],
-  );
-  const [goal, setGoal] = useState("");
-  const [deliverable, setDeliverable] = useState("");
-  const [audience, setAudience] = useState("");
-  const [brief, setBrief] = useState("");
-  const [includeKnowledge, setIncludeKnowledge] = useState(true);
-  const [includeSkills, setIncludeSkills] = useState(false);
   const [remoteList, setRemoteList] = useState<ScenarioApiRow[]>([]);
+
+  const [sceneDescription, setSceneDescription] = useState("");
+  const [resultDescription, setResultDescription] = useState("");
+  const [forceBindSkill, setForceBindSkill] = useState(false);
+  const [forceBindKb, setForceBindKb] = useState(false);
+  const [contractAllowedSkills, setContractAllowedSkills] = useState<string[]>([]);
+  const [selectedKbKeys, setSelectedKbKeys] = useState<string[]>([]);
+  const [selectedSkillTemplate, setSelectedSkillTemplate] = useState("");
+
   const [previewText, setPreviewText] = useState("");
   const [previewBusy, setPreviewBusy] = useState(false);
   const [saveBusy, setSaveBusy] = useState(false);
@@ -127,26 +112,24 @@ function CreatePageInner() {
   const [newScenarioDesc, setNewScenarioDesc] = useState("");
   const [addBusy, setAddBusy] = useState(false);
   const [addError, setAddError] = useState("");
-
-  const outputTemplatesRef = useRef<OutputTemplateRow[]>([]);
-  outputTemplatesRef.current = outputTemplates;
+  const [deleteBusy, setDeleteBusy] = useState(false);
+  const [dismissedPresetIds, setDismissedPresetIds] = useState<Set<string>>(loadDismissedPresetIds);
 
   useEffect(() => {
     let cancelled = false;
     Promise.allSettled([
       apiGet<{ collections: string[] }>("/kb/collections"),
       apiGet<{ skills: string[] }>("/ws/skills"),
-      apiGet<OutputTemplateRow[]>("/templates/"),
-    ]).then(([collectionsRes, skillsRes, templatesRes]) => {
+      apiGet<{ skills: SkillMetaRow[] }>("/ws/skills/metadata"),
+    ]).then(([collectionsRes, skillsRes, metaRes]) => {
       if (cancelled) return;
       const nextCollections =
         collectionsRes.status === "fulfilled" ? collectionsRes.value.collections : [];
       const nextSkills = skillsRes.status === "fulfilled" ? skillsRes.value.skills : [];
-      const nextTemplates =
-        templatesRes.status === "fulfilled" ? templatesRes.value : [];
+      const nextMeta = metaRes.status === "fulfilled" ? metaRes.value.skills : [];
       setCollections(nextCollections);
       setSkillsList(nextSkills);
-      setOutputTemplates(nextTemplates);
+      setSkillMeta(nextMeta);
       if (nextCollections.length > 0) {
         setSelectedKbKeys((current) => (current.length > 0 ? current : [nextCollections[0]]));
       }
@@ -168,12 +151,10 @@ function CreatePageInner() {
     [remoteList],
   );
 
-  /** 切换场景时从服务端拉取配置：新场景可填、已保存场景可改 */
   useEffect(() => {
     if (loading) return;
     let cancelled = false;
     const cols = collections;
-    const tpls = outputTemplatesRef.current;
     const sid = selectedScenarioId;
 
     (async () => {
@@ -181,21 +162,11 @@ function CreatePageInner() {
         setSaveMessage("");
         const row = await apiGet<ScenarioDetail>(`/scenarios/${sid}`);
         if (cancelled) return;
-        
+
         const localCard = SCENARIOS.find((s) => s.id === sid);
-        const remoteRow = remoteList.find((r) => r.id === sid);
-        const defaultSections =
-          localCard?.recommendedSections ??
-          (remoteRow ? scenarioFromRemoteRow(remoteRow).recommendedSections : ["背景", "方案", "总结"]);
 
-        setGoal(((row.goal ?? "").trim() || localCard?.goal) ?? "");
-
-        const preset = (row.preset_instructions ?? "").trim();
-        const fromPreset = parseAudienceDeliverableFromPreset(preset);
-        const fromOpen = parseOpeningHint(row.opening_hint);
-        setDeliverable(fromPreset.deliverable || fromOpen.deliverable);
-        setAudience(fromPreset.audience || fromOpen.audience);
-        setBrief(preset || (row.description ?? "").trim());
+        setSceneDescription((row.description ?? "").trim() || localCard?.summary || "");
+        setResultDescription((row.goal ?? "").trim() || localCard?.goal || "");
 
         const kp = row.knowledge_policy ?? {};
         const rawCols = Array.isArray(kp.collections) ? (kp.collections as string[]) : [];
@@ -205,7 +176,7 @@ function CreatePageInner() {
           intersect.length > 0 ||
           rawCols.length > 0 ||
           (modeK !== "off" && modeK !== "none" && modeK !== "disabled");
-        setIncludeKnowledge(knowledgeOn);
+        setForceBindKb(knowledgeOn);
         if (intersect.length > 0) setSelectedKbKeys(intersect);
         else if (rawCols.length > 0) setSelectedKbKeys(rawCols);
         else if (knowledgeOn && cols[0]) setSelectedKbKeys([cols[0]]);
@@ -215,94 +186,140 @@ function CreatePageInner() {
         const allowedRaw = Array.isArray(sp.allowed) ? (sp.allowed as unknown[]) : [];
         const allowedNorm = allowedRaw.map((x) => String(x).trim()).filter(Boolean);
         const mode = typeof sp.mode === "string" ? sp.mode : "";
-        const skillsOn = mode === "allowed_list" || allowedNorm.length > 0;
-        setIncludeSkills(skillsOn);
+        setForceBindSkill(mode === "allowed_list" || allowedNorm.length > 0);
         setContractAllowedSkills(allowedNorm);
 
         const op = row.output_policy ?? {};
-        const tid = typeof op.template_id === "string" ? op.template_id : "";
-        if (tid && tpls.some((t) => t.id === tid)) setSelectedOutputTemplateId(tid);
-        else setSelectedOutputTemplateId("");
-        const mft = op.must_follow_template;
-        setMustFollowTemplate(mft === true || mft === "true");
-        if ("required_sections" in op && Array.isArray((op as { required_sections?: unknown }).required_sections)) {
-          const rs = ((op as { required_sections: unknown[] }).required_sections ?? [])
-            .map((x) => String(x).trim())
-            .filter(Boolean);
-          setRequiredSections(rs);
+        const skillName = typeof op.skill_name === "string" ? op.skill_name : "";
+        const skillTpl = typeof op.skill_template === "string" ? op.skill_template : "";
+        if (skillName && skillTpl) {
+          setSelectedSkillTemplate(encodeSkillTemplate(skillName, skillTpl));
         } else {
-          setRequiredSections([...defaultSections]);
+          setSelectedSkillTemplate("");
         }
+
       } catch {
         if (cancelled) return;
         const local = SCENARIOS.find((s) => s.id === sid);
-        setGoal(local?.goal ?? "");
-        setDeliverable("");
-        setAudience("");
-        setBrief("");
-        setIncludeKnowledge(true);
+        setSceneDescription(local?.summary ?? "");
+        setResultDescription(local?.goal ?? "");
+        setForceBindKb(false);
         setSelectedKbKeys(cols[0] ? [cols[0]] : []);
-        setIncludeSkills(false);
+        setForceBindSkill(false);
         setContractAllowedSkills([]);
-        setSelectedOutputTemplateId("");
-        setMustFollowTemplate(false);
-        setRequiredSections(local?.recommendedSections ? [...local.recommendedSections] : []);
+        setSelectedSkillTemplate("");
       }
     })();
 
     return () => {
       cancelled = true;
     };
-  }, [selectedScenarioId, loading, collections, skillsList, remoteList]);
+  }, [selectedScenarioId, loading, collections, remoteList]);
+
+  const scenarioListItems = useMemo(
+    () => buildScenarioListItems(remoteList, dismissedPresetIds),
+    [remoteList, dismissedPresetIds],
+  );
+
+  const localTemplateCount = useMemo(
+    () => countLocalTemplates(remoteList, dismissedPresetIds),
+    [remoteList, dismissedPresetIds],
+  );
+
+  const selectedScenario = useMemo(() => {
+    const fromList = scenarioListItems.find((s) => s.id === selectedScenarioId);
+    if (fromList) return fromList;
+    return scenarioListItems[0] ?? SCENARIOS[0];
+  }, [selectedScenarioId, scenarioListItems]);
+
+  const skillTemplateOptions = useMemo(() => {
+    if (!forceBindSkill || contractAllowedSkills.length === 0) return [];
+    const opts: { value: string; label: string }[] = [];
+    const seen = new Set<string>();
+    for (const skillName of contractAllowedSkills) {
+      const meta = skillMeta.find((m) => m.name === skillName);
+      for (const t of meta?.templates ?? []) {
+        const value = encodeSkillTemplate(skillName, t.path);
+        if (seen.has(value)) continue;
+        seen.add(value);
+        opts.push({ value, label: t.label });
+      }
+    }
+    return opts;
+  }, [forceBindSkill, contractAllowedSkills, skillMeta]);
 
   useEffect(() => {
-    if (outputTemplates.length === 0) return;
-    setSelectedOutputTemplateId((prev) =>
-      prev && outputTemplates.some((t) => t.id === prev) ? prev : "",
+    if (!selectedSkillTemplate) return;
+    if (!skillTemplateOptions.some((o) => o.value === selectedSkillTemplate)) {
+      setSelectedSkillTemplate("");
+    }
+  }, [skillTemplateOptions, selectedSkillTemplate]);
+
+  const kbOrdered = useMemo(
+    () => collections.filter((c) => selectedKbKeys.includes(c)),
+    [collections, selectedKbKeys],
+  );
+
+  const decodedTemplate = useMemo(
+    () => (selectedSkillTemplate ? decodeSkillTemplate(selectedSkillTemplate) : null),
+    [selectedSkillTemplate],
+  );
+
+  const selectedTemplateMeta = useMemo((): SkillTemplateMeta | null => {
+    if (!decodedTemplate) return null;
+    const skill = skillMeta.find((m) => m.name === decodedTemplate.skillName);
+    return skill?.templates.find((t) => t.path === decodedTemplate.templatePath) ?? null;
+  }, [decodedTemplate, skillMeta]);
+
+  const outputTags = useMemo(
+    () => resolveTemplateOutputTags(selectedTemplateMeta),
+    [selectedTemplateMeta],
+  );
+
+  const contractSections = useMemo(
+    () => resolveTemplateContractSections(selectedTemplateMeta),
+    [selectedTemplateMeta],
+  );
+
+  function toggleKb(name: string) {
+    if (!forceBindKb) return;
+    setSelectedKbKeys((prev) => {
+      if (prev.includes(name)) {
+        if (prev.length <= 1) return prev;
+        return prev.filter((x) => x !== name);
+      }
+      return [...prev, name];
+    });
+  }
+
+  function toggleSkill(name: string) {
+    if (!forceBindSkill) return;
+    setContractAllowedSkills((prev) =>
+      prev.includes(name) ? prev.filter((x) => x !== name) : [...prev, name],
     );
-  }, [outputTemplates]);
+  }
 
   async function runServerPreview() {
     if (!selectedScenarioId) return;
     setPreviewBusy(true);
     try {
-      const overrides: TaskExecuteOverrides | undefined = selectedOutputTemplateId
-        ? { output: { template_id: selectedOutputTemplateId } }
-        : undefined;
       const res = await apiFetch(`/scenarios/${selectedScenarioId}/preview`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           project_id: null,
           user_message: "（编排预览）",
-          ...(overrides ? { overrides } : {}),
         }),
       });
       const data = await readJson<unknown>(res);
       setPreviewText(JSON.stringify(data, null, 2));
-      console.info("[create] 编排预览", {
-        scenario_id: selectedScenarioId,
-        template_id: selectedOutputTemplateId || null,
-      });
+      console.info("[create] 编排预览", { scenario_id: selectedScenarioId });
     } catch (e) {
       setPreviewText(e instanceof Error ? e.message : "预览失败");
     } finally {
       setPreviewBusy(false);
     }
   }
-
-  const extraRemoteScenarios = useMemo(
-    () => remoteList.filter((r) => !LOCAL_SCENARIO_IDS.has(r.id)),
-    [remoteList],
-  );
-
-  const selectedScenario = useMemo(() => {
-    const local = SCENARIOS.find((s) => s.id === selectedScenarioId);
-    if (local) return local;
-    const row = remoteList.find((r) => r.id === selectedScenarioId);
-    if (row) return scenarioFromRemoteRow(row);
-    return SCENARIOS[0];
-  }, [selectedScenarioId, remoteList]);
 
   function openAddScenarioModal() {
     setAddError("");
@@ -326,27 +343,6 @@ function CreatePageInner() {
     setAddBusy(true);
     setAddError("");
     try {
-      const knowledge_policy = {
-        mode: "restricted",
-        collections: [] as string[],
-        project_bound: false,
-        top_k: 5,
-        fallback_policy: "cache_allowed",
-      };
-      const skills_policy = {
-        mode: "agent_select",
-        allowed: [] as string[],
-        preferred: [] as string[],
-        forbidden: [] as string[],
-        allow_agent_free_choice: true,
-      };
-      const output_policy = {
-        template_id: null,
-        format: "markdown",
-        must_follow_template: false,
-        required_sections: [] as string[],
-        validation_rules: { must_have_headings: true, must_cite_sources: false },
-      };
       const res = await apiFetch("/scenarios/", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -354,18 +350,15 @@ function CreatePageInner() {
           code,
           name,
           description: newScenarioDesc.trim() || null,
-          goal: "待补充：请在编排页填写任务目标后保存。",
+          goal: "待补充结果说明",
           conversation_mode: "task_oriented",
           domain: {},
-          knowledge_policy,
-          skills_policy,
-          output_policy,
-          preset_instructions: null,
-          opening_hint: null,
+          knowledge_policy: { mode: "restricted", collections: [], project_bound: false, top_k: 5 },
+          skills_policy: { mode: "agent_select", allowed: [], preferred: [], allow_agent_free_choice: true },
+          output_policy: { format: "markdown", required_sections: [], must_follow_template: false },
         }),
       });
-      const created = await readJson<{ id: string; code: string }>(res);
-      console.info("[create] 新建场景", { id: created.id, code: created.code });
+      const created = await readJson<{ id: string }>(res);
       const next = await apiGet<ScenarioApiRow[]>("/scenarios/").catch(() => null);
       if (next) setRemoteList(next);
       setSelectedScenarioId(created.id);
@@ -377,99 +370,52 @@ function CreatePageInner() {
     }
   }
 
-  const kbOrdered = useMemo(
-    () => collections.filter((c) => selectedKbKeys.includes(c)),
-    [collections, selectedKbKeys],
-  );
-
-  const skillsNotInstalled = useMemo(
-    () => contractAllowedSkills.filter((s) => !skillsList.includes(s)),
-    [contractAllowedSkills, skillsList],
-  );
-
-  function toggleKb(name: string) {
-    if (!includeKnowledge) return;
-    setSelectedKbKeys((prev) => {
-      if (prev.includes(name)) {
-        if (prev.length <= 1) return prev;
-        return prev.filter((x) => x !== name);
-      }
-      return [...prev, name];
-    });
-  }
-
-  function toggleSkill(name: string) {
-    if (!includeSkills) return;
-    setContractAllowedSkills((prev) =>
-      prev.includes(name) ? prev.filter((x) => x !== name) : [...prev, name],
-    );
-  }
-
-  const outputTemplateSummary = useMemo(() => {
-    if (!selectedOutputTemplateId) return "场景默认";
-    const row = outputTemplates.find((t) => t.id === selectedOutputTemplateId);
-    if (!row) return selectedOutputTemplateId;
-    const bits = [row.name, row.category, row.format].filter(Boolean);
-    return bits.join(" · ");
-  }, [outputTemplates, selectedOutputTemplateId]);
-
-  /** 将当前表单写入服务端，返回可参与发布与绑定的场景 id（新建预设场景时可能生成新 id） */
-  async function persistScenarioDraftToServer(): Promise<{
-    scenarioId: string;
-    createdNew: boolean;
-    savedCode?: string | null;
-  }> {
+  async function persistScenarioDraftToServer(): Promise<{ scenarioId: string; createdNew: boolean }> {
     if (!selectedScenario) throw new Error("未选择场景");
+
     const presetInstructions = [
-      `【编排保存】场景：${selectedScenario.title}`,
-      goal.trim() ? `任务目标：${goal.trim()}` : `任务目标：${selectedScenario.goal}`,
-      deliverable.trim() ? `期望输出：${deliverable.trim()}` : null,
-      audience.trim() ? `目标受众：${audience.trim()}` : null,
-      brief.trim() ? `补充背景：\n${brief.trim()}` : null,
-      `建议章节：${requiredSections.join("、")}`,
+      `【场景说明】\n${sceneDescription.trim() || selectedScenario.summary}`,
+      `【结果说明】\n${resultDescription.trim() || selectedScenario.goal}`,
+      selectedTemplateMeta
+        ? `【输出模版】${selectedTemplateMeta.label}`
+        : null,
+      contractSections.length > 0 ? `【模版标签】${contractSections.join("、")}` : null,
     ]
       .filter(Boolean)
       .join("\n\n");
 
-    const openingHint = [
-      `请输出：${deliverable.trim() || selectedScenario.recommendedTemplate}`,
-      audience.trim() ? `受众：${audience.trim()}` : null,
-    ]
-      .filter(Boolean)
-      .join("；");
-
     const knowledge_policy = {
-      mode: "restricted",
-      collections: includeKnowledge ? kbOrdered : [],
+      mode: forceBindKb ? "restricted" : "off",
+      collections: forceBindKb ? kbOrdered : [],
       project_bound: false,
       top_k: 5,
       fallback_policy: "cache_allowed",
     };
 
     const skills_policy = {
-      mode: includeSkills ? "allowed_list" : "manual_only",
-      allowed: includeSkills ? contractAllowedSkills : [],
-      preferred: [] as string[],
+      mode: forceBindSkill ? "allowed_list" : "agent_select",
+      allowed: forceBindSkill ? contractAllowedSkills : [],
+      preferred: forceBindSkill && contractAllowedSkills[0] ? [contractAllowedSkills[0]] : [],
       forbidden: [] as string[],
-      allow_agent_free_choice: includeSkills && contractAllowedSkills.length === 0,
+      allow_agent_free_choice: !forceBindSkill,
     };
 
-    const output_policy = {
-      template_id: selectedOutputTemplateId || null,
+    const output_policy: Record<string, unknown> = {
       format: "markdown",
-      must_follow_template: mustFollowTemplate,
-      required_sections: requiredSections,
-      validation_rules: {
-        must_have_headings: true,
-        must_cite_sources: includeKnowledge,
-      },
+      must_follow_template: Boolean(decodedTemplate),
+      required_sections: contractSections,
+      validation_rules: { must_have_headings: true, must_cite_sources: forceBindKb },
+      template_id: null,
     };
+    if (decodedTemplate) {
+      output_policy.skill_name = decodedTemplate.skillName;
+      output_policy.skill_template = decodedTemplate.templatePath;
+    }
 
     const updateBody = {
-      goal: goal.trim() || selectedScenario.goal,
-      description: brief.trim() || selectedScenario.summary,
+      goal: resultDescription.trim() || selectedScenario.goal,
+      description: sceneDescription.trim() || selectedScenario.summary,
       preset_instructions: presetInstructions,
-      opening_hint: openingHint,
       knowledge_policy,
       skills_policy,
       output_policy,
@@ -491,56 +437,36 @@ function CreatePageInner() {
         body: JSON.stringify({
           code,
           name: `${selectedScenario.title}（编排）`,
-          description: selectedScenario.summary,
-          goal: updateBody.goal,
           conversation_mode: "task_oriented",
           domain: {},
-          knowledge_policy,
-          skills_policy,
-          output_policy,
-          preset_instructions: presetInstructions,
-          opening_hint: openingHint,
+          ...updateBody,
         }),
       });
     }
 
-    const saved = await readJson<{ id?: string; code?: string }>(res);
+    const saved = await readJson<{ id?: string }>(res);
     const scenarioId = saved.id ?? selectedScenario.id;
-    if (!scenarioId) throw new Error("保存未返回场景 id");
     if (saved.id && saved.id !== selectedScenario.id) {
       setSelectedScenarioId(saved.id);
     }
-    return { scenarioId, createdNew, savedCode: saved.code };
+    return { scenarioId, createdNew };
   }
 
   async function saveScenarioDraft() {
     setSaveBusy(true);
     setSaveMessage("");
     try {
-      const { createdNew, savedCode, scenarioId } = await persistScenarioDraftToServer();
-      console.info("[create] 场景保存成功", {
-        scenario_id: scenarioId,
-        saved_code: savedCode,
-        createdNew,
-      });
-      setSaveMessage(
-        createdNew
-          ? `已新建场景「${savedCode ?? scenarioId ?? ""}」并写入编排`
-          : "当前场景编排已保存到服务端",
-      );
+      const { createdNew, scenarioId } = await persistScenarioDraftToServer();
+      setSaveMessage(createdNew ? `已新建场景 ${scenarioId}` : "场景编排已保存");
+      console.info("[create] 场景保存", { scenario_id: scenarioId, createdNew });
     } catch (e) {
-      const msg = e instanceof Error ? e.message : "保存失败";
-      setSaveMessage(msg);
-      console.warn("[create] 场景保存失败", msg);
+      setSaveMessage(e instanceof Error ? e.message : "保存失败");
     } finally {
       setSaveBusy(false);
-      apiGet<ScenarioApiRow[]>("/scenarios/")
-        .then(setRemoteList)
-        .catch(() => {});
+      apiGet<ScenarioApiRow[]>("/scenarios/").then(setRemoteList).catch(() => {});
     }
   }
 
-  /** 先持久化当前表单，再调用 POST /scenarios/{id}/publish（需通过合同校验，见后端 _ensure_scenario_publishable） */
   async function publishScenario() {
     setPublishBusy(true);
     setSaveMessage("");
@@ -548,589 +474,499 @@ function CreatePageInner() {
       const { scenarioId } = await persistScenarioDraftToServer();
       const pub = await apiFetch(`/scenarios/${scenarioId}/publish`, { method: "POST" });
       await readJson(pub);
-      setSaveMessage("已保存并发布：可在项目详情中绑定该场景后进入工坊执行。");
-      console.info("[create] 场景发布成功", { scenario_id: scenarioId });
+      setSaveMessage("已保存并发布，可在项目详情中绑定该场景。");
     } catch (e) {
-      const msg = e instanceof Error ? e.message : "发布失败";
-      setSaveMessage(msg);
-      console.warn("[create] 场景发布失败", msg);
+      setSaveMessage(e instanceof Error ? e.message : "发布失败");
     } finally {
       setPublishBusy(false);
-      apiGet<ScenarioApiRow[]>("/scenarios/")
-        .then(setRemoteList)
-        .catch(() => {});
+      apiGet<ScenarioApiRow[]>("/scenarios/").then(setRemoteList).catch(() => {});
+    }
+  }
+
+  const remoteStatus = remoteById.get(selectedScenarioId);
+  const canDeleteServerScenario = Boolean(remoteById.get(selectedScenarioId));
+
+  async function deleteSelectedScenario() {
+    const row = remoteById.get(selectedScenarioId);
+    if (!row) {
+      setSaveMessage("当前场景无服务端记录，无法删除（本地预设仍保留）");
+      return;
+    }
+    const bindHint =
+      "删除后项目中的绑定关系将一并解除，且不可恢复。";
+    if (!window.confirm(`确定删除服务端场景「${row.name}」？\n${bindHint}`)) {
+      return;
+    }
+    setDeleteBusy(true);
+    setSaveMessage("");
+    try {
+      const res = await apiDelete<{
+        ok: boolean;
+        name?: string;
+        project_bindings_removed?: number;
+      }>(`/scenarios/${selectedScenarioId}`);
+      console.info("[create] 场景删除", {
+        scenario_id: selectedScenarioId,
+        bindings: res.project_bindings_removed,
+      });
+      const deletedId = selectedScenarioId;
+      const next = await apiGet<ScenarioApiRow[]>("/scenarios/");
+      setRemoteList(next);
+      setDismissedPresetIds((prev) => {
+        const merged = new Set(prev);
+        merged.add(deletedId);
+        if (typeof window !== "undefined") {
+          sessionStorage.setItem(DISMISSED_PRESETS_KEY, JSON.stringify([...merged]));
+        }
+        return merged;
+      });
+      const remoteIds = new Set(next.map((r) => r.id));
+      const remaining = buildScenarioListItems(next, new Set([...dismissedPresetIds, deletedId]));
+      if (!remoteIds.has(deletedId)) {
+        setSelectedScenarioId(remaining[0]?.id ?? DEFAULT_SCENARIO_ID);
+      }
+      const removed = res.project_bindings_removed ?? 0;
+      setSaveMessage(
+        removed > 0
+          ? `已删除「${res.name ?? row.name}」，并解除 ${removed} 处项目绑定`
+          : `已删除「${res.name ?? row.name}」`,
+      );
+    } catch (e) {
+      setSaveMessage(e instanceof Error ? e.message : "删除失败");
+      console.warn("[create] 场景删除失败", e);
+    } finally {
+      setDeleteBusy(false);
     }
   }
 
   return (
     <main className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 p-4 text-white sm:p-6 md:p-8">
       <div className={CONTENT_MAX_CLASS}>
-        <div className="mb-8">
-          <div className="mb-3 flex items-center gap-3">
-            <Link href="/" className="text-sm text-slate-400 transition hover:text-white">
-              ← 返回首页
-            </Link>
-          </div>
-          <div className="inline-flex items-center gap-2 rounded-full border border-blue-500/30 bg-blue-500/10 px-3 py-1 text-xs font-medium text-blue-200">
+        <header className="mb-8">
+          <Link href="/" className="text-sm text-slate-400 transition hover:text-white">
+            ← 返回首页
+          </Link>
+          <div className="mt-3 inline-flex items-center gap-2 rounded-full border border-blue-500/30 bg-blue-500/10 px-3 py-1 text-xs font-medium text-blue-200">
             <span className="h-2 w-2 rounded-full bg-blue-400" aria-hidden />
             场景编排
           </div>
           <h1 className="mt-4 text-3xl font-bold sm:text-4xl">场景编排</h1>
-          <p className="mt-2 max-w-2xl text-sm text-slate-400 sm:text-base">
-            维护场景合同（说明、知识/技能策略、输出规则）。本页预览仅为结构化合同 JSON，不在此生成正文；执行请从项目进入「对话创作」或「场景输出」。
+          <p className="mt-2 max-w-2xl text-sm text-slate-400">
+            定义场景合同：场景说明、结果说明、可选绑定技能/知识库与输出模版。本页仅预览合同与保存发布，不在此生成正文。
           </p>
-        </div>
+        </header>
 
-        <div className="pb-16">
         <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_minmax(0,1.15fr)_minmax(0,1fr)]">
-          <div className="min-w-0">
-            <div className="rounded-3xl border border-slate-800 bg-slate-900/50 p-6">
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <p className="text-xs uppercase tracking-[0.2em] text-slate-500">Step 1</p>
-                  <h3 className="mt-2 text-xl font-semibold">场景列表</h3>
-                </div>
-                <div className="flex shrink-0 flex-col items-end gap-2">
-                  <button
-                    type="button"
-                    onClick={openAddScenarioModal}
-                    className="rounded-xl border border-slate-600 bg-slate-800/80 px-3 py-1.5 text-xs font-medium text-white transition hover:bg-slate-700"
-                  >
-                    增加
-                  </button>
-                  <p className="max-w-[11rem] text-right text-xs leading-snug text-slate-500 sm:max-w-none sm:text-sm">
-                    本地 {SCENARIOS.length} 个预设 · 服务端已同步 {remoteList.length} 条场景
-                  </p>
-                </div>
+          {/* Step 1: 场景列表 */}
+          <section className="rounded-3xl border border-slate-800 bg-slate-900/50 p-6">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <p className="text-xs uppercase tracking-[0.2em] text-slate-500">{stepLabel(1)}</p>
+                <h2 className="mt-2 text-xl font-semibold">场景列表</h2>
               </div>
-              <div className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-1">
-                {SCENARIOS.map((scenario) => {
+              <div className="flex shrink-0 gap-2">
+                <button
+                  type="button"
+                  onClick={openAddScenarioModal}
+                  disabled={deleteBusy}
+                  className="rounded-xl border border-slate-600 bg-slate-800/80 px-3 py-1.5 text-xs font-medium hover:bg-slate-700 disabled:opacity-50"
+                >
+                  新增
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void deleteSelectedScenario()}
+                  disabled={deleteBusy || !canDeleteServerScenario}
+                  title={
+                    canDeleteServerScenario
+                      ? "删除当前选中的服务端场景"
+                      : "仅本地预设或无服务端记录时不可删"
+                  }
+                  className="rounded-xl border border-red-700/60 bg-red-950/40 px-3 py-1.5 text-xs font-medium text-red-200 hover:bg-red-900/50 disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  {deleteBusy ? "删除中…" : "删除"}
+                </button>
+              </div>
+            </div>
+            <p className="mt-2 text-xs text-slate-500">
+              服务端 {remoteList.length} · 内置模板 {localTemplateCount}
+            </p>
+            <div className="mt-4 grid gap-3">
+              {scenarioListItems.length === 0 ? (
+                <p className="text-sm text-slate-500">暂无场景，可点击「新增」创建。</p>
+              ) : (
+                scenarioListItems.map((scenario) => {
                   const active = scenario.id === selectedScenarioId;
-                  const remote = remoteById.get(scenario.id);
+                  const remote = scenario.remote;
+                  const isLocalTemplate = scenario.isLocalTemplate;
                   return (
                     <button
                       key={scenario.id}
                       type="button"
                       onClick={() => setSelectedScenarioId(scenario.id)}
-                      className={`rounded-2xl border p-5 text-left transition ${
+                      className={`rounded-2xl border p-4 text-left transition ${
                         active
-                          ? "border-blue-500 bg-blue-500/10 shadow-lg shadow-blue-950/20"
-                          : "border-slate-700 bg-slate-950/60 hover:border-slate-600 hover:bg-slate-900/70"
+                          ? "border-blue-500 bg-blue-500/10"
+                          : "border-slate-700 bg-slate-950/60 hover:border-slate-600"
                       }`}
                     >
-                      <div className="flex items-start justify-between gap-3">
-                        <div>
-                          <h4 className="text-base font-semibold text-white">{scenario.title}</h4>
-                          <p className="mt-2 text-sm leading-relaxed text-slate-400">
-                            {scenario.summary}
-                          </p>
-                        </div>
+                      <div className="flex items-start justify-between gap-2">
+                        <h3 className="font-semibold">{scenario.title}</h3>
                         <span
-                          className={`mt-1 h-2.5 w-2.5 rounded-full ${
-                            active ? "bg-blue-400" : "bg-slate-600"
-                          }`}
-                          aria-hidden
+                          className={`h-2 w-2 shrink-0 rounded-full ${active ? "bg-blue-400" : "bg-slate-600"}`}
                         />
                       </div>
-                      <div className="mt-4 flex flex-wrap gap-2">
-                        <span className="rounded-full border border-slate-700 px-2.5 py-1 text-xs text-slate-300">
-                          {scenario.recommendedTemplate}
-                        </span>
-                        <span className="rounded-full border border-slate-700 px-2.5 py-1 text-xs text-slate-400">
-                          {scenario.recommendedKnowledgeMode}
-                        </span>
-                        {remote && (
-                          <span className="rounded-full border border-emerald-700/50 bg-emerald-500/10 px-2.5 py-1 text-xs text-emerald-200">
-                            {remote.status} · v{remote.version}
+                      <p className="mt-1 line-clamp-2 text-xs text-slate-400">{scenario.summary}</p>
+                      <div className="mt-2 flex flex-wrap gap-2">
+                        {remote ? (
+                          <span className="rounded-full border border-emerald-700/50 bg-emerald-500/10 px-2 py-0.5 text-[10px] text-emerald-200">
+                            {scenarioStatusLabel(remote.status)} · v{remote.version}
                           </span>
-                        )}
+                        ) : null}
+                        {isLocalTemplate ? (
+                          <span className="rounded-full border border-slate-600 px-2 py-0.5 text-[10px] text-slate-400">
+                            内置模板
+                          </span>
+                        ) : null}
                       </div>
                     </button>
                   );
-                })}
-                {extraRemoteScenarios.map((row) => {
-                  const active = row.id === selectedScenarioId;
-                  return (
-                    <button
-                      key={row.id}
-                      type="button"
-                      onClick={() => setSelectedScenarioId(row.id)}
-                      className={`rounded-2xl border p-5 text-left transition ${
-                        active
-                          ? "border-violet-500 bg-violet-500/10 shadow-lg shadow-violet-950/20"
-                          : "border-slate-700 bg-slate-950/60 hover:border-slate-600 hover:bg-slate-900/70"
-                      }`}
-                    >
-                      <div className="flex items-start justify-between gap-3">
-                        <div>
-                          <h4 className="text-base font-semibold text-white">{row.name}</h4>
-                          <p className="mt-2 text-sm leading-relaxed text-slate-400">
-                            {row.description ?? "（无描述）"}
-                          </p>
-                        </div>
-                        <span
-                          className={`mt-1 h-2.5 w-2.5 shrink-0 rounded-full ${
-                            active ? "bg-violet-400" : "bg-slate-600"
-                          }`}
-                          aria-hidden
-                        />
-                      </div>
-                      <div className="mt-4 flex flex-wrap gap-2">
-                        <span className="rounded-full border border-violet-700/40 bg-violet-500/10 px-2.5 py-1 text-xs text-violet-200">
-                          服务端
-                        </span>
-                        <span className="rounded-full border border-slate-700 px-2.5 py-1 text-xs text-slate-300">
-                          {row.code}
-                        </span>
-                        <span className="rounded-full border border-emerald-700/50 bg-emerald-500/10 px-2.5 py-1 text-xs text-emerald-200">
-                          {row.status} · v{row.version}
-                        </span>
-                      </div>
-                    </button>
-                  );
-                })}
-              </div>
+                })
+              )}
             </div>
-          </div>
+          </section>
 
-          <div className="min-w-0">
-            <div className="rounded-3xl border border-slate-800 bg-slate-900/50 p-6">
-              <div>
-                <p className="text-xs uppercase tracking-[0.2em] text-slate-500">Step 2</p>
-                <h3 className="mt-2 text-xl font-semibold">场景配置</h3>
-                <p className="mt-1 max-w-xl text-xs leading-relaxed text-slate-500">
-                  为新场景填写编排；切换左侧已保存场景后将自动载入服务端配置，可修改后再在第三步保存。
-                </p>
-              </div>
+          {/* Step 2: 场景配置 */}
+          <section className="rounded-3xl border border-slate-800 bg-slate-900/50 p-6">
+            <p className="text-xs uppercase tracking-[0.2em] text-slate-500">{stepLabel(2)}</p>
+            <h2 className="mt-2 text-xl font-semibold">场景配置</h2>
 
-              <div className="mt-5 grid gap-4 md:grid-cols-2 xl:grid-cols-1">
-                <label className="space-y-2 text-sm">
-                  <span className="text-slate-300">任务目标</span>
-                  <input
-                    value={goal}
-                    onChange={(e) => setGoal(e.target.value)}
-                    placeholder={selectedScenario?.goal}
-                    className="w-full rounded-xl border border-slate-700 bg-slate-950/70 px-4 py-3 text-sm text-white placeholder:text-slate-500 outline-none transition focus:border-blue-500"
-                  />
-                </label>
-
-                <label className="space-y-2 text-sm">
-                  <span className="text-slate-300">期望输出</span>
-                  <input
-                    value={deliverable}
-                    onChange={(e) => setDeliverable(e.target.value)}
-                    placeholder={selectedScenario?.recommendedTemplate}
-                    className="w-full rounded-xl border border-slate-700 bg-slate-950/70 px-4 py-3 text-sm text-white placeholder:text-slate-500 outline-none transition focus:border-blue-500"
-                  />
-                </label>
-
-                <label className="space-y-2 text-sm">
-                  <span className="text-slate-300">目标受众</span>
-                  <input
-                    value={audience}
-                    onChange={(e) => setAudience(e.target.value)}
-                    placeholder="例如：客户技术负责人、项目评审会、市场团队"
-                    className="w-full rounded-xl border border-slate-700 bg-slate-950/70 px-4 py-3 text-sm text-white placeholder:text-slate-500 outline-none transition focus:border-blue-500"
-                  />
-                </label>
-
-                <div className="rounded-2xl border border-slate-800 bg-slate-950/60 p-4 md:col-span-2 xl:col-span-1">
-                  <p className="text-sm font-medium text-white">输出结果</p>
-                  <p className="mt-1 text-xs leading-relaxed text-slate-500">
-                    基于输出模版：选择后将作为编排输出约束参与预览与场景输出页的合同（未选则跟随场景默认）。
-                  </p>
-                  <div className="mt-3 flex flex-wrap items-center gap-2">
-                    <span className="text-xs text-slate-500">当前</span>
-                    {selectedOutputTemplateId ? (
-                      <span
-                        className="max-w-full truncate rounded-full border border-blue-500/70 bg-blue-500/15 px-3 py-1.5 text-xs font-medium text-blue-100"
-                        title={outputTemplateSummary}
-                      >
-                        {outputTemplateSummary}
-                      </span>
-                    ) : (
-                      <span className="rounded-full border border-slate-600 bg-slate-900/40 px-3 py-1.5 text-xs text-slate-400">
-                        场景默认
-                      </span>
-                    )}
-                  </div>
-                  <label className="mt-3 block space-y-2 text-sm">
-                    <span className="text-slate-300">输出模版</span>
-                    <select
-                      value={selectedOutputTemplateId}
-                      onChange={(e) => setSelectedOutputTemplateId(e.target.value)}
-                      className="w-full rounded-xl border border-slate-700 bg-slate-950/70 px-4 py-3 text-sm text-white outline-none transition focus:border-blue-500"
-                    >
-                      <option value="">不指定模版（场景默认）</option>
-                      {outputTemplates.map((t) => (
-                        <option key={t.id} value={t.id}>
-                          {t.name}
-                          {t.category ? ` · ${t.category}` : ""}
-                          {t.format ? ` · ${t.format}` : ""}
-                          {t.version ? ` · v${t.version}` : ""}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <label className="mt-3 flex items-center justify-between gap-3 text-sm">
-                    <span className="text-slate-300">
-                      强制按模版与章节校验
-                      <span className="mt-0.5 block text-xs font-normal text-slate-500">
-                        开启后工单执行会校验模板与建议章节，不满足时输出降级为 draft（与 tasks 合同一致）。
-                      </span>
-                    </span>
-                    <input
-                      type="checkbox"
-                      checked={mustFollowTemplate}
-                      onChange={(e) => setMustFollowTemplate(e.target.checked)}
-                      aria-label="强制按模版与章节校验"
-                    />
-                  </label>
-                  {outputTemplates.length === 0 ? (
-                    <p className="mt-2 text-xs text-amber-400/90">
-                      当前无已登记模版，可在输出模版管理或种子数据中创建后再选。
-                    </p>
-                  ) : null}
-                </div>
-
-                <div className="rounded-2xl border border-slate-800 bg-slate-950/60 p-4 md:col-span-2 xl:col-span-1">
-                  <p className="text-sm font-medium text-white">策略开关</p>
-                  <div className="mt-4 space-y-3 text-sm">
-                    <label className="flex items-center justify-between gap-3">
-                      <span className="text-slate-300">启用知识策略</span>
-                      <input
-                        type="checkbox"
-                        checked={includeKnowledge}
-                        onChange={(e) => setIncludeKnowledge(e.target.checked)}
-                      />
-                    </label>
-                    <label className="flex items-center justify-between gap-3">
-                      <span className="text-slate-300">携带技能策略</span>
-                      <input
-                        type="checkbox"
-                        checked={includeSkills}
-                        onChange={(e) => setIncludeSkills(e.target.checked)}
-                      />
-                    </label>
-                  </div>
-                </div>
-
-                <div className="space-y-2 text-sm md:col-span-2 xl:col-span-1">
-                  <span className="text-slate-300">知识库（可多选）</span>
-                  <div
-                    className={`max-h-40 overflow-y-auto rounded-xl border border-slate-700 bg-slate-950/70 px-3 py-2 ${
-                      !includeKnowledge || collections.length === 0 ? "opacity-50" : ""
-                    }`}
-                  >
-                    {collections.length === 0 ? (
-                      <p className="py-2 text-xs text-slate-500">暂无知识集合，请先在知识侧同步</p>
-                    ) : (
-                      <ul className="space-y-2">
-                        {collections.map((name) => (
-                          <li key={name}>
-                            <label className="flex cursor-pointer items-center gap-2 text-sm text-slate-200">
-                              <input
-                                type="checkbox"
-                                checked={selectedKbKeys.includes(name)}
-                                disabled={!includeKnowledge}
-                                onChange={() => toggleKb(name)}
-                                className="rounded border-slate-600"
-                              />
-                              <span className="truncate">{name}</span>
-                            </label>
-                          </li>
-                        ))}
-                      </ul>
-                    )}
-                  </div>
-                  <p className="text-xs text-slate-500">检索上下文默认使用列表中第一项作为主集合</p>
-                </div>
-
-                <div className="space-y-2 text-sm md:col-span-2 xl:col-span-1">
-                  <span className="text-slate-300">技能（可多选）</span>
-                  <div
-                    className={`max-h-40 min-h-[3rem] overflow-y-auto rounded-xl border border-slate-700 bg-slate-950/70 px-3 py-3 ${
-                      !includeSkills || skillsList.length === 0 ? "opacity-50" : ""
-                    }`}
-                  >
-                    {skillsList.length === 0 ? (
-                      <p className="py-1 text-xs text-slate-500">暂无工坊技能，请先在技能市场安装</p>
-                    ) : (
-                      <div className="flex flex-wrap gap-2">
-                        {skillsList.map((name) => {
-                          const active = contractAllowedSkills.includes(name);
-                          return (
-                            <button
-                              key={name}
-                              type="button"
-                              disabled={!includeSkills}
-                              onClick={() => toggleSkill(name)}
-                              title={name}
-                              className={`max-w-full truncate rounded-full border px-3 py-1.5 text-left font-mono text-xs transition ${
-                                active
-                                  ? "border-blue-500/70 bg-blue-500/15 text-blue-100"
-                                  : "border-slate-600 bg-slate-900/40 text-slate-400 hover:border-slate-500 hover:text-slate-200"
-                              } disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:border-slate-600`}
-                            >
-                              {name}
-                            </button>
-                          );
-                        })}
-                      </div>
-                    )}
-                  </div>
-                  {includeSkills && skillsNotInstalled.length > 0 ? (
-                    <p className="mt-2 text-xs text-amber-400/90">
-                      以下技能不在当前环境已安装列表中，仍将按合同保留：<span className="font-mono">{skillsNotInstalled.join("、")}</span>
-                    </p>
-                  ) : null}
-                  <p className="text-xs text-slate-500">
-                    先开启「携带技能策略」再点选标签；保存后由场景合同约束场景输出页的可选技能范围。
-                  </p>
-                </div>
-
-                <label className="space-y-2 text-sm md:col-span-2 xl:col-span-1">
-                  <span className="text-slate-300">合同章节（output required_sections）</span>
-                  <span className="block text-xs font-normal text-slate-500">
-                    每行一条章节标题，与服务端 output_policy.required_sections 一致；保存/发布时原样写回。
-                  </span>
-                  <textarea
-                    value={requiredSections.join("\n")}
-                    onChange={(e) =>
-                      setRequiredSections(
-                        e.target.value
-                          .split("\n")
-                          .map((line) => line.trim())
-                          .filter(Boolean),
-                      )
-                    }
-                    rows={5}
-                    placeholder={"背景\n方案\n总结"}
-                    className="w-full rounded-xl border border-slate-700 bg-slate-950/70 px-4 py-3 text-sm text-white placeholder:text-slate-600 outline-none transition focus:border-blue-500"
-                  />
-                </label>
-              </div>
-
-              <label className="mt-4 block space-y-2 text-sm">
-                <span className="text-slate-300">补充背景</span>
+            <div className="mt-5 space-y-4">
+              <label className="block space-y-2 text-sm">
+                <span className="text-slate-300">场景说明（输入）</span>
                 <textarea
-                  value={brief}
-                  onChange={(e) => setBrief(e.target.value)}
-                  rows={5}
-                  placeholder="补充业务背景、现有材料、禁止事项或必须覆盖的信息"
-                  className="w-full rounded-2xl border border-slate-700 bg-slate-950/70 px-4 py-3 text-sm text-white placeholder:text-slate-500 outline-none transition focus:border-blue-500"
+                  value={sceneDescription}
+                  onChange={(e) => setSceneDescription(e.target.value)}
+                  rows={4}
+                  placeholder="描述本场景的业务背景、约束与输入材料…"
+                  className="w-full rounded-xl border border-slate-700 bg-slate-950/70 px-4 py-3 text-sm outline-none focus:border-blue-500"
                 />
               </label>
-            </div>
-          </div>
 
-          <aside className="min-w-0">
-            <div className="rounded-3xl border border-slate-800 bg-slate-900/50 p-6">
-              <div>
-                <p className="text-xs uppercase tracking-[0.2em] text-slate-500">Step 3</p>
-                <h3 className="mt-2 text-xl font-semibold">合同预览与保存</h3>
-                <p className="mt-1 text-xs leading-relaxed text-slate-500">
-                  汇总当前所选场景与第二步编排，生成 JSON 预览，并将配置写入服务端场景。
-                </p>
+              <label className="block space-y-2 text-sm">
+                <span className="text-slate-300">结果说明（输出）</span>
+                <textarea
+                  value={resultDescription}
+                  onChange={(e) => setResultDescription(e.target.value)}
+                  rows={3}
+                  placeholder="描述期望交付物形态、用途与质量标准…"
+                  className="w-full rounded-xl border border-slate-700 bg-slate-950/70 px-4 py-3 text-sm outline-none focus:border-blue-500"
+                />
+              </label>
+
+              <div className="space-y-2 text-sm">
+                <label className="flex items-center justify-between gap-3">
+                  <span className="text-slate-300">强制绑定技能（可选）</span>
+                  <input
+                    type="checkbox"
+                    checked={forceBindSkill}
+                    onChange={(e) => {
+                      setForceBindSkill(e.target.checked);
+                      if (!e.target.checked) {
+                        setContractAllowedSkills([]);
+                        setSelectedSkillTemplate("");
+                      }
+                    }}
+                    aria-label="强制绑定技能"
+                  />
+                </label>
+                <div className="rounded-2xl border border-slate-800 bg-slate-950/60 p-4">
+                  {forceBindSkill ? (
+                    <div className="flex flex-wrap gap-2">
+                      {skillsList.length === 0 ? (
+                        <p className="text-xs text-slate-500">暂无已安装技能</p>
+                      ) : (
+                        skillsList.map((name) => (
+                          <button
+                            key={name}
+                            type="button"
+                            onClick={() => toggleSkill(name)}
+                            className={`rounded-full border px-3 py-1 font-mono text-xs ${
+                              contractAllowedSkills.includes(name)
+                                ? "border-blue-500/70 bg-blue-500/15 text-blue-100"
+                                : "border-slate-600 text-slate-400"
+                            }`}
+                          >
+                            {name}
+                          </button>
+                        ))
+                      )}
+                    </div>
+                  ) : (
+                    <p className="text-xs text-slate-500">未开启时由智能体按场景自选技能</p>
+                  )}
+                </div>
               </div>
 
-              <div className="mt-5 space-y-4">
+              <div className="space-y-2 text-sm">
+                <label className="flex items-center justify-between gap-3">
+                  <span className="text-slate-300">强制绑定知识库（可选）</span>
+                  <input
+                    type="checkbox"
+                    checked={forceBindKb}
+                    onChange={(e) => {
+                      setForceBindKb(e.target.checked);
+                      if (!e.target.checked) setSelectedKbKeys([]);
+                      else if (selectedKbKeys.length === 0 && collections[0]) {
+                        setSelectedKbKeys([collections[0]]);
+                      }
+                    }}
+                    aria-label="强制绑定知识库"
+                  />
+                </label>
                 <div className="rounded-2xl border border-slate-800 bg-slate-950/60 p-4">
-                  <p className="text-xs uppercase tracking-[0.16em] text-slate-500">合同摘要</p>
-                  <p className="mt-2 text-base font-semibold text-white">{selectedScenario?.title}</p>
-                  <p className="mt-2 text-sm leading-relaxed text-slate-400">
-                    {selectedScenario?.summary}
+                {forceBindKb ? (
+                  <ul className="max-h-32 space-y-2 overflow-y-auto">
+                    {collections.map((name) => (
+                      <li key={name}>
+                        <label className="flex items-center gap-2">
+                          <input
+                            type="checkbox"
+                            checked={selectedKbKeys.includes(name)}
+                            onChange={() => toggleKb(name)}
+                          />
+                          {name}
+                        </label>
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p className="text-xs text-slate-500">未开启时不限制知识集合</p>
+                )}
+                </div>
+              </div>
+
+              <label className="block space-y-2 text-sm">
+                <span className="text-slate-300">输出模版（可选，来自技能配置）</span>
+                <select
+                  value={selectedSkillTemplate}
+                  onChange={(e) => setSelectedSkillTemplate(e.target.value)}
+                  disabled={!forceBindSkill || skillTemplateOptions.length === 0}
+                  className="w-full rounded-xl border border-slate-700 bg-slate-950/70 px-4 py-3 text-sm outline-none focus:border-blue-500 disabled:opacity-50"
+                >
+                  <option value="">不指定模版</option>
+                  {skillTemplateOptions.map((o) => (
+                    <option key={o.value} value={o.value}>
+                      {o.label}
+                    </option>
+                  ))}
+                </select>
+                {forceBindSkill && contractAllowedSkills.length > 0 && skillTemplateOptions.length === 0 ? (
+                  <p className="text-xs text-amber-400/90">所选技能未配置输出模版字段</p>
+                ) : null}
+              </label>
+
+            </div>
+          </section>
+
+          {/* Step 3: 合同预览与保存 */}
+          <aside className="rounded-3xl border border-slate-800 bg-slate-900/50 p-6">
+            <p className="text-xs uppercase tracking-[0.2em] text-slate-500">{stepLabel(3)}</p>
+            <h2 className="mt-2 text-xl font-semibold">合同预览与保存</h2>
+
+            <div className="mt-5 space-y-4">
+              <div className="rounded-2xl border border-slate-800 bg-slate-950/60 p-4 text-sm">
+                <p className="text-xs text-slate-500">摘要信息</p>
+                <div className="mt-3 space-y-3">
+                  <div>
+                    <span className="text-slate-500">场景说明（输入）</span>
+                    <p className="mt-1 whitespace-pre-wrap text-slate-200">
+                      {sceneDescription.trim() || "（未填写）"}
+                    </p>
+                  </div>
+                  <div>
+                    <span className="text-slate-500">结果说明（输出）</span>
+                    <p className="mt-1 whitespace-pre-wrap text-slate-200">
+                      {resultDescription.trim() || "（未填写）"}
+                    </p>
+                  </div>
+                </div>
+                {remoteStatus ? (
+                  <p className="mt-3 text-xs text-emerald-300/80">
+                    {selectedScenario?.title} · {scenarioStatusLabel(remoteStatus.status)} · v
+                    {remoteStatus.version}
                   </p>
-                </div>
+                ) : (
+                  <p className="mt-3 text-xs text-slate-600">{selectedScenario?.title}</p>
+                )}
+              </div>
 
-                <div className="rounded-2xl border border-slate-800 bg-slate-950/60 p-4 text-sm">
-                  <div className="flex items-center justify-between gap-3">
-                    <span className="text-slate-500">任务目标</span>
-                    <span className="text-right text-slate-200">
-                      {goal.trim() || selectedScenario?.goal}
-                    </span>
-                  </div>
-                  <div className="mt-3 flex items-center justify-between gap-3">
-                    <span className="text-slate-500">期望输出</span>
-                    <span className="text-right text-slate-200">
-                      {deliverable.trim() || selectedScenario?.recommendedTemplate}
-                    </span>
-                  </div>
-                  <div className="mt-3 flex items-center justify-between gap-3">
-                    <span className="text-slate-500">输出模版</span>
-                    <span className="max-w-[min(16rem,55%)] text-right text-slate-200">
-                      {outputTemplateSummary}
-                    </span>
-                  </div>
-                  <div className="mt-3 flex items-center justify-between gap-3">
-                    <span className="text-slate-500">知识库</span>
-                    <span className="text-right text-slate-200">
-                      {includeKnowledge
-                        ? kbOrdered.length > 0
-                          ? kbOrdered.join("、")
-                          : "未选"
-                        : "关闭"}
-                    </span>
-                  </div>
-                  <div className="mt-3 flex items-center justify-between gap-3">
-                    <span className="text-slate-500">技能</span>
-                    <span className="text-right text-slate-200">
-                      {includeSkills
-                        ? contractAllowedSkills.length > 0
-                          ? `${contractAllowedSkills.length} 项：${contractAllowedSkills.slice(0, 4).join("、")}${
-                              contractAllowedSkills.length > 4 ? "…" : ""
-                            }`
-                          : "合同 allowed 为空（未选技能）"
-                        : "关闭"}
-                    </span>
-                  </div>
-                </div>
-
-                <div className="rounded-2xl border border-slate-800 bg-slate-950/60 p-4">
-                  <p className="text-sm font-medium text-white">合同章节</p>
-                  <div className="mt-3 flex flex-wrap gap-2">
-                    {requiredSections.length > 0 ? (
-                      requiredSections.map((section) => (
-                        <span
-                          key={section}
-                          className="rounded-full border border-blue-500/70 bg-blue-500/15 px-3 py-1.5 text-xs font-medium text-blue-100"
-                        >
-                          {section}
-                        </span>
-                      ))
+              <div className="rounded-2xl border border-slate-800 bg-slate-950/60 p-4 text-sm">
+                <p className="text-xs text-slate-500">任务信息</p>
+                <div className="mt-3 space-y-4">
+                  <div>
+                    <span className="text-slate-500">强制绑定技能（可选）</span>
+                    {forceBindSkill ? (
+                      contractAllowedSkills.length > 0 ? (
+                        <div className="mt-2 flex flex-wrap gap-2">
+                          {contractAllowedSkills.map((name) => (
+                            <span
+                              key={name}
+                              className="rounded-full border border-blue-500/70 bg-blue-500/15 px-2.5 py-1 font-mono text-xs text-blue-100"
+                            >
+                              {name}
+                            </span>
+                          ))}
+                        </div>
+                      ) : (
+                        <p className="mt-1 text-xs text-amber-400/90">已开启但未选择技能</p>
+                      )
                     ) : (
-                      <span className="text-xs text-slate-500">未填写（required_sections 为空）</span>
+                      <p className="mt-1 text-xs text-slate-500">未开启，由智能体按场景自选技能</p>
+                    )}
+                  </div>
+                  <div>
+                    <span className="text-slate-500">强制绑定知识库（可选）</span>
+                    {forceBindKb ? (
+                      kbOrdered.length > 0 ? (
+                        <ul className="mt-2 max-h-28 space-y-1 overflow-y-auto text-xs text-slate-300">
+                          {kbOrdered.map((name) => (
+                            <li key={name} className="truncate font-mono">
+                              {name}
+                            </li>
+                          ))}
+                        </ul>
+                      ) : (
+                        <p className="mt-1 text-xs text-amber-400/90">已开启但未选择集合</p>
+                      )
+                    ) : (
+                      <p className="mt-1 text-xs text-slate-500">未开启，不限制知识集合</p>
                     )}
                   </div>
                 </div>
-
-                <button
-                  type="button"
-                  onClick={runServerPreview}
-                  disabled={previewBusy}
-                  className="w-full rounded-2xl border border-slate-600 bg-slate-800/40 px-5 py-3 text-sm font-medium text-slate-100 transition hover:bg-slate-800 disabled:opacity-50"
-                >
-                  {previewBusy ? "生成预览中…" : "服务端编排预览（JSON）"}
-                </button>
-                {previewText ? (
-                  <pre className="max-h-64 overflow-auto rounded-2xl border border-slate-800 bg-slate-950/80 p-3 text-xs text-slate-300">
-                    {previewText}
-                  </pre>
-                ) : null}
-
-                <button
-                  type="button"
-                  onClick={saveScenarioDraft}
-                  disabled={saveBusy || publishBusy}
-                  className="w-full rounded-2xl border border-emerald-600/50 bg-emerald-500/15 px-5 py-3 text-sm font-medium text-emerald-100 transition hover:bg-emerald-500/25 disabled:opacity-50"
-                >
-                  {saveBusy ? "保存中…" : "场景保存"}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => void publishScenario()}
-                  disabled={saveBusy || publishBusy}
-                  className="w-full rounded-2xl border border-amber-500/50 bg-amber-500/15 px-5 py-3 text-sm font-medium text-amber-100 transition hover:bg-amber-500/25 disabled:opacity-50"
-                >
-                  {publishBusy ? "发布中…" : "发布场景"}
-                </button>
-                <p className="text-center text-[11px] leading-snug text-slate-500">
-                  「发布场景」会先将当前表单保存再提交发布；需满足技能白名单非空等合同校验后才可纳入项目绑定。
-                </p>
-                {saveMessage ? (
-                  <p
-                    className={`text-center text-xs ${
-                      saveMessage.includes("失败") || saveMessage.startsWith("HTTP")
-                        ? "text-red-400"
-                        : "text-emerald-300/90"
-                    }`}
-                  >
-                    {saveMessage}
-                  </p>
-                ) : null}
-                {returnProjectId ? (
-                  <div className="rounded-2xl border border-slate-700 bg-slate-950/50 px-4 py-3 text-center text-xs text-slate-400">
-                    保存场景后，可返回项目绑定该场景：
-                    <Link
-                      href={`/projects/${returnProjectId}`}
-                      className="ml-1 font-medium text-blue-400 hover:text-blue-300"
-                    >
-                      打开项目详情 →
-                    </Link>
-                  </div>
-                ) : null}
               </div>
+
+              <div className="rounded-2xl border border-slate-800 bg-slate-950/60 p-4">
+                <p className="text-sm font-medium">输出物标签</p>
+                {selectedTemplateMeta ? (
+                  <p className="mt-1 truncate text-xs text-slate-500" title={selectedTemplateMeta.label}>
+                    来自模版：{selectedTemplateMeta.label}
+                  </p>
+                ) : (
+                  <p className="mt-1 text-xs text-slate-500">请在左侧选择输出模版</p>
+                )}
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {outputTags.length > 0 ? (
+                    outputTags.map((tag) => (
+                      <span
+                        key={tag}
+                        className="rounded-full border border-blue-500/70 bg-blue-500/15 px-3 py-1 text-xs text-blue-100"
+                      >
+                        {tag}
+                      </span>
+                    ))
+                  ) : selectedTemplateMeta ? (
+                    <span className="text-xs text-slate-500">该模版未解析到标签或章节结构</span>
+                  ) : null}
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={runServerPreview}
+                disabled={previewBusy}
+                className="w-full rounded-2xl border border-slate-600 bg-slate-800/40 py-3 text-sm hover:bg-slate-800 disabled:opacity-50"
+              >
+                {previewBusy ? "生成中…" : "编排合同预览"}
+              </button>
+              {previewText ? (
+                <pre className="max-h-48 overflow-auto rounded-2xl border border-slate-800 bg-slate-950/80 p-3 text-xs text-slate-300">
+                  {previewText}
+                </pre>
+              ) : null}
+
+              <button
+                type="button"
+                onClick={saveScenarioDraft}
+                disabled={saveBusy || publishBusy}
+                className="w-full rounded-2xl border border-emerald-600/50 bg-emerald-500/15 py-3 text-sm font-medium text-emerald-100 disabled:opacity-50"
+              >
+                {saveBusy ? "保存中…" : "场景保存"}
+              </button>
+              <button
+                type="button"
+                onClick={() => void publishScenario()}
+                disabled={saveBusy || publishBusy}
+                className="w-full rounded-2xl border border-amber-500/50 bg-amber-500/15 py-3 text-sm font-medium text-amber-100 disabled:opacity-50"
+              >
+                {publishBusy ? "发布中…" : "发布场景"}
+              </button>
+              {saveMessage ? (
+                <p
+                  className={`text-center text-xs ${
+                    saveMessage.includes("失败") ? "text-red-400" : "text-emerald-300/90"
+                  }`}
+                >
+                  {saveMessage}
+                </p>
+              ) : null}
+              {returnProjectId ? (
+                <p className="text-center text-xs text-slate-500">
+                  <Link href={`/projects/${returnProjectId}`} className="text-blue-400 hover:underline">
+                    返回项目绑定场景 →
+                  </Link>
+                </p>
+              ) : null}
             </div>
           </aside>
         </div>
 
-        <div className="mt-10 text-center text-sm text-slate-600">
-          {loading ? "正在加载知识集合与技能..." : null}
-        </div>
+        {loading ? (
+          <p className="mt-6 text-center text-sm text-slate-600">加载知识库与技能元数据…</p>
+        ) : null}
       </div>
 
       {addOpen ? (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
-          role="presentation"
           onClick={() => !addBusy && setAddOpen(false)}
         >
           <div
-            className="w-full max-w-md rounded-2xl border border-slate-700 bg-slate-900 p-6 shadow-xl"
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="add-scenario-title"
+            className="w-full max-w-md rounded-2xl border border-slate-700 bg-slate-900 p-6"
             onClick={(e) => e.stopPropagation()}
           >
-            <h4 id="add-scenario-title" className="text-lg font-semibold text-white">
-              新增场景
-            </h4>
-            <p className="mt-1 text-xs text-slate-500">将创建一条服务端场景草稿，可在右侧继续编排后点「场景保存」。</p>
+            <h3 className="text-lg font-semibold">新增场景</h3>
             <div className="mt-4 space-y-3 text-sm">
-              <label className="block space-y-1.5">
-                <span className="text-slate-300">场景名称</span>
-                <input
-                  value={newScenarioName}
-                  onChange={(e) => setNewScenarioName(e.target.value)}
-                  placeholder="例如：客户汇报专用"
-                  className="w-full rounded-xl border border-slate-700 bg-slate-950/70 px-3 py-2 text-white outline-none focus:border-blue-500"
-                />
-              </label>
-              <label className="block space-y-1.5">
-                <span className="text-slate-300">场景编码</span>
-                <input
-                  value={newScenarioCode}
-                  onChange={(e) => setNewScenarioCode(e.target.value)}
-                  placeholder="英文小写、数字、连字符"
-                  className="w-full rounded-xl border border-slate-700 bg-slate-950/70 px-3 py-2 font-mono text-xs text-white outline-none focus:border-blue-500"
-                />
-              </label>
-              <label className="block space-y-1.5">
-                <span className="text-slate-300">描述（可选）</span>
-                <textarea
-                  value={newScenarioDesc}
-                  onChange={(e) => setNewScenarioDesc(e.target.value)}
-                  rows={3}
-                  placeholder="简要说明使用场景"
-                  className="w-full rounded-xl border border-slate-700 bg-slate-950/70 px-3 py-2 text-white outline-none focus:border-blue-500"
-                />
-              </label>
+              <input
+                value={newScenarioName}
+                onChange={(e) => setNewScenarioName(e.target.value)}
+                placeholder="场景名称"
+                className="w-full rounded-xl border border-slate-700 bg-slate-950/70 px-3 py-2"
+              />
+              <input
+                value={newScenarioCode}
+                onChange={(e) => setNewScenarioCode(e.target.value)}
+                placeholder="场景编码"
+                className="w-full rounded-xl border border-slate-700 bg-slate-950/70 px-3 py-2 font-mono text-xs"
+              />
+              <textarea
+                value={newScenarioDesc}
+                onChange={(e) => setNewScenarioDesc(e.target.value)}
+                placeholder="描述（可选）"
+                rows={2}
+                className="w-full rounded-xl border border-slate-700 bg-slate-950/70 px-3 py-2"
+              />
             </div>
-            {addError ? <p className="mt-3 text-xs text-red-400">{addError}</p> : null}
-            <div className="mt-5 flex justify-end gap-2">
-              <button
-                type="button"
-                disabled={addBusy}
-                onClick={() => setAddOpen(false)}
-                className="rounded-xl border border-slate-600 px-4 py-2 text-sm text-slate-300 hover:bg-slate-800 disabled:opacity-50"
-              >
+            {addError ? <p className="mt-2 text-xs text-red-400">{addError}</p> : null}
+            <div className="mt-4 flex justify-end gap-2">
+              <button type="button" onClick={() => setAddOpen(false)} className="rounded-xl border border-slate-600 px-4 py-2 text-sm">
                 取消
               </button>
               <button
                 type="button"
                 disabled={addBusy}
                 onClick={() => void submitNewScenario()}
-                className="rounded-xl bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-500 disabled:opacity-50"
+                className="rounded-xl bg-blue-600 px-4 py-2 text-sm disabled:opacity-50"
               >
                 {addBusy ? "创建中…" : "创建"}
               </button>
@@ -1138,7 +974,6 @@ function CreatePageInner() {
           </div>
         </div>
       ) : null}
-      </div>
     </main>
   );
 }

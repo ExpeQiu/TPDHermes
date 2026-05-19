@@ -85,8 +85,11 @@ scp -r /本地路径/TPDHermes root@47.113.225.93:/opt/tpdhermes/
 
 - `docker-compose.prod.yml`
 - `docker-compose.yml`
+- `docker-compose.src-hermes.yml`
 - `nginx/nginx.conf`
 - `.env.production.example`
+- `deploy/hermes-agent/config.yaml`
+- `deploy/hermes-agent/SOUL.md`
 
 其中：
 
@@ -226,7 +229,43 @@ platforms:
       require_mention: false
 ```
 
-对应挂载到容器内的路径是 `/opt/data/config.yaml`。修改后重启 `hermes-agent` 即可生效。
+生产部署时，Agent 会频繁执行 `curl`、`ssh`、`docker compose` 等运维命令。默认的 **Tirith 安全扫描** 与 **Command Approval Required** 交互审批会导致每次命令都弹窗确认。在可信的自建服务器上，建议在 `deploy/hermes-agent/config.yaml` 中关闭交互审批：
+
+```yaml
+# 生产部署：关闭命令交互审批（硬线 blocklist 仍生效，如 rm -rf /、fork bomb）
+approvals:
+  mode: off
+  timeout: 90
+
+security:
+  tirith_enabled: false
+```
+
+运维建议：
+
+- 健康检查优先用**容器内网地址**（如 `http://backend:8000/...`、`http://tphermes-mcp:8801/...`），避免 `http://47.113.225.93:8033/...` 触发 Tirith 对裸 IP / 明文 HTTP 的告警
+- 如需 SSH 到宿主机，优先配置 `terminal.backend: ssh` + 密钥（`TERMINAL_SSH_HOST` / `TERMINAL_SSH_USER` / `TERMINAL_SSH_KEY` 写在 `/opt/data/.env`），不要用 `sshpass` 明文密码
+- 若仍希望保留部分审批，可改为 `approvals.mode: smart`，或在飞书会话里发 `/yolo` 临时放行
+
+对应挂载到容器内的路径是 `/opt/data/config.yaml`。修改后重启 `hermes-agent` 即可生效：
+
+```bash
+cd /opt/tpdhermes/TPDHermes
+docker compose -f docker-compose.prod.yml -f docker-compose.src-hermes.yml restart hermes-agent
+```
+
+从本地上传配置后生效：
+
+```bash
+scp deploy/hermes-agent/config.yaml root@47.113.225.93:/opt/tpdhermes/TPDHermes/deploy/hermes-agent/config.yaml
+ssh root@47.113.225.93 'cd /opt/tpdhermes/TPDHermes && docker compose -f docker-compose.prod.yml -f docker-compose.src-hermes.yml restart hermes-agent'
+```
+
+验证容器内配置已加载：
+
+```bash
+docker exec hermes-agent sh -lc 'grep -A3 "^approvals:" /opt/data/config.yaml; grep -A2 "^security:" /opt/data/config.yaml'
+```
 
 如果后续确认需要开放更强的联网能力，再按需把 `tavily_crawl / tavily_map / tavily_research` 加回 `include` 白名单。
 
@@ -744,6 +783,41 @@ INFO [api-...] run_agent: tool mcp_tphermes_tavily_search completed (...)
 
 说明当前线上已经完全切换为 `TPDHermes MCP -> Tavily MCP` 路径。
 
+### 10.13 Agent 执行命令反复弹出 `Command Approval Required`
+
+现象：Agent 执行 `curl http://47.113.225.93:8033/...`、`curl | python3`、`sshpass ... ssh` 等命令时，飞书或 Web UI 反复弹出 **Command Approval Required**，提示 Tirith 扫描到裸 IP、明文 HTTP、管道到解释器等风险。
+
+原因：`deploy/hermes-agent/config.yaml` 默认 `terminal.backend: local`，且未关闭 `approvals` / `tirith` 时，Hermes-agent 会对每条命令做预检并等待人工确认。
+
+处理：确认 `deploy/hermes-agent/config.yaml` 已包含（见上文 §4）：
+
+```yaml
+approvals:
+  mode: off
+  timeout: 90
+
+security:
+  tirith_enabled: false
+```
+
+同步到服务器并重启：
+
+```bash
+scp deploy/hermes-agent/config.yaml root@47.113.225.93:/opt/tpdhermes/TPDHermes/deploy/hermes-agent/config.yaml
+ssh root@47.113.225.93 'cd /opt/tpdhermes/TPDHermes && docker compose -f docker-compose.prod.yml -f docker-compose.src-hermes.yml restart hermes-agent'
+```
+
+验证：
+
+```bash
+docker exec hermes-agent sh -lc 'grep -A3 "^approvals:" /opt/data/config.yaml'
+docker ps --filter name=hermes-agent --format "{{.Names}} {{.Status}}"
+```
+
+若配置已生效但仍偶发弹窗，可能是旧会话缓存了审批状态，重新发起一轮对话即可。
+
+临时方案（不改配置）：在弹窗点 **Session** / **Always**，或在飞书发 `/yolo` 开启本会话自动批准。
+
 ### 10.11 直接上传 `skills/` 后，为什么 `/skills` 页面还是看不到
 
 这是今天实际验证中最容易混淆的一点：
@@ -864,10 +938,11 @@ docker compose -f docker-compose.prod.yml up -d --build
 2. 上传 `TPDHermes` 和可选的 `Hermes-agent`
 3. 复制 `.env.production.example` 为 `.env`
 4. 按 IP 填好 `.env`，至少确认 `MINIMAX_CN_API_KEY`、`TAVILY_API_KEY`、`TAVILY_REMOTE_MCP_URL` 等关键项
-5. 执行 `docker compose -f docker-compose.prod.yml up -d --build`
-6. 验证 `http://47.113.225.93:8033/health`
-7. 打开首页并实际发一轮对话
-8. 额外验证一次 `Hermes-agent` 是否能调用 `mcp_tphermes_*` 下的 Tavily 工具
+5. 核对 `deploy/hermes-agent/config.yaml`（含 `approvals.mode: off` 与 `security.tirith_enabled: false`，见 §4）
+6. 执行 `docker compose -f docker-compose.prod.yml -f docker-compose.src-hermes.yml up -d --build`
+7. 验证 `http://47.113.225.93:8033/health`
+8. 打开首页并实际发一轮对话
+9. 额外验证一次 `Hermes-agent` 是否能调用 `mcp_tphermes_*` 下的 Tavily 工具
 
 如果你需要，我下一步可以继续补：
 

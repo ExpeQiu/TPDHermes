@@ -10,10 +10,11 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
-from sqlalchemy import or_, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.db import get_db
+from backend.models.project_scenario import ProjectScenario
 from backend.models.scenario_profile import ScenarioProfile
 from backend.models.template import Template
 from backend.schemas.orchestration import TaskExecuteRequest, TaskExecuteOverrides
@@ -325,6 +326,34 @@ async def disable_scenario(scenario_id: str, db: AsyncSession = Depends(get_db))
     await db.commit()
     await db.refresh(row)
     return _row_to_response(row)
+
+
+@router.delete("/{scenario_id}")
+async def delete_scenario(scenario_id: str, db: AsyncSession = Depends(get_db)):
+    row = await db.get(ScenarioProfile, scenario_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="场景不存在")
+    bind_count = await db.scalar(
+        select(func.count())
+        .select_from(ProjectScenario)
+        .where(ProjectScenario.scenario_id == scenario_id)
+    )
+    name = row.name
+    code = row.code
+    await db.delete(row)
+    await db.commit()
+    logger.info(
+        "scenario deleted id=%s code=%s project_bindings_removed=%s",
+        scenario_id,
+        code,
+        int(bind_count or 0),
+    )
+    return {
+        "ok": True,
+        "id": scenario_id,
+        "name": name,
+        "project_bindings_removed": int(bind_count or 0),
+    }
 
 
 class ScenarioPreviewBody(BaseModel):

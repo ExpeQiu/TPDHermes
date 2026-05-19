@@ -36,6 +36,15 @@ terminal:
   lifetime_seconds: 300
   docker_mount_cwd_to_workspace: false
 
+# 生产部署场景：Agent 需频繁 curl/ssh/docker 等运维命令，关闭交互式审批。
+# 硬线 blocklist（rm -rf /、fork bomb 等）仍会拦截，不受此配置影响。
+approvals:
+  mode: off
+  timeout: 90
+
+security:
+  tirith_enabled: false
+
 display:
   tool_progress: all
   interim_assistant_messages: true

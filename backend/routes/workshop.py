@@ -156,6 +156,12 @@ async def list_skills(loader: SkillLoader = Depends(_loader_dep)):
     return {"skills": loader.discover()}
 
 
+@router.get("/skills/metadata", response_model=None)
+async def list_skills_metadata(loader: SkillLoader = Depends(_loader_dep)):
+    """技能元数据与输出模版选项，供场景编排页绑定 skill 后选择模版。"""
+    return {"skills": loader.list_skill_metadata()}
+
+
 @router.post("/generate-from-kb", response_model=None)
 async def generate_from_kb(request: GenerateFromKBRequest):
     """

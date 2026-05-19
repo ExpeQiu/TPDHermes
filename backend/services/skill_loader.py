@@ -92,6 +92,112 @@ class SkillLoader:
                 names.append(entry)
         return names
 
+    def _extract_template_tags_sections(self, skill_path: Path, template_rel: str) -> dict[str, list[str]]:
+        """从模版 Markdown 解析 frontmatter tags 与 ## 章节标题。"""
+        tpl_path = Path(template_rel)
+        if not tpl_path.is_absolute():
+            tpl_path = skill_path / tpl_path
+        if not tpl_path.is_file():
+            return {"tags": [], "sections": []}
+        try:
+            raw = tpl_path.read_text(encoding="utf-8")
+        except Exception:
+            return {"tags": [], "sections": []}
+
+        tags: list[str] = []
+        sections: list[str] = []
+        fm_match = re.match(r"^---\n([\s\S]*?)\n---", raw)
+        if fm_match:
+            fm = fm_match.group(1)
+            tags_match = re.search(r"^tags:\s*\[(.*?)\]\s*$", fm, re.MULTILINE)
+            if tags_match:
+                tags = [
+                    t.strip().strip("\"'")
+                    for t in tags_match.group(1).split(",")
+                    if t.strip()
+                ]
+        for line in raw.splitlines():
+            m = re.match(r"^##\s+(.+?)\s*$", line)
+            if m:
+                title = m.group(1).strip()
+                if title and title not in sections:
+                    sections.append(title)
+        return {"tags": tags, "sections": sections}
+
+    def read_skill_json(self, name: str) -> dict[str, Any]:
+        """读取 skill.json（不加载 Python 模块），供编排页展示模板选项。"""
+        skill_path = self.skills_root / name
+        meta_path = skill_path / "skill.json"
+        if not meta_path.is_file():
+            return {}
+        try:
+            with open(meta_path, "r", encoding="utf-8") as f:
+                raw = json.load(f)
+            return raw if isinstance(raw, dict) else {}
+        except Exception:
+            return {}
+
+    def _template_meta_entry(
+        self,
+        skill_path: Path,
+        *,
+        tpl_id: str,
+        label: str,
+        path: str,
+    ) -> dict[str, Any]:
+        parsed = self._extract_template_tags_sections(skill_path, path)
+        return {
+            "id": tpl_id,
+            "label": label,
+            "path": path,
+            "tags": parsed["tags"],
+            "sections": parsed["sections"],
+        }
+
+    def list_skill_metadata(self) -> list[dict[str, Any]]:
+        """发现技能及其输出模版选项（来自 skill.json）。"""
+        items: list[dict[str, Any]] = []
+        for name in self.discover():
+            skill_path = self.skills_root / name
+            meta = self.read_skill_json(name)
+            templates: list[dict[str, Any]] = []
+            extra = meta.get("templates")
+            if isinstance(extra, list):
+                for t in extra:
+                    if isinstance(t, dict) and t.get("id"):
+                        path = str(t.get("path") or t["id"])
+                        templates.append(
+                            self._template_meta_entry(
+                                skill_path,
+                                tpl_id=str(t["id"]),
+                                label=str(t.get("label") or t["id"]),
+                                path=path,
+                            )
+                        )
+            tpl_path = meta.get("template")
+            if isinstance(tpl_path, str) and tpl_path.strip():
+                path = tpl_path.strip()
+                label = Path(path).name
+                display = str(meta.get("name") or name)
+                if not any(x["id"] == path for x in templates):
+                    templates.append(
+                        self._template_meta_entry(
+                            skill_path,
+                            tpl_id=path,
+                            label=f"{display} · {label}",
+                            path=path,
+                        )
+                    )
+            items.append(
+                {
+                    "name": name,
+                    "display_name": str(meta.get("name") or name),
+                    "description": str(meta.get("description") or ""),
+                    "templates": templates,
+                }
+            )
+        return items
+
     def load(self, name: str) -> Skill:
         """
         加载指定名称的 Skill（带缓存）

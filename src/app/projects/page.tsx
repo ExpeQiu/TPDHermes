@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { apiDelete, apiGet } from "@/lib/api";
 import { CONTENT_MAX_CLASS } from "@/lib/content-shell";
+import { projectStatusLabel } from "@/lib/ui-labels";
 
 interface Project {
   id: string;
@@ -91,15 +92,15 @@ export default function ProjectsPage() {
                   compact
                 />
                 <ActionCard
-                  href="/knowledge"
-                  title="知识策略"
+                  href="/chat"
+                  title="对话创作"
                   desc=""
                   accent="from-emerald-600 to-teal-600"
                   compact
                 />
                 <ActionCard
-                  href="/skills"
-                  title="技能策略"
+                  href="/workshop"
+                  title="场景输出"
                   desc=""
                   accent="from-amber-600 to-orange-600"
                   compact
@@ -118,7 +119,7 @@ export default function ProjectsPage() {
           <section className="min-w-0 rounded-3xl border border-slate-800 bg-slate-900/50 p-5 sm:p-6">
           <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
             <div>
-              <p className="text-xs uppercase tracking-[0.2em] text-slate-500">Projects</p>
+              <p className="text-xs uppercase tracking-[0.2em] text-slate-500">项目列表</p>
               <h2 className="mt-2 text-xl font-semibold text-white">项目列表</h2>
             </div>
           </div>
@@ -170,7 +171,7 @@ export default function ProjectsPage() {
                             statusColors[project.status] ?? "bg-slate-500"
                           }`}
                         >
-                          {statusLabels[project.status] ?? project.status}
+                          {projectStatusLabel(project.status)}
                         </span>
                       </div>
                       <p className="line-clamp-2 text-sm leading-relaxed text-slate-400">

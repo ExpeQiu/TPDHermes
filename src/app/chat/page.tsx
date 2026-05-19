@@ -23,6 +23,7 @@ import {
 } from "@/lib/chat-context";
 import { ChatMarkdownBody } from "@/components/chat-markdown-body";
 import { CONTENT_MAX_CLASS } from "@/lib/content-shell";
+import { chatTransportLabel } from "@/lib/ui-labels";
 
 interface Message {
   id: string;
@@ -297,11 +298,10 @@ function ChatTaskBoundaryPanel({
         <details className="rounded-2xl border border-slate-700 bg-slate-950/60 px-3 py-2 text-sm">
           <summary className="cursor-pointer list-none text-slate-300 [&::-webkit-details-marker]:hidden">
             <span className="text-xs text-slate-500">链路 · </span>
-            {useOrchestration
-              ? "POST /tasks/execute"
-              : transport?.mode === "backend-proxy"
-                ? "后端代理"
-                : "自定义地址"}
+            {chatTransportLabel({
+              useOrchestration,
+              proxyMode: transport?.mode,
+            })}
           </summary>
           <p className="mt-2 break-all text-xs text-slate-500">
             {useOrchestration ? tasksExecuteUrl : transport?.target ?? chatApiBase}
@@ -447,7 +447,7 @@ function ChatTaskBoundaryPanel({
 
       {useOrchestration && orchestrationPreview ? (
         <details className="mt-4 rounded-2xl border border-slate-700 bg-slate-900/60 p-4">
-          <summary className="cursor-pointer text-sm font-medium text-white">编排预览 JSON</summary>
+          <summary className="cursor-pointer text-sm font-medium text-white">编排预览（结构化数据）</summary>
           <pre className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap break-words font-sans text-xs leading-relaxed text-slate-400">
             {JSON.stringify(orchestrationPreview.snapshot, null, 2)}
           </pre>
@@ -1350,7 +1350,7 @@ function ChatPageInner() {
             <div className="flex flex-col items-center justify-center h-full text-slate-500">
               <p className="text-4xl mb-4">💬</p>
               <p className="text-sm">开始一段新对话吧</p>
-              <p className="text-xs mt-1 text-slate-600">Enter 发送 · Shift+Enter 换行</p>
+              <p className="text-xs mt-1 text-slate-600">回车发送 · Shift+回车换行</p>
             </div>
           )}
 
@@ -1473,7 +1473,7 @@ function ChatPageInner() {
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={handleKeyDown}
-              placeholder="输入问题，Enter 发送，Shift+Enter 换行…"
+              placeholder="输入问题，回车发送，Shift+回车换行…"
               rows={1}
               disabled={streaming || preparingContext}
               className="flex-1 bg-slate-700/60 border border-slate-600 rounded-xl px-4 py-3 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-blue-500 resize-none transition disabled:opacity-50"

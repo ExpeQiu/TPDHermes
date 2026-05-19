@@ -4,6 +4,7 @@ import { useEffect, useState, useCallback, useRef, useMemo } from "react";
 import Link from "next/link";
 import { apiFetch, readJson } from "@/lib/api";
 import { CONTENT_MAX_CLASS } from "@/lib/content-shell";
+import { skillScopeLabel } from "@/lib/ui-labels";
 
 interface Skill {
   id: string;
@@ -200,7 +201,7 @@ export default function SkillsPage() {
                   onClick={triggerSkillUpload}
                   className="rounded-xl border border-slate-700 bg-slate-900/70 px-4 py-2.5 text-sm font-medium text-slate-200 transition hover:border-slate-600 hover:bg-slate-900 disabled:opacity-50"
                 >
-                  {uploading ? "上传中…" : "上传 Skill"}
+                  {uploading ? "上传中…" : "上传技能"}
                 </button>
                 <input
                   ref={uploadInputRef}
@@ -292,10 +293,10 @@ export default function SkillsPage() {
               </section>
               <section className="border-t border-slate-700 pt-4">
                 <h2 className="mb-1 text-lg font-semibold">我的技能</h2>
-                <p className="mb-3 text-xs text-slate-500">本地上传，归属为 personal</p>
+                <p className="mb-3 text-xs text-slate-500">本地上传，归属为个人技能</p>
                 {!loading && personalSkills.length === 0 && (
                   <p className="py-4 text-center text-sm text-slate-500">
-                    暂无上传技能，可使用上方「上传 Skill」
+                    暂无上传技能，可使用上方「上传技能」
                   </p>
                 )}
                 {!loading && personalSkills.length > 0 && (
@@ -340,7 +341,7 @@ export default function SkillsPage() {
           <div className="lg:col-span-2">
             {!selectedSkill && (
               <div className="bg-slate-800/60 border border-slate-700 rounded-xl p-8 flex flex-col items-center justify-center min-h-64">
-                <p className="text-slate-500 text-sm">👈 从左侧选择一个 Skill 查看详情和策略状态</p>
+                <p className="text-slate-500 text-sm">👈 从左侧选择一个技能查看详情和策略状态</p>
               </div>
             )}
 
@@ -369,7 +370,8 @@ export default function SkillsPage() {
                     <p className="text-xs text-slate-400">来源 / 归属</p>
                     <p className="font-medium mt-0.5">
                       {selectedSkill.source}
-                      {((selectedSkill.scope ?? "public") === "personal") ? " · 个人" : " · 公共"}
+                      {" · "}
+                      {skillScopeLabel(selectedSkill.scope)}
                     </p>
                   </div>
                   <div className="bg-slate-700/40 rounded-lg p-3">
@@ -458,7 +460,7 @@ export default function SkillsPage() {
                     </button>
                   </div>
                 </div>
-                <p className="text-xs text-slate-400">以 JSON 格式编辑 Skill 配置</p>
+                <p className="text-xs text-slate-400">以 JSON 格式编辑技能配置</p>
                 <textarea
                   value={configText}
                   onChange={(e) => setConfigText(e.target.value)}
