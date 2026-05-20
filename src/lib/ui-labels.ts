@@ -169,6 +169,109 @@ export function skillScopeLabel(scope: string | null | undefined): string {
   return scope ? scope : "公共";
 }
 
+const SKILL_LABELS: Record<string, string> = {
+  hello_skill: "Hello 示例",
+  speech_skill: "发言稿",
+  video_skill: "视频脚本",
+  a4_skill: "A4 一页纸",
+  benchmark_skill: "竞品对标分析",
+  ip_matrix_skill: "IP 矩阵图",
+  knowledge_harvest_draft: "知识收割草稿",
+  sales_skill: "销售话术手册",
+  material_skill: "传播素材清单",
+};
+
+/** 技能展示名：优先 skill.json / metadata 的 display_name，否则内置中文映射 */
+export function skillLabel(name: string, displayName?: string | null): string {
+  const fromMeta = displayName?.trim();
+  if (fromMeta && fromMeta !== name) return fromMeta;
+  return SKILL_LABELS[name] ?? fromMeta ?? name;
+}
+
+const KB_SCOPE_LABELS: Record<string, string> = {
+  public: "公共",
+  internal: "内部",
+  project: "项目",
+};
+
+const KB_DOMAIN_LABELS: Record<string, string> = {
+  public_intel: "公开情报",
+  structured_tech: "结构化技术",
+  release_assets: "发布素材",
+  market_research: "市场研究",
+  policy_regulation: "政策法规",
+  internal_methodology: "内部方法论",
+};
+
+const KB_TOPIC_LABELS: Record<string, string> = {
+  speeches: "发言稿",
+  geely_tech: "吉利技术",
+  vehicle_launch: "车型发布",
+  autonomous_driving: "自动驾驶",
+  remote_debug: "远程联调",
+  competitor_news: "竞品资讯",
+  pitch_materials: "路演材料",
+  process_docs: "流程文档",
+  auto_company_strategy: "车企战略",
+  auto_company_strategy_local_smoke: "车企战略（联调）",
+  vehicle_model_library: "车型库",
+};
+
+function humanizeKbSegment(seg: string): string {
+  const k = seg.trim();
+  if (!k) return "";
+  return KB_TOPIC_LABELS[k] ?? k.replace(/_/g, " ");
+}
+
+/** 知识库 collection 展示名（规范名 → 中文可读标签） */
+export function kbCollectionLabel(
+  name: string,
+  opts?: { projectNames?: Record<string, string> },
+): string {
+  const key = name.trim();
+  if (!key) return "—";
+
+  const projectKbMatch = /^project\.([^.]+)\.kb$/.exec(key);
+  if (projectKbMatch) {
+    const pid = projectKbMatch[1];
+    const pname = opts?.projectNames?.[pid]?.trim();
+    return pname ? `${pname} · 项目知识库` : "项目知识库";
+  }
+
+  const parts = key.split(".").filter(Boolean);
+  if (parts.length >= 3) {
+    const [scope, domain, ...rest] = parts;
+    const domainLabel = KB_DOMAIN_LABELS[domain] ?? humanizeKbSegment(domain);
+    const topicLabel = rest.map(humanizeKbSegment).filter(Boolean).join(" · ");
+    if (scope === "public") {
+      return topicLabel ? `${domainLabel} · ${topicLabel}` : domainLabel;
+    }
+    const scopeLabel = KB_SCOPE_LABELS[scope] ?? scope;
+    return topicLabel
+      ? `${scopeLabel} · ${domainLabel} · ${topicLabel}`
+      : `${scopeLabel} · ${domainLabel}`;
+  }
+
+  if (parts.length === 2) {
+    const [scope, domain] = parts;
+    const domainLabel = KB_DOMAIN_LABELS[domain] ?? humanizeKbSegment(domain);
+    if (scope === "public") return domainLabel;
+    const scopeLabel = KB_SCOPE_LABELS[scope] ?? scope;
+    return `${scopeLabel} · ${domainLabel}`;
+  }
+
+  return key;
+}
+
+/** 是否为公共知识库 collection（与 /knowledge 目录树对应，排除 project.*.kb 等） */
+export function isPublicKbCollection(name: string): boolean {
+  return name.trim().startsWith("public.");
+}
+
+export function filterPublicKbCollections(collections: string[]): string[] {
+  return collections.filter(isPublicKbCollection);
+}
+
 /** 编排协作页：传输链路展示 */
 export function chatTransportLabel(opts: {
   useOrchestration: boolean;

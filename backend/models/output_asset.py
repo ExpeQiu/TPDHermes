@@ -3,7 +3,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Column, ForeignKey, String, Text
+from sqlalchemy import Column, ForeignKey, Integer, String, Text
 
 from backend.db import Base
 
@@ -28,3 +28,8 @@ class OutputAsset(Base):
     owner_id = Column(String, default="default")
     created_at = Column(String, default=lambda: datetime.now().isoformat())
     updated_at = Column(String, default=lambda: datetime.now().isoformat())
+    kb_ingest_status = Column(String)
+    kb_doc_id = Column(String)
+    kb_chunk_count = Column(Integer)
+    kb_ingested_at = Column(String)
+    kb_ingest_error = Column(Text)

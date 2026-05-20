@@ -22,6 +22,14 @@ from pydantic import BaseModel
 from backend.schemas.orchestration import TaskExecuteRequest, TaskExecuteOverrides
 from backend.services.orchestration_service import assemble_payload
 from backend.services.project_access import require_project_for_user
+from backend.services.project_kb import project_kb_collection
+from backend.services.project_kb_ingest import (
+    schedule_ingest_attachment,
+    schedule_ingest_output,
+    schedule_output_kb_visibility,
+    ingest_project_attachment,
+    remove_attachment_from_kb,
+)
 from backend.services.user_identity import get_effective_user_id, is_global_admin_user, viewer_role
 from backend.data.builtin_scenarios import BUILTIN_SCENARIOS, BUILTIN_VERSION
 
@@ -267,6 +275,7 @@ async def orchestration_preview(
 class ProjectContextAttachmentItem(BaseModel):
     id: str
     original_filename: str
+    ingest_status: str | None = None
 
 
 class ProjectContextOutputItem(BaseModel):
@@ -274,6 +283,14 @@ class ProjectContextOutputItem(BaseModel):
     title: str | None
     summary: str | None
     created_at: str | None
+    status: str | None = None
+    kb_indexed: bool = False
+
+
+class ProjectContextKbStats(BaseModel):
+    collection: str
+    attachments_indexed: int = 0
+    outputs_indexed: int = 0
 
 
 class ProjectContextResponse(BaseModel):
@@ -284,6 +301,7 @@ class ProjectContextResponse(BaseModel):
     audience: Optional[str]
     attachments: list[ProjectContextAttachmentItem]
     recent_outputs: list[ProjectContextOutputItem]
+    kb_stats: ProjectContextKbStats | None = None
 
 
 @router.get("/{project_id}/context", response_model=ProjectContextResponse)
@@ -303,9 +321,15 @@ async def get_project_context(
         )
     ).scalars().all()
     attachments = [
-        ProjectContextAttachmentItem(id=a.id, original_filename=a.original_filename)
+        ProjectContextAttachmentItem(
+            id=a.id,
+            original_filename=a.original_filename,
+            ingest_status=getattr(a, "ingest_status", None),
+        )
         for a in at_rows
     ]
+
+    att_indexed = sum(1 for a in at_rows if (getattr(a, "ingest_status", None) or "") == "ingested")
 
     out_rows = (
         await db.execute(
@@ -324,9 +348,20 @@ async def get_project_context(
             title=o.title,
             summary=(o.summary or (o.content or "")[:240]) or None,
             created_at=o.created_at,
+            status=o.status,
+            kb_indexed=(getattr(o, "kb_ingest_status", None) or "") == "ingested",
         )
         for o in out_rows
     ]
+    out_indexed = sum(
+        1 for o in out_rows if (getattr(o, "kb_ingest_status", None) or "") == "ingested"
+    )
+
+    kb_stats = ProjectContextKbStats(
+        collection=project_kb_collection(project_id),
+        attachments_indexed=att_indexed,
+        outputs_indexed=out_indexed,
+    )
 
     return ProjectContextResponse(
         project_id=project.id,
@@ -336,6 +371,7 @@ async def get_project_context(
         audience=project.audience,
         attachments=attachments,
         recent_outputs=recent_outputs,
+        kb_stats=kb_stats,
     )
 
 
@@ -350,6 +386,9 @@ class OutputListItem(BaseModel):
     status: str
     created_at: str | None
     content_preview: str
+    kb_ingest_status: str | None = None
+    kb_doc_id: str | None = None
+    kb_chunk_count: int | None = None
 
 
 class OutputDetailResponse(BaseModel):
@@ -418,6 +457,9 @@ async def list_project_outputs(
                 status=o.status,
                 created_at=o.created_at,
                 content_preview=preview,
+                kb_ingest_status=getattr(o, "kb_ingest_status", None),
+                kb_doc_id=getattr(o, "kb_doc_id", None),
+                kb_chunk_count=getattr(o, "kb_chunk_count", None),
             )
         )
     return out
@@ -512,6 +554,11 @@ class AttachmentListItem(BaseModel):
     content_type: str | None
     size_bytes: int
     created_at: str | None
+    ingest_status: str | None = None
+    kb_doc_id: str | None = None
+    chunk_count: int | None = None
+    ingest_error: str | None = None
+    ingested_at: str | None = None
 
 
 @router.get("/{project_id}/attachments", response_model=list[AttachmentListItem])
@@ -535,6 +582,11 @@ async def list_project_attachments(
             content_type=a.content_type,
             size_bytes=a.size_bytes,
             created_at=a.created_at,
+            ingest_status=getattr(a, "ingest_status", None),
+            kb_doc_id=getattr(a, "kb_doc_id", None),
+            chunk_count=getattr(a, "chunk_count", None),
+            ingest_error=getattr(a, "ingest_error", None),
+            ingested_at=getattr(a, "ingested_at", None),
         )
         for a in rows
     ]
@@ -584,6 +636,7 @@ async def upload_project_attachment(
         safe_name,
         size,
     )
+    schedule_ingest_attachment(aid)
     return AttachmentListItem(
         id=row.id,
         project_id=row.project_id,
@@ -591,6 +644,11 @@ async def upload_project_attachment(
         content_type=row.content_type,
         size_bytes=row.size_bytes,
         created_at=row.created_at,
+        ingest_status=getattr(row, "ingest_status", None),
+        kb_doc_id=getattr(row, "kb_doc_id", None),
+        chunk_count=getattr(row, "chunk_count", None),
+        ingest_error=getattr(row, "ingest_error", None),
+        ingested_at=getattr(row, "ingested_at", None),
     )
 
 
@@ -645,6 +703,7 @@ async def delete_project_attachment(
     row = q.scalar_one_or_none()
     if not row:
         raise HTTPException(status_code=404, detail="Attachment not found")
+    await remove_attachment_from_kb(attachment_id)
     path = _attachments_root() / row.stored_path
     try:
         if path.is_file():
@@ -660,6 +719,34 @@ async def delete_project_attachment(
     await db.commit()
     logger.info("project_attachment deleted project=%s id=%s", project_id, attachment_id)
     return {"ok": True}
+
+
+@router.post("/{project_id}/attachments/{attachment_id}/reingest")
+async def reingest_project_attachment(
+    project_id: str,
+    attachment_id: str,
+    db: AsyncSession = Depends(get_db),
+    effective_uid: str = Depends(get_effective_user_id),
+):
+    await require_project_for_user(db, project_id, effective_uid)
+    q = await db.execute(
+        select(ProjectAttachment).where(
+            ProjectAttachment.id == attachment_id,
+            ProjectAttachment.project_id == project_id,
+        )
+    )
+    row = q.scalar_one_or_none()
+    if not row:
+        raise HTTPException(status_code=404, detail="Attachment not found")
+    result = await ingest_project_attachment(attachment_id)
+    if not result.ok:
+        raise HTTPException(status_code=502, detail=result.message or "ingest_failed")
+    return {
+        "ok": True,
+        "kb_doc_id": result.doc_id,
+        "chunk_count": result.chunk_count,
+        "collection": result.collection,
+    }
 
 
 # --- 项目 ⇄ 场景绑定 ---
@@ -681,6 +768,10 @@ class ProjectScenarioBind(BaseModel):
     scenario_id: str
     scenario_version: str
     is_default: bool = False
+
+
+class ProjectScenarioVersionSync(BaseModel):
+    scenario_version: str
 
 
 def _project_scenario_item(ps: ProjectScenario, sp: ScenarioProfile) -> ProjectScenarioItem:
@@ -771,6 +862,56 @@ async def bind_project_scenario(
     await db.refresh(ps)
     await db.refresh(sp)
     return _project_scenario_item(ps, sp)
+
+
+@router.patch("/{project_id}/scenarios/{scenario_id}/version", response_model=ProjectScenarioItem)
+async def sync_project_scenario_version(
+    project_id: str,
+    scenario_id: str,
+    body: ProjectScenarioVersionSync,
+    db: AsyncSession = Depends(get_db),
+    effective_uid: str = Depends(get_effective_user_id),
+):
+    """将已绑定场景的版本钉选同步到当前已发布版本。"""
+    await require_project_for_user(db, project_id, effective_uid)
+    sp = await db.get(ScenarioProfile, scenario_id)
+    if not sp:
+        raise HTTPException(status_code=404, detail="场景不存在")
+    st = (sp.status or "draft").strip().lower()
+    if st != "published":
+        raise HTTPException(
+            status_code=400,
+            detail=f"仅允许同步已发布场景版本，当前为 {sp.status or 'draft'}",
+        )
+    if sp.version != body.scenario_version:
+        raise HTTPException(
+            status_code=409,
+            detail=f"场景版本不匹配：当前为 {sp.version}，请求同步 {body.scenario_version}",
+        )
+    res = await db.execute(
+        select(ProjectScenario).where(
+            ProjectScenario.project_id == project_id,
+            ProjectScenario.scenario_id == scenario_id,
+            ProjectScenario.enabled == 1,
+        )
+    )
+    row = res.scalar_one_or_none()
+    if not row:
+        raise HTTPException(status_code=404, detail="绑定不存在或未启用")
+    if row.scenario_version == body.scenario_version:
+        return _project_scenario_item(row, sp)
+    row.scenario_version = body.scenario_version
+    row.updated_at = datetime.now().isoformat()
+    await db.commit()
+    await db.refresh(row)
+    await db.refresh(sp)
+    logger.info(
+        "project scenario version synced project=%s scenario=%s version=%s",
+        project_id,
+        scenario_id,
+        body.scenario_version,
+    )
+    return _project_scenario_item(row, sp)
 
 
 @router.delete("/{project_id}/scenarios/{scenario_id}")
@@ -883,6 +1024,7 @@ async def create_output_version(
     db.add(new_row)
     await db.commit()
     await db.refresh(new_row)
+    schedule_ingest_output(new_row.id)
     return OutputDetailResponse(
         id=new_row.id,
         project_id=new_row.project_id,
@@ -920,6 +1062,7 @@ async def approve_output(
     row.updated_at = datetime.now().isoformat()
     await db.commit()
     await db.refresh(row)
+    schedule_output_kb_visibility(row.id, published=True)
     return OutputDetailResponse(
         id=row.id,
         project_id=row.project_id,
@@ -957,6 +1100,7 @@ async def archive_output(
     row.updated_at = datetime.now().isoformat()
     await db.commit()
     await db.refresh(row)
+    schedule_output_kb_visibility(row.id, published=False)
     return OutputDetailResponse(
         id=row.id,
         project_id=row.project_id,

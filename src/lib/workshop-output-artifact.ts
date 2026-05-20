@@ -92,3 +92,53 @@ export function thumbnailPreviewText(content: string, maxLen = 1200): string {
   const t = content.replace(/\s+/g, " ").trim();
   return t.length > maxLen ? `${t.slice(0, maxLen)}…` : t;
 }
+
+export type WorkshopOutputArtifact = {
+  id: string;
+  title?: string | null;
+  format: WorkshopOutputFormat;
+  content: string;
+};
+
+/** 从单次执行结果拆出可展示的产出物（如 JSON 包 + 内嵌 Markdown 正文） */
+export function deriveWorkshopArtifacts(
+  content: string,
+  primaryFormat: WorkshopOutputFormat,
+  title?: string | null,
+): WorkshopOutputArtifact[] {
+  const baseTitle = downloadFilenameBase(title);
+  if (!content.trim()) return [];
+
+  const primary: WorkshopOutputArtifact = {
+    id: "primary",
+    title: baseTitle,
+    format: primaryFormat,
+    content,
+  };
+
+  if (primaryFormat !== "json") return [primary];
+
+  try {
+    const parsed = JSON.parse(content) as Record<string, unknown>;
+    const embedded = parsed.content;
+    if (typeof embedded === "string" && embedded.trim()) {
+      const name =
+        typeof parsed.tech_name === "string" && parsed.tech_name.trim()
+          ? parsed.tech_name.trim()
+          : baseTitle;
+      return [
+        primary,
+        {
+          id: "embedded-markdown",
+          title: `${name} · 正文`,
+          format: "markdown",
+          content: embedded,
+        },
+      ];
+    }
+  } catch {
+    // keep single artifact
+  }
+
+  return [primary];
+}

@@ -140,6 +140,33 @@ def run_sqlite_migrations(connection: Connection) -> None:
             ],
         )
 
+    if "project_attachments" in names:
+        _add_columns(
+            connection,
+            "project_attachments",
+            [
+                ("ingest_status", "TEXT DEFAULT 'pending'"),
+                ("kb_collection", "TEXT"),
+                ("kb_doc_id", "TEXT"),
+                ("chunk_count", "INTEGER"),
+                ("ingest_error", "TEXT"),
+                ("ingested_at", "TEXT"),
+            ],
+        )
+
+    if "outputs" in names:
+        _add_columns(
+            connection,
+            "outputs",
+            [
+                ("kb_ingest_status", "TEXT"),
+                ("kb_doc_id", "TEXT"),
+                ("kb_chunk_count", "INTEGER"),
+                ("kb_ingested_at", "TEXT"),
+                ("kb_ingest_error", "TEXT"),
+            ],
+        )
+
     if "project_attachments" not in names:
         connection.execute(
             text(
@@ -151,7 +178,13 @@ def run_sqlite_migrations(connection: Connection) -> None:
                     content_type TEXT,
                     size_bytes INTEGER NOT NULL,
                     stored_path TEXT NOT NULL,
-                    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+                    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                    ingest_status TEXT DEFAULT 'pending',
+                    kb_collection TEXT,
+                    kb_doc_id TEXT,
+                    chunk_count INTEGER,
+                    ingest_error TEXT,
+                    ingested_at TEXT
                 )
                 """
             )

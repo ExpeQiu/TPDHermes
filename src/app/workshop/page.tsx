@@ -3,7 +3,8 @@
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { apiGet, apiV1, apiFetch, readJson } from "@/lib/api";
+import { apiGet, apiFetch, readJson } from "@/lib/api";
+import { useEffectiveUserScopeId } from "@/lib/use-effective-user-scope-id";
 import type { ProjectRecord, TaskExecuteBody, TaskInputPayload } from "@/lib/chat-context";
 import { CONTENT_MAX_CLASS } from "@/lib/content-shell";
 import {
@@ -26,6 +27,7 @@ import {
   type ScenarioSkillBinding,
 } from "@/lib/scenario-skills";
 import {
+  deriveWorkshopArtifacts,
   formatFromOutputPolicy,
   normalizeWorkshopOutputFormat,
   type WorkshopOutputFormat,
@@ -143,6 +145,7 @@ export default function WorkshopPage() {
 }
 
 function WorkshopPageInner() {
+  const scopeUserId = useEffectiveUserScopeId();
   const searchParams = useSearchParams();
   const projectFromUrl =
     searchParams?.get("project_id") ?? searchParams?.get("project") ?? "";
@@ -443,6 +446,11 @@ function WorkshopPageInner() {
     };
   }, [selectedScenarioId]);
 
+  useEffect(() => {
+    setErrorMsg("");
+    setGenStatus((s) => (s === "error" ? "idle" : s));
+  }, [selectedProjectId, selectedScenarioId]);
+
   const parsedScenarioSkills = useMemo(
     () =>
       parseScenarioSkills(scenarioDetail?.skills_policy, scenarioDetail?.output_policy),
@@ -666,6 +674,16 @@ function WorkshopPageInner() {
     };
   }, [selectedProjectId, lastRunMeta?.output_id]);
 
+  const outputArtifacts = useMemo(
+    () =>
+      deriveWorkshopArtifacts(
+        output,
+        outputArtifactFormat,
+        taskTitleCustom.trim() || derivedTaskTitle,
+      ),
+    [output, outputArtifactFormat, taskTitleCustom, derivedTaskTitle],
+  );
+
   const handleSubmit = useCallback(() => {
     if (!selectedProjectId) {
       alert("请先选择项目；场景输出需在项目上下文中执行。");
@@ -733,6 +751,7 @@ function WorkshopPageInner() {
       user_message: JSON.stringify({ skill: skillForRun, ...buildContext() }),
       task_input: taskInput,
       stream: true,
+      user_id: scopeUserId,
       source_output_id: mode === "refine" && sourceOutputId ? sourceOutputId : null,
       overrides: {
         skills: {
@@ -743,7 +762,7 @@ function WorkshopPageInner() {
       },
     };
 
-    fetch(apiV1("/tasks/execute"), {
+    apiFetch("/tasks/execute", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
@@ -856,6 +875,7 @@ function WorkshopPageInner() {
     taskObjective,
     taskTitleCustom,
     taskTone,
+    scopeUserId,
   ]);
 
   const handleSaveAsNewVersion = useCallback(async () => {
@@ -1517,11 +1537,10 @@ function WorkshopPageInner() {
               ) : null}
 
               <WorkshopOutputPanel
-                content={output}
-                format={outputArtifactFormat}
+                artifacts={outputArtifacts}
+                defaultFormat={outputArtifactFormat}
                 genStatus={genStatus}
                 errorMsg={errorMsg}
-                downloadTitle={taskTitleCustom.trim() || derivedTaskTitle}
                 outputEndRef={outputEndRef}
               />
             </section>

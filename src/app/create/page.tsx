@@ -6,7 +6,14 @@ import { useSearchParams } from "next/navigation";
 import { apiGet, apiFetch, apiDelete, readJson } from "@/lib/api";
 import { CONTENT_MAX_CLASS } from "@/lib/content-shell";
 import { SCENARIOS, type Scenario } from "@/lib/scenario-presets";
-import { scenarioStatusLabel, stepLabel } from "@/lib/ui-labels";
+import {
+  filterPublicKbCollections,
+  isPublicKbCollection,
+  kbCollectionLabel,
+  scenarioStatusLabel,
+  skillLabel,
+  stepLabel,
+} from "@/lib/ui-labels";
 import {
   buildScenarioListItems,
   countLocalTemplates,
@@ -130,9 +137,6 @@ function CreatePageInner() {
       setCollections(nextCollections);
       setSkillsList(nextSkills);
       setSkillMeta(nextMeta);
-      if (nextCollections.length > 0) {
-        setSelectedKbKeys((current) => (current.length > 0 ? current : [nextCollections[0]]));
-      }
       setLoading(false);
     });
     return () => {
@@ -151,10 +155,22 @@ function CreatePageInner() {
     [remoteList],
   );
 
+  const publicCollections = useMemo(
+    () => filterPublicKbCollections(collections),
+    [collections],
+  );
+
+  useEffect(() => {
+    setSelectedKbKeys((prev) => {
+      const next = prev.filter((k) => publicCollections.includes(k));
+      return next.length === prev.length ? prev : next;
+    });
+  }, [publicCollections]);
+
   useEffect(() => {
     if (loading) return;
     let cancelled = false;
-    const cols = collections;
+    const cols = publicCollections;
     const sid = selectedScenarioId;
 
     (async () => {
@@ -170,16 +186,19 @@ function CreatePageInner() {
 
         const kp = row.knowledge_policy ?? {};
         const rawCols = Array.isArray(kp.collections) ? (kp.collections as string[]) : [];
+        const publicRawCols = filterPublicKbCollections(
+          rawCols.map((c) => String(c).trim()).filter(Boolean),
+        );
         const modeK = typeof kp.mode === "string" ? kp.mode : "restricted";
-        const intersect = rawCols.filter((c) => cols.includes(c));
+        const intersect = publicRawCols.filter((c) => cols.includes(c));
         const knowledgeOn =
           intersect.length > 0 ||
-          rawCols.length > 0 ||
+          publicRawCols.length > 0 ||
           (modeK !== "off" && modeK !== "none" && modeK !== "disabled");
         setForceBindKb(knowledgeOn);
         if (intersect.length > 0) setSelectedKbKeys(intersect);
-        else if (rawCols.length > 0) setSelectedKbKeys(rawCols);
-        else if (knowledgeOn && cols[0]) setSelectedKbKeys([cols[0]]);
+        else if (publicRawCols.length > 0) setSelectedKbKeys(publicRawCols);
+        else if (knowledgeOn && cols.length > 0) setSelectedKbKeys(cols.slice());
         else setSelectedKbKeys([]);
 
         const sp = row.skills_policy ?? {};
@@ -204,7 +223,7 @@ function CreatePageInner() {
         setSceneDescription(local?.summary ?? "");
         setResultDescription(local?.goal ?? "");
         setForceBindKb(false);
-        setSelectedKbKeys(cols[0] ? [cols[0]] : []);
+        setSelectedKbKeys([]);
         setForceBindSkill(false);
         setContractAllowedSkills([]);
         setSelectedSkillTemplate("");
@@ -214,7 +233,7 @@ function CreatePageInner() {
     return () => {
       cancelled = true;
     };
-  }, [selectedScenarioId, loading, collections, remoteList]);
+  }, [selectedScenarioId, loading, publicCollections, remoteList]);
 
   const scenarioListItems = useMemo(
     () => buildScenarioListItems(remoteList, dismissedPresetIds),
@@ -231,6 +250,11 @@ function CreatePageInner() {
     if (fromList) return fromList;
     return scenarioListItems[0] ?? SCENARIOS[0];
   }, [selectedScenarioId, scenarioListItems]);
+
+  const skillDisplayByName = useMemo(
+    () => new Map(skillMeta.map((m) => [m.name, m.display_name] as const)),
+    [skillMeta],
+  );
 
   const skillTemplateOptions = useMemo(() => {
     if (!forceBindSkill || contractAllowedSkills.length === 0) return [];
@@ -256,8 +280,8 @@ function CreatePageInner() {
   }, [skillTemplateOptions, selectedSkillTemplate]);
 
   const kbOrdered = useMemo(
-    () => collections.filter((c) => selectedKbKeys.includes(c)),
-    [collections, selectedKbKeys],
+    () => publicCollections.filter((c) => selectedKbKeys.includes(c)),
+    [publicCollections, selectedKbKeys],
   );
 
   const decodedTemplate = useMemo(
@@ -282,7 +306,7 @@ function CreatePageInner() {
   );
 
   function toggleKb(name: string) {
-    if (!forceBindKb) return;
+    if (!forceBindKb || !isPublicKbCollection(name)) return;
     setSelectedKbKeys((prev) => {
       if (prev.includes(name)) {
         if (prev.length <= 1) return prev;
@@ -690,14 +714,15 @@ function CreatePageInner() {
                           <button
                             key={name}
                             type="button"
+                            title={name}
                             onClick={() => toggleSkill(name)}
-                            className={`rounded-full border px-3 py-1 font-mono text-xs ${
+                            className={`rounded-full border px-3 py-1 text-xs ${
                               contractAllowedSkills.includes(name)
                                 ? "border-blue-500/70 bg-blue-500/15 text-blue-100"
                                 : "border-slate-600 text-slate-400"
                             }`}
                           >
-                            {name}
+                            {skillLabel(name, skillDisplayByName.get(name))}
                           </button>
                         ))
                       )}
@@ -717,17 +742,18 @@ function CreatePageInner() {
                     onChange={(e) => {
                       setForceBindKb(e.target.checked);
                       if (!e.target.checked) setSelectedKbKeys([]);
-                      else if (selectedKbKeys.length === 0 && collections[0]) {
-                        setSelectedKbKeys([collections[0]]);
-                      }
+                      else setSelectedKbKeys(publicCollections.slice());
                     }}
                     aria-label="强制绑定知识库"
                   />
                 </label>
                 <div className="rounded-2xl border border-slate-800 bg-slate-950/60 p-4">
                 {forceBindKb ? (
+                  publicCollections.length === 0 ? (
+                    <p className="text-xs text-slate-500">暂无公共知识库集合</p>
+                  ) : (
                   <ul className="max-h-32 space-y-2 overflow-y-auto">
-                    {collections.map((name) => (
+                    {publicCollections.map((name) => (
                       <li key={name}>
                         <label className="flex items-center gap-2">
                           <input
@@ -735,11 +761,12 @@ function CreatePageInner() {
                             checked={selectedKbKeys.includes(name)}
                             onChange={() => toggleKb(name)}
                           />
-                          {name}
+                          <span title={name}>{kbCollectionLabel(name)}</span>
                         </label>
                       </li>
                     ))}
                   </ul>
+                  )
                 ) : (
                   <p className="text-xs text-slate-500">未开启时不限制知识集合</p>
                 )}
@@ -812,9 +839,10 @@ function CreatePageInner() {
                           {contractAllowedSkills.map((name) => (
                             <span
                               key={name}
-                              className="rounded-full border border-blue-500/70 bg-blue-500/15 px-2.5 py-1 font-mono text-xs text-blue-100"
+                              title={name}
+                              className="rounded-full border border-blue-500/70 bg-blue-500/15 px-2.5 py-1 text-xs text-blue-100"
                             >
-                              {name}
+                              {skillLabel(name, skillDisplayByName.get(name))}
                             </span>
                           ))}
                         </div>
@@ -831,8 +859,8 @@ function CreatePageInner() {
                       kbOrdered.length > 0 ? (
                         <ul className="mt-2 max-h-28 space-y-1 overflow-y-auto text-xs text-slate-300">
                           {kbOrdered.map((name) => (
-                            <li key={name} className="truncate font-mono">
-                              {name}
+                            <li key={name} className="truncate" title={name}>
+                              {kbCollectionLabel(name)}
                             </li>
                           ))}
                         </ul>

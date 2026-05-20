@@ -7,11 +7,13 @@ from __future__ import annotations
 import json
 import logging
 import uuid
+from datetime import datetime
 from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from backend.services.project_kb import merge_project_kb_collections
 from backend.models.project import Project
 from backend.models.project_config import ProjectConfig
 from backend.models.project_scenario import ProjectScenario
@@ -159,9 +161,16 @@ async def _ensure_workshop_binding(
     if not row:
         raise WorkshopBindingError(f"项目在工坊中未启用该场景绑定: scenario_id={scenario_id}")
     if row.scenario_version != profile_version:
-        raise ScenarioVersionMismatchError(
-            f"场景版本不一致：绑定为 {row.scenario_version}，当前场景版本为 {profile_version}"
+        logger.info(
+            "workshop binding version sync project=%s scenario=%s %s -> %s",
+            project_id,
+            scenario_id,
+            row.scenario_version,
+            profile_version,
         )
+        row.scenario_version = profile_version
+        row.updated_at = datetime.now().isoformat()
+        await db.flush()
 
 
 def _catalog_meta(sid: str) -> tuple[str, str, str]:
@@ -517,6 +526,10 @@ async def assemble_payload(
 
     if entrypoint == "workshop":
         skills = skills.model_copy(update={"mode": "manual_only", "allow_agent_free_choice": False})
+
+    if project_row and str(project_row.id).strip() and str(project_row.id) != "none":
+        merged_cols = merge_project_kb_collections(knowledge.collections, project_row.id)
+        knowledge = knowledge.model_copy(update={"collections": merged_cols})
 
     execution = OrchestrationExecution(stream=request.stream, trace=True, save_output=True, save_run_log=True)
 

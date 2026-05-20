@@ -10,7 +10,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
-from sqlalchemy import func, or_, select
+from sqlalchemy import func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.db import get_db
@@ -312,9 +312,19 @@ async def publish_scenario(scenario_id: str, db: AsyncSession = Depends(get_db))
     row.version = _bump_version(row.version)
     row.status = "published"
     row.updated_at = datetime.now().isoformat()
+    sync_result = await db.execute(
+        update(ProjectScenario)
+        .where(ProjectScenario.scenario_id == scenario_id)
+        .values(scenario_version=row.version, updated_at=row.updated_at)
+    )
     await db.commit()
     await db.refresh(row)
-    logger.info("scenario published id=%s version=%s", scenario_id, row.version)
+    logger.info(
+        "scenario published id=%s version=%s bindings_synced=%s",
+        scenario_id,
+        row.version,
+        sync_result.rowcount,
+    )
     return _row_to_response(row)
 
 

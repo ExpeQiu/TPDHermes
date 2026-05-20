@@ -268,13 +268,20 @@ export interface ProjectContextResponse {
   description: string | null;
   background: string | null;
   audience: string | null;
-  attachments: Array<{ id: string; original_filename: string }>;
+  attachments: Array<{ id: string; original_filename: string; ingest_status?: string | null }>;
   recent_outputs: Array<{
     id: string;
     title: string | null;
     summary: string | null;
     created_at: string | null;
+    status?: string | null;
+    kb_indexed?: boolean;
   }>;
+  kb_stats?: {
+    collection: string;
+    attachments_indexed: number;
+    outputs_indexed: number;
+  } | null;
 }
 
 export async function fetchProjectContext(projectId: string): Promise<ProjectContextResponse> {
@@ -291,17 +298,11 @@ export function formatProjectContextForTaskInput(ctx: ProjectContextResponse): s
   if (bg) lines.push(`背景: ${bg.slice(0, 800)}`);
   const aud = ctx.audience?.trim();
   if (aud) lines.push(`受众: ${aud.slice(0, 400)}`);
-  if (ctx.attachments.length > 0) {
-    const names = ctx.attachments.map((a) => a.original_filename).filter(Boolean);
-    if (names.length) lines.push(`附件列表: ${names.join("、")}`);
-  }
-  if (ctx.recent_outputs.length > 0) {
-    lines.push("近期项目输出（摘要，供参考，勿逐字照抄）:");
-    for (const o of ctx.recent_outputs.slice(0, 10)) {
-      const t = (o.title || "未命名").trim();
-      const s = (o.summary || "").replace(/\s+/g, " ").trim().slice(0, 160);
-      lines.push(`- ${t} (id=${o.id})${s ? ` — ${s}` : ""}`);
-    }
+  const stats = ctx.kb_stats;
+  if (stats?.collection) {
+    lines.push(
+      `项目知识库 collection=${stats.collection}（已索引：附件 ${stats.attachments_indexed} 份，输出 ${stats.outputs_indexed} 篇）；请按需 kb_query 检索，勿假设 prompt 含全文。`,
+    );
   }
   return lines.join("\n");
 }

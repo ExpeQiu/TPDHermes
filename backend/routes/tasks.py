@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import time
 import uuid
 from typing import Any, AsyncGenerator
@@ -30,6 +31,8 @@ from backend.services.orchestration_service import (
     assemble_payload,
     merge_chat_messages,
 )
+from backend.services.project_kb import output_doc_id, project_kb_collection
+from backend.services.project_kb_ingest import schedule_ingest_output
 from backend.services.project_access import require_project_for_user
 from backend.services.run_log_service import create_run, finalize_run, mark_run_failed
 from backend.services.skill_loader import get_loader
@@ -114,6 +117,12 @@ async def execute_task(req: Request, task_req: TaskExecuteRequest, db: AsyncSess
         task_req.project_id,
     )
     eff_request = task_req
+    refine_full_source = os.getenv("WORKSHOP_REFINE_FULL_SOURCE", "").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+        "on",
+    )
     if (
         eff_request.entrypoint == "workshop"
         and eff_request.source_output_id
@@ -130,16 +139,39 @@ async def execute_task(req: Request, task_req: TaskExecuteRequest, db: AsyncSess
         src_row = q.scalar_one_or_none()
         if not src_row:
             raise HTTPException(status_code=404, detail=f"来源输出不存在: {oid}")
-        material = (src_row.content or "").strip()
-        ti = eff_request.task_input
-        if not material:
-            raise HTTPException(status_code=400, detail="来源输出正文为空，无法优化")
-        if ti is None:
-            eff_request = eff_request.model_copy(update={"task_input": TaskInputPayload(source_material=material)})
-        elif not (ti.source_material and str(ti.source_material).strip()):
-            eff_request = eff_request.model_copy(
-                update={"task_input": ti.model_copy(update={"source_material": material})},
+        if refine_full_source:
+            material = (src_row.content or "").strip()
+            ti = eff_request.task_input
+            if not material:
+                raise HTTPException(status_code=400, detail="来源输出正文为空，无法优化")
+            if ti is None:
+                eff_request = eff_request.model_copy(
+                    update={"task_input": TaskInputPayload(source_material=material)}
+                )
+            elif not (ti.source_material and str(ti.source_material).strip()):
+                eff_request = eff_request.model_copy(
+                    update={"task_input": ti.model_copy(update={"source_material": material})},
+                )
+        else:
+            schedule_ingest_output(oid)
+            kb_col = project_kb_collection(pid)
+            doc_id = output_doc_id(oid)
+            hint = (
+                f"来源输出已入项目知识库 collection={kb_col}，doc_id={doc_id}；"
+                f"请用 kb_query 或 kb_get_entry 按需检索片段，勿臆造未检索内容。"
             )
+            ti = eff_request.task_input
+            if ti is None:
+                eff_request = eff_request.model_copy(update={"task_input": TaskInputPayload(extra=hint)})
+            elif not (ti.extra and str(ti.extra).strip()):
+                eff_request = eff_request.model_copy(
+                    update={"task_input": ti.model_copy(update={"extra": hint})},
+                )
+            else:
+                merged_extra = f"{ti.extra.strip()}\n{hint}"
+                eff_request = eff_request.model_copy(
+                    update={"task_input": ti.model_copy(update={"extra": merged_extra})},
+                )
 
     pid_strip = (eff_request.project_id or "").strip()
     if pid_strip and pid_strip != "none":

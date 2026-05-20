@@ -27,6 +27,8 @@ def _build_orchestration_guidance(payload: OrchestrationPayload) -> str:
     lines = [
         "你是 TPDHermes 编排执行代理。你必须优先遵循 orchestration 中的边界、模板和技能策略。",
         "用户自然语言需求在对话消息中给出；不要在未授权时编造事实。",
+        "项目附件与输出沉淀已写入 orchestration.knowledge.collections 中的 project.*.kb 集合；"
+        "需要引用时请调用 kb_query / kb_get_entry 按需检索，不要假设 prompt 中已包含全文。",
     ]
 
     if knowledge_collections:

@@ -57,6 +57,9 @@ interface ApiOutputRow {
   status: string;
   created_at: string | null;
   content_preview: string;
+  kb_ingest_status?: string | null;
+  kb_doc_id?: string | null;
+  kb_chunk_count?: number | null;
 }
 
 interface ApiRunRow {
@@ -96,6 +99,7 @@ interface ProjectOutput {
   run_id?: string | null;
   entrypoint?: string | null;
   status: string;
+  kb_ingest_status?: string | null;
 }
 
 function buildOutputChatRefineLink(
@@ -150,7 +154,31 @@ function mapApiOutput(o: ApiOutputRow): ProjectOutput {
     run_id: o.run_id ?? null,
     entrypoint: o.entrypoint ?? null,
     status: o.status || "draft",
+    kb_ingest_status: o.kb_ingest_status ?? null,
   };
+}
+
+function kbIngestStatusLabel(status: string | null | undefined): string {
+  const s = (status || "pending").toLowerCase();
+  if (s === "ingested") return "已入库";
+  if (s === "extracting" || s === "pending") return "入库中";
+  if (s === "failed") return "入库失败";
+  if (s === "removed") return "已移出";
+  return status || "待处理";
+}
+
+function kbIngestBadgeClass(status: string | null | undefined): string {
+  const s = (status || "pending").toLowerCase();
+  if (s === "ingested") {
+    return "rounded border border-emerald-600/40 bg-emerald-500/10 px-2 py-0.5 text-xs text-emerald-300";
+  }
+  if (s === "failed") {
+    return "rounded border border-red-700/50 bg-red-950/30 px-2 py-0.5 text-xs text-red-300";
+  }
+  if (s === "extracting" || s === "pending") {
+    return "rounded border border-amber-600/40 bg-amber-500/10 px-2 py-0.5 text-xs text-amber-200";
+  }
+  return "rounded bg-slate-700/60 px-2 py-0.5 text-xs text-slate-400";
 }
 
 interface ApiAttachmentRow {
@@ -160,6 +188,11 @@ interface ApiAttachmentRow {
   content_type: string | null;
   size_bytes: number;
   created_at: string | null;
+  ingest_status?: string | null;
+  kb_doc_id?: string | null;
+  chunk_count?: number | null;
+  ingest_error?: string | null;
+  ingested_at?: string | null;
 }
 
 /** GET /projects/{id}/scenarios */
@@ -520,7 +553,7 @@ export default function ProjectDetailPage() {
     const fd = new FormData();
     fd.append("file", file);
     try {
-      const res = await fetch(apiV1(`/projects/${String(id)}/attachments`), {
+      const res = await apiFetch(`/projects/${String(id)}/attachments`, {
         method: "POST",
         body: fd,
       });
@@ -537,13 +570,28 @@ export default function ProjectDetailPage() {
     if (!id || !window.confirm("确定删除该附件？")) return;
     setAttachmentError(null);
     try {
-      const res = await fetch(apiV1(`/projects/${String(id)}/attachments/${attachmentId}`), {
+      const res = await apiFetch(`/projects/${String(id)}/attachments/${attachmentId}`, {
         method: "DELETE",
       });
       await readJson<{ ok: boolean }>(res);
       await refreshAttachments();
     } catch (err) {
       setAttachmentError(err instanceof Error ? err.message : "删除失败");
+    }
+  };
+
+  const handleReingestAttachment = async (attachmentId: string) => {
+    if (!id) return;
+    setAttachmentError(null);
+    try {
+      const res = await apiFetch(
+        `/projects/${String(id)}/attachments/${attachmentId}/reingest`,
+        { method: "POST" },
+      );
+      await readJson<{ ok: boolean }>(res);
+      await refreshAttachments();
+    } catch (err) {
+      setAttachmentError(err instanceof Error ? err.message : "重新入库失败");
     }
   };
 
@@ -935,8 +983,27 @@ export default function ProjectDetailPage() {
                               <p className="text-xs text-slate-500">
                                 {formatFileSize(a.size_bytes)} · {formatDate(a.created_at)}
                               </p>
+                              <div className="mt-1 flex flex-wrap items-center gap-2">
+                                <span className={kbIngestBadgeClass(a.ingest_status)}>
+                                  {kbIngestStatusLabel(a.ingest_status)}
+                                </span>
+                                {a.ingest_error ? (
+                                  <span className="text-xs text-red-400/90 truncate max-w-[12rem]" title={a.ingest_error}>
+                                    {a.ingest_error.slice(0, 80)}
+                                  </span>
+                                ) : null}
+                              </div>
                             </div>
                             <div className="flex shrink-0 items-center gap-2">
+                              {(a.ingest_status || "").toLowerCase() === "failed" ? (
+                                <button
+                                  type="button"
+                                  onClick={() => void handleReingestAttachment(a.id)}
+                                  className="rounded-lg border border-amber-700/50 px-2.5 py-1 text-xs text-amber-200 transition hover:bg-amber-950/30"
+                                >
+                                  重试入库
+                                </button>
+                              ) : null}
                               <a
                                 href={attachmentDownloadUrl(a.id)}
                                 target="_blank"
@@ -1036,6 +1103,9 @@ export default function ProjectDetailPage() {
                                 <span className={outputStatusBadgeClass(output.status)}>
                                   {output.status === "approved" ? "✓ " : ""}
                                   {outputStatusLabel(output.status)}
+                                </span>
+                                <span className={kbIngestBadgeClass(output.kb_ingest_status)}>
+                                  KB {kbIngestStatusLabel(output.kb_ingest_status)}
                                 </span>
                                 {output.tags
                                   .filter((tag) => tag !== outputStatusLabel(output.status))

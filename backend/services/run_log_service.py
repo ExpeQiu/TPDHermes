@@ -111,6 +111,9 @@ async def finalize_run(
         await db.flush()
         output_id = out.id
         logger.info("output saved output_id=%s run_id=%s status=%s", output_id, run_id, out_status)
+        from backend.services.project_kb_ingest import schedule_ingest_output
+
+        schedule_ingest_output(output_id)
     elif save_output and not validation_ok:
         res.status = "draft"
         logger.info("output skipped due to validation run_id=%s", run_id)

@@ -89,14 +89,21 @@ export async function syncQuickScenariosToProjectBindings(
     }
   }
 
-  const stillBound = new Set(
-    enabled.filter((b) => target.has(b.scenario_id)).map((b) => b.scenario_id),
-  );
-
   for (const scenarioId of quick.scenarioIds) {
-    if (stillBound.has(scenarioId)) continue;
     const cat = catalog.find((c) => c.id === scenarioId);
     if (!cat) continue;
+    const existing = enabled.find((b) => b.scenario_id === scenarioId);
+    if (existing) {
+      if (existing.scenario_version && existing.scenario_version !== cat.version) {
+        const res = await fetchFn(`/projects/${projectId}/scenarios/${scenarioId}/version`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ scenario_version: cat.version }),
+        });
+        await readJsonFn(res);
+      }
+      continue;
+    }
     const res = await fetchFn(`/projects/${projectId}/scenarios`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },

@@ -280,6 +280,10 @@ def run_kb_ingestion(
                 "trace_id",
                 "created_by",
                 "scenario_id",
+                "project_id",
+                "source_id",
+                "output_status",
+                "entrypoint",
             ):
                 if merged.get(_hk) is not None:
                     base_meta[_hk] = merged[_hk]
