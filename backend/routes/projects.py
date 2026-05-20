@@ -310,7 +310,10 @@ async def get_project_context(
     out_rows = (
         await db.execute(
             select(OutputAsset)
-            .where(OutputAsset.project_id == project_id)
+            .where(
+                OutputAsset.project_id == project_id,
+                OutputAsset.status != "archived",
+            )
             .order_by(OutputAsset.created_at.desc())
             .limit(12)
         )
@@ -343,6 +346,7 @@ class OutputListItem(BaseModel):
     template_id: str | None
     run_id: str | None
     scenario_id: str | None = None
+    entrypoint: str | None = None
     status: str
     created_at: str | None
     content_preview: str
@@ -356,11 +360,25 @@ class OutputDetailResponse(BaseModel):
     template_id: str | None
     run_id: str | None
     scenario_id: str | None = None
+    entrypoint: str | None = None
     status: str
     created_at: str | None
     updated_at: str | None
     content_format: str
     content: str
+
+
+async def _entrypoint_map_for_runs(
+    db: AsyncSession, run_ids: list[str]
+) -> dict[str, str]:
+    if not run_ids:
+        return {}
+    q = await db.execute(
+        select(OrchestrationRun.id, OrchestrationRun.entrypoint).where(
+            OrchestrationRun.id.in_(run_ids)
+        )
+    )
+    return {row[0]: row[1] for row in q.all() if row[0] and row[1]}
 
 
 @router.get("/{project_id}/outputs", response_model=list[OutputListItem])
@@ -378,9 +396,13 @@ async def list_project_outputs(
         query = query.where(OutputAsset.scenario_id == scenario_id)
     if status:
         query = query.where(OutputAsset.status == status)
+    else:
+        query = query.where(OutputAsset.status != "archived")
     query = query.order_by(OutputAsset.created_at.desc()).limit(min(limit, 500))
     q = await db.execute(query)
     rows = q.scalars().all()
+    run_ids = [o.run_id for o in rows if o.run_id]
+    entry_by_run = await _entrypoint_map_for_runs(db, run_ids)
     out: list[OutputListItem] = []
     for o in rows:
         preview = (o.content or "")[:200]
@@ -392,6 +414,7 @@ async def list_project_outputs(
                 template_id=o.template_id,
                 run_id=o.run_id,
                 scenario_id=getattr(o, "scenario_id", None),
+                entrypoint=entry_by_run.get(o.run_id) if o.run_id else None,
                 status=o.status,
                 created_at=o.created_at,
                 content_preview=preview,
@@ -417,6 +440,10 @@ async def get_project_output_detail(
     row = q.scalar_one_or_none()
     if not row:
         raise HTTPException(status_code=404, detail="Output not found")
+    entrypoint: str | None = None
+    if row.run_id:
+        entry_by_run = await _entrypoint_map_for_runs(db, [row.run_id])
+        entrypoint = entry_by_run.get(row.run_id)
     return OutputDetailResponse(
         id=row.id,
         project_id=row.project_id,
@@ -425,6 +452,7 @@ async def get_project_output_detail(
         template_id=row.template_id,
         run_id=row.run_id,
         scenario_id=getattr(row, "scenario_id", None),
+        entrypoint=entrypoint,
         status=row.status,
         created_at=row.created_at,
         updated_at=row.updated_at,

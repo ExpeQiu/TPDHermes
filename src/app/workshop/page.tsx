@@ -7,6 +7,11 @@ import { apiGet, apiV1, apiFetch, readJson } from "@/lib/api";
 import type { ProjectRecord, TaskExecuteBody, TaskInputPayload } from "@/lib/chat-context";
 import { CONTENT_MAX_CLASS } from "@/lib/content-shell";
 import {
+  loadProjectQuickScenarios,
+  quickScenariosScopeId,
+  resolveWorkshopScenarioId,
+} from "@/lib/project-quick-scenarios";
+import {
   buildScenarioListItems,
   countLocalTemplates,
   isScenarioPublished,
@@ -227,14 +232,18 @@ function WorkshopPageInner() {
     [boundScenarios],
   );
 
+  const isWorkshopSelectable = useCallback((item: ScenarioListItem): boolean => {
+    if (item.isLocalTemplate) return false;
+    return isScenarioPublished(item.remote);
+  }, []);
+
   const isWorkshopExecutable = useCallback(
     (item: ScenarioListItem): boolean => {
+      if (!isWorkshopSelectable(item)) return false;
       const binding = boundByScenarioId.get(item.id);
-      if (!binding || binding.enabled !== 1) return false;
-      const st = (binding.scenario_status || item.remote?.status || "draft").toLowerCase();
-      return st === "published";
+      return Boolean(binding && binding.enabled === 1);
     },
-    [boundByScenarioId],
+    [boundByScenarioId, isWorkshopSelectable],
   );
 
   useEffect(() => {
@@ -298,40 +307,91 @@ function WorkshopPageInner() {
     };
   }, [outputFromUrl, selectedProjectId, modeFromUrl]);
 
+  const projectQuickScenarios = useMemo(() => {
+    if (!selectedProjectId) return null;
+    return loadProjectQuickScenarios(quickScenariosScopeId(), selectedProjectId);
+  }, [selectedProjectId]);
+
+  const quickScenarioIdSet = useMemo(
+    () => new Set(projectQuickScenarios?.scenarioIds ?? []),
+    [projectQuickScenarios],
+  );
+
+  const workshopDisplayScenarios = useMemo(() => {
+    const published = scenarioListItems.filter((item) => isWorkshopSelectable(item));
+    return published.sort((a, b) => {
+      const aQuick = quickScenarioIdSet.has(a.id) ? 0 : 1;
+      const bQuick = quickScenarioIdSet.has(b.id) ? 0 : 1;
+      if (aQuick !== bQuick) return aQuick - bQuick;
+      const aBound = boundByScenarioId.has(a.id) ? 0 : 1;
+      const bBound = boundByScenarioId.has(b.id) ? 0 : 1;
+      if (aBound !== bBound) return aBound - bBound;
+      return a.title.localeCompare(b.title, "zh-CN");
+    });
+  }, [scenarioListItems, isWorkshopSelectable, quickScenarioIdSet, boundByScenarioId]);
+
   const workshopScenarioOptions = useMemo((): WorkshopScenarioOption[] => {
     return scenarioListItems
       .filter((item) => isWorkshopExecutable(item))
       .map((item) => {
         const binding = boundByScenarioId.get(item.id)!;
+        const isQuickDefault =
+          projectQuickScenarios?.defaultScenarioId === item.id ||
+          quickScenarioIdSet.has(item.id) ||
+          (binding.is_default === 1 && !projectQuickScenarios?.scenarioIds?.length);
         return {
           id: item.id,
           name: item.title,
           versionLine: `${scenarioStatusLabel(binding.scenario_status)} · v${binding.scenario_version}${
-            binding.is_default ? " · 默认" : ""
+            isQuickDefault ? " · 默认" : ""
           }`,
         };
       });
-  }, [scenarioListItems, boundByScenarioId, isWorkshopExecutable]);
+  }, [
+    scenarioListItems,
+    boundByScenarioId,
+    isWorkshopExecutable,
+    projectQuickScenarios,
+    quickScenarioIdSet,
+  ]);
 
   useEffect(() => {
-    if (workshopScenarioOptions.length === 0) {
+    if (!selectedProjectId || loadingBound) return;
+    if (workshopDisplayScenarios.length === 0) {
       setSelectedScenarioId("");
       return;
     }
-    if (scenarioFromUrl && workshopScenarioOptions.some((o) => o.id === scenarioFromUrl)) {
+    const inDisplay = (id: string) => workshopDisplayScenarios.some((s) => s.id === id);
+
+    if (scenarioFromUrl && inDisplay(scenarioFromUrl)) {
       setSelectedScenarioId(scenarioFromUrl);
       return;
     }
-    if (selectedScenarioId && workshopScenarioOptions.some((o) => o.id === selectedScenarioId)) {
+    if (selectedScenarioId && inDisplay(selectedScenarioId)) {
+      return;
+    }
+    const quickDefault = resolveWorkshopScenarioId(projectQuickScenarios);
+    if (quickDefault && inDisplay(quickDefault)) {
+      setSelectedScenarioId(quickDefault);
       return;
     }
     const def = boundScenarios.find((b) => b.enabled === 1 && b.is_default === 1);
-    if (def && workshopScenarioOptions.some((o) => o.id === def.scenario_id)) {
+    if (def?.scenario_id && inDisplay(def.scenario_id)) {
       setSelectedScenarioId(def.scenario_id);
       return;
     }
-    setSelectedScenarioId(workshopScenarioOptions[0]?.id ?? "");
-  }, [workshopScenarioOptions, scenarioFromUrl, selectedScenarioId, boundScenarios]);
+    const firstExecutable = workshopDisplayScenarios.find((s) => isWorkshopExecutable(s));
+    setSelectedScenarioId(firstExecutable?.id ?? workshopDisplayScenarios[0]?.id ?? "");
+  }, [
+    selectedProjectId,
+    loadingBound,
+    workshopDisplayScenarios,
+    scenarioFromUrl,
+    selectedScenarioId,
+    boundScenarios,
+    projectQuickScenarios,
+    isWorkshopExecutable,
+  ]);
 
   useEffect(() => {
     if (!selectedProjectId || !selectedScenarioId) {
@@ -612,7 +672,12 @@ function WorkshopPageInner() {
       return;
     }
     if (!selectedScenarioId || loadingBound) {
-      alert("请等待项目绑定场景加载完成并选择场景");
+      alert("请等待场景列表加载完成并选择场景");
+      return;
+    }
+    const selectedItem = scenarioListItems.find((s) => s.id === selectedScenarioId);
+    if (!selectedItem || !isWorkshopExecutable(selectedItem)) {
+      alert("当前场景未绑定本项目。请先在项目详情「设置快捷场景」中勾选并保存，或选择已绑定的场景。");
       return;
     }
     if (loadingScenarioDetail || !scenarioDetail) {
@@ -986,12 +1051,12 @@ function WorkshopPageInner() {
 
               {!selectedProjectId ? (
                 <p className="mt-5 rounded-2xl border border-dashed border-slate-700 bg-slate-950/30 px-4 py-6 text-center text-sm text-slate-500">
-                  请先选择项目；场景列表与「场景编排」同源，仅已绑定且已发布的场景可执行。
+                  请先选择项目；将展示全部已发布场景，并默认选中项目快捷场景。
                 </p>
               ) : (
               <div className="mt-5 space-y-3 text-sm">
                 <div className="flex flex-wrap items-end justify-between gap-2">
-                  <span className="text-slate-300">场景（与场景编排列表同源）</span>
+                  <span className="text-slate-300">已发布场景（与场景编排同源）</span>
                   <span className="text-xs text-slate-500">
                     服务端 {remoteScenarios.length} · 内置模板 {localTemplateCount}
                   </span>
@@ -1002,32 +1067,30 @@ function WorkshopPageInner() {
                   </p>
                 ) : (
                   <div className="grid max-h-[min(22rem,50vh)] gap-3 overflow-y-auto pr-1">
-                    {scenarioListItems.map((scenario) => {
+                    {workshopDisplayScenarios.map((scenario) => {
                       const active = scenario.id === selectedScenarioId;
                       const binding = boundByScenarioId.get(scenario.id);
                       const executable = isWorkshopExecutable(scenario);
+                      const isQuick = quickScenarioIdSet.has(scenario.id);
                       const remote = scenario.remote;
                       return (
                         <button
                           key={scenario.id}
                           type="button"
-                          disabled={!executable}
-                          onClick={() => {
-                            if (executable) setSelectedScenarioId(scenario.id);
-                          }}
+                          onClick={() => setSelectedScenarioId(scenario.id)}
                           className={`rounded-2xl border p-4 text-left transition ${
-                            active && executable
+                            active
                               ? "border-blue-500 bg-blue-500/10"
                               : executable
                                 ? "border-slate-700 bg-slate-950/60 hover:border-slate-600"
-                                : "cursor-not-allowed border-slate-800 bg-slate-950/40 opacity-75"
+                                : "border-slate-800 bg-slate-950/40 hover:border-slate-700"
                           }`}
                         >
                           <div className="flex items-start justify-between gap-2">
                             <h3 className="font-semibold text-white">{scenario.title}</h3>
                             <span
                               className={`h-2 w-2 shrink-0 rounded-full ${
-                                active && executable ? "bg-blue-400" : "bg-slate-600"
+                                active ? "bg-blue-400" : executable ? "bg-emerald-500/80" : "bg-slate-600"
                               }`}
                             />
                           </div>
@@ -1043,53 +1106,53 @@ function WorkshopPageInner() {
                                 内置模板
                               </span>
                             ) : null}
+                            {isQuick ? (
+                              <span className="rounded-full border border-violet-600/50 bg-violet-500/10 px-2 py-0.5 text-[10px] text-violet-200">
+                                快捷场景
+                                {projectQuickScenarios?.defaultScenarioId === scenario.id
+                                  ? " · 默认"
+                                  : ""}
+                              </span>
+                            ) : null}
                             {binding?.enabled === 1 ? (
                               <span className="rounded-full border border-blue-600/50 bg-blue-500/10 px-2 py-0.5 text-[10px] text-blue-200">
-                                已绑定{binding.is_default ? " · 默认" : ""}
+                                已绑定{binding.is_default && !isQuick ? " · 默认" : ""}
                               </span>
-                            ) : remote && isScenarioPublished(remote) ? (
+                            ) : (
                               <span className="rounded-full border border-amber-700/50 bg-amber-500/10 px-2 py-0.5 text-[10px] text-amber-200">
                                 未绑定本项目
                               </span>
-                            ) : null}
-                            {!executable && !scenario.isLocalTemplate && remote && !isScenarioPublished(remote) ? (
-                              <span className="rounded-full border border-slate-600 px-2 py-0.5 text-[10px] text-slate-500">
-                                未发布
-                              </span>
-                            ) : null}
-                            {scenario.isLocalTemplate && !remote ? (
-                              <span className="rounded-full border border-slate-600 px-2 py-0.5 text-[10px] text-slate-500">
-                                需在编排中保存并发布
-                              </span>
-                            ) : null}
+                            )}
                           </div>
                         </button>
                       );
                     })}
                   </div>
                 )}
-                {selectedProjectId && !loadingBound && workshopScenarioOptions.length === 0 ? (
+                {selectedProjectId && !loadingBound && workshopDisplayScenarios.length === 0 ? (
                   <p className="text-xs text-amber-400/90">
-                    {boundScenarios.some((b) => b.enabled === 1)
-                      ? "已有绑定，但场景均未发布。请在场景编排中发布，或到项目详情解绑无效场景。"
-                      : "当前项目尚无可执行场景：请在 "}
-                    {!boundScenarios.some((b) => b.enabled === 1) ? (
-                      <>
-                        <Link href={`/projects/${selectedProjectId}`} className="underline">
-                          项目详情
-                        </Link>{" "}
-                        绑定已发布场景，或在{" "}
-                        <Link href="/create" className="underline">
-                          场景编排
-                        </Link>{" "}
-                        发布后再绑定。
-                      </>
-                    ) : null}
+                    暂无已发布场景。请先在{" "}
+                    <Link href="/create" className="underline">
+                      场景编排
+                    </Link>{" "}
+                    发布场景，再到{" "}
+                    <Link href={`/projects/${selectedProjectId}`} className="underline">
+                      项目详情
+                    </Link>{" "}
+                    设置快捷场景。
                   </p>
                 ) : null}
-                {selectedProjectId && !loadingBound && workshopScenarioOptions.length > 0 ? (
+                {selectedProjectId &&
+                !loadingBound &&
+                workshopDisplayScenarios.length > 0 &&
+                workshopScenarioOptions.length === 0 ? (
+                  <p className="text-xs text-amber-400/90">
+                    已有已发布场景，但均未绑定本项目。请在项目详情「设置快捷场景」中勾选并保存后再执行。
+                  </p>
+                ) : null}
+                {selectedProjectId && !loadingBound && workshopDisplayScenarios.length > 0 ? (
                   <p className="text-xs text-slate-500">
-                    仅「已绑定本项目」且「已发布」的场景可执行；其余项与场景编排列表一致，便于对照维护。
+                    列表为全部已发布场景；带「快捷场景」的为项目详情中配置的默认入口。仅已绑定场景可执行生成。
                   </p>
                 ) : null}
               </div>

@@ -31,10 +31,23 @@ fi
 
 mkdir -p "$ROOT/logs"
 if [[ -f "$ROOT/.env.local" ]]; then
-  set -a
-  # shellcheck disable=SC1091
-  source "$ROOT/.env.local"
-  set +a
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    line="${line#"${line%%[![:space:]]*}"}"
+    [[ -z "$line" || "$line" == \#* ]] && continue
+    if [[ "$line" == export\ * ]]; then
+      line="${line#export }"
+    fi
+    if [[ "$line" =~ ^([A-Za-z_][A-Za-z0-9_]*)=(.*)$ ]]; then
+      key="${BASH_REMATCH[1]}"
+      val="${BASH_REMATCH[2]}"
+      if [[ "$val" == \"*\" && "$val" == *\" ]]; then
+        val="${val:1:${#val}-2}"
+      elif [[ "$val" == \'*\' && "$val" == *\' ]]; then
+        val="${val:1:${#val}-2}"
+      fi
+      export "$key=$val"
+    fi
+  done <"$ROOT/.env.local"
 fi
 export HERMES_CHAT_API_URL="${HERMES_CHAT_API_URL:-http://127.0.0.1:8642/v1/chat/completions}"
 export HERMES_CHAT_API_KEY="${HERMES_CHAT_API_KEY:-${API_SERVER_KEY:-}}"

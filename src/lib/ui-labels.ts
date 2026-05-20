@@ -79,7 +79,7 @@ export function projectStatusLabel(status: string | null | undefined): string {
 const OUTPUT_STATUS: Record<string, string> = {
   draft: "草稿",
   completed: "已完成",
-  approved: "已批准",
+  approved: "已采纳",
   archived: "已归档",
 };
 

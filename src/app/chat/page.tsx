@@ -25,6 +25,8 @@ import { getApiHeaders } from "@/lib/api-headers";
 import { useEffectiveUserScopeId } from "@/lib/use-effective-user-scope-id";
 import { CONTENT_MAX_CLASS } from "@/lib/content-shell";
 import { chatTransportLabel } from "@/lib/ui-labels";
+import { ChatMarkdownBody } from "@/components/chat-markdown-body";
+import { ChatMessageQuickActions } from "@/components/chat-message-quick-actions";
 
 interface Message {
   id: string;
@@ -35,11 +37,23 @@ interface Message {
   contextWarnings?: string[];
 }
 
+type OrchestrationPriorTurn = { role: "user" | "assistant"; content: string };
+
+type RunAssistantStreamParams = {
+  sessionId: string;
+  text: string;
+  orchestrationPriorMessages: OrchestrationPriorTurn[];
+  priorSession: ChatSession;
+};
+
 interface ChatSession {
   id: string;
   title: string;
   messages: Message[];
   createdAt: number;
+  /** 编排执行沉淀的 output_id，供项目详情「查看对话记录」深链定位 */
+  linkedOutputIds?: string[];
+  linkedRunIds?: string[];
   /** 来自 /create 的编排字段，仅本会话有效，避免跨会话泄漏 */
   scenarioPresetInstructions?: string;
   scenarioOpeningHint?: string;
@@ -189,12 +203,57 @@ function truncate(text: string, max = 180) {
   return text.length > max ? `${text.slice(0, max)}...` : text;
 }
 
+const PLACEHOLDER_SESSION_TITLES = new Set(["新对话", "对话创作"]);
+
+function isPlaceholderSessionTitle(title: string): boolean {
+  return PLACEHOLDER_SESSION_TITLES.has(title.trim());
+}
+
+function firstUserMessageContent(session: ChatSession): string | null {
+  const msg = session.messages.find((m) => m.role === "user");
+  if (!msg) return null;
+  const text = msg.content.trim();
+  return text || null;
+}
+
+/** 将首条用户问题浓缩为侧边栏/顶栏主题名（规则截断，无需额外 LLM 调用） */
+function condenseTopicTitle(text: string, maxLen = 16): string {
+  let s = text.trim().replace(/\s+/g, " ");
+  const firstLine = (s.split(/\n/)[0] ?? s).trim();
+  s = firstLine;
+  const prefixPatterns = [
+    /^请?(帮我|帮忙|协助)?/u,
+    /^我想(了解|咨询|问|知道|写|做)?/u,
+    /^能否/u,
+    /^可以(吗|么)?/u,
+    /^关于/u,
+    /^请问/u,
+  ];
+  for (const re of prefixPatterns) {
+    const next = s.replace(re, "").trim();
+    if (next.length >= 2) s = next;
+  }
+  s = s.replace(/[？?。！!，,、；;：:.]+$/gu, "").trim();
+  if (!s) s = firstLine;
+  if (s.length <= maxLen) return s;
+  return `${s.slice(0, maxLen)}…`;
+}
+
 function titleFromSession(session: ChatSession | undefined): string {
   if (!session) return "对话创作";
-  const firstUser = session.messages.find((msg) => msg.role === "user");
-  if (!firstUser) return session.title === "新对话" ? "对话创作" : session.title;
-  const text = firstUser.content.trim();
-  return text.slice(0, 20) + (text.length > 20 ? "…" : "");
+  const first = firstUserMessageContent(session);
+  if (first) return condenseTopicTitle(first);
+  if (isPlaceholderSessionTitle(session.title)) return "对话创作";
+  return session.title;
+}
+
+function normalizeSessionsPlaceholders(sessions: ChatSession[]): ChatSession[] {
+  return sessions.map((session) => {
+    if (!isPlaceholderSessionTitle(session.title)) return session;
+    const first = firstUserMessageContent(session);
+    if (!first) return session;
+    return { ...session, title: condenseTopicTitle(first) };
+  });
 }
 
 export default function ChatPage() {
@@ -299,7 +358,6 @@ function ChatTaskBoundaryPanel({
       <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
         <div>
           <p className="text-xs uppercase tracking-[0.2em] text-slate-500">创作边界</p>
-          <h2 className="mt-1 text-lg font-semibold text-white">项目 · 知识 · 输出约束</h2>
         </div>
         <details className="rounded-2xl border border-slate-700 bg-slate-950/60 px-3 py-2 text-sm">
           <summary className="cursor-pointer list-none text-slate-300 [&::-webkit-details-marker]:hidden">
@@ -498,6 +556,7 @@ function ChatPageInner() {
   const abortRef = useRef<AbortController | null>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const sessionsRef = useRef<ChatSession[]>([]);
+  const chatDeepLinkAppliedRef = useRef(false);
   const activeIdRef = useRef<string | null>(null);
 
   const chatApiBase =
@@ -514,6 +573,8 @@ function ChatPageInner() {
   /** 标准字段为 project_id；project 仅作旧链接兼容 */
   const projectFromUrl =
     searchParams?.get("project_id") ?? searchParams?.get("project") ?? "";
+  const sessionIdFromUrl = searchParams?.get("session_id") ?? "";
+  const outputIdFromUrl = searchParams?.get("output_id") ?? "";
   const collectionFromUrl = searchParams?.get("collection") ?? "";
   const skillsFromUrl = searchParams?.get("skills") === "1";
   const tasksExecuteUrl = apiV1("/tasks/execute");
@@ -571,6 +632,13 @@ function ChatPageInner() {
 
   const activeSession = sessions.find((s) => s.id === activeId);
 
+  const effectiveKbCollection = useMemo(() => {
+    if (selectedCollection.trim()) return selectedCollection.trim();
+    const fromQc = activeSession?.quickCreateOverrides?.knowledgeCollections?.[0];
+    if (fromQc?.trim()) return fromQc.trim();
+    return collections[0]?.trim() ?? "";
+  }, [activeSession?.quickCreateOverrides?.knowledgeCollections, collections, selectedCollection]);
+
   const saveAndSet = useCallback(
     (updated: ChatSession[]) => {
       sessionsRef.current = updated;
@@ -600,7 +668,12 @@ function ChatPageInner() {
   }, [activeId]);
 
   useEffect(() => {
-    const saved = loadSessions(scopeUserId);
+    const raw = loadSessions(scopeUserId);
+    const saved = normalizeSessionsPlaceholders(raw);
+    if (saved.some((s, i) => s.title !== raw[i]?.title)) {
+      saveSessions(scopeUserId, saved);
+      console.info("[chat] 已根据首条用户消息回填历史会话主题");
+    }
     const active = localStorage.getItem(chatActiveStorageKey(scopeUserId));
     if (saved.length === 0) {
       const first: ChatSession = {
@@ -619,6 +692,35 @@ function ChatPageInner() {
       setActiveId(active && saved.find((s) => s.id === active) ? active : saved[0].id);
     }
   }, [scopeUserId]);
+
+  useEffect(() => {
+    if (!sessions.length || chatDeepLinkAppliedRef.current) return;
+    if (!sessionIdFromUrl && !outputIdFromUrl) return;
+
+    let targetId: string | null = null;
+    if (sessionIdFromUrl && sessions.some((s) => s.id === sessionIdFromUrl)) {
+      targetId = sessionIdFromUrl;
+    } else if (outputIdFromUrl) {
+      const matched = sessions.find((s) => s.linkedOutputIds?.includes(outputIdFromUrl));
+      if (matched) targetId = matched.id;
+    }
+
+    if (targetId) {
+      setActiveId(targetId);
+      localStorage.setItem(chatActiveStorageKey(scopeUserId), targetId);
+      setSidebarOpen(true);
+      console.info("[chat] 深链定位历史会话", {
+        session_id: targetId,
+        output_id: outputIdFromUrl || undefined,
+      });
+    } else if (outputIdFromUrl) {
+      setSidebarOpen(true);
+      console.info("[chat] 未找到 output_id 对应的历史会话，已展开侧边栏", {
+        output_id: outputIdFromUrl,
+      });
+    }
+    chatDeepLinkAppliedRef.current = true;
+  }, [sessions, sessionIdFromUrl, outputIdFromUrl, scopeUserId]);
 
   useEffect(() => {
     fetchChatBootstrap()
@@ -724,9 +826,9 @@ function ChatPageInner() {
   }, [activeId, activeSession, updateSession]);
 
   useEffect(() => {
-    if (!activeSession || activeSession.title !== "新对话") return;
+    if (!activeSession || !isPlaceholderSessionTitle(activeSession.title)) return;
     const nextTitle = titleFromSession(activeSession);
-    if (nextTitle !== activeSession.title) {
+    if (!isPlaceholderSessionTitle(nextTitle) && nextTitle !== activeSession.title) {
       updateSession(activeSession.id, (session) => ({ ...session, title: nextTitle }));
     }
   }, [activeSession, updateSession]);
@@ -883,6 +985,332 @@ function ChatPageInner() {
     useOrchestration,
   ]);
 
+  const runAssistantStream = useCallback(
+    async ({
+      sessionId,
+      text,
+      orchestrationPriorMessages,
+      priorSession,
+    }: RunAssistantStreamParams) => {
+      setStreaming(true);
+      if (abortRef.current) abortRef.current.abort();
+      const controller = new AbortController();
+      abortRef.current = controller;
+
+      const assistantId = uuid();
+      updateSession(sessionId, (session) => ({
+        ...session,
+        messages: [...session.messages, { id: assistantId, role: "assistant", content: "" }],
+      }));
+
+      taskMetaRef.current = null;
+      setOrchestrationSink(null);
+
+      let fullContent = "";
+
+      try {
+        const headers: Record<string, string> = {
+          "Content-Type": "application/json",
+          ...getApiHeaders(),
+        };
+        if (chatApiKey) headers.Authorization = `Bearer ${chatApiKey}`;
+
+        if (useOrchestration) {
+          const qc = priorSession?.quickCreateOverrides;
+          const overrides: TaskExecuteBody["overrides"] = {};
+          if (showAdvancedOrchestration && includeKnowledgeContext) {
+            const cols =
+              qc?.knowledgeCollections?.filter(Boolean) ??
+              (selectedCollection ? [selectedCollection] : []);
+            if (cols.length > 0) {
+              overrides.knowledge = { collections: cols };
+            }
+          }
+          if (showAdvancedOrchestration && includeSkillsContext) {
+            const list =
+              qc?.skillNames && qc.skillNames.length > 0 ? qc.skillNames : skills;
+            const allowed = list.slice(0, 32);
+            if (allowed.length > 0) {
+              overrides.skills = {
+                mode: "allowed_list",
+                allowed,
+                allow_agent_free_choice: false,
+              };
+            }
+          }
+          if (qc?.outputPreset === "structured" && qc.outputRequiredSections?.length) {
+            overrides.output = {
+              must_follow_template: true,
+              required_sections: qc.outputRequiredSections,
+            };
+          }
+          let scenarioPresetInstructions =
+            priorSession?.scenarioPresetInstructions?.trim() ?? "";
+          let scenarioOpeningHint = priorSession?.scenarioOpeningHint?.trim() ?? "";
+          if (!scenarioPresetInstructions) {
+            const sys = priorSession?.messages.find(
+              (m) => m.role === "system" && m.content.trim().length > 0,
+            );
+            if (sys) {
+              scenarioPresetInstructions = sys.content
+                .replace(/^\s*场景预设[：:]\s*\n?/, "")
+                .trim();
+            }
+          }
+          const ctxExtra =
+            includeProjectContext && selectedProjectId && projectTaskContext
+              ? formatProjectContextForTaskInput(projectTaskContext)
+              : "";
+          const body: TaskExecuteBody = {
+            entrypoint: "chat",
+            project_id: includeProjectContext && selectedProjectId ? selectedProjectId : null,
+            scenario_id: scenarioFromUrl || "general",
+            user_message: text,
+            stream: true,
+            messages:
+              orchestrationPriorMessages.length > 0 ? orchestrationPriorMessages : undefined,
+            overrides: Object.keys(overrides).length > 0 ? overrides : undefined,
+            user_id: scopeUserId,
+          };
+          if (ctxExtra.trim()) {
+            body.task_input = { extra: ctxExtra };
+          }
+          if (scenarioPresetInstructions) {
+            body.scenario_preset_instructions = scenarioPresetInstructions;
+          }
+          if (scenarioOpeningHint) {
+            body.scenario_opening_hint = scenarioOpeningHint;
+          }
+
+          const res = await fetch(tasksExecuteUrl, {
+            method: "POST",
+            headers,
+            body: JSON.stringify(body),
+            signal: controller.signal,
+          });
+
+          if (!res.ok) {
+            const errText = await res.text().catch(() => "");
+            throw new Error(`HTTP ${res.status}: ${errText || res.statusText}`);
+          }
+
+          const reader = res.body?.getReader();
+          if (!reader) throw new Error("响应流不可用");
+          const decoder = new TextDecoder();
+          let buffer = "";
+
+          while (!controller.signal.aborted) {
+            const { done, value } = await reader.read();
+            if (done) break;
+
+            buffer += decoder.decode(value, { stream: true });
+            const lines = buffer.split("\n");
+            buffer = lines.pop() ?? "";
+
+            for (const line of lines) {
+              if (!line.startsWith("data: ")) continue;
+              const data = line.slice(6).trim();
+              const meta = parseTpHermesTaskMeta(data);
+              if (meta?.run_id) {
+                taskMetaRef.current = {
+                  output_id: meta.output_id,
+                  validation: meta.validation,
+                };
+                updateSession(sessionId, (session) => ({
+                  ...session,
+                  linkedOutputIds:
+                    meta.output_id != null
+                      ? [...new Set([...(session.linkedOutputIds ?? []), meta.output_id])]
+                      : session.linkedOutputIds,
+                  linkedRunIds: [...new Set([...(session.linkedRunIds ?? []), meta.run_id!])],
+                }));
+                console.info(
+                  `[chat] orchestration completed run_id=${meta.run_id} output_id=${meta.output_id ?? ""}`,
+                );
+              }
+              const part = parseSSEDataPayload(data);
+              if (part.errorText) throw new Error(part.errorText);
+              if (part.content) {
+                fullContent += part.content;
+                updateSession(sessionId, (session) => ({
+                  ...session,
+                  messages: session.messages.map((message) =>
+                    message.id === assistantId ? { ...message, content: fullContent } : message,
+                  ),
+                }));
+              }
+            }
+          }
+
+          if (buffer.trim()) {
+            for (const line of buffer.split("\n")) {
+              if (!line.startsWith("data: ")) continue;
+              const data = line.slice(6).trim();
+              const meta = parseTpHermesTaskMeta(data);
+              if (meta?.run_id) {
+                taskMetaRef.current = {
+                  output_id: meta.output_id,
+                  validation: meta.validation,
+                };
+                updateSession(sessionId, (session) => ({
+                  ...session,
+                  linkedOutputIds:
+                    meta.output_id != null
+                      ? [...new Set([...(session.linkedOutputIds ?? []), meta.output_id])]
+                      : session.linkedOutputIds,
+                  linkedRunIds: [...new Set([...(session.linkedRunIds ?? []), meta.run_id!])],
+                }));
+                console.info(`[chat] orchestration completed run_id=${meta.run_id}`);
+              }
+              const part = parseSSEDataPayload(data);
+              if (part.errorText) throw new Error(part.errorText);
+              if (part.content) fullContent += part.content;
+            }
+          }
+
+          updateSession(sessionId, (session) => ({
+            ...session,
+            messages: session.messages.map((message) =>
+              message.id === assistantId
+                ? { ...message, content: fullContent || message.content }
+                : message,
+            ),
+          }));
+
+          const snap = taskMetaRef.current;
+          if (snap) {
+            const v = snap.validation as { ok?: boolean } | undefined;
+            setOrchestrationSink({
+              output_id: snap.output_id,
+              validation_ok: v && typeof v.ok === "boolean" ? v.ok : true,
+            });
+          }
+        } else {
+          for (let continueRound = 0; continueRound < CHAT_MAX_CONTINUE_ROUNDS; continueRound++) {
+            if (controller.signal.aborted) break;
+
+            const sessionSnapshot =
+              sessionsRef.current.find((session) => session.id === sessionId)?.messages ?? [];
+            const basePayload = messagesToApiPayload(sessionSnapshot);
+            const messagesPayload =
+              continueRound === 0
+                ? basePayload
+                : [...basePayload, { role: "user" as const, content: CHAT_CONTINUE_USER }];
+
+            if (continueRound > 0) {
+              console.info(
+                `[chat] hermes 续写第 ${continueRound} 轮，当前助手消息长度 ${fullContent.length} 字符`,
+              );
+            }
+
+            const res = await fetch(chatApiBase, {
+              method: "POST",
+              headers,
+              body: JSON.stringify({
+                model: "hermes-agent",
+                messages: messagesPayload,
+                stream: true,
+              }),
+              signal: controller.signal,
+            });
+
+            if (!res.ok) {
+              const errText = await res.text().catch(() => "");
+              throw new Error(`HTTP ${res.status}: ${errText || res.statusText}`);
+            }
+
+            const reader = res.body?.getReader();
+            if (!reader) throw new Error("响应流不可用");
+            const decoder = new TextDecoder();
+            let buffer = "";
+            let roundFinish: string | null = null;
+
+            while (!controller.signal.aborted) {
+              const { done, value } = await reader.read();
+              if (done) break;
+
+              buffer += decoder.decode(value, { stream: true });
+              const lines = buffer.split("\n");
+              buffer = lines.pop() ?? "";
+
+              const { text: chunkText, finishReason, errorText } = accumulateSseTextBlock(
+                lines.join("\n"),
+              );
+              if (errorText) {
+                throw new Error(errorText);
+              }
+              if (finishReason) roundFinish = finishReason;
+              if (chunkText) {
+                fullContent += chunkText;
+                updateSession(sessionId, (session) => ({
+                  ...session,
+                  messages: session.messages.map((message) =>
+                    message.id === assistantId ? { ...message, content: fullContent } : message,
+                  ),
+                }));
+              }
+            }
+
+            if (buffer.trim()) {
+              const { text: chunkText, finishReason, errorText } = accumulateSseTextBlock(buffer);
+              if (errorText) {
+                throw new Error(errorText);
+              }
+              if (finishReason) roundFinish = finishReason;
+              if (chunkText) {
+                fullContent += chunkText;
+              }
+            }
+
+            updateSession(sessionId, (session) => ({
+              ...session,
+              messages: session.messages.map((message) =>
+                message.id === assistantId
+                  ? { ...message, content: fullContent || message.content }
+                  : message,
+              ),
+            }));
+
+            console.info(
+              `[chat] 流结束 round=${continueRound} finish_reason=${roundFinish ?? "（未上报）"} 累计长度=${fullContent.length}`,
+            );
+
+            const needContinue = roundFinish === "length";
+            if (!needContinue) break;
+          }
+        }
+      } catch (sendError) {
+        if ((sendError as Error).name !== "AbortError") {
+          setError(`连接失败：${(sendError as Error).message}`);
+          updateSession(sessionId, (session) => ({
+            ...session,
+            messages: session.messages.filter((message) => message.id !== assistantId),
+          }));
+        }
+      } finally {
+        setStreaming(false);
+      }
+    },
+    [
+      chatApiBase,
+      chatApiKey,
+      includeKnowledgeContext,
+      includeProjectContext,
+      includeSkillsContext,
+      orchestrationPreview,
+      projectTaskContext,
+      scenarioFromUrl,
+      scopeUserId,
+      selectedCollection,
+      selectedProjectId,
+      showAdvancedOrchestration,
+      skills,
+      tasksExecuteUrl,
+      updateSession,
+      useOrchestration,
+    ],
+  );
+
   const sendMessage = useCallback(async () => {
     const text = input.trim();
     const sessionId = activeIdRef.current;
@@ -945,303 +1373,103 @@ function ChatPageInner() {
       contextWarnings,
     };
 
-    updateSession(sessionId, (session) => ({
-      ...session,
-      messages: [...session.messages, userMsg],
-    }));
+    updateSession(sessionId, (session) => {
+      const messages = [...session.messages, userMsg];
+      const isFirstUser = !session.messages.some((m) => m.role === "user");
+      const next: ChatSession = { ...session, messages };
+      if (isFirstUser && isPlaceholderSessionTitle(session.title)) {
+        next.title = condenseTopicTitle(text);
+        console.info("[chat] 会话主题已根据首问更新", { session_id: sessionId, title: next.title });
+      }
+      return next;
+    });
     setInput("");
 
-    setStreaming(true);
-    if (abortRef.current) abortRef.current.abort();
-    const controller = new AbortController();
-    abortRef.current = controller;
+    const sessionAfterUser = sessionsRef.current.find((s) => s.id === sessionId);
+    if (!sessionAfterUser) return;
 
-    const assistantId = uuid();
-    updateSession(sessionId, (session) => ({
-      ...session,
-      messages: [...session.messages, { id: assistantId, role: "assistant", content: "" }],
-    }));
-
-    taskMetaRef.current = null;
-    setOrchestrationSink(null);
-
-    let fullContent = "";
-
-    try {
-      const headers: Record<string, string> = {
-        "Content-Type": "application/json",
-        ...getApiHeaders(),
-      };
-      if (chatApiKey) headers.Authorization = `Bearer ${chatApiKey}`;
-
-      if (useOrchestration) {
-        const qc = priorSession?.quickCreateOverrides;
-        const overrides: TaskExecuteBody["overrides"] = {};
-        if (showAdvancedOrchestration && includeKnowledgeContext) {
-          const cols =
-            qc?.knowledgeCollections?.filter(Boolean) ??
-            (selectedCollection ? [selectedCollection] : []);
-          if (cols.length > 0) {
-            overrides.knowledge = { collections: cols };
-          }
-        }
-        if (showAdvancedOrchestration && includeSkillsContext) {
-          const list =
-            qc?.skillNames && qc.skillNames.length > 0 ? qc.skillNames : skills;
-          const allowed = list.slice(0, 32);
-          if (allowed.length > 0) {
-            overrides.skills = {
-              mode: "allowed_list",
-              allowed,
-              allow_agent_free_choice: false,
-            };
-          }
-        }
-        if (qc?.outputPreset === "structured" && qc.outputRequiredSections?.length) {
-          overrides.output = {
-            must_follow_template: true,
-            required_sections: qc.outputRequiredSections,
-          };
-        }
-        let scenarioPresetInstructions =
-          priorSession?.scenarioPresetInstructions?.trim() ?? "";
-        let scenarioOpeningHint = priorSession?.scenarioOpeningHint?.trim() ?? "";
-        if (!scenarioPresetInstructions) {
-          const sys = priorSession?.messages.find(
-            (m) => m.role === "system" && m.content.trim().length > 0,
-          );
-          if (sys) {
-            scenarioPresetInstructions = sys.content.replace(/^\s*场景预设[：:]\s*\n?/, "").trim();
-          }
-        }
-        const ctxExtra =
-          includeProjectContext && selectedProjectId && projectTaskContext
-            ? formatProjectContextForTaskInput(projectTaskContext)
-            : "";
-        const body: TaskExecuteBody = {
-          entrypoint: "chat",
-          project_id: includeProjectContext && selectedProjectId ? selectedProjectId : null,
-          scenario_id: scenarioFromUrl || "general",
-          user_message: text,
-          stream: true,
-          messages: priorMessages.length > 0 ? priorMessages : undefined,
-          overrides: Object.keys(overrides).length > 0 ? overrides : undefined,
-          user_id: scopeUserId,
-        };
-        if (ctxExtra.trim()) {
-          body.task_input = { extra: ctxExtra };
-        }
-        if (scenarioPresetInstructions) {
-          body.scenario_preset_instructions = scenarioPresetInstructions;
-        }
-        if (scenarioOpeningHint) {
-          body.scenario_opening_hint = scenarioOpeningHint;
-        }
-
-        const res = await fetch(tasksExecuteUrl, {
-          method: "POST",
-          headers,
-          body: JSON.stringify(body),
-          signal: controller.signal,
-        });
-
-        if (!res.ok) {
-          const errText = await res.text().catch(() => "");
-          throw new Error(`HTTP ${res.status}: ${errText || res.statusText}`);
-        }
-
-        const reader = res.body?.getReader();
-        if (!reader) throw new Error("响应流不可用");
-        const decoder = new TextDecoder();
-        let buffer = "";
-
-        while (!controller.signal.aborted) {
-          const { done, value } = await reader.read();
-          if (done) break;
-
-          buffer += decoder.decode(value, { stream: true });
-          const lines = buffer.split("\n");
-          buffer = lines.pop() ?? "";
-
-          for (const line of lines) {
-            if (!line.startsWith("data: ")) continue;
-            const data = line.slice(6).trim();
-            const meta = parseTpHermesTaskMeta(data);
-            if (meta?.run_id) {
-              taskMetaRef.current = {
-                output_id: meta.output_id,
-                validation: meta.validation,
-              };
-              console.info(`[chat] orchestration completed run_id=${meta.run_id} output_id=${meta.output_id ?? ""}`);
-            }
-            const part = parseSSEDataPayload(data);
-            if (part.errorText) throw new Error(part.errorText);
-            if (part.content) {
-              fullContent += part.content;
-              updateSession(sessionId, (session) => ({
-                ...session,
-                messages: session.messages.map((message) =>
-                  message.id === assistantId ? { ...message, content: fullContent } : message,
-                ),
-              }));
-            }
-          }
-        }
-
-        if (buffer.trim()) {
-          for (const line of buffer.split("\n")) {
-            if (!line.startsWith("data: ")) continue;
-            const data = line.slice(6).trim();
-            const meta = parseTpHermesTaskMeta(data);
-            if (meta?.run_id) {
-              taskMetaRef.current = {
-                output_id: meta.output_id,
-                validation: meta.validation,
-              };
-              console.info(`[chat] orchestration completed run_id=${meta.run_id}`);
-            }
-            const part = parseSSEDataPayload(data);
-            if (part.errorText) throw new Error(part.errorText);
-            if (part.content) fullContent += part.content;
-          }
-        }
-
-        updateSession(sessionId, (session) => ({
-          ...session,
-          messages: session.messages.map((message) =>
-            message.id === assistantId ? { ...message, content: fullContent || message.content } : message,
-          ),
-        }));
-
-        const snap = taskMetaRef.current;
-        if (snap) {
-          const v = snap.validation as { ok?: boolean } | undefined;
-          setOrchestrationSink({
-            output_id: snap.output_id,
-            validation_ok: v && typeof v.ok === "boolean" ? v.ok : true,
-          });
-        }
-      } else {
-        for (let continueRound = 0; continueRound < CHAT_MAX_CONTINUE_ROUNDS; continueRound++) {
-          if (controller.signal.aborted) break;
-
-          const sessionSnapshot =
-            sessionsRef.current.find((session) => session.id === sessionId)?.messages ?? [];
-          const basePayload = messagesToApiPayload(sessionSnapshot);
-          const messagesPayload =
-            continueRound === 0
-              ? basePayload
-              : [...basePayload, { role: "user" as const, content: CHAT_CONTINUE_USER }];
-
-          if (continueRound > 0) {
-            console.info(
-              `[chat] hermes 续写第 ${continueRound} 轮，当前助手消息长度 ${fullContent.length} 字符`,
-            );
-          }
-
-          const res = await fetch(chatApiBase, {
-            method: "POST",
-            headers,
-            body: JSON.stringify({
-              model: "hermes-agent",
-              messages: messagesPayload,
-              stream: true,
-            }),
-            signal: controller.signal,
-          });
-
-          if (!res.ok) {
-            const errText = await res.text().catch(() => "");
-            throw new Error(`HTTP ${res.status}: ${errText || res.statusText}`);
-          }
-
-          const reader = res.body?.getReader();
-          if (!reader) throw new Error("响应流不可用");
-          const decoder = new TextDecoder();
-          let buffer = "";
-          let roundFinish: string | null = null;
-
-          while (!controller.signal.aborted) {
-            const { done, value } = await reader.read();
-            if (done) break;
-
-            buffer += decoder.decode(value, { stream: true });
-            const lines = buffer.split("\n");
-            buffer = lines.pop() ?? "";
-
-            const { text, finishReason, errorText } = accumulateSseTextBlock(lines.join("\n"));
-            if (errorText) {
-              throw new Error(errorText);
-            }
-            if (finishReason) roundFinish = finishReason;
-            if (text) {
-              fullContent += text;
-              updateSession(sessionId, (session) => ({
-                ...session,
-                messages: session.messages.map((message) =>
-                  message.id === assistantId ? { ...message, content: fullContent } : message,
-                ),
-              }));
-            }
-          }
-
-          if (buffer.trim()) {
-            const { text, finishReason, errorText } = accumulateSseTextBlock(buffer);
-            if (errorText) {
-              throw new Error(errorText);
-            }
-            if (finishReason) roundFinish = finishReason;
-            if (text) {
-              fullContent += text;
-            }
-          }
-
-          updateSession(sessionId, (session) => ({
-            ...session,
-            messages: session.messages.map((message) =>
-              message.id === assistantId ? { ...message, content: fullContent || message.content } : message,
-            ),
-          }));
-
-          console.info(
-            `[chat] 流结束 round=${continueRound} finish_reason=${roundFinish ?? "（未上报）"} 累计长度=${fullContent.length}`,
-          );
-
-          const needContinue = roundFinish === "length";
-          if (!needContinue) break;
-        }
-      }
-    } catch (sendError) {
-      if ((sendError as Error).name !== "AbortError") {
-        setError(`连接失败：${(sendError as Error).message}`);
-        updateSession(sessionId, (session) => ({
-          ...session,
-          messages: session.messages.filter((message) => message.id !== assistantId),
-        }));
-      }
-    } finally {
-      setStreaming(false);
-    }
+    await runAssistantStream({
+      sessionId,
+      text,
+      orchestrationPriorMessages: priorMessages,
+      priorSession: sessionAfterUser,
+    });
   }, [
-    chatApiBase,
-    chatApiKey,
     includeKnowledgeContext,
     includeProjectContext,
     includeSkillsContext,
     input,
     orchestrationPreview,
     preparingContext,
-    projectTaskContext,
-    scenarioFromUrl,
+    runAssistantStream,
     selectedCollection,
     selectedProjectId,
     showAdvancedOrchestration,
     skills,
     streaming,
-    tasksExecuteUrl,
     updateSession,
     useOrchestration,
   ]);
+
+  const regenerateAssistantReply = useCallback(
+    async (assistantMessageId: string) => {
+      const sessionId = activeIdRef.current;
+      if (!sessionId || streaming || preparingContext) return;
+
+      if (abortRef.current) abortRef.current.abort();
+
+      const session = sessionsRef.current.find((s) => s.id === sessionId);
+      if (!session) return;
+
+      const assistantIdx = session.messages.findIndex((m) => m.id === assistantMessageId);
+      if (assistantIdx < 0 || session.messages[assistantIdx]?.role !== "assistant") return;
+
+      let userIdx = -1;
+      for (let i = assistantIdx - 1; i >= 0; i--) {
+        if (session.messages[i]?.role === "user") {
+          userIdx = i;
+          break;
+        }
+      }
+      if (userIdx < 0) {
+        setError("找不到对应的用户问题，无法再次生成");
+        return;
+      }
+
+      const userMsg = session.messages[userIdx];
+      const userText = userMsg.content.trim();
+      if (!userText) {
+        setError("用户问题为空，无法再次生成");
+        return;
+      }
+
+      const truncatedMessages = session.messages.slice(0, assistantIdx);
+      const orchestrationPrior: OrchestrationPriorTurn[] = [];
+      for (let i = 0; i < userIdx; i++) {
+        const m = truncatedMessages[i];
+        if (m.role === "user" || m.role === "assistant") {
+          orchestrationPrior.push({ role: m.role, content: m.content });
+        }
+      }
+
+      setError("");
+      updateSession(sessionId, (s) => ({ ...s, messages: truncatedMessages }));
+      console.info("[chat] 再次生成", {
+        session_id: sessionId,
+        assistant_message_id: assistantMessageId,
+        user_preview: userText.slice(0, 80),
+      });
+
+      const priorSession: ChatSession = { ...session, messages: truncatedMessages };
+      await runAssistantStream({
+        sessionId,
+        text: userText,
+        orchestrationPriorMessages: orchestrationPrior,
+        priorSession,
+      });
+    },
+    [preparingContext, runAssistantStream, streaming, updateSession],
+  );
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === "Enter" && !e.shiftKey) {
@@ -1308,7 +1536,7 @@ function ChatPageInner() {
               }`}
             >
               <span className="text-xs">💬</span>
-              <span className="text-sm flex-1 truncate">{session.title}</span>
+              <span className="text-sm flex-1 truncate">{titleFromSession(session)}</span>
               <button
                 onClick={(e) => {
                   e.stopPropagation();
@@ -1434,6 +1662,20 @@ function ChatPageInner() {
                     </>
                   )}
                 </div>
+
+                {msg.role === "assistant" && msg.content.trim() ? (
+                  <ChatMessageQuickActions
+                    content={msg.content}
+                    role={msg.role}
+                    messageId={msg.id}
+                    exportTitle={titleFromSession(activeSession)}
+                    collectionName={effectiveKbCollection}
+                    projectId={selectedProjectId || projectFromUrl}
+                    sessionId={activeId}
+                    onRegenerate={regenerateAssistantReply}
+                    actionsDisabled={streaming || preparingContext}
+                  />
+                ) : null}
               </div>
             </div>
             );

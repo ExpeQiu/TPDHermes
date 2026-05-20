@@ -7,6 +7,14 @@ import Feedback from "@/components/Feedback";
 import { apiGet, apiV1, apiFetch, readJson } from "@/lib/api";
 import { CONTENT_MAX_CLASS } from "@/lib/content-shell";
 import {
+  loadProjectQuickScenarios,
+  resolveWorkshopScenarioId,
+  saveProjectQuickScenarios,
+  syncQuickScenariosToProjectBindings,
+  type ProjectQuickScenarios,
+} from "@/lib/project-quick-scenarios";
+import { useEffectiveUserScopeId } from "@/lib/use-effective-user-scope-id";
+import {
   entrypointLabel,
   outputStatusLabel,
   projectStatusLabel,
@@ -31,13 +39,6 @@ const statusColors: Record<string, string> = {
   archived: "bg-slate-500",
 };
 
-const outputStatusLabels: Record<string, string> = {
-  draft: "草稿",
-  completed: "已完成",
-  approved: "已批准",
-  archived: "已归档",
-};
-
 const statusLabels: Record<string, string> = {
   active: "进行中",
   paused: "已暂停",
@@ -52,6 +53,7 @@ interface ApiOutputRow {
   template_id: string | null;
   run_id: string | null;
   scenario_id?: string | null;
+  entrypoint?: string | null;
   status: string;
   created_at: string | null;
   content_preview: string;
@@ -73,6 +75,8 @@ interface ApiOutputDetail {
   content: string;
   template_id: string | null;
   run_id: string | null;
+  scenario_id?: string | null;
+  entrypoint?: string | null;
   status: string;
   created_at: string | null;
   updated_at: string | null;
@@ -89,7 +93,40 @@ interface ProjectOutput {
   word_count: number;
   tags: string[];
   scenario_id?: string | null;
+  run_id?: string | null;
+  entrypoint?: string | null;
   status: string;
+}
+
+function buildOutputChatRefineLink(
+  projectId: string,
+  output: Pick<ProjectOutput, "id" | "scenario_id">,
+): string {
+  const params = new URLSearchParams({
+    project_id: projectId,
+    output_id: output.id,
+  });
+  const scenario = output.scenario_id?.trim();
+  if (scenario) params.set("scenario", scenario);
+  return `/chat?${params.toString()}`;
+}
+
+function buildOutputWorkshopRefineLink(
+  projectId: string,
+  output: Pick<ProjectOutput, "id" | "scenario_id">,
+): string {
+  const params = new URLSearchParams({
+    project_id: projectId,
+    output_id: output.id,
+    mode: "refine",
+  });
+  const scenario = output.scenario_id?.trim();
+  if (scenario) params.set("scenario_id", scenario);
+  return `/workshop?${params.toString()}`;
+}
+
+function mapVisibleOutputs(rows: ApiOutputRow[]): ProjectOutput[] {
+  return rows.filter((o) => o.status !== "archived").map(mapApiOutput);
 }
 
 function mapApiOutput(o: ApiOutputRow): ProjectOutput {
@@ -110,6 +147,8 @@ function mapApiOutput(o: ApiOutputRow): ProjectOutput {
     word_count: body.replace(/\s/g, "").length,
     tags,
     scenario_id: o.scenario_id ?? null,
+    run_id: o.run_id ?? null,
+    entrypoint: o.entrypoint ?? null,
     status: o.status || "draft",
   };
 }
@@ -161,6 +200,20 @@ function constraintsToEditString(constraints: unknown): string {
   }
 }
 
+function outputStatusBadgeClass(status: string): string {
+  const k = status.toLowerCase();
+  if (k === "approved") {
+    return "rounded border border-emerald-600/50 bg-emerald-500/15 px-2 py-0.5 text-xs font-medium text-emerald-300";
+  }
+  if (k === "archived") {
+    return "rounded border border-amber-600/40 bg-amber-500/10 px-2 py-0.5 text-xs font-medium text-amber-200/90";
+  }
+  if (k === "completed") {
+    return "rounded border border-blue-600/40 bg-blue-500/10 px-2 py-0.5 text-xs font-medium text-blue-200/90";
+  }
+  return "rounded bg-slate-700/60 px-2 py-0.5 text-xs text-slate-400";
+}
+
 function formatDate(value: string | null | undefined) {
   if (!value) return "未记录";
   const parsed = new Date(value);
@@ -203,12 +256,17 @@ export default function ProjectDetailPage() {
     status: "active" as Project["status"],
   });
 
-  const [bindSelectId, setBindSelectId] = useState("");
-  const [bindBusy, setBindBusy] = useState(false);
+  const scopeUserId = useEffectiveUserScopeId();
   const [boundScenarios, setBoundScenarios] = useState<ProjectBoundScenario[]>([]);
   const [boundLoading, setBoundLoading] = useState(false);
   const [catalogScenarios, setCatalogScenarios] = useState<ScenarioCatalogRow[]>([]);
-  const [scenarioBindingOpen, setScenarioBindingOpen] = useState(false);
+  const [quickScenarioOpen, setQuickScenarioOpen] = useState(false);
+  const [quickDraft, setQuickDraft] = useState<ProjectQuickScenarios>({
+    scenarioIds: [],
+    defaultScenarioId: null,
+  });
+  const [quickSaveBusy, setQuickSaveBusy] = useState(false);
+  const quickDraftInitializedRef = useRef(false);
 
   const refreshAttachments = useCallback(async () => {
     if (!id) return;
@@ -236,19 +294,41 @@ export default function ProjectDetailPage() {
     const outRows = await apiGet<ApiOutputRow[]>(`/projects/${String(id)}/outputs`).catch(
       () => [] as ApiOutputRow[],
     );
-    const mapped = outRows.map(mapApiOutput);
+    const mapped = mapVisibleOutputs(outRows);
     setOutputs(mapped);
     return mapped;
   }, [id]);
 
-  const bindableScenarios = useMemo(() => {
-    const boundIds = new Set(boundScenarios.map((b) => b.scenario_id));
-    return catalogScenarios.filter((s) => {
-      if (boundIds.has(s.id)) return false;
-      const st = (s.status || "draft").toLowerCase();
-      return st === "published";
-    });
-  }, [catalogScenarios, boundScenarios]);
+  const publishedScenarios = useMemo(
+    () =>
+      catalogScenarios.filter((s) => (s.status || "draft").toLowerCase() === "published"),
+    [catalogScenarios],
+  );
+
+  useEffect(() => {
+    quickDraftInitializedRef.current = false;
+  }, [id, scopeUserId]);
+
+  useEffect(() => {
+    if (!id || quickDraftInitializedRef.current || boundLoading) return;
+    const saved = loadProjectQuickScenarios(scopeUserId, String(id));
+    if (saved) {
+      setQuickDraft(saved);
+      quickDraftInitializedRef.current = true;
+      return;
+    }
+    const enabled = boundScenarios.filter((b) => b.enabled === 1);
+    if (enabled.length > 0) {
+      setQuickDraft({
+        scenarioIds: enabled.map((b) => b.scenario_id),
+        defaultScenarioId:
+          enabled.find((b) => b.is_default === 1)?.scenario_id ??
+          enabled[0]?.scenario_id ??
+          null,
+      });
+    }
+    quickDraftInitializedRef.current = true;
+  }, [id, scopeUserId, boundScenarios, boundLoading]);
 
   useEffect(() => {
     if (!id) return;
@@ -261,57 +341,57 @@ export default function ProjectDetailPage() {
       .catch(() => setCatalogScenarios([]));
   }, []);
 
-  const setDefaultBoundScenario = async (scenarioId: string) => {
+  const toggleQuickScenario = (scenarioId: string) => {
+    setQuickDraft((prev) => {
+      const has = prev.scenarioIds.includes(scenarioId);
+      const scenarioIds = has
+        ? prev.scenarioIds.filter((sid) => sid !== scenarioId)
+        : [...prev.scenarioIds, scenarioId];
+      let defaultScenarioId = prev.defaultScenarioId;
+      if (has && defaultScenarioId === scenarioId) {
+        defaultScenarioId = scenarioIds[0] ?? null;
+      } else if (!has && (scenarioIds.length === 1 || !defaultScenarioId)) {
+        defaultScenarioId = scenarioId;
+      }
+      return { scenarioIds, defaultScenarioId };
+    });
+  };
+
+  const setQuickDefaultScenario = (scenarioId: string) => {
+    setQuickDraft((prev) => {
+      if (!prev.scenarioIds.includes(scenarioId)) {
+        return {
+          scenarioIds: [...prev.scenarioIds, scenarioId],
+          defaultScenarioId: scenarioId,
+        };
+      }
+      return { ...prev, defaultScenarioId: scenarioId };
+    });
+  };
+
+  const saveQuickScenarios = async () => {
     if (!id) return;
+    setQuickSaveBusy(true);
     try {
-      const res = await apiFetch(`/projects/${String(id)}/scenarios/${scenarioId}/default`, {
-        method: "POST",
-      });
-      await readJson(res);
+      saveProjectQuickScenarios(scopeUserId, String(id), quickDraft);
+      await syncQuickScenariosToProjectBindings(
+        String(id),
+        quickDraft,
+        catalogScenarios,
+        boundScenarios,
+        apiFetch,
+        readJson,
+      );
       await refreshBoundScenarios();
+      console.info("[project] 快捷场景已保存", {
+        project_id: id,
+        scenario_ids: quickDraft.scenarioIds,
+        default: quickDraft.defaultScenarioId,
+      });
     } catch (err) {
-      alert(err instanceof Error ? err.message : "设置默认失败");
-    }
-  };
-
-  const unbindScenario = async (scenarioId: string) => {
-    if (!id || !window.confirm("确定解除该场景绑定？")) return;
-    try {
-      const res = await apiFetch(`/projects/${String(id)}/scenarios/${scenarioId}`, {
-        method: "DELETE",
-      });
-      await readJson<{ message?: string }>(res);
-      await refreshBoundScenarios();
-    } catch (eff) {
-      alert(eff instanceof Error ? eff.message : "解绑失败");
-    }
-  };
-
-  const bindScenarioToProject = async () => {
-    if (!id || !bindSelectId) {
-      alert("请选择要绑定的场景");
-      return;
-    }
-    const row = catalogScenarios.find((s) => s.id === bindSelectId);
-    if (!row) return;
-    setBindBusy(true);
-    try {
-      const res = await apiFetch(`/projects/${String(id)}/scenarios`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          scenario_id: row.id,
-          scenario_version: row.version,
-          is_default: boundScenarios.filter((b) => b.enabled === 1).length === 0,
-        }),
-      });
-      await readJson(res);
-      setBindSelectId("");
-      await refreshBoundScenarios();
-    } catch (err) {
-      alert(err instanceof Error ? err.message : "绑定失败");
+      alert(err instanceof Error ? err.message : "保存快捷场景失败");
     } finally {
-      setBindBusy(false);
+      setQuickSaveBusy(false);
     }
   };
 
@@ -331,7 +411,7 @@ export default function ProjectDetailPage() {
       .then(([proj, outRows, runRows, attachRows]) => {
         if (!cancelled) {
           setProject(proj);
-          setOutputs(outRows.map(mapApiOutput));
+          setOutputs(mapVisibleOutputs(outRows));
           setRuns(runRows);
           setAttachments(attachRows);
         }
@@ -360,7 +440,15 @@ export default function ProjectDetailPage() {
         if (cancelled) return;
         setOutputFullContent(d.content);
         setSelectedOutput((prev) =>
-          prev && prev.id === d.id ? { ...prev, status: d.status } : prev,
+          prev && prev.id === d.id
+            ? {
+                ...prev,
+                status: d.status,
+                run_id: d.run_id ?? prev.run_id,
+                scenario_id: d.scenario_id ?? prev.scenario_id,
+                entrypoint: d.entrypoint ?? prev.entrypoint,
+              }
+            : prev,
         );
       })
       .catch(() => {
@@ -392,9 +480,9 @@ export default function ProjectDetailPage() {
       const mapped = await refreshOutputs();
       const next = mapped.find((o) => o.id === selectedOutput.id);
       if (next) setSelectedOutput(next);
-      console.info("[project] 输出已批准", { project_id: id, output_id: selectedOutput.id });
+      console.info("[project] 输出已采纳", { project_id: id, output_id: selectedOutput.id });
     } catch (e) {
-      alert(e instanceof Error ? e.message : "批准失败");
+      alert(e instanceof Error ? e.message : "采纳失败");
     } finally {
       setOutputGovernBusy(false);
     }
@@ -408,9 +496,8 @@ export default function ProjectDetailPage() {
         method: "POST",
       });
       await readJson(res);
-      const mapped = await refreshOutputs();
-      const next = mapped.find((o) => o.id === selectedOutput.id);
-      if (next) setSelectedOutput(next);
+      await refreshOutputs();
+      setSelectedOutput(null);
       console.info("[project] 输出已归档", { project_id: id, output_id: selectedOutput.id });
     } catch (e) {
       alert(e instanceof Error ? e.message : "归档失败");
@@ -523,6 +610,22 @@ export default function ProjectDetailPage() {
   const totalWords = outputs.reduce((sum, o) => sum + o.word_count, 0);
   const latestOutput = outputs[0];
   const latestRun = runs[0];
+  const outputActionLinks = useMemo(() => {
+    if (!id || !selectedOutput) return null;
+    const projectId = String(id);
+    return {
+      chat: buildOutputChatRefineLink(projectId, selectedOutput),
+      workshop: buildOutputWorkshopRefineLink(projectId, selectedOutput),
+    };
+  }, [id, selectedOutput]);
+
+  const workshopEntryHref = useMemo(() => {
+    if (!id) return "/workshop";
+    const params = new URLSearchParams({ project_id: String(id) });
+    const scenarioId = resolveWorkshopScenarioId(quickDraft);
+    if (scenarioId) params.set("scenario_id", scenarioId);
+    return `/workshop?${params.toString()}`;
+  }, [id, quickDraft]);
 
   return (
     <main className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 p-4 text-white sm:p-6 md:p-8">
@@ -659,135 +762,123 @@ export default function ProjectDetailPage() {
                         title="进入对话创作"
                         desc=""
                       />
-                      <ActionLink
-                        href={`/workshop?project_id=${id}`}
-                        title="进入场景输出"
-                        desc=""
-                      />
-                      <button
-                        type="button"
-                        onClick={() => setScenarioBindingOpen((open) => !open)}
-                        className={`block w-full rounded-2xl border bg-slate-900/60 p-4 text-left transition hover:border-slate-600 hover:bg-slate-900 ${
-                          scenarioBindingOpen
-                            ? "border-blue-500/50 bg-slate-900"
-                            : "border-slate-700"
-                        }`}
-                      >
-                        <p className="text-sm font-medium text-white">默认场景编排</p>
-                      </button>
+                      <div className="grid grid-cols-3 gap-3">
+                        <button
+                          type="button"
+                          onClick={() => setQuickScenarioOpen((open) => !open)}
+                          className={`col-span-1 rounded-2xl border bg-slate-900/60 p-4 text-left transition hover:border-slate-600 hover:bg-slate-900 ${
+                            quickScenarioOpen
+                              ? "border-blue-500/50 bg-slate-900"
+                              : "border-slate-700"
+                          }`}
+                        >
+                          <p className="text-sm font-medium text-white">设置快捷场景</p>
+                        </button>
+                        <Link
+                          href={workshopEntryHref}
+                          className="col-span-2 block rounded-2xl border border-slate-700 bg-slate-900/60 p-4 transition hover:border-slate-600 hover:bg-slate-900"
+                        >
+                          <p className="text-sm font-medium text-white">进入场景输出</p>
+                          {quickDraft.scenarioIds.length > 0 ? (
+                            <p className="mt-1 text-xs text-slate-500 line-clamp-1">
+                              按快捷场景：
+                              {publishedScenarios
+                                .filter((s) => s.id === resolveWorkshopScenarioId(quickDraft))
+                                .map((s) => s.name)
+                                .join("") || "未设默认"}
+                            </p>
+                          ) : null}
+                        </Link>
+                      </div>
                     </div>
                   </div>
                 </div>
 
-                {scenarioBindingOpen ? (
+                {quickScenarioOpen ? (
                 <div className="rounded-3xl border border-slate-700 bg-slate-800/50 p-5 sm:p-6">
                   <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                     <div>
-                      <p className="text-xs uppercase tracking-[0.2em] text-slate-500">场景绑定</p>
-                      <h2 className="mt-2 text-xl font-semibold text-white">已绑定场景</h2>
+                      <p className="text-xs uppercase tracking-[0.2em] text-slate-500">快捷场景</p>
+                      <h2 className="mt-2 text-xl font-semibold text-white">设置快捷场景</h2>
                       <p className="mt-1 text-xs text-slate-500">
-                        「场景输出」仅可选择此处已启用绑定。维护合同请用下方入口前往场景编排。
+                        勾选后可在「进入场景输出」中快速选用；默认项将自动带入工坊。
                       </p>
                     </div>
                     <Link
                       href={`/create?return_project_id=${id}`}
                       className="inline-flex shrink-0 items-center justify-center rounded-xl border border-slate-600 bg-slate-900/80 px-4 py-2 text-xs font-medium text-slate-200 transition hover:border-blue-500/40 hover:text-white"
                     >
-                      场景编排
+                      新建场景
                     </Link>
                   </div>
-                  {boundLoading ? (
-                    <p className="mt-4 text-sm text-slate-500">加载绑定列表…</p>
-                  ) : boundScenarios.filter((b) => b.enabled === 1).length === 0 ? (
+                  {boundLoading && publishedScenarios.length === 0 ? (
+                    <p className="mt-4 text-sm text-slate-500">加载场景列表…</p>
+                  ) : publishedScenarios.length === 0 ? (
                     <p className="mt-4 text-sm text-amber-400/90">
-                      尚未绑定可执行场景。请绑定或前往场景编排创建后回到本页添加绑定。
+                      暂无已发布场景，请先在场景编排中发布后再设置快捷场景。
                     </p>
                   ) : (
-                    <ul className="mt-4 space-y-2">
-                      {boundScenarios
-                        .filter((b) => b.enabled === 1)
-                        .map((b) => {
-                          const bindSt = (b.scenario_status || "draft").toLowerCase();
-                          const workshopReady = bindSt === "published";
-                          return (
+                    <ul className="mt-4 max-h-72 space-y-2 overflow-y-auto pr-1">
+                      {publishedScenarios.map((s) => {
+                        const checked = quickDraft.scenarioIds.includes(s.id);
+                        const isDefault = quickDraft.defaultScenarioId === s.id;
+                        return (
                           <li
-                            key={b.binding_id}
-                            className="flex flex-col gap-2 rounded-2xl border border-slate-700 bg-slate-900/50 px-4 py-3 text-sm sm:flex-row sm:items-center sm:justify-between"
+                            key={s.id}
+                            className={`flex items-center gap-3 rounded-2xl border px-4 py-3 text-sm transition ${
+                              checked
+                                ? "border-blue-500/40 bg-slate-900/80"
+                                : "border-slate-700 bg-slate-900/40"
+                            }`}
                           >
-                            <div className="min-w-0">
-                              <p className="font-medium text-white">{b.scenario_name}</p>
-                              <p className="mt-0.5 font-mono text-xs text-slate-500">
-                                {b.scenario_code} · v{b.scenario_version} ·{" "}
-                                {scenarioStatusLabel(b.scenario_status)}
-                                {b.is_default === 1 ? " · 默认" : ""}
+                            <input
+                              type="checkbox"
+                              checked={checked}
+                              onChange={() => toggleQuickScenario(s.id)}
+                              className="h-4 w-4 rounded border-slate-600 bg-slate-950 text-blue-600 focus:ring-blue-500"
+                            />
+                            <div className="min-w-0 flex-1">
+                              <p className="font-medium text-white">{s.name}</p>
+                              <p className="mt-0.5 text-xs text-slate-500">
+                                {s.code} · v{s.version}
+                                {s.description ? ` · ${s.description}` : ""}
                               </p>
-                              {!workshopReady ? (
-                                <p className="mt-1 text-xs text-amber-400/90">
-                                  场景输出不可选：需场景已发布；当前为{" "}
-                                  {scenarioStatusLabel(b.scenario_status)}
-                                  （请发布或解绑后重新绑定）
-                                </p>
-                              ) : null}
-                              {b.scenario_description ? (
-                                <p className="mt-1 line-clamp-2 text-xs text-slate-400">
-                                  {b.scenario_description}
-                                </p>
-                              ) : null}
                             </div>
-                            <div className="flex shrink-0 flex-wrap gap-2">
-                              {b.is_default !== 1 ? (
-                                <button
-                                  type="button"
-                                  onClick={() => void setDefaultBoundScenario(b.scenario_id)}
-                                  className="rounded-lg border border-slate-600 px-2.5 py-1 text-xs text-slate-200 transition hover:bg-slate-800"
-                                >
-                                  设为默认
-                                </button>
-                              ) : null}
-                              <button
-                                type="button"
-                                onClick={() => void unbindScenario(b.scenario_id)}
-                                className="rounded-lg border border-red-900/50 px-2.5 py-1 text-xs text-red-300 transition hover:bg-red-950/40"
-                              >
-                                解绑
-                              </button>
-                            </div>
+                            <button
+                              type="button"
+                              disabled={!checked}
+                              onClick={() => setQuickDefaultScenario(s.id)}
+                              className={`shrink-0 rounded-lg px-2.5 py-1 text-xs transition ${
+                                isDefault
+                                  ? "border border-blue-500/50 bg-blue-500/15 text-blue-200"
+                                  : "border border-slate-600 text-slate-400 hover:bg-slate-800 disabled:opacity-40"
+                              }`}
+                            >
+                              {isDefault ? "默认" : "设为默认"}
+                            </button>
                           </li>
-                          );
-                        })}
+                        );
+                      })}
                     </ul>
                   )}
-                  <div className="mt-4 space-y-3 rounded-2xl border border-slate-800 bg-slate-950/40 p-4">
-                    <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
-                      <label className="block flex-1 space-y-2 text-sm">
-                        <span className="text-slate-400">绑定已有场景</span>
-                        <select
-                          value={bindSelectId}
-                          onChange={(e) => setBindSelectId(e.target.value)}
-                          className="w-full rounded-xl border border-slate-700 bg-slate-950/70 px-3 py-2 text-sm text-white outline-none focus:border-blue-500"
-                        >
-                          <option value="">选择场景…</option>
-                          {bindableScenarios.map((s) => (
-                            <option key={s.id} value={s.id}>
-                              {s.name} · v{s.version} · {scenarioStatusLabel(s.status)}
-                            </option>
-                          ))}
-                        </select>
-                      </label>
-                      <button
-                        type="button"
-                        disabled={bindBusy || !bindSelectId}
-                        onClick={() => void bindScenarioToProject()}
-                        className="rounded-xl bg-blue-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-blue-500 disabled:opacity-50"
-                      >
-                        {bindBusy ? "绑定中…" : "添加绑定"}
-                      </button>
-                    </div>
-                    {bindableScenarios.length === 0 && catalogScenarios.length > 0 ? (
-                      <p className="text-xs text-slate-500">
-                        下拉仅列出已发布且未绑定的场景；草稿或停用场景请先在场景编排中发布。
-                      </p>
-                    ) : null}
+                  <div className="mt-4 flex flex-wrap items-center gap-3">
+                    <button
+                      type="button"
+                      disabled={quickSaveBusy || quickDraft.scenarioIds.length === 0}
+                      onClick={() => void saveQuickScenarios()}
+                      className="rounded-xl bg-blue-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-blue-500 disabled:opacity-50"
+                    >
+                      {quickSaveBusy ? "保存中…" : "保存快捷场景"}
+                    </button>
+                    <p className="text-xs text-slate-500">
+                      已选 {quickDraft.scenarioIds.length} 个
+                      {quickDraft.defaultScenarioId
+                        ? ` · 默认：${
+                            publishedScenarios.find((s) => s.id === quickDraft.defaultScenarioId)
+                              ?.name ?? quickDraft.defaultScenarioId
+                          }`
+                        : ""}
+                    </p>
                   </div>
                 </div>
                 ) : null}
@@ -942,14 +1033,20 @@ export default function ProjectDetailPage() {
                                 </span>
                               </div>
                               <div className="flex flex-wrap gap-1.5 mb-2">
-                                {output.tags.map((tag) => (
-                                  <span
-                                    key={tag}
-                                    className="rounded bg-slate-700/60 px-2 py-0.5 text-xs text-slate-400"
-                                  >
-                                    {tag}
-                                  </span>
-                                ))}
+                                <span className={outputStatusBadgeClass(output.status)}>
+                                  {output.status === "approved" ? "✓ " : ""}
+                                  {outputStatusLabel(output.status)}
+                                </span>
+                                {output.tags
+                                  .filter((tag) => tag !== outputStatusLabel(output.status))
+                                  .map((tag) => (
+                                    <span
+                                      key={tag}
+                                      className="rounded bg-slate-700/60 px-2 py-0.5 text-xs text-slate-400"
+                                    >
+                                      {tag}
+                                    </span>
+                                  ))}
                                 <span className="text-xs text-slate-500">{output.word_count.toLocaleString()} 字</span>
                               </div>
                               <p className="text-slate-400 text-xs line-clamp-2 leading-relaxed">
@@ -976,7 +1073,8 @@ export default function ProjectDetailPage() {
                               <p className="text-xs text-slate-500">
                                 {selectedOutput.skill_name} · {formatDate(selectedOutput.created_at)}
                               </p>
-                              <span className="rounded bg-slate-700/80 px-2 py-0.5 text-[11px] font-medium text-slate-200">
+                              <span className={outputStatusBadgeClass(selectedOutput.status)}>
+                                {selectedOutput.status === "approved" ? "✓ " : ""}
                                 {outputStatusLabel(selectedOutput.status)}
                               </span>
                             </div>
@@ -1010,12 +1108,22 @@ export default function ProjectDetailPage() {
                       </div>
                       <div className="border-t border-slate-700 p-4">
                         <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
-                          <Link
-                            href={`/workshop?project_id=${id}&scenario_id=${encodeURIComponent(selectedOutput.scenario_id || "")}&output_id=${selectedOutput.id}&mode=refine`}
-                            className="flex-1 min-w-[10rem] px-4 py-2 bg-blue-600 hover:bg-blue-500 rounded-lg text-sm font-medium text-center transition"
-                          >
-                            基于此优化
-                          </Link>
+                          {outputActionLinks ? (
+                            <>
+                              <Link
+                                href={outputActionLinks.chat}
+                                className="flex-1 min-w-[8rem] px-4 py-2 rounded-lg border border-blue-500/50 bg-blue-500/10 text-sm font-medium text-center text-blue-200 transition hover:bg-blue-500/20"
+                              >
+                                对话优化
+                              </Link>
+                              <Link
+                                href={outputActionLinks.workshop}
+                                className="flex-1 min-w-[8rem] px-4 py-2 bg-blue-600 hover:bg-blue-500 rounded-lg text-sm font-medium text-center transition"
+                              >
+                                二次创作
+                              </Link>
+                            </>
+                          ) : null}
                           <button
                             type="button"
                             onClick={() => void handleApproveProjectOutput()}
@@ -1026,7 +1134,7 @@ export default function ProjectDetailPage() {
                             }
                             className="px-4 py-2 rounded-lg text-sm font-medium border border-emerald-600/50 bg-emerald-500/15 text-emerald-100 hover:bg-emerald-500/25 transition disabled:opacity-40 disabled:cursor-not-allowed"
                           >
-                            批准
+                            采纳
                           </button>
                           <button
                             type="button"
@@ -1035,13 +1143,6 @@ export default function ProjectDetailPage() {
                             className="px-4 py-2 rounded-lg text-sm font-medium border border-amber-600/50 bg-amber-500/15 text-amber-100 hover:bg-amber-500/25 transition disabled:opacity-40 disabled:cursor-not-allowed"
                           >
                             归档
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => setSelectedOutput(null)}
-                            className="px-4 py-2 bg-slate-700 hover:bg-slate-600 rounded-lg text-sm transition sm:ml-auto"
-                          >
-                            关闭
                           </button>
                         </div>
                       </div>
