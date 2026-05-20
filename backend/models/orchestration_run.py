@@ -24,6 +24,7 @@ class OrchestrationRun(Base):
     assistant_content = Column(Text)
     validation_json = Column(Text)
     skills_policy_json = Column(Text)
+    tool_capture_json = Column(Text)
     error_message = Column(Text)
     duration_ms = Column(Integer)
     user_id = Column(String, default="default")

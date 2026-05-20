@@ -510,6 +510,25 @@ class RunListItem(BaseModel):
     status: str
     created_at: str | None
     duration_ms: int | None
+    execution_mode: str | None = None
+    tool_capture_hit: bool | None = None
+
+
+def _run_observability_from_metadata(raw: str | None) -> tuple[str | None, bool | None]:
+    if not raw:
+        return None, None
+    try:
+        meta = json.loads(raw)
+    except json.JSONDecodeError:
+        return None, None
+    if not isinstance(meta, dict):
+        return None, None
+    mode = meta.get("execution_mode")
+    hit = meta.get("tool_capture_hit")
+    return (
+        mode if isinstance(mode, str) else None,
+        hit if isinstance(hit, bool) else None,
+    )
 
 
 @router.get("/{project_id}/runs", response_model=list[RunListItem])
@@ -531,17 +550,22 @@ async def list_project_runs(
         query.order_by(OrchestrationRun.created_at.desc()).limit(min(limit, 500))
     )
     rows = q.scalars().all()
-    return [
-        RunListItem(
-            id=r.id,
-            entrypoint=r.entrypoint,
-            scenario_id=getattr(r, "scenario_id", None),
-            status=r.status,
-            created_at=r.created_at,
-            duration_ms=r.duration_ms,
+    items: list[RunListItem] = []
+    for r in rows:
+        exec_mode, capture_hit = _run_observability_from_metadata(r.response_metadata_json)
+        items.append(
+            RunListItem(
+                id=r.id,
+                entrypoint=r.entrypoint,
+                scenario_id=getattr(r, "scenario_id", None),
+                status=r.status,
+                created_at=r.created_at,
+                duration_ms=r.duration_ms,
+                execution_mode=exec_mode,
+                tool_capture_hit=capture_hit,
+            )
         )
-        for r in rows
-    ]
+    return items
 
 
 # --- 项目附件 ---

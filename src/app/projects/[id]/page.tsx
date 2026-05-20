@@ -68,6 +68,8 @@ interface ApiRunRow {
   status: string;
   created_at: string | null;
   duration_ms: number | null;
+  execution_mode?: string | null;
+  tool_capture_hit?: boolean | null;
 }
 
 interface ApiOutputDetail {
@@ -1253,6 +1255,12 @@ export default function ProjectDetailPage() {
                         </span>
                         {r.duration_ms != null && (
                           <span className="text-slate-500">耗时 {r.duration_ms} 毫秒</span>
+                        )}
+                        {r.execution_mode && (
+                          <span className="rounded bg-violet-900/30 px-2 py-0.5 text-violet-200">
+                            {r.execution_mode === "agent" ? "Agent" : "直连"}
+                            {r.tool_capture_hit ? " · 工具产出" : ""}
+                          </span>
                         )}
                       </div>
                     </div>

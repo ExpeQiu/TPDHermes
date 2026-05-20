@@ -8,7 +8,7 @@ import json
 import os
 from typing import Any
 
-from backend.schemas.orchestration import OrchestrationPayload
+from backend.schemas.orchestration import OrchestrationPayload, TaskInputPayload
 
 ORCHESTRATION_MARKER_BEGIN = "<<<ORCHESTRATION_JSON_BEGIN>>>"
 ORCHESTRATION_MARKER_END = "<<<ORCHESTRATION_JSON_END>>>"
@@ -68,10 +68,47 @@ def _build_orchestration_guidance(payload: OrchestrationPayload) -> str:
     return " ".join(lines)
 
 
+    return " ".join(lines)
+
+
+def _build_workshop_agent_guidance(
+    payload: OrchestrationPayload,
+    *,
+    skill_name: str,
+    run_id: str,
+    task_input: dict[str, Any] | None = None,
+) -> str:
+    knowledge_collections = [c for c in payload.knowledge.collections if c]
+    project_id = payload.project.id if payload.project.id != "none" else ""
+    lines = [
+        "【结果工坊强制流程】你必须通过 MCP 工具完成生成，禁止跳过工具直接输出最终正文。",
+        f"固定 skill_name={skill_name}，不得改用其他技能。",
+        f"调用 workshop_generate 或 workshop_generate_from_kb 时，必须传入 tphermes_run_id={run_id}（工具顶层参数或 context 字段），"
+        f"并包含 project_id={project_id}、scenario_id={payload.scenario.id}。",
+    ]
+    if task_input:
+        lines.append("context 还须包含 task_input 对象（与编排合同一致）。")
+    if knowledge_collections:
+        lines.append(
+            "优先调用 workshop_generate_from_kb：collection_name 从 "
+            + ", ".join(knowledge_collections)
+            + f" 中选择；project_id={project_id or 'null'}。"
+        )
+    else:
+        lines.append(
+            f"调用 workshop_generate(skill_name={skill_name!r}, context={{...}})。"
+        )
+    lines.append("工具成功后可用一句话摘要回复用户，但系统落库以工具返回内容为准。")
+    return " ".join(lines)
+
+
 def build_chat_completion_body(
     payload: OrchestrationPayload,
     messages: list[dict[str, Any]],
     model: str | None = None,
+    *,
+    workshop_skill_name: str | None = None,
+    task_input: TaskInputPayload | None = None,
 ) -> dict[str, Any]:
     """
     构造转发给上游的 JSON body。
@@ -83,6 +120,18 @@ def build_chat_completion_body(
     model_name = model or os.getenv("HERMES_CHAT_MODEL", "hermes-agent")
 
     system_intro = _build_orchestration_guidance(payload)
+    if payload.entrypoint == "workshop" and workshop_skill_name and payload.execution.run_id:
+        ti_dict = task_input.model_dump(exclude_none=True) if task_input else None
+        system_intro = (
+            system_intro
+            + " "
+            + _build_workshop_agent_guidance(
+                payload,
+                skill_name=workshop_skill_name,
+                run_id=payload.execution.run_id,
+                task_input=ti_dict,
+            )
+        )
 
     if mode == "extra":
         body: dict[str, Any] = {

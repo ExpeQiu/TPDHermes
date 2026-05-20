@@ -130,12 +130,23 @@ def workshop_get_skill_info(skill_name: str) -> dict:
 
 @mcp.tool(
     title="Workshop Generate",
-    description="Execute a Skill's generate() method with the given context and return the result.",
+    description=(
+        "Execute a Skill's generate() method with the given context and return the result. "
+        "When invoked from TPDHermes workshop agent flow, tphermes_run_id is required."
+    ),
 )
-async def workshop_generate(skill_name: str, context: dict) -> dict:
+async def workshop_generate(
+    skill_name: str,
+    context: dict,
+    tphermes_run_id: str | None = None,
+) -> dict:
     """Execute a Skill."""
     from backend.tools.workshop_tools import workshop_generate as _gen
-    return await _gen(skill_name, context)
+
+    ctx = dict(context or {})
+    if tphermes_run_id:
+        ctx["tphermes_run_id"] = tphermes_run_id
+    return await _gen(skill_name, ctx)
 
 
 @mcp.tool(
@@ -152,16 +163,21 @@ async def workshop_generate_from_kb(
     limit: int = 3,
     project_id: str | None = None,
     context: dict | None = None,
+    tphermes_run_id: str | None = None,
 ) -> dict:
     """Execute a Skill with KB-augmented context."""
     from backend.tools.workshop_tools import workshop_generate_from_kb as _gen_from_kb
+
+    ctx = dict(context or {})
+    if tphermes_run_id:
+        ctx["tphermes_run_id"] = tphermes_run_id
     return await _gen_from_kb(
         skill_name=skill_name,
         query=query,
         collection_name=collection_name,
         limit=limit,
         project_id=project_id,
-        context=context,
+        context=ctx,
     )
 
 

@@ -42,6 +42,12 @@ from backend.services.workshop_task_runner import (
     run_workshop_skill_async,
     sse_openai_delta,
 )
+from backend.services.workshop_execution import (
+    primary_text_from_capture,
+    workshop_agent_fallback_direct,
+    workshop_execution_mode,
+)
+from backend.services.workshop_tool_capture import load_workshop_tool_capture
 from backend.services.user_identity import effective_user_id_for_api, viewer_role
 
 logger = logging.getLogger("tpdx.hermes")
@@ -97,13 +103,91 @@ def _merge_required_sections(payload: OrchestrationPayload, template_sections: l
     )
 
 
-def _response_meta(payload: OrchestrationPayload, *, used_skills: list[str] | None = None) -> dict[str, Any]:
-    return {
+def _response_meta(
+    payload: OrchestrationPayload,
+    *,
+    used_skills: list[str] | None = None,
+    execution_mode: str | None = None,
+    tool_capture_hit: bool = False,
+) -> dict[str, Any]:
+    meta: dict[str, Any] = {
         "used_skills": used_skills or [],
         "used_collections": [],
         "skills_policy": payload.skills.model_dump(),
         "skills_violations": [],
     }
+    if execution_mode:
+        meta["execution_mode"] = execution_mode
+    if payload.entrypoint == "workshop":
+        meta["tool_capture_hit"] = tool_capture_hit
+    return meta
+
+
+def _must_have_headings(payload: OrchestrationPayload) -> bool:
+    vr = payload.output.validation_rules
+    return True if vr is None else bool(vr.must_have_headings)
+
+
+def _workshop_skill_context(user_text: str, task_input: TaskInputPayload | None) -> dict[str, Any]:
+    context = _parse_workshop_context(user_text)
+    if task_input is not None:
+        context["task_input"] = task_input.model_dump(exclude_none=True)
+    return context
+
+
+async def _run_workshop_direct_text(
+    skill_name: str,
+    user_text: str,
+    task_input: TaskInputPayload | None,
+) -> str:
+    context = _workshop_skill_context(user_text, task_input)
+    return await run_workshop_skill_async(skill_name, context)
+
+
+async def _resolve_workshop_agent_output(
+    *,
+    run_id: str,
+    sse_fallback: str,
+    skill_name: str,
+    user_text: str,
+    task_input: TaskInputPayload | None,
+) -> tuple[str, bool, str]:
+    """
+    返回 (落库正文, tool_capture_hit, execution_mode)。
+    execution_mode 可能因 fallback 变为 direct。
+    """
+    async with async_session_maker() as db:
+        capture = await load_workshop_tool_capture(db, run_id)
+    text = primary_text_from_capture(capture)
+    if text.strip():
+        return text, True, "agent"
+
+    if workshop_agent_fallback_direct():
+        logger.warning(
+            "workshop agent capture miss run_id=%s fallback=direct skill=%s",
+            run_id,
+            skill_name,
+        )
+        try:
+            direct_text = await _run_workshop_direct_text(skill_name, user_text, task_input)
+        except RuntimeError as exc:
+            raise HTTPException(
+                status_code=424,
+                detail=f"Agent 未调用 workshop 工具且直连降级失败: {exc}",
+            ) from exc
+        return direct_text, False, "direct"
+
+    detail = (
+        "Agent 未调用 workshop_generate / workshop_generate_from_kb，无法获取产出正文。"
+        "请确认 Hermes-agent 已连接 tphermes MCP 且编排指令生效。"
+    )
+    if sse_fallback.strip():
+        logger.warning(
+            "workshop agent capture miss run_id=%s sse_len=%s",
+            run_id,
+            len(sse_fallback),
+        )
+    raise HTTPException(status_code=424, detail=detail)
 
 
 @router.post("/execute")
@@ -218,21 +302,36 @@ async def execute_task(req: Request, task_req: TaskExecuteRequest, db: AsyncSess
         skills_policy_json=json.dumps(payload.skills.model_dump(), ensure_ascii=False),
     )
 
-    if eff_request.entrypoint == "workshop":
-        skill_name = payload.skills.allowed[0]
-        context = _parse_workshop_context(user_text)
-        # Inject structured task_input so the skill can access individual fields
-        if eff_request.task_input is not None:
-            context["task_input"] = eff_request.task_input.model_dump(exclude_none=True)
+    payload = payload.model_copy(
+        update={"execution": payload.execution.model_copy(update={"run_id": run_id})}
+    )
+    snapshot = {**snapshot, "run_id": run_id}
 
-        def _must_head_ws() -> bool:
-            vr = payload.output.validation_rules
-            return True if vr is None else bool(vr.must_have_headings)
+    is_workshop = eff_request.entrypoint == "workshop"
+    ws_mode = workshop_execution_mode() if is_workshop else None
+    workshop_skill: str | None = None
+    if is_workshop:
+        workshop_skill = payload.skills.allowed[0]
+        logger.info(
+            "workshop execute run_id=%s mode=%s skill=%s project_id=%s",
+            run_id,
+            ws_mode,
+            workshop_skill,
+            eff_request.project_id,
+        )
+        snapshot = {**snapshot, "workshop_execution_mode": ws_mode}
+
+    if is_workshop and ws_mode == "direct":
+        user_text_ws = payload.user_input.message
 
         if not eff_request.stream:
             t0 = time.perf_counter()
             try:
-                text = await run_workshop_skill_async(skill_name, context)
+                text = await _run_workshop_direct_text(
+                    workshop_skill,
+                    user_text_ws,
+                    eff_request.task_input,
+                )
             except RuntimeError as exc:
                 await mark_run_failed(db, run_id, str(exc))
                 raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -240,7 +339,7 @@ async def execute_task(req: Request, task_req: TaskExecuteRequest, db: AsyncSess
             validation = validate_markdown_sections(
                 text,
                 payload.output.required_sections,
-                must_have_headings=_must_head_ws(),
+                must_have_headings=_must_have_headings(payload),
             )
             status = "draft" if payload.output.must_follow_template and not validation.get("ok") else "completed"
             async with async_session_maker() as db2:
@@ -249,7 +348,12 @@ async def execute_task(req: Request, task_req: TaskExecuteRequest, db: AsyncSess
                     run_id=run_id,
                     assistant_content=text,
                     status=status,
-                    response_metadata=_response_meta(payload, used_skills=[skill_name]),
+                    response_metadata=_response_meta(
+                        payload,
+                        used_skills=[workshop_skill],
+                        execution_mode="direct",
+                        tool_capture_hit=False,
+                    ),
                     validation=validation,
                     error_message=None,
                     duration_ms=duration_ms,
@@ -266,14 +370,19 @@ async def execute_task(req: Request, task_req: TaskExecuteRequest, db: AsyncSess
                     "output_id": output_id,
                     "validation": validation,
                     "content": text,
-                    "used_skills": [skill_name],
+                    "used_skills": [workshop_skill],
+                    "execution_mode": "direct",
                 }
             )
 
-        async def workshop_event_stream() -> AsyncGenerator[str, None]:
+        async def workshop_direct_stream() -> AsyncGenerator[str, None]:
             t0 = time.perf_counter()
             try:
-                text = await run_workshop_skill_async(skill_name, context)
+                text = await _run_workshop_direct_text(
+                    workshop_skill,
+                    user_text_ws,
+                    eff_request.task_input,
+                )
             except RuntimeError as exc:
                 async with async_session_maker() as s:
                     await mark_run_failed(s, run_id, str(exc))
@@ -287,7 +396,7 @@ async def execute_task(req: Request, task_req: TaskExecuteRequest, db: AsyncSess
             validation = validate_markdown_sections(
                 text,
                 payload.output.required_sections,
-                must_have_headings=_must_head_ws(),
+                must_have_headings=_must_have_headings(payload),
             )
             status = "draft" if payload.output.must_follow_template and not validation.get("ok") else "completed"
             output_id: str | None = None
@@ -298,7 +407,12 @@ async def execute_task(req: Request, task_req: TaskExecuteRequest, db: AsyncSess
                         run_id=run_id,
                         assistant_content=text,
                         status=status,
-                        response_metadata=_response_meta(payload, used_skills=[skill_name]),
+                        response_metadata=_response_meta(
+                            payload,
+                            used_skills=[workshop_skill],
+                            execution_mode="direct",
+                            tool_capture_hit=False,
+                        ),
                         validation=validation,
                         error_message=None,
                         duration_ms=duration_ms,
@@ -312,11 +426,18 @@ async def execute_task(req: Request, task_req: TaskExecuteRequest, db: AsyncSess
             except Exception as exc:
                 logger.exception("finalize_run failed run_id=%s err=%s", run_id, exc)
 
-            meta = {"tphermes_task": {"run_id": run_id, "output_id": output_id, "validation": validation}}
+            meta = {
+                "tphermes_task": {
+                    "run_id": run_id,
+                    "output_id": output_id,
+                    "validation": validation,
+                    "execution_mode": "direct",
+                }
+            }
             yield "data: " + json.dumps(meta, ensure_ascii=False) + "\n\n"
 
         return StreamingResponse(
-            workshop_event_stream(),
+            workshop_direct_stream(),
             media_type="text/event-stream",
             headers={
                 "Cache-Control": "no-cache",
@@ -326,7 +447,12 @@ async def execute_task(req: Request, task_req: TaskExecuteRequest, db: AsyncSess
         )
 
     messages = merge_chat_messages(eff_request.messages, user_text)
-    upstream_body = build_chat_completion_body(payload, messages)
+    upstream_body = build_chat_completion_body(
+        payload,
+        messages,
+        workshop_skill_name=workshop_skill if is_workshop else None,
+        task_input=eff_request.task_input if is_workshop else None,
+    )
     upstream_body["stream"] = eff_request.stream
 
     if not eff_request.stream:
@@ -360,14 +486,27 @@ async def execute_task(req: Request, task_req: TaskExecuteRequest, db: AsyncSess
             await mark_run_failed(db, run_id, resp.text[:2000])
             return JSONResponse(status_code=resp.status_code, content=_format_upstream_error(resp.status_code, resp.content))
 
-        def _must_have_headings_ns() -> bool:
-            vr = payload.output.validation_rules
-            return True if vr is None else bool(vr.must_have_headings)
+        exec_mode = "agent"
+        capture_hit = False
+        used_skills: list[str] | None = None
+        if is_workshop and workshop_skill:
+            try:
+                text, capture_hit, exec_mode = await _resolve_workshop_agent_output(
+                    run_id=run_id,
+                    sse_fallback=text,
+                    skill_name=workshop_skill,
+                    user_text=user_text,
+                    task_input=eff_request.task_input,
+                )
+            except HTTPException as exc:
+                await mark_run_failed(db, run_id, str(exc.detail))
+                raise
+            used_skills = [workshop_skill]
 
         validation = validate_markdown_sections(
             text,
             payload.output.required_sections,
-            must_have_headings=_must_have_headings_ns(),
+            must_have_headings=_must_have_headings(payload),
         )
         if payload.output.must_follow_template and not validation.get("ok"):
             status = "draft"
@@ -380,7 +519,12 @@ async def execute_task(req: Request, task_req: TaskExecuteRequest, db: AsyncSess
                 run_id=run_id,
                 assistant_content=text,
                 status=status,
-                response_metadata=_response_meta(payload),
+                response_metadata=_response_meta(
+                    payload,
+                    used_skills=used_skills,
+                    execution_mode=exec_mode if is_workshop else None,
+                    tool_capture_hit=capture_hit,
+                ),
                 validation=validation,
                 error_message=None,
                 duration_ms=duration_ms,
@@ -392,18 +536,18 @@ async def execute_task(req: Request, task_req: TaskExecuteRequest, db: AsyncSess
                 output_owner_id=effective_uid,
             )
 
-        return JSONResponse(
-            content={
-                "run_id": run_id,
-                "output_id": output_id,
-                "validation": validation,
-                "content": text,
-            }
-        )
-
-    def _must_have_headings() -> bool:
-        vr = payload.output.validation_rules
-        return True if vr is None else bool(vr.must_have_headings)
+        body: dict[str, Any] = {
+            "run_id": run_id,
+            "output_id": output_id,
+            "validation": validation,
+            "content": text,
+        }
+        if is_workshop:
+            body["execution_mode"] = exec_mode
+            body["tool_capture_hit"] = capture_hit
+            if used_skills:
+                body["used_skills"] = used_skills
+        return JSONResponse(content=body)
 
     async def event_stream() -> AsyncGenerator[str, None]:
         target_url, api_key = _chat_target_required()
@@ -464,10 +608,34 @@ async def execute_task(req: Request, task_req: TaskExecuteRequest, db: AsyncSess
             return
 
         duration_ms = int((time.perf_counter() - t0) * 1000)
+        finalize_text = full_text
+        exec_mode = "agent"
+        capture_hit = False
+        used_skills: list[str] | None = None
+
+        if is_workshop and workshop_skill:
+            try:
+                finalize_text, capture_hit, exec_mode = await _resolve_workshop_agent_output(
+                    run_id=run_id,
+                    sse_fallback=full_text,
+                    skill_name=workshop_skill,
+                    user_text=user_text,
+                    task_input=eff_request.task_input,
+                )
+            except HTTPException as exc:
+                async with async_session_maker() as s:
+                    await mark_run_failed(s, run_id, str(exc.detail))
+                yield "data: " + json.dumps({"error": {"message": exc.detail}}, ensure_ascii=False) + "\n\n"
+                return
+            used_skills = [workshop_skill]
+            if finalize_text.strip() and finalize_text != full_text:
+                for line in finalize_text.splitlines(keepends=True):
+                    yield sse_openai_delta(line)
+
         validation = validate_markdown_sections(
-            full_text,
+            finalize_text,
             payload.output.required_sections,
-            must_have_headings=_must_have_headings(),
+            must_have_headings=_must_have_headings(payload),
         )
         status = "completed"
         if payload.output.must_follow_template and not validation.get("ok"):
@@ -479,9 +647,14 @@ async def execute_task(req: Request, task_req: TaskExecuteRequest, db: AsyncSess
                 _, output_id = await finalize_run(
                     db2,
                     run_id=run_id,
-                    assistant_content=full_text,
+                    assistant_content=finalize_text,
                     status=status,
-                    response_metadata=_response_meta(payload),
+                    response_metadata=_response_meta(
+                        payload,
+                        used_skills=used_skills,
+                        execution_mode=exec_mode if is_workshop else None,
+                        tool_capture_hit=capture_hit,
+                    ),
                     validation=validation,
                     error_message=None,
                     duration_ms=duration_ms,
@@ -495,7 +668,16 @@ async def execute_task(req: Request, task_req: TaskExecuteRequest, db: AsyncSess
         except Exception as exc:
             logger.exception("finalize_run failed run_id=%s err=%s", run_id, exc)
 
-        meta = {"tphermes_task": {"run_id": run_id, "output_id": output_id, "validation": validation}}
+        meta: dict[str, Any] = {
+            "tphermes_task": {
+                "run_id": run_id,
+                "output_id": output_id,
+                "validation": validation,
+            }
+        }
+        if is_workshop:
+            meta["tphermes_task"]["execution_mode"] = exec_mode
+            meta["tphermes_task"]["tool_capture_hit"] = capture_hit
         yield "data: " + json.dumps(meta, ensure_ascii=False) + "\n\n"
 
     return StreamingResponse(

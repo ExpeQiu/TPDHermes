@@ -250,12 +250,21 @@ async def workshop_generate(skill_name: str, context: dict) -> dict:
 
     try:
         result = skill.generate(context)
-        return {
+        payload = {
             "success": True,
             "content": result,
             "error": None,
             "skill": skill_name,
         }
+        from backend.services.workshop_tool_capture import save_workshop_tool_capture_for_context
+
+        await save_workshop_tool_capture_for_context(
+            context,
+            "workshop_generate",
+            payload,
+            skill_name=skill_name,
+        )
+        return payload
     except Exception as e:
         return {
             "success": False,
@@ -287,7 +296,7 @@ async def workshop_generate_from_kb(
         context=context,
     )
     generation = await workshop_generate(skill_name, built_context)
-    return {
+    payload = {
         "success": generation.get("success", False),
         "skill": skill_name,
         "query": query,
@@ -297,3 +306,12 @@ async def workshop_generate_from_kb(
         "generation": generation,
         "error": generation.get("error"),
     }
+    from backend.services.workshop_tool_capture import save_workshop_tool_capture_for_context
+
+    await save_workshop_tool_capture_for_context(
+        built_context,
+        "workshop_generate_from_kb",
+        payload,
+        skill_name=skill_name,
+    )
+    return payload

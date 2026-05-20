@@ -101,6 +101,7 @@ class OrchestrationExecution(BaseModel):
     trace: bool = True
     save_output: bool = True
     save_run_log: bool = True
+    run_id: str | None = Field(default=None, description="编排 run 主键，工坊 Agent 模式写入 MCP context")
 
 
 class OrchestrationActor(BaseModel):

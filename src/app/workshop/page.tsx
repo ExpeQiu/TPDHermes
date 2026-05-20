@@ -34,15 +34,12 @@ import {
 } from "@/lib/workshop-output-artifact";
 import { WorkshopOutputPanel } from "@/components/workshop-output-panel";
 import {
-  POLICY_SECTION_SUMMARY,
-  TASK_EXECUTE_HINT,
   entrypointLabel,
   fieldLabel,
   outputStatusLabel,
   projectStatusLabel,
   scenarioStatusLabel,
   stepLabel,
-  stepRangeLabel,
   taskInputSectionTitle,
   userMessageSectionTitle,
   skillsOverrideSummary,
@@ -183,7 +180,10 @@ function WorkshopPageInner() {
   const [lastRunMeta, setLastRunMeta] = useState<{
     run_id?: string;
     output_id?: string | null;
+    execution_mode?: string;
+    tool_capture_hit?: boolean;
   } | null>(null);
+  const [toolProgressLabel, setToolProgressLabel] = useState<string | null>(null);
   const [savedOutputFormat, setSavedOutputFormat] = useState<WorkshopOutputFormat | null>(null);
   const [versionSaveStatus, setVersionSaveStatus] = useState<"idle" | "saving" | "ok" | "err">("idle");
   const [versionSaveMsg, setVersionSaveMsg] = useState("");
@@ -720,6 +720,7 @@ function WorkshopPageInner() {
     setGenStatus("generating");
     setCopied(false);
     setLastRunMeta(null);
+    setToolProgressLabel(null);
     setVersionSaveStatus("idle");
     setVersionSaveMsg("");
 
@@ -776,6 +777,7 @@ function WorkshopPageInner() {
         const reader = res.body!.getReader();
         const decoder = new TextDecoder();
         let buffer = "";
+        let sseEvent = "";
 
         function parseOpenAiDelta(data: string): string {
           if (!data || data === "[DONE]") return "";
@@ -810,8 +812,28 @@ function WorkshopPageInner() {
               buffer = lines.pop() ?? "";
 
               for (const line of lines) {
+                if (line.startsWith("event: ")) {
+                  sseEvent = line.slice(7).trim();
+                  continue;
+                }
                 if (!line.startsWith("data: ")) continue;
                 const raw = line.slice(6).trim();
+                if (sseEvent === "hermes.tool.progress") {
+                  try {
+                    const prog = JSON.parse(raw) as Record<string, unknown>;
+                    const tool = typeof prog.tool === "string" ? prog.tool : "tool";
+                    const status = typeof prog.status === "string" ? prog.status : "";
+                    const label = typeof prog.label === "string" ? prog.label : tool;
+                    setToolProgressLabel(
+                      status === "completed" ? `${label} 完成` : `执行 ${label}…`,
+                    );
+                  } catch {
+                    // ignore
+                  }
+                  sseEvent = "";
+                  continue;
+                }
+                sseEvent = "";
                 try {
                   const event = JSON.parse(raw) as Record<string, unknown>;
                   if (event.error) {
@@ -834,7 +856,12 @@ function WorkshopPageInner() {
                           : m.output_id === null
                             ? null
                             : undefined,
+                      execution_mode:
+                        typeof m.execution_mode === "string" ? m.execution_mode : undefined,
+                      tool_capture_hit:
+                        typeof m.tool_capture_hit === "boolean" ? m.tool_capture_hit : undefined,
                     });
+                    setToolProgressLabel(null);
                   }
                 } catch {
                   // ignore malformed chunk
@@ -992,65 +1019,6 @@ function WorkshopPageInner() {
                     </Link>
                   </p>
                 </label>
-
-                {selectedProject ? (
-                  <div className="rounded-2xl border border-slate-800 bg-slate-950/50 p-4">
-                    <p className="text-xs uppercase tracking-[0.16em] text-slate-500">项目信息</p>
-                    <p className="mt-2 text-base font-semibold text-white">{selectedProject.name}</p>
-                    <dl className="mt-4 space-y-3 text-sm">
-                      <div>
-                        <dt className="text-xs text-slate-500">状态</dt>
-                        <dd className="mt-0.5 text-slate-200">
-                          {projectStatusLabel(selectedProject.status)}
-                        </dd>
-                      </div>
-                      {selectedProject.description?.trim() ? (
-                        <div>
-                          <dt className="text-xs text-slate-500">描述</dt>
-                          <dd className="mt-0.5 whitespace-pre-wrap text-slate-200">{selectedProject.description}</dd>
-                        </div>
-                      ) : null}
-                      {selectedProject.background?.trim() ? (
-                        <div>
-                          <dt className="text-xs text-slate-500">项目背景</dt>
-                          <dd className="mt-0.5 whitespace-pre-wrap text-slate-200">{selectedProject.background}</dd>
-                        </div>
-                      ) : null}
-                      {selectedProject.audience?.trim() ? (
-                        <div>
-                          <dt className="text-xs text-slate-500">目标受众</dt>
-                          <dd className="mt-0.5 whitespace-pre-wrap text-slate-200">{selectedProject.audience}</dd>
-                        </div>
-                      ) : null}
-                      {selectedProject.deadline?.trim() ? (
-                        <div>
-                          <dt className="text-xs text-slate-500">截止时间</dt>
-                          <dd className="mt-0.5 text-slate-200">{selectedProject.deadline}</dd>
-                        </div>
-                      ) : null}
-                      {selectedProject.constraints && Object.keys(selectedProject.constraints).length > 0 ? (
-                        <div>
-                          <dt className="text-xs text-slate-500">约束 / 元数据</dt>
-                          <dd className="mt-0.5">
-                            <pre className="max-h-40 overflow-auto rounded-lg border border-slate-800 bg-slate-950/80 p-3 font-mono text-xs text-slate-300">
-                              {JSON.stringify(selectedProject.constraints, null, 2)}
-                            </pre>
-                          </dd>
-                        </div>
-                      ) : null}
-                      {(selectedProject.updated_at || selectedProject.created_at) && (
-                        <div className="flex flex-wrap gap-x-4 gap-y-1 border-t border-slate-800 pt-3 text-xs text-slate-500">
-                          {selectedProject.created_at ? <span>创建：{selectedProject.created_at}</span> : null}
-                          {selectedProject.updated_at ? <span>更新：{selectedProject.updated_at}</span> : null}
-                        </div>
-                      )}
-                    </dl>
-                  </div>
-                ) : (
-                  <div className="rounded-2xl border border-dashed border-slate-700 bg-slate-950/30 px-4 py-8 text-center text-sm text-slate-500">
-                    选择项目后，将在此展示项目档案中的描述、背景与受众等信息。
-                  </div>
-                )}
               </div>
             </div>
 
@@ -1170,42 +1138,8 @@ function WorkshopPageInner() {
                     已有已发布场景，但均未绑定本项目。请在项目详情「设置快捷场景」中勾选并保存后再执行。
                   </p>
                 ) : null}
-                {selectedProjectId && !loadingBound && workshopDisplayScenarios.length > 0 ? (
-                  <p className="text-xs text-slate-500">
-                    列表为全部已发布场景；带「快捷场景」的为项目详情中配置的默认入口。仅已绑定场景可执行生成。
-                  </p>
-                ) : null}
               </div>
               )}
-
-              {selectedScenarioId && scenarioDetail ? (
-                <div className="mt-4 rounded-2xl border border-slate-800 bg-slate-950/50 p-4">
-                  <p className="text-xs uppercase tracking-[0.16em] text-slate-500">场景合同（服务端）</p>
-                  <p className="mt-2 text-base font-semibold text-white">{scenarioDetail.name}</p>
-                  <p className="mt-1 text-xs text-slate-500">
-                    场景编码 · <span className="font-mono text-slate-400">{scenarioDetail.code}</span>
-                  </p>
-                  {scenarioDetail.description?.trim() ? (
-                    <p className="mt-3 whitespace-pre-wrap text-sm text-slate-300">
-                      {scenarioDetail.description}
-                    </p>
-                  ) : null}
-                  <details className="mt-4 group border-t border-slate-800 pt-3">
-                    <summary className="cursor-pointer text-xs text-slate-400 transition hover:text-slate-200">
-                      {POLICY_SECTION_SUMMARY}
-                    </summary>
-                    <pre className="mt-2 max-h-48 overflow-y-auto whitespace-pre-wrap rounded-lg border border-slate-800 bg-slate-950/80 p-3 font-mono text-xs leading-relaxed text-slate-400">
-                      {contractSummaryText || "—"}
-                    </pre>
-                  </details>
-                </div>
-              ) : selectedScenarioId && loadingScenarioDetail ? (
-                <p className="mt-4 text-sm text-slate-500">加载场景合同…</p>
-              ) : !loadingBound && workshopScenarioOptions.length > 0 && !selectedScenarioId ? (
-                <div className="mt-4 rounded-2xl border border-dashed border-slate-700 bg-slate-950/30 px-4 py-6 text-center text-sm text-slate-500">
-                  请选择场景以加载服务端合同与技能白名单。
-                </div>
-              ) : null}
 
               <div className="mt-6 border-t border-slate-800 pt-5">
                 <div className="mb-3 flex flex-wrap items-end justify-between gap-2">
@@ -1329,9 +1263,6 @@ function WorkshopPageInner() {
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0">
                         <p className="text-xs uppercase tracking-[0.16em] text-slate-500">编排下发汇总</p>
-                        <p className="mt-1 text-sm text-slate-400">
-                          {stepRangeLabel(1, 3)} 对应信息；{TASK_EXECUTE_HINT}
-                        </p>
                       </div>
                       <span className="shrink-0 pt-0.5 text-xs text-slate-500 transition group-open:text-slate-400">
                         <span className="group-open:hidden">展开</span>
@@ -1380,64 +1311,6 @@ function WorkshopPageInner() {
                     </pre>
                   </div>
                 </details>
-
-                <div className="rounded-2xl border border-slate-800 bg-slate-950/40 p-4">
-                  <div className="flex flex-wrap items-start justify-between gap-2">
-                    <div>
-                      <p className="text-xs uppercase tracking-[0.16em] text-slate-500">已沉淀输出</p>
-                      <p className="mt-1 text-sm text-slate-400">
-                        当前项目下，与{stepLabel(3)}所选场景关联的历史输出记录
-                      </p>
-                    </div>
-                    {selectedProjectId ? (
-                      <Link
-                        href={`/projects/${selectedProjectId}`}
-                        className="shrink-0 text-xs text-blue-400 transition hover:text-blue-300"
-                      >
-                        项目详情 · 输出沉淀 →
-                      </Link>
-                    ) : null}
-                  </div>
-                  {!selectedProjectId || !selectedScenarioId ? (
-                    <p className="mt-3 text-sm text-slate-500">请先完成项目与场景选择。</p>
-                  ) : scenarioOutputsLoading ? (
-                    <p className="mt-3 text-sm text-slate-400">加载产出列表…</p>
-                  ) : scenarioLinkedOutputs.length === 0 ? (
-                    <p className="mt-3 text-sm text-slate-500">
-                      该场景下尚无已沉淀输出；编排执行成功并写入后将显示在此。
-                    </p>
-                  ) : (
-                    <ul className="mt-3 max-h-56 space-y-2 overflow-y-auto pr-1">
-                      {scenarioLinkedOutputs.map((o) => {
-                        const preview = (o.summary || o.content_preview || "").replace(/\s+/g, " ").trim();
-                        const previewShort =
-                          preview.length > 140 ? `${preview.slice(0, 140)}…` : preview || "（无摘要）";
-                        return (
-                          <li
-                            key={o.id}
-                            className="rounded-xl border border-slate-800/90 bg-slate-900/50 px-3 py-2.5"
-                          >
-                            <div className="flex flex-wrap items-center justify-between gap-2">
-                              <span className="text-sm font-medium text-white">
-                                {o.title?.trim() || "未命名输出"}
-                              </span>
-                              <span className="text-xs text-slate-500">{formatOutputTime(o.created_at)}</span>
-                            </div>
-                            <div className="mt-1 flex flex-wrap gap-2 text-xs text-slate-500">
-                              <span className="rounded border border-slate-700 px-1.5 py-0.5 text-slate-400">
-                                {outputStatusLabel(o.status)}
-                              </span>
-                              {o.template_id ? (
-                                <span className="text-slate-500">模板 {o.template_id}</span>
-                              ) : null}
-                            </div>
-                            <p className="mt-1.5 text-xs leading-relaxed text-slate-400">{previewShort}</p>
-                          </li>
-                        );
-                      })}
-                    </ul>
-                  )}
-                </div>
               </div>
 
               <button
@@ -1461,9 +1334,15 @@ function WorkshopPageInner() {
                   {genStatus === "generating" && (
                     <span className="flex items-center gap-1.5 text-sm text-blue-400">
                       <span className="h-2 w-2 rounded-full bg-blue-400 animate-pulse" />
-                      执行中
+                      {toolProgressLabel ?? "执行中"}
                     </span>
                   )}
+                  {genStatus === "done" && lastRunMeta?.execution_mode ? (
+                    <span className="text-xs text-slate-500">
+                      {lastRunMeta.execution_mode === "agent" ? "Agent" : "直连"}
+                      {lastRunMeta.tool_capture_hit ? " · 工具产出" : ""}
+                    </span>
+                  ) : null}
                   {genStatus === "done" && (
                     <span className="flex items-center gap-1.5 text-sm text-green-400">
                       <span className="h-2 w-2 rounded-full bg-green-400" />
@@ -1543,6 +1422,76 @@ function WorkshopPageInner() {
                 errorMsg={errorMsg}
                 outputEndRef={outputEndRef}
               />
+
+              <details className="group mt-4 rounded-2xl border border-slate-800 bg-slate-950/40 p-4 [&_summary::-webkit-details-marker]:hidden">
+                <summary className="cursor-pointer list-none outline-none marker:content-none">
+                  <div className="flex flex-wrap items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <h3 className="text-base font-semibold text-white">历史产出文件汇总</h3>
+                      <p className="mt-1 text-sm text-slate-400">
+                        当前项目与{stepLabel(3)}所选场景的历史输出
+                        {scenarioLinkedOutputs.length > 0 ? (
+                          <span className="text-slate-500"> · {scenarioLinkedOutputs.length} 条</span>
+                        ) : null}
+                      </p>
+                    </div>
+                    <div className="flex shrink-0 items-center gap-3">
+                      {selectedProjectId ? (
+                        <Link
+                          href={`/projects/${selectedProjectId}`}
+                          onClick={(e) => e.stopPropagation()}
+                          className="text-xs text-blue-400 transition hover:text-blue-300"
+                        >
+                          项目详情 · 输出沉淀 →
+                        </Link>
+                      ) : null}
+                      <span className="text-xs text-slate-500 transition group-open:text-slate-400">
+                        <span className="group-open:hidden">展开</span>
+                        <span className="hidden group-open:inline">收起</span>
+                      </span>
+                    </div>
+                  </div>
+                </summary>
+                {!selectedProjectId || !selectedScenarioId ? (
+                  <p className="mt-3 text-sm text-slate-500">请先完成项目与场景选择。</p>
+                ) : scenarioOutputsLoading ? (
+                  <p className="mt-3 text-sm text-slate-400">加载产出列表…</p>
+                ) : scenarioLinkedOutputs.length === 0 ? (
+                  <p className="mt-3 text-sm text-slate-500">
+                    该场景下尚无历史产出；编排执行成功并写入后将显示在此。
+                  </p>
+                ) : (
+                  <ul className="mt-3 max-h-56 space-y-2 overflow-y-auto pr-1">
+                    {scenarioLinkedOutputs.map((o) => {
+                      const preview = (o.summary || o.content_preview || "").replace(/\s+/g, " ").trim();
+                      const previewShort =
+                        preview.length > 140 ? `${preview.slice(0, 140)}…` : preview || "（无摘要）";
+                      return (
+                        <li
+                          key={o.id}
+                          className="rounded-xl border border-slate-800/90 bg-slate-900/50 px-3 py-2.5"
+                        >
+                          <div className="flex flex-wrap items-center justify-between gap-2">
+                            <span className="text-sm font-medium text-white">
+                              {o.title?.trim() || "未命名输出"}
+                            </span>
+                            <span className="text-xs text-slate-500">{formatOutputTime(o.created_at)}</span>
+                          </div>
+                          <div className="mt-1 flex flex-wrap gap-2 text-xs text-slate-500">
+                            <span className="rounded border border-slate-700 px-1.5 py-0.5 text-slate-400">
+                              {outputStatusLabel(o.status)}
+                            </span>
+                            {o.template_id ? (
+                              <span className="text-slate-500">模板 {o.template_id}</span>
+                            ) : null}
+                          </div>
+                          <p className="mt-1.5 text-xs leading-relaxed text-slate-400">{previewShort}</p>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                )}
+              </details>
             </section>
             </div>
           </aside>
@@ -1573,16 +1522,6 @@ function ScenarioSkillsBlock({
 }) {
   return (
     <div className="space-y-3">
-      <div className="rounded-2xl border border-slate-800 bg-slate-950/50 px-4 py-3 text-sm">
-        <span className="text-slate-500">绑定模式</span>
-        <p className="mt-1 text-slate-200">
-          {skillsPolicyModeLabel(parsed.mode)}
-          {parsed.allowAgentFreeChoice
-            ? " · 允许智能体在合同范围内自选"
-            : " · 须按下列绑定执行"}
-        </p>
-      </div>
-
       {bindings.length > 0 ? (
         <div className="grid gap-2 sm:grid-cols-2">
           {bindings.map((binding) => {
