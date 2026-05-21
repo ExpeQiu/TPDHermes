@@ -6,8 +6,11 @@ Hermes-agent connects to this server to access Knowledge Base, Workshop, Project
 and mounted external MCP capabilities such as Tavily Remote MCP.
 """
 
+from typing import Any
+
 from fastmcp import FastMCP
 
+from backend.mcp_tool_utils import coerce_tool_context
 from backend.mcp_tavily import mount_tavily_remote_mcp
 
 # Initialize FastMCP server
@@ -137,13 +140,13 @@ def workshop_get_skill_info(skill_name: str) -> dict:
 )
 async def workshop_generate(
     skill_name: str,
-    context: dict,
+    context: dict[str, Any] | str | None = None,
     tphermes_run_id: str | None = None,
 ) -> dict:
     """Execute a Skill."""
     from backend.tools.workshop_tools import workshop_generate as _gen
 
-    ctx = dict(context or {})
+    ctx = coerce_tool_context(context)
     if tphermes_run_id:
         ctx["tphermes_run_id"] = tphermes_run_id
     return await _gen(skill_name, ctx)
@@ -162,13 +165,13 @@ async def workshop_generate_from_kb(
     collection_name: str,
     limit: int = 3,
     project_id: str | None = None,
-    context: dict | None = None,
+    context: dict[str, Any] | str | None = None,
     tphermes_run_id: str | None = None,
 ) -> dict:
     """Execute a Skill with KB-augmented context."""
     from backend.tools.workshop_tools import workshop_generate_from_kb as _gen_from_kb
 
-    ctx = dict(context or {})
+    ctx = coerce_tool_context(context)
     if tphermes_run_id:
         ctx["tphermes_run_id"] = tphermes_run_id
     return await _gen_from_kb(

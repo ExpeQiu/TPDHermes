@@ -9,6 +9,7 @@ from typing import Any, Optional
 from backend.services.kb_proxy import kb_proxy_service
 from backend.services.kb_cache import kb_cache_service
 from backend.services.kb_write import add_kb_harvest_entry
+from backend.services.kb_collection_resolve import merge_kb_warnings, resolve_collection_name
 from backend.services.project_kb import is_project_kb_collection
 
 
@@ -55,13 +56,21 @@ async def kb_query(
             "warning": Optional[str]
         }
     """
+    resolved_name, resolve_warning = await resolve_collection_name(
+        collection_name,
+        project_id=project_id,
+    )
     result = await kb_proxy_service.query_collection(
-        collection_name=collection_name,
+        collection_name=resolved_name,
         query_text=query,
         n_results=limit,
         project_id=project_id,
     )
-    return _filter_project_kb_results(result, collection_name)
+    filtered = _filter_project_kb_results(result, resolved_name)
+    filtered["warning"] = merge_kb_warnings(filtered.get("warning"), resolve_warning)
+    if resolved_name != str(collection_name or "").strip():
+        filtered["collection_resolved"] = resolved_name
+    return filtered
 
 
 async def kb_list_collections(project_id: Optional[str] = None) -> dict:

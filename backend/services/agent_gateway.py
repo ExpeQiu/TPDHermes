@@ -29,6 +29,10 @@ def _build_orchestration_guidance(payload: OrchestrationPayload) -> str:
         "用户自然语言需求在对话消息中给出；不要在未授权时编造事实。",
         "项目附件与输出沉淀已写入 orchestration.knowledge.collections 中的 project.*.kb 集合；"
         "需要引用时请调用 kb_query / kb_get_entry 按需检索，不要假设 prompt 中已包含全文。",
+        "知识库 collection_name 必须与 kb_list_collections 返回的完整名称完全一致"
+        "（如 public.structured_tech.geely_tech），禁止省略 public./project. 前缀或使用短名 geely_tech。",
+        "kb_query 的 query 优先使用文档中的产品代号、技术缩写、英文标识（如 GEA、Flyme），"
+        "避免仅用营销口号或空泛词；若 count 为 0，应换用更具体的检索词重试，勿直接编造正文。",
     ]
 
     if knowledge_collections:
@@ -50,9 +54,11 @@ def _build_orchestration_guidance(payload: OrchestrationPayload) -> str:
         lines.extend(
             [
                 "当用户要求生成模板化内容、结构化文稿、发言稿、一页纸、短视频脚本，或明确要求结合知识库生成内容时，优先调用 `workshop_generate_from_kb`。",
-                "调用要求：`collection_name` 必须从 orchestration.knowledge.collections 中选择，`skill_name` 必须从 orchestration.skills.preferred/allowed 中选择。",
-                "为 `query` 提炼一个简洁检索词；仅在 `context` 中传入需要覆盖或补充的字段，例如 tone、cta、style、required_sections。",
-                "如果 `workshop_generate_from_kb` 失败，再降级为 `kb_query` + `workshop_generate`，不要跳过工具直接编造最终内容。",
+                "调用要求：`collection_name` 必须从 orchestration.knowledge.collections 中原样复制（先 kb_list_collections 核对），"
+                "`skill_name` 必须从 orchestration.skills.preferred/allowed 中选择。",
+                "为 `query` 提炼文档实词检索词（产品/技术标识优先，勿单独使用口号）；"
+                "`context` 须为 JSON 对象（勿传字符串）；仅传入需覆盖字段如 tone、cta、style。",
+                "若 kb 返回 count=0，先换 query 或核对 collection_name 是否完整，再降级 kb_query + workshop_generate。",
             ]
         )
 
@@ -64,9 +70,6 @@ def _build_orchestration_guidance(payload: OrchestrationPayload) -> str:
             + ", ".join(payload.output.required_sections)
             + "。"
         )
-
-    return " ".join(lines)
-
 
     return " ".join(lines)
 
@@ -90,9 +93,11 @@ def _build_workshop_agent_guidance(
         lines.append("context 还须包含 task_input 对象（与编排合同一致）。")
     if knowledge_collections:
         lines.append(
-            "优先调用 workshop_generate_from_kb：collection_name 从 "
+            "优先调用 workshop_generate_from_kb：collection_name 必须从 "
             + ", ".join(knowledge_collections)
-            + f" 中选择；project_id={project_id or 'null'}。"
+            + " 中原样复制（完整名，含 public./project. 前缀）；"
+            f"project_id={project_id or 'null'}；"
+            "query 用文档实词；context 为对象勿传字符串。"
         )
     else:
         lines.append(

@@ -212,6 +212,20 @@ class KBProxyService:
                                 "distance": dist,
                             }
                         )
+                    if not results and (query_text or "").strip():
+                        contains_fallback = await self._query_collection_via_get(
+                            collection_ref=collection_ref,
+                            collection_name=collection_name,
+                            query_text=query_text,
+                            n_results=n_results,
+                        )
+                        if contains_fallback and contains_fallback.get("count", 0) > 0:
+                            contains_fallback["warning"] = (
+                                (contains_fallback.get("warning") or "")
+                                + (" | " if contains_fallback.get("warning") else "")
+                                + "semantic_empty_used_contains_fallback"
+                            ).strip(" | ")
+                            return contains_fallback
                     return {
                         "results": results,
                         "source": "chroma",

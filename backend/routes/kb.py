@@ -9,6 +9,7 @@ from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
 from backend.services.kb_proxy import kb_proxy_service
+from backend.tools.kb_tools import kb_query as kb_query_tool
 from backend.services.kb_browse import DEFAULT_TREE_ENTRY_LIMIT, build_browse_tree
 from backend.services.kb_cache import kb_cache_service
 from backend.services.kg_service import kb_kg_link_service
@@ -207,13 +208,18 @@ async def kb_query(data: KBQueriesRequest):
 
     优先透传到外部 ChromaDB；外部服务不可用时自动降级到本地缓存。
     """
-    result = await kb_proxy_service.query_collection(
+    result = await kb_query_tool(
+        query=data.query_text,
         collection_name=data.collection_name,
-        query_text=data.query_text,
-        n_results=data.n_results,
+        limit=data.n_results,
         project_id=data.project_id,
     )
-    return KBQueriesResponse(**result)
+    return KBQueriesResponse(
+        results=result.get("results", []),
+        source=result.get("source", "cache"),
+        count=int(result.get("count", 0)),
+        warning=result.get("warning"),
+    )
 
 
 @router.get("/collections/{name}/query", response_model=KBQueriesResponse)
@@ -228,13 +234,18 @@ async def kb_query_by_collection(
 
     支持路径参数指定 collection 名。
     """
-    result = await kb_proxy_service.query_collection(
+    result = await kb_query_tool(
+        query=q,
         collection_name=name,
-        query_text=q,
-        n_results=n,
+        limit=n,
         project_id=project_id,
     )
-    return KBQueriesResponse(**result)
+    return KBQueriesResponse(
+        results=result.get("results", []),
+        source=result.get("source", "cache"),
+        count=int(result.get("count", 0)),
+        warning=result.get("warning"),
+    )
 
 
 @router.get("/collections", response_model=CollectionListResponse)
