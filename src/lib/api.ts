@@ -14,10 +14,33 @@ export function apiV1(path: string): string {
   return `${getPublicApiBase()}${API_V1}${p}`;
 }
 
+export function formatApiError(status: number, body: string): string {
+  try {
+    const parsed = JSON.parse(body) as { detail?: unknown };
+    const detail = parsed.detail;
+    if (typeof detail === "string" && detail.trim()) return detail;
+    if (Array.isArray(detail)) {
+      return detail
+        .map((item) => {
+          if (typeof item === "string") return item;
+          if (item && typeof item === "object" && "msg" in item) {
+            return String((item as { msg?: unknown }).msg ?? "");
+          }
+          return JSON.stringify(item);
+        })
+        .filter(Boolean)
+        .join("；");
+    }
+  } catch {
+    /* 非 JSON 响应 */
+  }
+  return `HTTP ${status}: ${body.slice(0, 200)}`;
+}
+
 export async function readJson<T>(res: Response): Promise<T> {
   if (!res.ok) {
     const t = await res.text();
-    throw new Error(`HTTP ${res.status}: ${t.slice(0, 200)}`);
+    throw new Error(formatApiError(res.status, t));
   }
   return res.json() as Promise<T>;
 }

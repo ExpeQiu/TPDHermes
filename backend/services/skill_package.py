@@ -281,6 +281,46 @@ def _skill_class_name(skill_name: str) -> str:
     return f"{base}Skill"
 
 
+def parse_skill_md_frontmatter(root: Path) -> Dict[str, str]:
+    """读取 SKILL.md YAML frontmatter 中的 name / description。"""
+    skill_md = root / "SKILL.md"
+    if not skill_md.is_file():
+        return {}
+    try:
+        raw = skill_md.read_text(encoding="utf-8")
+    except OSError:
+        return {}
+    match = re.match(r"^---\n([\s\S]*?)\n---", raw)
+    if not match:
+        return {}
+    out: Dict[str, str] = {}
+    for line in match.group(1).splitlines():
+        m = re.match(r"^(name|description):\s*(.+)\s*$", line.strip())
+        if m:
+            out[m.group(1)] = m.group(2).strip().strip("\"'")
+    return out
+
+
+def ensure_python_stub(root: Path, skill_name: str) -> bool:
+    """
+    SKILL.md 包上传时自动生成 __init__.py 桩，便于 SkillLoader 注册。
+    已存在 __init__.py 时不覆盖。返回是否新建。
+    """
+    target = root / "__init__.py"
+    if target.is_file():
+        return False
+    if not (root / "SKILL.md").is_file():
+        raise SkillPackageError("技能包缺少 __init__.py 与 SKILL.md")
+    class_name = _skill_class_name(skill_name)
+    body = STANDARD_INIT_PY_TEMPLATE.format(
+        skill_name=skill_name,
+        class_name=class_name,
+    )
+    target.write_text(body, encoding="utf-8")
+    logger.info("skill_package ensure_python_stub name=%s", skill_name)
+    return True
+
+
 def _create_standard_dir(root: Path, dirname: str, hint: str) -> Dict[str, Any]:
     dir_path = root / dirname
     if dir_path.is_dir():

@@ -41,6 +41,91 @@ def _cleanup_uploaded_skill(name: str) -> None:
     loader._cache.pop(name, None)
 
 
+def test_skills_upload_skill_md_zip():
+    """SKILL.md 标准布局 ZIP 可上传（自动生成 __init__.py 桩）。"""
+    name = f"mdskill_{uuid.uuid4().hex[:8]}"
+    skill_md = f"""---
+name: {name}
+description: markdown skill upload test
+---
+
+# Test Skill
+"""
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr(f"{name}/SKILL.md", skill_md)
+        zf.writestr(f"{name}/scripts/run.py", "print('ok')\n")
+    zip_bytes = buf.getvalue()
+    _cleanup_uploaded_skill(name)
+
+    try:
+        with TestClient(app) as client:
+            uploaded = client.post(
+                "/api/v1/skills/upload",
+                files={"file": (f"{name}.zip", zip_bytes, "application/zip")},
+            )
+            assert uploaded.status_code == 200, uploaded.text
+            body = uploaded.json()
+            assert body["name"] == name
+            assert "markdown skill upload test" in body["description"]
+
+            loader = get_loader()
+            assert (loader.skills_root / name / "__init__.py").is_file()
+            assert (loader.skills_root / name / "SKILL.md").is_file()
+
+            deleted = client.delete(f"/api/v1/skills/{name}")
+            assert deleted.status_code == 200, deleted.text
+    finally:
+        _cleanup_uploaded_skill(name)
+
+
+def test_skills_upload_replace_existing_upload_skill():
+    """已安装的上传技能可被同用户或其他用户重新上传覆盖。"""
+    name = f"mdskill_{uuid.uuid4().hex[:8]}"
+    skill_md_v1 = f"""---
+name: {name}
+description: version one
+---
+
+# Test Skill v1
+"""
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr(f"{name}/SKILL.md", skill_md_v1)
+    zip_v1 = buf.getvalue()
+    _cleanup_uploaded_skill(name)
+
+    try:
+        with TestClient(app) as client:
+            first = client.post(
+                "/api/v1/skills/upload",
+                files={"file": (f"{name}.zip", zip_v1, "application/zip")},
+                headers={"X-User-ID": "user_a"},
+            )
+            assert first.status_code == 200, first.text
+            assert first.json()["owner_id"] == "user_a"
+
+            skill_md_v2 = skill_md_v1.replace("version one", "version two")
+            buf2 = io.BytesIO()
+            with zipfile.ZipFile(buf2, "w", zipfile.ZIP_DEFLATED) as zf:
+                zf.writestr(f"{name}/SKILL.md", skill_md_v2)
+            second = client.post(
+                "/api/v1/skills/upload",
+                files={"file": (f"{name}.zip", buf2.getvalue(), "application/zip")},
+                headers={"X-User-ID": "user_b"},
+            )
+            assert second.status_code == 200, second.text
+            body = second.json()
+            assert body["owner_id"] == "user_b"
+            assert "version two" in body["description"]
+            assert body["version"] == "1.0.1"
+
+            deleted = client.delete(f"/api/v1/skills/{name}")
+            assert deleted.status_code == 200, deleted.text
+    finally:
+        _cleanup_uploaded_skill(name)
+
+
 def test_skills_upload_update_toggle_config_and_cleanup():
     name = f"zipskill_{uuid.uuid4().hex[:8]}"
     zip_bytes = _build_skill_zip(name)

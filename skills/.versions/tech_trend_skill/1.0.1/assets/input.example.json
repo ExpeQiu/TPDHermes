@@ -1,0 +1,80 @@
+{
+  "title": "技术推广-车型项目管理流程-技术发展/品牌营销洞察报告",
+  "project_name": "智能电动汽车技术品牌年度洞察",
+  "industry": "智能电动汽车",
+  "technology_domain": "智能座舱、辅助驾驶、补能生态",
+  "report_period": "2026年度",
+  "industry_analysis": {
+    "macro_environment": "新能源汽车竞争从单点参数进入体系化体验竞争，政策、基础设施与用户认知共同推动智能化技术普及。",
+    "technology_change_direction": "从硬件堆叠转向软件定义、数据闭环、场景智能与生态协同。",
+    "lifecycle_stage": "快速扩散期"
+  },
+  "market_analysis": {
+    "customer_needs": "用户希望技术减少驾驶负担、提升出行安全，并在座舱、泊车、补能等高频场景中形成可感知价值。",
+    "pain_points": "技术概念复杂、体验差异难理解、功能信任建立周期长。",
+    "unmet_needs": "缺少面向真实场景的证据表达，以及把技术优势转译为用户收益的统一叙事。"
+  },
+  "competitors": [
+    {
+      "name": "竞品A",
+      "strengths": "智能驾驶声量高，用户案例传播充分。",
+      "weaknesses": "品牌叙事偏技术炫技，与家庭/日常场景连接不足。",
+      "differentiation": "用安全、舒适、可靠的场景证据建立可信智能形象。"
+    }
+  ],
+  "self_analysis": {
+    "resource_capability": "具备整车工程、用户场景、渠道触达和品牌传播协同资源。",
+    "technology_shortcomings": "部分技术优势仍停留在研发语言，用户感知表达不足。",
+    "advantage_accumulation": "在安全、可靠、舒适体验和多车型落地方面具备沉淀。"
+  },
+  "strategic_opportunities": [
+    "将技术卖点转译为用户高频场景价值。",
+    "建立技术IP化表达体系，提升持续传播效率。"
+  ],
+  "opportunity_priorities": [
+    "优先级1：场景化技术证据表达。",
+    "优先级2：技术IP统一命名与内容货架。"
+  ],
+  "marketing_insight": {
+    "industry_technology_features": [
+      "智能化体验",
+      "安全可靠",
+      "能源效率"
+    ],
+    "communication_directions": [
+      "从参数领先转向场景价值",
+      "从功能发布转向连续体验证明"
+    ],
+    "narrative_logic": "以用户问题为起点，以技术方案为证据，以场景收益为结论。",
+    "main_channels": [
+      "品牌官网",
+      "社交媒体",
+      "门店体验",
+      "发布会"
+    ],
+    "communication_cadence": "季度主题牵引，月度内容验证，重点节点集中引爆。"
+  },
+  "technology_outlook": {
+    "trend_judgement": "智能化技术将从功能竞争进入体验可信度和生态协同竞争。",
+    "time_window": "未来12-24个月是建立技术品牌认知和用户信任的关键窗口。"
+  },
+  "strategy_recommendations": {
+    "marketing_positioning": "可信、可感知、可持续进化的智能出行技术伙伴",
+    "promotion_dimensions": [
+      "安全维度",
+      "效率维度",
+      "舒适维度",
+      "生态维度"
+    ],
+    "channel_strategy": [
+      "线上用短视频和图文拆解场景价值",
+      "线下用门店试驾和技术展具强化体验",
+      "公关用行业案例和第三方背书建立可信度"
+    ],
+    "execution_cadence": [
+      "第一阶段：完成技术卖点梳理与用户语言转译。",
+      "第二阶段：发布技术IP内容货架并联动重点车型。",
+      "第三阶段：通过体验活动、用户案例和数据复盘持续迭代。"
+    ]
+  }
+}

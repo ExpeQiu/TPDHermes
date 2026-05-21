@@ -26,6 +26,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.models.skill import Skill
 from backend.services.skill_loader import SkillLoader, SkillNotFoundError, SkillLoadError
+from backend.services.skill_package import ensure_python_stub, parse_skill_md_frontmatter
 from backend.services.skill_version import SkillVersionService, bump_version
 from backend.services.user_identity import is_global_admin_user
 from backend.services.resource_visibility import skill_dict_visibility_fields
@@ -38,6 +39,20 @@ def assert_valid_skill_directory_name(name: str) -> None:
         raise ValueError("技能目录名须以字母开头，且仅含字母、数字、下划线")
 
 
+def upload_replace_allowed(existing: Optional[Dict[str, Any]], owner_id: str) -> bool:
+    """上传 ZIP 是否允许覆盖已有技能（公共/市场技能不可覆盖）。"""
+    if existing is None:
+        return True
+    src = (existing.get("source") or "").strip()
+    oid = (existing.get("owner_id") or "").strip()
+    uid = (owner_id or "").strip()
+    if src == "upload":
+        return True
+    if oid and uid and oid == uid:
+        return True
+    return False
+
+
 def _iter_extract_root_children(extract_root: Path) -> List[Path]:
     return [p for p in extract_root.iterdir() if p.name != "__MACOSX"]
 
@@ -45,17 +60,19 @@ def _iter_extract_root_children(extract_root: Path) -> List[Path]:
 def resolve_zip_package_root(extract_root: Path) -> Tuple[Path, Optional[str]]:
     """
     解析解压目录中的技能包根目录。
-    返回 (含 __init__.py 的目录, 推断的技能名)；若根目录即包且需调用方指定名称则第二项为 None。
+    返回 (技能包根目录, 推断的技能名)；若根目录即包且需调用方指定名称则第二项为 None。
+    支持 Python 包（__init__.py）或标准 SKILL.md 布局。
     """
     children = _iter_extract_root_children(extract_root)
     if len(children) == 1 and children[0].is_dir():
         pack = children[0]
-        if (pack / "__init__.py").is_file():
+        if (pack / "__init__.py").is_file() or (pack / "SKILL.md").is_file():
             return pack, pack.name
-    if (extract_root / "__init__.py").is_file():
+    if (extract_root / "__init__.py").is_file() or (extract_root / "SKILL.md").is_file():
         return extract_root, None
     raise ValueError(
-        "ZIP 须为：单一顶层文件夹且内含 __init__.py；或在 ZIP 根目录直接放置 __init__.py（此时请在表单中填写技能目录名）"
+        "ZIP 须为：单一顶层文件夹且内含 __init__.py 或 SKILL.md；"
+        "或在 ZIP 根目录直接放置 __init__.py / SKILL.md（此时请在表单中填写技能目录名）"
     )
 
 
@@ -124,16 +141,30 @@ class SkillLifecycleService:
         """
         package_root = package_root.resolve()
         if not (package_root / "__init__.py").is_file():
-            raise ValueError("技能包缺少 __init__.py")
+            if (package_root / "SKILL.md").is_file():
+                ensure_python_stub(package_root, skill_name)
+                logger.info("skill_upload stub __init__.py name=%s", skill_name)
+            else:
+                raise ValueError("技能包缺少 __init__.py 或 SKILL.md")
         assert_valid_skill_directory_name(skill_name)
 
         existing = await self.get_skill(skill_name)
-        if existing:
-            raise ValueError(f"Skill '{skill_name}' is already installed")
-
         dest = self.loader.skills_root / skill_name
-        if dest.exists():
-            raise ValueError(f"技能目录已存在，无法覆盖：{skill_name}")
+        replacing = existing is not None or dest.exists()
+        if replacing:
+            if existing and not upload_replace_allowed(existing, owner_id):
+                raise ValueError(
+                    f"技能「{skill_name}」已存在（公共/市场技能），无法通过 ZIP 覆盖，请先卸载或使用其他目录名"
+                )
+            return await self._replace_uploaded_package(
+                package_root,
+                skill_name,
+                description=description,
+                config=config,
+                source=source,
+                owner_id=owner_id,
+                existing=existing,
+            )
 
         logger.info("skill_upload copy start name=%s from=%s", skill_name, package_root)
         try:
@@ -160,6 +191,87 @@ class SkillLifecycleService:
                 del self.loader._cache[skill_name]
             raise
 
+    async def _replace_uploaded_package(
+        self,
+        package_root: Path,
+        skill_name: str,
+        description: str = "",
+        config: Optional[Dict[str, Any]] = None,
+        source: str = "upload",
+        owner_id: str = "",
+        existing: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """覆盖已有上传技能或仅磁盘残留目录，并归属当前用户。"""
+        dest = self.loader.skills_root / skill_name
+        backup: Optional[Path] = None
+        logger.info(
+            "skill_upload replace start name=%s owner=%s had_db=%s",
+            skill_name,
+            (owner_id or "")[:24],
+            existing is not None,
+        )
+        try:
+            if dest.exists():
+                backup = dest.with_name(f".{skill_name}.upload_bak")
+                if backup.exists():
+                    shutil.rmtree(backup, ignore_errors=True)
+                dest.rename(backup)
+            shutil.copytree(package_root, dest)
+            if skill_name in self.loader._cache:
+                del self.loader._cache[skill_name]
+            try:
+                self.loader.load(skill_name)
+            except SkillLoadError as e:
+                raise ValueError(f"技能 '{skill_name}' 无法被加载：{e}") from e
+
+            db_skill = await self._get_db_skill(skill_name)
+            if db_skill:
+                version = bump_version(db_skill.version)
+                self.version_service.snapshot(skill_name, version, "Re-upload from ZIP")
+                history = json.loads(db_skill.version_history or "[]")
+                history.append({
+                    "version": version,
+                    "changelog": "Re-upload from ZIP",
+                    "installed_at": datetime.now().isoformat(),
+                })
+                if description.strip():
+                    db_skill.description = description
+                if config is not None:
+                    db_skill.config = json.dumps(config, ensure_ascii=False)
+                db_skill.version = version
+                db_skill.source = source
+                db_skill.owner_id = (owner_id or "").strip()
+                db_skill.enabled = 1
+                db_skill.version_history = json.dumps(history, ensure_ascii=False)
+                db_skill.updated_at = datetime.now().isoformat()
+                await self.db.commit()
+                await self.db.refresh(db_skill)
+                if backup and backup.exists():
+                    shutil.rmtree(backup, ignore_errors=True)
+                logger.info("skill_upload replaced name=%s version=%s", skill_name, version)
+                return self._skill_to_dict(db_skill)
+
+            out = await self.install(
+                name=skill_name,
+                description=description,
+                config=config,
+                source=source,
+                owner_id=owner_id,
+            )
+            if backup and backup.exists():
+                shutil.rmtree(backup, ignore_errors=True)
+            logger.info("skill_upload replaced name=%s (new db record)", skill_name)
+            return out
+        except Exception:
+            logger.warning("skill_upload replace rollback name=%s", skill_name)
+            if dest.exists():
+                shutil.rmtree(dest, ignore_errors=True)
+            if backup and backup.exists():
+                backup.rename(dest)
+            if skill_name in self.loader._cache:
+                del self.loader._cache[skill_name]
+            raise
+
     async def install_from_zip_bytes(
         self,
         data: bytes,
@@ -179,6 +291,7 @@ class SkillLifecycleService:
             with zipfile.ZipFile(zip_path) as zf:
                 safe_extract_zip(zf, extract_root)
             pack_root, inferred = resolve_zip_package_root(extract_root)
+            frontmatter = parse_skill_md_frontmatter(pack_root)
             if inferred:
                 if trimmed and trimmed != inferred:
                     raise ValueError(
@@ -187,13 +300,27 @@ class SkillLifecycleService:
                 skill_name = inferred
             else:
                 if not trimmed:
-                    raise ValueError("ZIP 根目录为技能包时，请在表单中填写技能目录名（name）")
-                assert_valid_skill_directory_name(trimmed)
-                skill_name = trimmed
+                    fm_name = (frontmatter.get("name") or "").strip()
+                    if fm_name:
+                        assert_valid_skill_directory_name(fm_name)
+                        skill_name = fm_name
+                    else:
+                        raise ValueError("ZIP 根目录为技能包时，请在表单中填写技能目录名（name）")
+                else:
+                    assert_valid_skill_directory_name(trimmed)
+                    skill_name = trimmed
+            fm_name = (frontmatter.get("name") or "").strip()
+            if fm_name and fm_name != skill_name:
+                raise ValueError(
+                    f"SKILL.md frontmatter 中 name 为「{fm_name}」，与技能目录名「{skill_name}」不一致"
+                )
+            desc = description
+            if not desc.strip():
+                desc = (frontmatter.get("description") or "").strip()
             return await self.install_from_uploaded_package(
                 pack_root,
                 skill_name,
-                description=description,
+                description=desc,
                 config=config,
                 source="upload",
                 owner_id=owner_id,

@@ -220,7 +220,8 @@ async def upload_skill_package(
     effective_uid: str = Depends(get_effective_user_id),
 ):
     """
-    上传 ZIP 安装技能：须含可加载的 Python 包（__init__.py），结构见 SkillLifecycleService.install_from_zip_bytes。
+    上传 ZIP 安装技能：须含 __init__.py（Python 包）或 SKILL.md（标准 Agent 技能包），
+    结构见 SkillLifecycleService.install_from_zip_bytes。
     """
     if not file.filename or not file.filename.lower().endswith(".zip"):
         raise HTTPException(status_code=400, detail="请上传 .zip 文件")
