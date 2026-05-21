@@ -325,11 +325,11 @@ export default function SkillMarketPage() {
   const topRated = skills.length > 0 ? Math.max(...skills.map((s) => s.rating)) : 0;
 
   return (
-    <main className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 p-4 text-white sm:p-6 md:p-8">
+    <main className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-slate-100 p-4 text-slate-900 sm:p-6 md:p-8 dark:from-slate-950 dark:via-slate-900 dark:to-slate-950 dark:text-white">
       <div className={CONTENT_MAX_CLASS}>
         <div className="mb-8">
           <div className="mb-3 flex items-center gap-3">
-            <Link href="/skills" className="text-sm text-slate-400 transition hover:text-white">
+            <Link href="/skills" className="text-sm text-slate-400 transition hover:text-slate-900 dark:hover:text-white">
               ← 返回技能策略
             </Link>
           </div>
@@ -345,7 +345,7 @@ export default function SkillMarketPage() {
             <div className="flex flex-wrap gap-2">
               <Link
                 href="/skills"
-                className="rounded-xl border border-slate-700 bg-slate-900/70 px-4 py-2.5 text-sm font-medium text-slate-200 transition hover:border-slate-600 hover:bg-slate-900"
+                className="rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-100 dark:bg-slate-900/70 px-4 py-2.5 text-sm font-medium text-slate-800 dark:text-slate-200 transition hover:border-slate-300 dark:border-slate-600 hover:bg-slate-200 dark:hover:bg-slate-900"
               >
                 查看技能策略
               </Link>
@@ -378,11 +378,11 @@ export default function SkillMarketPage() {
           </div>
         )}
 
-        <section className="rounded-3xl border border-slate-800 bg-slate-900/50 p-6">
+        <section className="rounded-3xl border border-slate-200 dark:border-slate-800 bg-white/80 dark:bg-slate-900/50 p-6">
           <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
             <div>
               <p className="text-xs uppercase tracking-[0.2em] text-slate-500">发现技能</p>
-              <h2 className="mt-2 text-xl font-semibold text-white">浏览与安装</h2>
+              <h2 className="mt-2 text-xl font-semibold text-slate-900 dark:text-white">浏览与安装</h2>
             </div>
           </div>
 
@@ -394,13 +394,13 @@ export default function SkillMarketPage() {
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 placeholder="搜索技能名称、描述或标签…"
-                className="w-full rounded-lg border border-slate-700 bg-slate-800/80 py-2.5 pl-9 pr-4 text-sm text-white placeholder-slate-500 transition focus:border-blue-500 focus:outline-none"
+                className="w-full rounded-lg border border-slate-300 dark:border-slate-700 bg-slate-200/80 dark:bg-slate-800/80 py-2.5 pl-9 pr-4 text-sm text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder-slate-500 transition focus:border-blue-500 focus:outline-none"
               />
             </div>
             <select
               value={sortBy}
               onChange={(e) => setSortBy(e.target.value as typeof sortBy)}
-              className="min-w-36 cursor-pointer appearance-none rounded-lg border border-slate-700 bg-slate-800/80 px-3 py-2.5 text-sm text-white transition focus:border-blue-500 focus:outline-none"
+              className="min-w-36 cursor-pointer appearance-none rounded-lg border border-slate-300 dark:border-slate-700 bg-slate-200/80 dark:bg-slate-800/80 px-3 py-2.5 text-sm text-slate-900 dark:text-white transition focus:border-blue-500 focus:outline-none"
             >
               <option value="installs">🔥 最多安装</option>
               <option value="rating">⭐ 最高评分</option>
@@ -416,7 +416,7 @@ export default function SkillMarketPage() {
                 className={`whitespace-nowrap rounded-full px-3 py-1.5 text-xs font-medium transition sm:text-sm ${
                   activeCategory === cat.id
                     ? "bg-blue-600 text-white"
-                    : "border border-slate-700 bg-slate-800/80 text-slate-400 hover:border-slate-600 hover:text-white"
+                    : "border border-slate-300 dark:border-slate-700 bg-slate-200/80 dark:bg-slate-800/80 text-slate-400 hover:border-slate-300 dark:border-slate-600 hover:text-slate-900 dark:hover:text-white"
                 }`}
               >
                 <span>{cat.icon}</span>
@@ -429,10 +429,10 @@ export default function SkillMarketPage() {
             {loading && (
               <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
                 {[...Array(6)].map((_, i) => (
-                  <div key={i} className="animate-pulse rounded-xl border border-slate-700 bg-slate-800/60 p-5">
-                    <div className="mb-3 h-4 w-3/4 rounded bg-slate-700" />
-                    <div className="mb-2 h-3 w-full rounded bg-slate-700" />
-                    <div className="h-3 w-2/3 rounded bg-slate-700" />
+                  <div key={i} className="animate-pulse rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-200/60 dark:bg-slate-800/60 p-5">
+                    <div className="mb-3 h-4 w-3/4 rounded bg-slate-300 dark:bg-slate-700" />
+                    <div className="mb-2 h-3 w-full rounded bg-slate-300 dark:bg-slate-700" />
+                    <div className="h-3 w-2/3 rounded bg-slate-300 dark:bg-slate-700" />
                   </div>
                 ))}
               </div>
@@ -454,7 +454,7 @@ export default function SkillMarketPage() {
                   return (
                     <div
                       key={skill.id}
-                      className="group flex flex-col rounded-xl border border-slate-700 bg-slate-800/60 p-4 transition hover:border-slate-600 hover:bg-slate-800/80 sm:p-5"
+                      className="group flex flex-col rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-200/60 dark:bg-slate-800/60 p-4 transition hover:border-slate-300 dark:border-slate-600 hover:bg-slate-200/80 dark:bg-slate-800/80 sm:p-5"
                     >
                       <div className="mb-3 flex items-start justify-between">
                         <div className="flex items-center gap-3">
@@ -466,7 +466,7 @@ export default function SkillMarketPage() {
                             </p>
                           </div>
                         </div>
-                        <span className="shrink-0 rounded-full bg-slate-700/80 px-2 py-0.5 text-xs text-slate-400">
+                        <span className="shrink-0 rounded-full bg-slate-300 dark:bg-slate-700/80 px-2 py-0.5 text-xs text-slate-400">
                           {skill.category}
                         </span>
                       </div>
@@ -479,14 +479,14 @@ export default function SkillMarketPage() {
                         {skill.tags.slice(0, 3).map((tag) => (
                           <span
                             key={tag}
-                            className="rounded bg-slate-700/60 px-2 py-0.5 text-xs text-slate-400"
+                            className="rounded bg-slate-300/60 dark:bg-slate-700/60 px-2 py-0.5 text-xs text-slate-400"
                           >
                             {tag}
                           </span>
                         ))}
                       </div>
 
-                      <div className="mb-3 flex items-center justify-between border-b border-slate-700/60 pb-3">
+                      <div className="mb-3 flex items-center justify-between border-b border-slate-300 dark:border-slate-700/60 pb-3">
                         <div className="flex items-center gap-3">
                           <StarRating rating={skill.rating} />
                           <span className="text-xs text-slate-400">{skill.rating.toFixed(1)}</span>
@@ -506,7 +506,7 @@ export default function SkillMarketPage() {
                             isInstalled
                               ? "cursor-default bg-green-600/20 text-green-400"
                               : isInstalling
-                                ? "cursor-not-allowed bg-slate-700 text-slate-400"
+                                ? "cursor-not-allowed bg-slate-300 dark:bg-slate-700 text-slate-400"
                                 : "bg-blue-600 text-white hover:bg-blue-500"
                           }`}
                         >
@@ -541,9 +541,9 @@ function MetricCard({
   hint: string;
 }) {
   return (
-    <div className="rounded-2xl border border-slate-800 bg-slate-900/50 p-4">
+    <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white/80 dark:bg-slate-900/50 p-4">
       <p className="text-xs uppercase tracking-[0.16em] text-slate-500">{label}</p>
-      <p className="mt-3 text-2xl font-semibold text-white">{value}</p>
+      <p className="mt-3 text-2xl font-semibold text-slate-900 dark:text-white">{value}</p>
       <p className="mt-1 text-xs text-slate-500">{hint}</p>
     </div>
   );

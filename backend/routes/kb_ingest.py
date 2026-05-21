@@ -13,7 +13,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Optional
 
-from fastapi import APIRouter, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 
@@ -29,6 +29,12 @@ from backend.services.kb_ingest_core import (
     sha256_file,
 )
 from backend.services.kb_proxy import CHROMA_HOST
+from backend.services.kb_entry_manage import (
+    create_kb_manual_entry,
+    delete_kb_collection,
+    delete_kb_entry,
+    update_kb_entry,
+)
 from backend.services.kb_write import add_kb_harvest_entry
 
 router = APIRouter(prefix="/kb", tags=["knowledge_base"])
@@ -62,6 +68,31 @@ class KbPublishRequest(BaseModel):
     sync_cache: bool = True
     chroma_url: Optional[str] = None
 
+
+class KbEntryUpdateRequest(BaseModel):
+    collection: str
+    project_id: str = "__all__"
+    sync_cache: bool = True
+    chroma_url: Optional[str] = None
+    title: Optional[str] = None
+    content: Optional[str] = None
+    metadata: Optional[dict[str, Any]] = None
+    strict_domain: bool = False
+
+
+class KbManualEntryRequest(BaseModel):
+    collection: str
+    project_id: str = "__all__"
+    title: str
+    content: str
+    domain: str = "structured_tech"
+    folder_path: str = "02-知识库/手动录入"
+    published: bool = True
+    doc_id: Optional[str] = None
+    source_type: str = "manual"
+    sync_cache: bool = True
+    chroma_url: Optional[str] = None
+    strict_domain: bool = False
 
 class KbHarvestEntryRequest(BaseModel):
     """对话收割原子写入"""
@@ -280,6 +311,92 @@ async def kb_ingest_job_get(job_id: str):
         "updated_at": row.updated_at,
         "created_by": row.created_by,
     }
+
+
+@router.post("/entries/manual")
+async def kb_create_manual_entry(body: KbManualEntryRequest):
+    """手动新建知识条目（Markdown 正文，写入 Chroma 并同步缓存）。"""
+    result = await create_kb_manual_entry(
+        collection=body.collection,
+        title=body.title,
+        content=body.content,
+        domain=body.domain,
+        folder_path=body.folder_path,
+        published=body.published,
+        doc_id=body.doc_id,
+        source_type=body.source_type,
+        project_id=body.project_id,
+        chroma_url=body.chroma_url,
+        strict_domain=body.strict_domain,
+        sync_cache=body.sync_cache,
+    )
+    if not result.get("ok"):
+        raise HTTPException(status_code=400, detail=result.get("message") or "create_failed")
+    return result
+
+
+@router.patch("/entries/{doc_id}")
+async def kb_update_entry(doc_id: str, body: KbEntryUpdateRequest):
+    """更新条目 metadata；提供 content 时重新切分并 upsert。"""
+    result = await update_kb_entry(
+        collection=body.collection,
+        doc_id=doc_id,
+        project_id=body.project_id,
+        chroma_url=body.chroma_url,
+        title=body.title,
+        content=body.content,
+        metadata=body.metadata,
+        strict_domain=body.strict_domain,
+        sync_cache=body.sync_cache,
+    )
+    if not result.get("ok"):
+        code = 404 if result.get("message") == "entry_not_found" else 400
+        raise HTTPException(status_code=code, detail=result.get("message") or "update_failed")
+    return result
+
+
+@router.delete("/collections/{collection_name}/entries")
+async def kb_delete_collection_entries(
+    collection_name: str,
+    confirm: bool = Query(False, description="必须为 true 才执行删除"),
+    project_id: str = Query("__all__"),
+    sync_cache: bool = Query(True),
+    chroma_url: Optional[str] = Query(None),
+):
+    """删除指定 collection 在 Chroma 中的全部 chunk，并清理 kb_cache。"""
+    if not confirm:
+        raise HTTPException(status_code=400, detail="confirm=true required")
+    result = await delete_kb_collection(
+        collection=collection_name,
+        project_id=project_id,
+        chroma_url=chroma_url,
+        sync_cache=sync_cache,
+    )
+    if not result.get("ok"):
+        raise HTTPException(status_code=400, detail=result.get("message") or "delete_failed")
+    return result
+
+
+@router.delete("/entries/{doc_id}")
+async def kb_delete_entry(
+    doc_id: str,
+    collection: str = Query(..., description="条目所在 collection"),
+    project_id: str = Query("__all__"),
+    sync_cache: bool = Query(True),
+    chroma_url: Optional[str] = Query(None),
+):
+    """按 doc_id 删除 Chroma 中全部 chunk，并清理本地 kb_cache。"""
+    result = await delete_kb_entry(
+        collection=collection,
+        doc_id=doc_id,
+        project_id=project_id,
+        chroma_url=chroma_url,
+        sync_cache=sync_cache,
+    )
+    if not result.get("ok"):
+        code = 404 if result.get("message") == "entry_not_found" else 400
+        raise HTTPException(status_code=code, detail=result.get("message") or "delete_failed")
+    return result
 
 
 @router.post("/publish")

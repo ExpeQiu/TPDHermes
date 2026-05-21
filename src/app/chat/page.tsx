@@ -260,7 +260,7 @@ export default function ChatPage() {
   return (
     <Suspense
       fallback={
-        <div className="flex h-screen items-center justify-center bg-slate-900 text-slate-400 text-sm">
+        <div className="flex h-screen items-center justify-center bg-slate-100 text-sm text-slate-500 dark:bg-slate-900 dark:text-slate-400">
           加载对话…
         </div>
       }
@@ -280,9 +280,9 @@ function BoundaryMetric({
   hint?: string;
 }) {
   return (
-    <div className="rounded-2xl border border-slate-700 bg-slate-950/60 p-3">
+    <div className="rounded-2xl border border-slate-300 dark:border-slate-700 bg-slate-100/80 dark:bg-slate-950/60 p-3">
       <p className="text-[11px] uppercase tracking-[0.16em] text-slate-500">{label}</p>
-      <p className="mt-2 text-sm font-medium leading-relaxed text-white">{value}</p>
+      <p className="mt-2 text-sm font-medium leading-relaxed text-slate-900 dark:text-white">{value}</p>
       {hint ? <p className="mt-1 text-xs leading-relaxed text-slate-500">{hint}</p> : null}
     </div>
   );
@@ -354,13 +354,13 @@ function ChatTaskBoundaryPanel({
   const innerCols = narrow ? "grid gap-4 grid-cols-1" : "grid gap-4 md:grid-cols-2";
 
   return (
-    <div className="rounded-3xl border border-slate-700 bg-slate-900/50 p-4 md:p-5">
+    <div className="rounded-3xl border border-slate-300 dark:border-slate-700 bg-white/80 dark:bg-slate-900/50 p-4 md:p-5">
       <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
         <div>
           <p className="text-xs uppercase tracking-[0.2em] text-slate-500">创作边界</p>
         </div>
-        <details className="rounded-2xl border border-slate-700 bg-slate-950/60 px-3 py-2 text-sm">
-          <summary className="cursor-pointer list-none text-slate-300 [&::-webkit-details-marker]:hidden">
+        <details className="rounded-2xl border border-slate-300 dark:border-slate-700 bg-slate-100/80 dark:bg-slate-950/60 px-3 py-2 text-sm">
+          <summary className="cursor-pointer list-none text-slate-700 dark:text-slate-300 [&::-webkit-details-marker]:hidden">
             <span className="text-xs text-slate-500">链路 · </span>
             {chatTransportLabel({
               useOrchestration,
@@ -391,7 +391,7 @@ function ChatTaskBoundaryPanel({
       )}
 
       <div className={`mt-4 ${settingsGrid}`}>
-        <div className="rounded-2xl border border-slate-700 bg-slate-950/60 p-4">
+        <div className="rounded-2xl border border-slate-300 dark:border-slate-700 bg-slate-100/80 dark:bg-slate-950/60 p-4">
           <p className="text-xs uppercase tracking-[0.16em] text-slate-500">项目上下文（推荐）</p>
           <div className="mt-4">
             <div className="mb-2 flex items-center justify-between">
@@ -405,7 +405,7 @@ function ChatTaskBoundaryPanel({
             <select
               value={selectedProjectId}
               onChange={(e) => setSelectedProjectId(e.target.value)}
-              className="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white"
+              className="w-full rounded-lg border border-slate-300 dark:border-slate-700 bg-slate-200 dark:bg-slate-800 px-3 py-2 text-sm text-slate-900 dark:text-white"
             >
               <option value="">不注入项目</option>
               {projects.map((project) => (
@@ -421,7 +421,7 @@ function ChatTaskBoundaryPanel({
         </div>
 
         <details
-          className="rounded-2xl border border-slate-700 bg-slate-950/60 p-4"
+          className="rounded-2xl border border-slate-300 dark:border-slate-700 bg-slate-100/80 dark:bg-slate-950/60 p-4"
           {...(showAdvancedOrchestration ? { open: true } : {})}
         >
           <summary className="cursor-pointer list-none text-xs font-medium uppercase tracking-[0.16em] text-slate-500 [&::-webkit-details-marker]:hidden">
@@ -455,7 +455,7 @@ function ChatTaskBoundaryPanel({
                 <select
                   value={selectedCollection}
                   onChange={(e) => setSelectedCollection(e.target.value)}
-                  className="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white"
+                  className="w-full rounded-lg border border-slate-300 dark:border-slate-700 bg-slate-200 dark:bg-slate-800 px-3 py-2 text-sm text-slate-900 dark:text-white"
                   disabled={!includeKnowledgeContext}
                 >
                   {collections.length === 0 && <option value="">暂无集合</option>}
@@ -487,13 +487,13 @@ function ChatTaskBoundaryPanel({
         </details>
       </div>
 
-      <div className="mt-4 rounded-2xl border border-slate-700 bg-slate-950/60 p-4">
+      <div className="mt-4 rounded-2xl border border-slate-300 dark:border-slate-700 bg-slate-100/80 dark:bg-slate-950/60 p-4">
         <div className="flex items-center justify-between gap-3">
           <p className="text-xs uppercase tracking-[0.16em] text-slate-500">边界摘要</p>
         </div>
         <div className="mt-3 flex flex-wrap gap-2 text-xs">
           {contextSummary.length === 0 ? (
-            <span className="rounded-full border border-slate-700 bg-slate-800 px-2 py-1 text-slate-500">
+            <span className="rounded-full border border-slate-300 dark:border-slate-700 bg-slate-200 dark:bg-slate-800 px-2 py-1 text-slate-500">
               当前未启用额外上下文
             </span>
           ) : (
@@ -510,8 +510,8 @@ function ChatTaskBoundaryPanel({
       </div>
 
       {useOrchestration && orchestrationPreview ? (
-        <details className="mt-4 rounded-2xl border border-slate-700 bg-slate-900/60 p-4">
-          <summary className="cursor-pointer text-sm font-medium text-white">编排预览（结构化数据）</summary>
+        <details className="mt-4 rounded-2xl border border-slate-300 dark:border-slate-700 bg-white/90 dark:bg-slate-900/60 p-4">
+          <summary className="cursor-pointer text-sm font-medium text-slate-900 dark:text-white">编排预览（结构化数据）</summary>
           <pre className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap break-words font-sans text-xs leading-relaxed text-slate-400">
             {JSON.stringify(orchestrationPreview.snapshot, null, 2)}
           </pre>
@@ -1508,14 +1508,14 @@ function ChatPageInner() {
   };
 
   return (
-    <div className="flex h-screen bg-slate-900 text-white overflow-hidden">
+    <div className="flex h-screen overflow-hidden bg-slate-100 text-slate-900 dark:bg-slate-900 dark:text-white">
       <aside
         className={`${
           sidebarOpen ? "w-64" : "w-0"
-        } flex-shrink-0 bg-slate-800 border-r border-slate-700 flex flex-col transition-all overflow-hidden`}
+        } flex-shrink-0 bg-slate-200 dark:bg-slate-800 border-r border-slate-300 dark:border-slate-700 flex flex-col transition-all overflow-hidden`}
       >
-        <div className="p-4 border-b border-slate-700 flex items-center justify-between">
-          <span className="text-sm font-semibold text-slate-300">历史对话</span>
+        <div className="p-4 border-b border-slate-300 dark:border-slate-700 flex items-center justify-between">
+          <span className="text-sm font-semibold text-slate-700 dark:text-slate-300">历史对话</span>
           <button
             onClick={createSession}
             className="text-xs bg-blue-600 hover:bg-blue-500 text-white px-3 py-1.5 rounded-lg transition"
@@ -1529,10 +1529,10 @@ function ChatPageInner() {
             <div
               key={session.id}
               onClick={() => selectSession(session.id)}
-              className={`group flex items-center gap-2 px-4 py-3 cursor-pointer border-b border-slate-700/50 transition ${
+              className={`group flex items-center gap-2 px-4 py-3 cursor-pointer border-b border-slate-300 dark:border-slate-700/50 transition ${
                 session.id === activeId
-                  ? "bg-slate-700/70 text-white"
-                  : "text-slate-400 hover:bg-slate-700/40 hover:text-white"
+                  ? "bg-slate-300/70 dark:bg-slate-700/70 text-slate-900 dark:text-white"
+                  : "text-slate-400 hover:bg-slate-300/40 dark:bg-slate-700/40 hover:text-slate-900 dark:hover:text-white"
               }`}
             >
               <span className="text-xs">💬</span>
@@ -1553,17 +1553,17 @@ function ChatPageInner() {
 
       <div className="flex min-h-0 min-w-0 flex-1 flex-col lg:flex-row">
         <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-          <header className="flex items-center gap-3 px-4 py-3 border-b border-slate-700 bg-slate-800/80">
+          <header className="flex items-center gap-3 px-4 py-3 border-b border-slate-300 dark:border-slate-700 bg-slate-200/80 dark:bg-slate-800/80">
             <button
               onClick={() => setSidebarOpen((v) => !v)}
-              className="text-slate-400 hover:text-white transition text-sm"
+              className="text-slate-400 hover:text-slate-900 dark:hover:text-white transition text-sm"
             >
               {sidebarOpen ? "◀" : "▶"}
             </button>
-            <Link href="/" className="text-slate-400 hover:text-white transition text-sm">
+            <Link href="/" className="text-slate-400 hover:text-slate-900 dark:hover:text-white transition text-sm">
               ← 首页
             </Link>
-            <h1 className="text-sm font-semibold text-white flex-1 truncate">
+            <h1 className="text-sm font-semibold text-slate-900 dark:text-white flex-1 truncate">
               {titleFromSession(activeSession)}
             </h1>
             {(preparingContext || streaming) && (
@@ -1574,13 +1574,13 @@ function ChatPageInner() {
             )}
           </header>
 
-          <details className="group border-b border-slate-700 bg-slate-800/40 lg:hidden">
-            <summary className="flex cursor-pointer list-none items-center justify-between px-4 py-2.5 text-sm font-medium text-slate-200 [&::-webkit-details-marker]:hidden">
+          <details className="group border-b border-slate-300 dark:border-slate-700 bg-slate-200/40 dark:bg-slate-800/40 lg:hidden">
+            <summary className="flex cursor-pointer list-none items-center justify-between px-4 py-2.5 text-sm font-medium text-slate-800 dark:text-slate-200 [&::-webkit-details-marker]:hidden">
               <span>创作边界</span>
               <span className="text-xs text-slate-500 group-open:hidden">展开</span>
               <span className="hidden text-xs text-slate-500 group-open:inline">收起</span>
             </summary>
-            <div className="max-h-[42vh] overflow-y-auto border-t border-slate-700/50 px-3 pb-3 pt-2">
+            <div className="max-h-[42vh] overflow-y-auto border-t border-slate-300 dark:border-slate-700/50 px-3 pb-3 pt-2">
               <ChatTaskBoundaryPanel model={boundaryModel} narrow={false} />
             </div>
           </details>
@@ -1617,15 +1617,15 @@ function ChatPageInner() {
 
               <div className="max-w-[78%]">
                 {visibleContextBlocks.length > 0 && (
-                  <div className="mb-2 rounded-xl border border-slate-700 bg-slate-900/60 px-3 py-3 text-xs text-slate-300">
-                    <div className="font-medium text-slate-200 mb-2">
+                  <div className="mb-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white/90 dark:bg-slate-900/60 px-3 py-3 text-xs text-slate-700 dark:text-slate-300">
+                    <div className="font-medium text-slate-800 dark:text-slate-200 mb-2">
                       {`已注入 ${visibleContextBlocks.length} 项显式上下文`}
                     </div>
                     <div className="space-y-2">
                       {visibleContextBlocks.map((block) => (
-                        <div key={`${msg.id}-${block.tool}`} className="rounded-lg bg-slate-800/70 p-2">
+                        <div key={`${msg.id}-${block.tool}`} className="rounded-lg bg-slate-200/70 dark:bg-slate-800/70 p-2">
                           <div className="text-blue-300">{block.tool}</div>
-                          <div className="text-slate-200 mt-1">{block.title}</div>
+                          <div className="text-slate-800 dark:text-slate-200 mt-1">{block.title}</div>
                           <pre className="whitespace-pre-wrap text-slate-400 mt-1 font-sans">
                             {truncate(block.content, 260)}
                           </pre>
@@ -1647,7 +1647,7 @@ function ChatPageInner() {
                       ? "whitespace-pre-wrap text-sm leading-relaxed bg-blue-600 text-white rounded-tr-sm"
                       : msg.role === "system"
                         ? "bg-orange-900/50 text-orange-100 rounded-tl-sm border border-orange-700/30"
-                        : "bg-slate-700 text-slate-200 rounded-tl-sm"
+                        : "bg-slate-300 dark:bg-slate-700 text-slate-800 dark:text-slate-200 rounded-tl-sm"
                   }`}
                 >
                   {msg.role === "user" ? (
@@ -1695,7 +1695,7 @@ function ChatPageInner() {
           <div ref={messagesEndRef} />
         </div>
 
-        <div className="border-t border-slate-700 bg-slate-800/60 py-4">
+        <div className="border-t border-slate-300 dark:border-slate-700 bg-slate-200/60 dark:bg-slate-800/60 py-4">
           {useOrchestration && orchestrationSink && selectedProjectId && includeProjectContext ? (
             <div
               className={`${CONTENT_MAX_CLASS} mb-3 px-4 text-xs leading-relaxed sm:px-6 md:px-8 ${
@@ -1705,7 +1705,7 @@ function ChatPageInner() {
               {orchestrationSink.output_id ? (
                 <span>
                   本轮对话已将助手正文尝试沉淀为项目输出（id{" "}
-                  <span className="font-mono text-slate-300">{orchestrationSink.output_id}</span>
+                  <span className="font-mono text-slate-700 dark:text-slate-300">{orchestrationSink.output_id}</span>
                   ）。
                   <Link
                     href={`/projects/${selectedProjectId}`}
@@ -1730,7 +1730,7 @@ function ChatPageInner() {
               placeholder="输入问题，回车发送，Shift+回车换行…"
               rows={1}
               disabled={streaming || preparingContext}
-              className="flex-1 bg-slate-700/60 border border-slate-600 rounded-xl px-4 py-3 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-blue-500 resize-none transition disabled:opacity-50"
+              className="flex-1 bg-slate-300/60 dark:bg-slate-700/60 border border-slate-300 dark:border-slate-600 rounded-xl px-4 py-3 text-sm text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:border-blue-500 resize-none transition disabled:opacity-50"
               style={{ maxHeight: "9rem", minHeight: "3rem", height: "auto" } as React.CSSProperties}
               onInput={(e) => {
                 const el = e.currentTarget;
@@ -1743,7 +1743,7 @@ function ChatPageInner() {
               disabled={streaming || preparingContext || !input.trim()}
               className={`flex-shrink-0 px-5 py-3 rounded-xl font-medium text-sm transition ${
                 streaming || preparingContext || !input.trim()
-                  ? "bg-slate-700 text-slate-500 cursor-not-allowed"
+                  ? "bg-slate-300 dark:bg-slate-700 text-slate-500 cursor-not-allowed"
                   : "bg-blue-600 hover:bg-blue-500 text-white"
               }`}
             >
@@ -1755,7 +1755,7 @@ function ChatPageInner() {
                   if (abortRef.current) abortRef.current.abort();
                   setStreaming(false);
                 }}
-                className="flex-shrink-0 px-4 py-3 rounded-xl text-sm text-slate-300 border border-slate-600 hover:bg-slate-700 transition"
+                className="flex-shrink-0 px-4 py-3 rounded-xl text-sm text-slate-700 dark:text-slate-300 border border-slate-300 dark:border-slate-600 hover:bg-slate-300 dark:bg-slate-700 transition"
               >
                 停止
               </button>
@@ -1767,8 +1767,8 @@ function ChatPageInner() {
         </div>
         </div>
 
-        <aside className="hidden min-h-0 w-[min(22rem,32vw)] max-w-sm shrink-0 flex-col border-l border-slate-700 bg-slate-800/40 lg:flex">
-          <div className="shrink-0 border-b border-slate-700/80 px-3 py-2 text-xs font-medium uppercase tracking-[0.16em] text-slate-500">
+        <aside className="hidden min-h-0 w-[min(22rem,32vw)] max-w-sm shrink-0 flex-col border-l border-slate-300 dark:border-slate-700 bg-slate-200/40 dark:bg-slate-800/40 lg:flex">
+          <div className="shrink-0 border-b border-slate-300 dark:border-slate-700/80 px-3 py-2 text-xs font-medium uppercase tracking-[0.16em] text-slate-500">
             创作边界
           </div>
           <div className="min-h-0 flex-1 overflow-y-auto p-3">

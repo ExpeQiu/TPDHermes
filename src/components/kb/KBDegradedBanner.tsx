@@ -1,7 +1,8 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useEffect, useState } from "react";
 import { apiGet } from "@/lib/api";
+import { accentOrange, accentOrangeSoft } from "@/lib/theme-text";
 
 const STORAGE_KEY = "kb_degraded_banner_dismissed";
 
@@ -68,15 +69,15 @@ export default function KBDegradedBanner() {
   }
 
   return (
-    <div className="w-full bg-orange-600/20 border border-orange-500/50 rounded-lg p-4 flex items-start justify-between gap-4 mb-4">
+    <div className="mb-4 flex w-full items-start justify-between gap-4 rounded-lg border border-orange-300 bg-orange-50 p-4 dark:border-orange-500/50 dark:bg-orange-600/20">
       <div className="flex items-start gap-3">
-        <span className="text-orange-400 text-xl mt-0.5">⚠️</span>
+        <span className={`${accentOrange} mt-0.5 text-xl`}>⚠️</span>
         <div>
-          <p className="text-orange-300 font-medium text-sm">
+          <p className={`${accentOrange} text-sm font-medium`}>
             知识库当前为只读缓存模式，部分内容可能不是最新
           </p>
           {health.message && (
-            <p className="text-orange-400/70 text-xs mt-1">
+            <p className={`${accentOrangeSoft} mt-1 text-xs opacity-80`}>
               {health.message}
             </p>
           )}
@@ -85,7 +86,7 @@ export default function KBDegradedBanner() {
 
       <button
         onClick={handleDismiss}
-        className="text-orange-400 hover:text-orange-300 text-lg leading-none transition"
+        className={`${accentOrange} text-lg leading-none transition hover:opacity-80`}
         aria-label="关闭提示"
       >
         ×

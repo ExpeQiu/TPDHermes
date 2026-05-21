@@ -50,10 +50,10 @@ function ToastItem({ id, type, message }: ToastProps) {
       `}
     >
       <span className="text-xl flex-shrink-0">{icons[type]}</span>
-      <p className="text-sm text-white flex-1">{message}</p>
+      <p className="text-sm text-slate-900 dark:text-white flex-1">{message}</p>
       <button
         onClick={() => removeToast(id)}
-        className="text-white/60 hover:text-white transition-colors text-lg leading-none flex-shrink-0"
+        className="text-white/60 hover:text-slate-900 dark:hover:text-white transition-colors text-lg leading-none flex-shrink-0"
         aria-label="关闭"
       >
         ×

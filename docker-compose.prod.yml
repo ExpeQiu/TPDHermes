@@ -53,10 +53,12 @@ services:
       - CHROMA_HOST=${CHROMA_HOST:-http://your-chroma-host:8001}
       - FEISHU_APP_ID=${FEISHU_APP_ID:-}
       - FEISHU_APP_SECRET=${FEISHU_APP_SECRET:-}
+      - HERMES_AGENT_CONFIG_PATH=${HERMES_AGENT_CONFIG_PATH:-/app/hermes-agent/config.yaml}
     expose:
       - "8000"
     volumes:
       - tphermes-data:/app/data
+      - ./deploy/hermes-agent/config.yaml:/app/hermes-agent/config.yaml
     networks:
       - tphermes-net
 

@@ -16,7 +16,7 @@ const proseComponents: Components = {
       {...props}
       src={src}
       alt={alt ?? ""}
-      className="max-w-full rounded-md border border-slate-700/80 my-2"
+      className="max-w-full rounded-md border border-slate-300 dark:border-slate-700/80 my-2"
       loading="lazy"
       decoding="async"
     />
@@ -47,7 +47,7 @@ export function KbMarkdown({
             {...props}
             src={resolved}
             alt={alt ?? ""}
-            className="max-w-full rounded-md border border-slate-700/80 my-2"
+            className="max-w-full rounded-md border border-slate-300 dark:border-slate-700/80 my-2"
             loading="lazy"
             decoding="async"
           />

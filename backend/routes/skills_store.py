@@ -16,6 +16,7 @@ Skills Store API - 技能商店
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Depends, Query, File, UploadFile, Form
 from pydantic import BaseModel
@@ -27,6 +28,14 @@ from backend.db import get_db
 from backend.services.skill_lifecycle import SkillLifecycleService
 from backend.services.skill_version import SkillVersionService
 from backend.services.skill_loader import SkillNotFoundError, get_loader
+from backend.services.skill_package import (
+    SkillPackageError,
+    create_layout_item,
+    init_skill_md,
+    list_package,
+    read_package_file,
+    write_package_file,
+)
 from backend.services.resource_visibility import skill_installation_visible
 from backend.services.user_identity import get_effective_user_id
 
@@ -57,6 +66,15 @@ class SkillConfigRequest(BaseModel):
 
 class SkillEnableRequest(BaseModel):
     enabled: bool
+
+
+class SkillPackageFileWriteRequest(BaseModel):
+    path: str
+    content: str
+
+
+class SkillLayoutItemRequest(BaseModel):
+    item: str
 
 
 class SkillResponse(BaseModel):
@@ -129,6 +147,26 @@ MARKETPLACE_CATALOG = [
         "rating": 4.5,
     },
 ]
+
+
+# ─── Helpers ───────────────────────────────────────────────────────────────────
+
+async def _resolve_skill_package_root(
+    name: str,
+    db: AsyncSession,
+    effective_uid: str,
+) -> tuple[dict[str, Any], Path]:
+    """返回 (skill dict, 磁盘包根目录)。"""
+    svc = SkillLifecycleService(db, get_loader())
+    skill = await svc.get_skill(name)
+    if not skill:
+        raise HTTPException(status_code=404, detail=f"Skill '{name}' not found")
+    if not skill_installation_visible(skill.get("owner_id"), effective_uid):
+        raise HTTPException(status_code=404, detail=f"Skill '{name}' not found")
+    root = get_loader().skills_root / name
+    if not root.is_dir():
+        raise HTTPException(status_code=404, detail=f"Skill package directory not found: {name}")
+    return skill, root
 
 
 # ─── Endpoints ─────────────────────────────────────────────────────────────────
@@ -285,6 +323,84 @@ async def uninstall_skill(name: str, db: AsyncSession = Depends(get_db)):
         return {"message": f"Skill '{name}' uninstalled successfully"}
     except SkillNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e))
+
+
+@router.get("/{name}/package")
+async def get_skill_package(
+    name: str,
+    db: AsyncSession = Depends(get_db),
+    effective_uid: str = Depends(get_effective_user_id),
+):
+    """列出技能包目录树与标准布局符合情况。"""
+    _, root = await _resolve_skill_package_root(name, db, effective_uid)
+    try:
+        return list_package(root, name)
+    except SkillPackageError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+
+@router.get("/{name}/package/file")
+async def get_skill_package_file(
+    name: str,
+    path: str = Query(..., description="相对技能根目录的文件路径"),
+    db: AsyncSession = Depends(get_db),
+    effective_uid: str = Depends(get_effective_user_id),
+):
+    """读取技能包内单个文件（文本）。"""
+    _, root = await _resolve_skill_package_root(name, db, effective_uid)
+    try:
+        return read_package_file(root, path)
+    except SkillPackageError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+
+@router.put("/{name}/package/file")
+async def put_skill_package_file(
+    name: str,
+    data: SkillPackageFileWriteRequest,
+    db: AsyncSession = Depends(get_db),
+    effective_uid: str = Depends(get_effective_user_id),
+):
+    """保存技能包内文本文件。"""
+    _, root = await _resolve_skill_package_root(name, db, effective_uid)
+    try:
+        return write_package_file(root, data.path, data.content)
+    except SkillPackageError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+
+@router.post("/{name}/package/init-skill-md")
+async def post_init_skill_md(
+    name: str,
+    db: AsyncSession = Depends(get_db),
+    effective_uid: str = Depends(get_effective_user_id),
+):
+    """若缺失则创建标准 SKILL.md 模板。"""
+    skill, root = await _resolve_skill_package_root(name, db, effective_uid)
+    try:
+        return init_skill_md(root, name, skill.get("description") or "")
+    except SkillPackageError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+
+@router.post("/{name}/package/layout-item")
+async def post_create_layout_item(
+    name: str,
+    data: SkillLayoutItemRequest,
+    db: AsyncSession = Depends(get_db),
+    effective_uid: str = Depends(get_effective_user_id),
+):
+    """创建标准布局中缺失的一项（文件或目录）。"""
+    skill, root = await _resolve_skill_package_root(name, db, effective_uid)
+    try:
+        return create_layout_item(
+            root,
+            name,
+            data.item,
+            skill.get("description") or "",
+        )
+    except SkillPackageError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
 
 
 @router.get("/{name}/versions")

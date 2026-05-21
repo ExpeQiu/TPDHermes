@@ -655,7 +655,7 @@ export default function ProjectDetailPage() {
   };
 
   const editInputCls =
-    "w-full rounded-lg border border-slate-600 bg-slate-900/80 px-3 py-2 text-sm text-white placeholder-slate-500 focus:border-blue-500 focus:outline-none";
+    "w-full rounded-lg border border-slate-300 bg-white/90 px-3 py-2 text-sm text-slate-900 placeholder-slate-400 focus:border-blue-500 focus:outline-none dark:border-slate-600 dark:bg-slate-900/80 dark:text-white dark:placeholder-slate-500";
 
   const totalWords = outputs.reduce((sum, o) => sum + o.word_count, 0);
   const latestOutput = outputs[0];
@@ -678,20 +678,20 @@ export default function ProjectDetailPage() {
   }, [id, quickDraft]);
 
   return (
-    <main className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 p-4 text-white sm:p-6 md:p-8">
+    <main className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-slate-100 p-4 text-slate-900 sm:p-6 md:p-8 dark:from-slate-950 dark:via-slate-900 dark:to-slate-950 dark:text-white">
       <div className={CONTENT_MAX_CLASS}>
         <Link
           href="/projects"
-          className="mb-6 inline-flex items-center text-sm text-slate-400 transition hover:text-white"
+          className="mb-6 inline-flex items-center text-sm text-slate-400 transition hover:text-slate-900 dark:hover:text-white"
         >
           ← 返回项目列表
         </Link>
 
         {loading && (
           <div className="space-y-4 animate-pulse">
-            <div className="h-8 bg-slate-700 rounded w-1/2" />
-            <div className="h-4 bg-slate-700 rounded w-full" />
-            <div className="h-32 bg-slate-700 rounded" />
+            <div className="h-8 bg-slate-300 dark:bg-slate-700 rounded w-1/2" />
+            <div className="h-4 bg-slate-300 dark:bg-slate-700 rounded w-full" />
+            <div className="h-32 bg-slate-300 dark:bg-slate-700 rounded" />
           </div>
         )}
 
@@ -712,7 +712,7 @@ export default function ProjectDetailPage() {
                 <p className="mt-2 text-sm text-slate-400">项目 ID: #{project.id}</p>
               </div>
               <span
-                className={`self-start rounded-full px-3 py-1 text-xs font-medium text-white sm:text-sm ${statusColors[project.status] ?? "bg-slate-500"}`}
+                className={`self-start rounded-full px-3 py-1 text-xs font-medium text-slate-900 dark:text-white sm:text-sm ${statusColors[project.status] ?? "bg-slate-500"}`}
               >
                 {projectStatusLabel(project.status)}
               </span>
@@ -729,7 +729,7 @@ export default function ProjectDetailPage() {
               />
             </div>
 
-            <div className="mb-6 flex gap-1 overflow-x-auto border-b border-slate-700">
+            <div className="mb-6 flex gap-1 overflow-x-auto border-b border-slate-300 dark:border-slate-700">
               {[
                 { key: "info", label: "控制台" },
                 { key: "outputs", label: "输出沉淀", badge: outputs.length },
@@ -741,8 +741,8 @@ export default function ProjectDetailPage() {
                   onClick={() => setActiveTab(tab.key as typeof activeTab)}
                   className={`flex items-center gap-1.5 px-4 py-2.5 text-sm font-medium border-b-2 transition whitespace-nowrap ${
                     activeTab === tab.key
-                      ? "border-blue-500 text-white"
-                      : "border-transparent text-slate-400 hover:text-white hover:border-slate-600"
+                      ? "border-blue-500 text-slate-900 dark:text-white"
+                      : "border-transparent text-slate-400 hover:text-slate-900 dark:hover:text-white hover:border-slate-300 dark:border-slate-600"
                   }`}
                 >
                   {tab.label}
@@ -758,40 +758,40 @@ export default function ProjectDetailPage() {
             {activeTab === "info" && (
               <div className="space-y-6">
                 <div className="grid gap-4 lg:grid-cols-[1.1fr_0.9fr]">
-                  <div className="space-y-4 rounded-3xl border border-slate-700 bg-slate-800/50 p-5 sm:p-6">
+                  <div className="space-y-4 rounded-3xl border border-slate-300 dark:border-slate-700 bg-slate-200 dark:bg-slate-800/50 p-5 sm:p-6">
                     <div className="flex items-center justify-between">
                       <div>
                         <p className="text-xs uppercase tracking-[0.2em] text-slate-500">
                           项目边界
                         </p>
-                        <h2 className="mt-2 text-xl font-semibold text-white">项目边界</h2>
+                        <h2 className="mt-2 text-xl font-semibold text-slate-900 dark:text-white">项目边界</h2>
                       </div>
                       <button
                         type="button"
                         onClick={openEditProject}
-                        className="shrink-0 rounded-full border border-slate-600 bg-slate-900/80 px-3 py-1 text-xs font-medium text-slate-200 transition hover:border-blue-500/50 hover:bg-slate-800 hover:text-white"
+                        className="shrink-0 rounded-full border border-slate-300 dark:border-slate-600 bg-slate-100 dark:bg-slate-900/80 px-3 py-1 text-xs font-medium text-slate-800 dark:text-slate-200 transition hover:border-blue-500/50 hover:bg-slate-800 hover:text-slate-900 dark:hover:text-white"
                       >
                         编辑
                       </button>
                     </div>
 
                     <InfoField label="项目背景">
-                      <p className="leading-relaxed text-slate-200">
+                      <p className="leading-relaxed text-slate-800 dark:text-slate-200">
                         {project.background || "暂无描述"}
                       </p>
                     </InfoField>
 
                     <div className="grid gap-4 sm:grid-cols-2">
                       <InfoField label="目标受众">
-                        <p className="text-slate-200">{project.audience || "未设置"}</p>
+                        <p className="text-slate-800 dark:text-slate-200">{project.audience || "未设置"}</p>
                       </InfoField>
                       <InfoField label="截止日期">
-                        <p className="text-slate-200">{project.deadline || "未设置"}</p>
+                        <p className="text-slate-800 dark:text-slate-200">{project.deadline || "未设置"}</p>
                       </InfoField>
                     </div>
 
                     <InfoField label="约束条件">
-                      <pre className="overflow-x-auto whitespace-pre-wrap rounded-2xl bg-slate-900/70 p-4 text-sm leading-relaxed text-slate-300">
+                      <pre className="overflow-x-auto whitespace-pre-wrap rounded-2xl bg-slate-100 dark:bg-slate-900/70 p-4 text-sm leading-relaxed text-slate-700 dark:text-slate-300">
                         {project.constraints == null
                           ? "暂无约束条件"
                           : typeof project.constraints === "string"
@@ -801,11 +801,11 @@ export default function ProjectDetailPage() {
                     </InfoField>
                   </div>
 
-                  <div className="rounded-3xl border border-slate-700 bg-slate-800/50 p-5 sm:p-6">
+                  <div className="rounded-3xl border border-slate-300 dark:border-slate-700 bg-slate-200 dark:bg-slate-800/50 p-5 sm:p-6">
                     <p className="text-xs uppercase tracking-[0.2em] text-slate-500">
                       快捷操作
                     </p>
-                    <h2 className="mt-2 text-xl font-semibold text-white">工作流入口</h2>
+                    <h2 className="mt-2 text-xl font-semibold text-slate-900 dark:text-white">工作流入口</h2>
                     <div className="mt-5 space-y-3">
                       <ActionLink
                         href={`/chat?project_id=${id}`}
@@ -816,19 +816,19 @@ export default function ProjectDetailPage() {
                         <button
                           type="button"
                           onClick={() => setQuickScenarioOpen((open) => !open)}
-                          className={`col-span-1 rounded-2xl border bg-slate-900/60 p-4 text-left transition hover:border-slate-600 hover:bg-slate-900 ${
+                          className={`col-span-1 rounded-2xl border bg-white/90 dark:bg-slate-900/60 p-4 text-left transition hover:border-slate-300 dark:border-slate-600 hover:bg-slate-200 dark:hover:bg-slate-900 ${
                             quickScenarioOpen
                               ? "border-blue-500/50 bg-slate-900"
-                              : "border-slate-700"
+                              : "border-slate-300 dark:border-slate-700"
                           }`}
                         >
-                          <p className="text-sm font-medium text-white">设置快捷场景</p>
+                          <p className="text-sm font-medium text-slate-900 dark:text-white">设置快捷场景</p>
                         </button>
                         <Link
                           href={workshopEntryHref}
-                          className="col-span-2 block rounded-2xl border border-slate-700 bg-slate-900/60 p-4 transition hover:border-slate-600 hover:bg-slate-900"
+                          className="col-span-2 block rounded-2xl border border-slate-300 dark:border-slate-700 bg-white/90 dark:bg-slate-900/60 p-4 transition hover:border-slate-300 dark:border-slate-600 hover:bg-slate-200 dark:hover:bg-slate-900"
                         >
-                          <p className="text-sm font-medium text-white">进入场景输出</p>
+                          <p className="text-sm font-medium text-slate-900 dark:text-white">进入场景输出</p>
                           {quickDraft.scenarioIds.length > 0 ? (
                             <p className="mt-1 text-xs text-slate-500 line-clamp-1">
                               按快捷场景：
@@ -845,18 +845,18 @@ export default function ProjectDetailPage() {
                 </div>
 
                 {quickScenarioOpen ? (
-                <div className="rounded-3xl border border-slate-700 bg-slate-800/50 p-5 sm:p-6">
+                <div className="rounded-3xl border border-slate-300 dark:border-slate-700 bg-slate-200 dark:bg-slate-800/50 p-5 sm:p-6">
                   <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                     <div>
                       <p className="text-xs uppercase tracking-[0.2em] text-slate-500">快捷场景</p>
-                      <h2 className="mt-2 text-xl font-semibold text-white">设置快捷场景</h2>
+                      <h2 className="mt-2 text-xl font-semibold text-slate-900 dark:text-white">设置快捷场景</h2>
                       <p className="mt-1 text-xs text-slate-500">
                         勾选后可在「进入场景输出」中快速选用；默认项将自动带入工坊。
                       </p>
                     </div>
                     <Link
                       href={`/create?return_project_id=${id}`}
-                      className="inline-flex shrink-0 items-center justify-center rounded-xl border border-slate-600 bg-slate-900/80 px-4 py-2 text-xs font-medium text-slate-200 transition hover:border-blue-500/40 hover:text-white"
+                      className="inline-flex shrink-0 items-center justify-center rounded-xl border border-slate-300 dark:border-slate-600 bg-slate-100 dark:bg-slate-900/80 px-4 py-2 text-xs font-medium text-slate-800 dark:text-slate-200 transition hover:border-blue-500/40 hover:text-slate-900 dark:hover:text-white"
                     >
                       新建场景
                     </Link>
@@ -877,18 +877,18 @@ export default function ProjectDetailPage() {
                             key={s.id}
                             className={`flex items-center gap-3 rounded-2xl border px-4 py-3 text-sm transition ${
                               checked
-                                ? "border-blue-500/40 bg-slate-900/80"
-                                : "border-slate-700 bg-slate-900/40"
+                                ? "border-blue-500/40 bg-slate-100 dark:bg-slate-900/80"
+                                : "border-slate-300 dark:border-slate-700 bg-slate-900/40"
                             }`}
                           >
                             <input
                               type="checkbox"
                               checked={checked}
                               onChange={() => toggleQuickScenario(s.id)}
-                              className="h-4 w-4 rounded border-slate-600 bg-slate-950 text-blue-600 focus:ring-blue-500"
+                              className="h-4 w-4 rounded border-slate-300 dark:border-slate-600 bg-slate-50 dark:bg-slate-950 text-blue-600 focus:ring-blue-500"
                             />
                             <div className="min-w-0 flex-1">
-                              <p className="font-medium text-white">{s.name}</p>
+                              <p className="font-medium text-slate-900 dark:text-white">{s.name}</p>
                               <p className="mt-0.5 text-xs text-slate-500">
                                 {s.code} · v{s.version}
                                 {s.description ? ` · ${s.description}` : ""}
@@ -901,7 +901,7 @@ export default function ProjectDetailPage() {
                               className={`shrink-0 rounded-lg px-2.5 py-1 text-xs transition ${
                                 isDefault
                                   ? "border border-blue-500/50 bg-blue-500/15 text-blue-200"
-                                  : "border border-slate-600 text-slate-400 hover:bg-slate-800 disabled:opacity-40"
+                                  : "border border-slate-300 dark:border-slate-600 text-slate-400 hover:bg-slate-200 dark:bg-slate-800 disabled:opacity-40"
                               }`}
                             >
                               {isDefault ? "默认" : "设为默认"}
@@ -934,11 +934,11 @@ export default function ProjectDetailPage() {
                 ) : null}
 
                 <div className="grid gap-4 lg:grid-cols-2">
-                  <div className="rounded-3xl border border-slate-700 bg-slate-800/50 p-5 sm:p-6">
+                  <div className="rounded-3xl border border-slate-300 dark:border-slate-700 bg-slate-200 dark:bg-slate-800/50 p-5 sm:p-6">
                     <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                       <div>
                         <p className="text-xs uppercase tracking-[0.2em] text-slate-500">项目文件</p>
-                        <h2 className="mt-2 text-xl font-semibold text-white">项目文件</h2>
+                        <h2 className="mt-2 text-xl font-semibold text-slate-900 dark:text-white">项目文件</h2>
                         <p className="mt-1 text-xs text-slate-500">
                           上传需求说明、素材等，供编排与协作时参考。
                         </p>
@@ -976,7 +976,7 @@ export default function ProjectDetailPage() {
                         {attachments.map((a) => (
                           <li
                             key={a.id}
-                            className="flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-slate-700 bg-slate-900/60 px-3 py-2.5 text-sm"
+                            className="flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-slate-300 dark:border-slate-700 bg-white/90 dark:bg-slate-900/60 px-3 py-2.5 text-sm"
                           >
                             <div className="min-w-0 flex-1">
                               <p className="truncate font-medium text-slate-100" title={a.original_filename}>
@@ -1010,7 +1010,7 @@ export default function ProjectDetailPage() {
                                 href={attachmentDownloadUrl(a.id)}
                                 target="_blank"
                                 rel="noopener noreferrer"
-                                className="rounded-lg border border-slate-600 px-2.5 py-1 text-xs text-slate-200 transition hover:bg-slate-700"
+                                className="rounded-lg border border-slate-300 dark:border-slate-600 px-2.5 py-1 text-xs text-slate-800 dark:text-slate-200 transition hover:bg-slate-300 dark:bg-slate-700"
                               >
                                 下载
                               </a>
@@ -1028,14 +1028,14 @@ export default function ProjectDetailPage() {
                     )}
                   </div>
 
-                  <div className="rounded-3xl border border-slate-700 bg-slate-800/50 p-5 sm:p-6">
+                  <div className="rounded-3xl border border-slate-300 dark:border-slate-700 bg-slate-200 dark:bg-slate-800/50 p-5 sm:p-6">
                     <p className="text-xs uppercase tracking-[0.2em] text-slate-500">最新输出</p>
-                    <h2 className="mt-2 text-xl font-semibold text-white">最近输出沉淀</h2>
+                    <h2 className="mt-2 text-xl font-semibold text-slate-900 dark:text-white">最近输出沉淀</h2>
                     {latestOutput ? (
-                      <div className="mt-4 rounded-2xl border border-slate-700 bg-slate-900/60 p-4">
+                      <div className="mt-4 rounded-2xl border border-slate-300 dark:border-slate-700 bg-white/90 dark:bg-slate-900/60 p-4">
                         <div className="flex items-start justify-between gap-3">
                           <div>
-                            <p className="text-base font-medium text-white">{latestOutput.title}</p>
+                            <p className="text-base font-medium text-slate-900 dark:text-white">{latestOutput.title}</p>
                             <p className="mt-1 text-xs text-slate-500">
                               {formatDate(latestOutput.created_at)}
                             </p>
@@ -1087,8 +1087,8 @@ export default function ProjectDetailPage() {
                       <div
                         key={output.id}
                         onClick={() => setSelectedOutput(output)}
-                        className={`cursor-pointer rounded-xl border bg-slate-800/60 p-4 transition hover:border-slate-600 ${
-                          selectedOutput?.id === output.id ? "border-blue-500" : "border-slate-700"
+                        className={`cursor-pointer rounded-xl border bg-slate-200/60 dark:bg-slate-800/60 p-4 transition hover:border-slate-300 dark:border-slate-600 ${
+                          selectedOutput?.id === output.id ? "border-blue-500" : "border-slate-300 dark:border-slate-700"
                         }`}
                       >
                         <div className="flex items-start justify-between gap-3">
@@ -1114,7 +1114,7 @@ export default function ProjectDetailPage() {
                                   .map((tag) => (
                                     <span
                                       key={tag}
-                                      className="rounded bg-slate-700/60 px-2 py-0.5 text-xs text-slate-400"
+                                      className="rounded bg-slate-300/60 dark:bg-slate-700/60 px-2 py-0.5 text-xs text-slate-400"
                                     >
                                       {tag}
                                     </span>
@@ -1135,8 +1135,8 @@ export default function ProjectDetailPage() {
                 {/* Output Detail Modal */}
                 {selectedOutput && (
                   <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-                    <div className="bg-slate-800 border border-slate-700 rounded-2xl w-full max-w-2xl max-h-[85vh] overflow-hidden flex flex-col">
-                      <div className="flex items-center justify-between p-4 sm:p-5 border-b border-slate-700">
+                    <div className="bg-slate-200 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-2xl w-full max-w-2xl max-h-[85vh] overflow-hidden flex flex-col">
+                      <div className="flex items-center justify-between p-4 sm:p-5 border-b border-slate-300 dark:border-slate-700">
                         <div className="flex items-center gap-3 min-w-0">
                           <span className="text-2xl">{selectedOutput.skill_icon}</span>
                           <div className="min-w-0">
@@ -1158,27 +1158,27 @@ export default function ProjectDetailPage() {
                             className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition ${
                               copied
                                 ? "border-green-500/50 bg-green-500/10 text-green-400"
-                                : "border-slate-600 bg-slate-700/60 text-slate-300 hover:bg-slate-700"
+                                : "border-slate-300 dark:border-slate-600 bg-slate-300/60 dark:bg-slate-700/60 text-slate-700 dark:text-slate-300 hover:bg-slate-700"
                             }`}
                           >
                             {copied ? "✓ 已复制" : "复制全文"}
                           </button>
                           <button
                             onClick={() => setSelectedOutput(null)}
-                            className="px-3 py-1.5 bg-slate-700 hover:bg-slate-600 rounded-lg text-sm transition"
+                            className="px-3 py-1.5 bg-slate-300 dark:bg-slate-700 hover:bg-slate-600 rounded-lg text-sm transition"
                           >
                             ✕
                           </button>
                         </div>
                       </div>
                       <div className="flex-1 overflow-y-auto p-4 sm:p-5">
-                        <pre className="whitespace-pre-wrap text-slate-200 text-sm leading-relaxed font-mono">
+                        <pre className="whitespace-pre-wrap text-slate-800 dark:text-slate-200 text-sm leading-relaxed font-mono">
                           {outputDetailLoading
                             ? "正在加载全文…"
                             : outputFullContent ?? selectedOutput.content}
                         </pre>
                       </div>
-                      <div className="border-t border-slate-700 p-4">
+                      <div className="border-t border-slate-300 dark:border-slate-700 p-4">
                         <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
                           {outputActionLinks ? (
                             <>
@@ -1238,7 +1238,7 @@ export default function ProjectDetailPage() {
                   runs.map((r) => (
                     <div
                       key={r.id}
-                      className="rounded-2xl border border-slate-700 bg-slate-800/60 p-5 text-sm"
+                      className="rounded-2xl border border-slate-300 dark:border-slate-700 bg-slate-200/60 dark:bg-slate-800/60 p-5 text-sm"
                     >
                       <div className="flex flex-wrap justify-between gap-2">
                         <code className="text-xs text-slate-400 break-all">{r.id}</code>
@@ -1247,7 +1247,7 @@ export default function ProjectDetailPage() {
                         </span>
                       </div>
                       <div className="mt-4 flex flex-wrap items-center gap-2 text-xs">
-                        <span className="rounded bg-slate-700 px-2 py-0.5 text-slate-200">
+                        <span className="rounded bg-slate-300 dark:bg-slate-700 px-2 py-0.5 text-slate-800 dark:text-slate-200">
                           {entrypointLabel(r.entrypoint)}
                         </span>
                         <span className="rounded bg-blue-900/40 px-2 py-0.5 text-blue-200">
@@ -1282,17 +1282,17 @@ export default function ProjectDetailPage() {
                   role="dialog"
                   aria-modal="true"
                   aria-labelledby="edit-project-title"
-                  className="flex max-h-[90vh] w-full max-w-lg flex-col overflow-hidden rounded-2xl border border-slate-700 bg-slate-800 shadow-xl"
+                  className="flex max-h-[90vh] w-full max-w-lg flex-col overflow-hidden rounded-2xl border border-slate-300 dark:border-slate-700 bg-slate-200 dark:bg-slate-800 shadow-xl"
                 >
                   <form onSubmit={submitEditProject} className="flex flex-col overflow-hidden">
-                    <div className="flex items-center justify-between border-b border-slate-700 px-4 py-3 sm:px-5">
-                      <h2 id="edit-project-title" className="text-lg font-semibold text-white">
+                    <div className="flex items-center justify-between border-b border-slate-300 dark:border-slate-700 px-4 py-3 sm:px-5">
+                      <h2 id="edit-project-title" className="text-lg font-semibold text-slate-900 dark:text-white">
                         编辑项目
                       </h2>
                       <button
                         type="button"
                         onClick={() => setEditOpen(false)}
-                        className="rounded-lg px-2 py-1 text-slate-400 transition hover:bg-slate-700 hover:text-white"
+                        className="rounded-lg px-2 py-1 text-slate-400 transition hover:bg-slate-300 dark:bg-slate-700 hover:text-slate-900 dark:hover:text-white"
                       >
                         ✕
                       </button>
@@ -1377,7 +1377,7 @@ export default function ProjectDetailPage() {
                         />
                       </div>
                     </div>
-                    <div className="flex gap-3 border-t border-slate-700 px-4 py-3 sm:px-5">
+                    <div className="flex gap-3 border-t border-slate-300 dark:border-slate-700 px-4 py-3 sm:px-5">
                       <button
                         type="submit"
                         disabled={editSaving}
@@ -1388,7 +1388,7 @@ export default function ProjectDetailPage() {
                       <button
                         type="button"
                         onClick={() => setEditOpen(false)}
-                        className="rounded-lg border border-slate-600 px-4 py-2 text-sm text-slate-300 transition hover:bg-slate-700"
+                        className="rounded-lg border border-slate-300 dark:border-slate-600 px-4 py-2 text-sm text-slate-700 dark:text-slate-300 transition hover:bg-slate-300 dark:bg-slate-700"
                       >
                         取消
                       </button>
@@ -1414,9 +1414,9 @@ function MetricCard({
   hint: string;
 }) {
   return (
-    <div className="rounded-2xl border border-slate-700 bg-slate-800/50 p-4">
+    <div className="rounded-2xl border border-slate-300 dark:border-slate-700 bg-slate-200 dark:bg-slate-800/50 p-4">
       <p className="text-xs uppercase tracking-[0.16em] text-slate-500">{label}</p>
-      <p className="mt-3 text-2xl font-semibold text-white">{value}</p>
+      <p className="mt-3 text-2xl font-semibold text-slate-900 dark:text-white">{value}</p>
       <p className="mt-1 text-xs text-slate-500">{hint}</p>
     </div>
   );
@@ -1434,9 +1434,9 @@ function ActionLink({
   return (
     <Link
       href={href}
-      className="block rounded-2xl border border-slate-700 bg-slate-900/60 p-4 transition hover:border-slate-600 hover:bg-slate-900"
+      className="block rounded-2xl border border-slate-300 dark:border-slate-700 bg-white/90 dark:bg-slate-900/60 p-4 transition hover:border-slate-300 dark:border-slate-600 hover:bg-slate-200 dark:hover:bg-slate-900"
     >
-      <p className="text-sm font-medium text-white">{title}</p>
+      <p className="text-sm font-medium text-slate-900 dark:text-white">{title}</p>
       {desc ? <p className="mt-2 text-sm leading-relaxed text-slate-400">{desc}</p> : null}
     </Link>
   );
@@ -1452,9 +1452,9 @@ function EmptyState({
   description: string;
 }) {
   return (
-    <div className="flex min-h-52 flex-col items-center justify-center rounded-2xl border border-dashed border-slate-700 bg-slate-900/30 px-6 text-center">
+    <div className="flex min-h-52 flex-col items-center justify-center rounded-2xl border border-dashed border-slate-300 dark:border-slate-700 bg-slate-100 dark:bg-slate-900/30 px-6 text-center">
       <p className="text-4xl">{icon}</p>
-      <p className="mt-3 text-sm font-medium text-slate-200">{title}</p>
+      <p className="mt-3 text-sm font-medium text-slate-800 dark:text-slate-200">{title}</p>
       <p className="mt-2 max-w-sm text-sm leading-relaxed text-slate-500">{description}</p>
     </div>
   );

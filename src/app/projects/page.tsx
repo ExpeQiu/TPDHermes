@@ -55,7 +55,7 @@ export default function ProjectsPage() {
   }, []);
 
   return (
-    <main className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 p-4 text-white sm:p-6 md:p-8">
+    <main className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-slate-100 p-4 text-slate-900 sm:p-6 md:p-8 dark:from-slate-950 dark:via-slate-900 dark:to-slate-950 dark:text-white">
       <div className={CONTENT_MAX_CLASS}>
         <header className="mb-6 lg:mb-8">
           <div className="inline-flex items-center gap-2 rounded-full border border-blue-500/30 bg-blue-500/10 px-3 py-1 text-xs font-medium text-blue-200">
@@ -80,9 +80,9 @@ export default function ProjectsPage() {
 
         <div className="grid gap-6 lg:grid-cols-[minmax(15rem,18rem)_1fr] xl:grid-cols-[minmax(17rem,20rem)_1fr] lg:items-start">
           <aside className="lg:sticky lg:top-20 lg:z-10">
-            <div className="rounded-3xl border border-slate-800 bg-slate-900/50 p-5 sm:p-6">
+            <div className="rounded-3xl border border-slate-200 dark:border-slate-800 bg-white/80 dark:bg-slate-900/50 p-5 sm:p-6">
               <p className="text-xs uppercase tracking-[0.2em] text-slate-500">快捷入口</p>
-              <h2 className="mt-2 text-lg font-semibold text-white xl:text-xl">常用操作</h2>
+              <h2 className="mt-2 text-lg font-semibold text-slate-900 dark:text-white xl:text-xl">常用操作</h2>
               <div className="mt-4 grid grid-cols-1 gap-3">
                 <ActionCard
                   href="/projects/new"
@@ -116,11 +116,11 @@ export default function ProjectsPage() {
             </div>
           </aside>
 
-          <section className="min-w-0 rounded-3xl border border-slate-800 bg-slate-900/50 p-5 sm:p-6">
+          <section className="min-w-0 rounded-3xl border border-slate-200 dark:border-slate-800 bg-white/80 dark:bg-slate-900/50 p-5 sm:p-6">
           <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
             <div>
               <p className="text-xs uppercase tracking-[0.2em] text-slate-500">项目列表</p>
-              <h2 className="mt-2 text-xl font-semibold text-white">项目列表</h2>
+              <h2 className="mt-2 text-xl font-semibold text-slate-900 dark:text-white">项目列表</h2>
             </div>
           </div>
 
@@ -152,7 +152,7 @@ export default function ProjectsPage() {
               {projects.map((project) => (
                 <div
                   key={project.id}
-                  className="relative rounded-3xl border border-slate-700 bg-slate-800/60 p-5 transition hover:border-slate-600 hover:bg-slate-800/80"
+                  className="relative rounded-3xl border border-slate-300 dark:border-slate-700 bg-slate-200/60 dark:bg-slate-800/60 p-5 transition hover:border-slate-300 dark:border-slate-600 hover:bg-slate-200/80 dark:bg-slate-800/80"
                 >
                   <Link
                     href={`/projects/${project.id}`}
@@ -163,11 +163,11 @@ export default function ProjectsPage() {
                   <div className="pointer-events-none relative z-10 flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
                     <div className="min-w-0">
                       <div className="mb-3 flex flex-wrap items-center gap-2">
-                        <span className="text-xl font-semibold text-white">
+                        <span className="text-xl font-semibold text-slate-900 dark:text-white">
                           {project.name}
                         </span>
                         <span
-                          className={`rounded-full px-2.5 py-1 text-xs font-medium text-white ${
+                          className={`rounded-full px-2.5 py-1 text-xs font-medium text-slate-900 dark:text-white ${
                             statusColors[project.status] ?? "bg-slate-500"
                           }`}
                         >
@@ -178,29 +178,29 @@ export default function ProjectsPage() {
                         {project.background || "暂无背景描述"}
                       </p>
                       <div className="mt-4 flex flex-wrap gap-2 text-xs text-slate-500">
-                        <span className="rounded-full border border-slate-700 px-2.5 py-1">
+                        <span className="rounded-full border border-slate-300 dark:border-slate-700 px-2.5 py-1">
                           截止日期：{formatDate(project.deadline)}
                         </span>
-                        <span className="rounded-full border border-slate-700 px-2.5 py-1">
+                        <span className="rounded-full border border-slate-300 dark:border-slate-700 px-2.5 py-1">
                           项目中心
                         </span>
                       </div>
                     </div>
 
                     <div className="relative z-20 grid min-w-[16rem] gap-2 sm:grid-cols-2 lg:grid-cols-1">
-                      <span className="rounded-xl border border-slate-700 bg-slate-900/70 px-4 py-2.5 text-center text-sm font-medium text-slate-200">
+                      <span className="rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-100 dark:bg-slate-900/70 px-4 py-2.5 text-center text-sm font-medium text-slate-800 dark:text-slate-200">
                         项目控制台
                       </span>
                       <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-2">
                         <Link
                           href={`/workshop?project_id=${project.id}`}
-                          className="pointer-events-auto relative z-20 rounded-xl border border-slate-700 bg-slate-900/60 px-4 py-2.5 text-center text-sm text-slate-300 transition hover:border-slate-600 hover:bg-slate-900"
+                          className="pointer-events-auto relative z-20 rounded-xl border border-slate-300 dark:border-slate-700 bg-white/90 dark:bg-slate-900/60 px-4 py-2.5 text-center text-sm text-slate-700 dark:text-slate-300 transition hover:border-slate-300 dark:border-slate-600 hover:bg-slate-200 dark:hover:bg-slate-900"
                         >
                           场景输出
                         </Link>
                         <Link
                           href={`/chat?project_id=${project.id}`}
-                          className="pointer-events-auto relative z-20 rounded-xl border border-slate-700 bg-slate-900/60 px-4 py-2.5 text-center text-sm text-slate-300 transition hover:border-slate-600 hover:bg-slate-900"
+                          className="pointer-events-auto relative z-20 rounded-xl border border-slate-300 dark:border-slate-700 bg-white/90 dark:bg-slate-900/60 px-4 py-2.5 text-center text-sm text-slate-700 dark:text-slate-300 transition hover:border-slate-300 dark:border-slate-600 hover:bg-slate-200 dark:hover:bg-slate-900"
                         >
                           对话创作
                         </Link>
@@ -267,10 +267,10 @@ function ActionCard({
   return (
     <Link
       href={href}
-      className={`group block rounded-2xl border border-slate-800 bg-slate-950/60 ${pad} transition hover:-translate-y-0.5 hover:border-slate-600 hover:bg-slate-900/80`}
+      className={`group block rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-100/80 dark:bg-slate-950/60 ${pad} transition hover:-translate-y-0.5 hover:border-slate-300 dark:border-slate-600 hover:bg-slate-200/80 dark:hover:bg-slate-900/80`}
     >
       <div className={`h-1.5 w-10 rounded-full bg-gradient-to-r ${accent}`} aria-hidden />
-      <p className={`${titleMt} text-sm font-semibold text-white sm:text-base`}>{title}</p>
+      <p className={`${titleMt} text-sm font-semibold text-slate-900 dark:text-white sm:text-base`}>{title}</p>
       {desc ? <p className="mt-2 text-sm leading-relaxed text-slate-400">{desc}</p> : null}
       <span
         className={`${linkMt} inline-flex items-center gap-1 text-xs font-medium text-blue-400 transition group-hover:text-blue-300 sm:text-sm`}

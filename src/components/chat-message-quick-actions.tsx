@@ -3,6 +3,7 @@
 import { useCallback, useState } from "react";
 import Link from "next/link";
 
+import { accentBlueSoft, accentEmeraldSoft, accentLink, accentRedSoft } from "@/lib/theme-text";
 import { apiPost } from "@/lib/api";
 import { triggerWorkshopOutputDownload } from "@/lib/workshop-output-artifact";
 
@@ -181,11 +182,11 @@ export function ChatMessageQuickActions({
       ) : null}
       {kbHint ? (
         <span
-          className={`text-[10px] ${kbState === "fail" ? "text-red-400" : "text-emerald-400/90"}`}
+          className={`text-[10px] ${kbState === "fail" ? accentRedSoft : accentEmeraldSoft}`}
         >
           {kbHint}
           {kbState === "ok" && collectionName ? (
-            <Link href="/knowledge" className="ml-1 text-blue-400 hover:text-blue-300">
+            <Link href="/knowledge" className={`ml-1 ${accentLink}`}>
               去知识库
             </Link>
           ) : null}

@@ -156,6 +156,8 @@ const SOURCE_TYPE_LABELS: Record<string, string> = {
   conversation_harvest: "对话收割",
   file: "文件",
   upload: "上传",
+  project_output: "项目输出",
+  project_attachment: "项目附件",
 };
 
 export function kbSourceTypeLabel(sourceType: string | null | undefined): string {
@@ -194,14 +196,22 @@ const KB_SCOPE_LABELS: Record<string, string> = {
   project: "项目",
 };
 
-const KB_DOMAIN_LABELS: Record<string, string> = {
+export const KB_DOMAIN_LABELS: Record<string, string> = {
   public_intel: "公开情报",
   structured_tech: "结构化技术",
   release_assets: "发布素材",
   market_research: "市场研究",
   policy_regulation: "政策法规",
   internal_methodology: "内部方法论",
+  _uncategorized: "未设置业务域",
 };
+
+/** metadata.domain → 中文业务域名 */
+export function kbDomainLabel(domain: string | undefined | null): string {
+  const k = (domain ?? "").trim();
+  if (!k) return "未分类";
+  return KB_DOMAIN_LABELS[k] ?? humanizeKbSegment(k);
+}
 
 const KB_TOPIC_LABELS: Record<string, string> = {
   speeches: "发言稿",

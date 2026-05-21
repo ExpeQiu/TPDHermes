@@ -131,7 +131,7 @@ export default function WorkshopPage() {
   return (
     <Suspense
       fallback={
-        <div className="flex min-h-screen items-center justify-center bg-slate-950 text-sm text-slate-400">
+        <div className="flex min-h-screen items-center justify-center text-sm text-slate-500 dark:bg-slate-950 dark:text-slate-400">
           加载结果工坊...
         </div>
       }
@@ -938,11 +938,11 @@ function WorkshopPageInner() {
   }, [output, selectedProjectId, selectedScenarioId, sourceOutputId]);
 
   return (
-    <main className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 p-4 text-white sm:p-6 md:p-8">
+    <main className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-slate-100 p-4 text-slate-900 sm:p-6 md:p-8 dark:from-slate-950 dark:via-slate-900 dark:to-slate-950 dark:text-white">
       <div className={CONTENT_MAX_CLASS}>
         <div className="mb-8">
           <div className="mb-3 flex items-center gap-3">
-            <Link href="/" className="text-sm text-slate-400 transition hover:text-white">
+            <Link href="/" className="text-sm text-slate-400 transition hover:text-slate-900 dark:hover:text-white">
               ← 返回首页
             </Link>
           </div>
@@ -964,7 +964,7 @@ function WorkshopPageInner() {
 
         <section className="grid gap-6 xl:grid-cols-[minmax(0,22rem)_minmax(0,1fr)]">
           <div className="w-full min-w-0 space-y-6 xl:max-w-[22rem]">
-            <div className="rounded-3xl border border-slate-800 bg-slate-900/50 p-6">
+            <div className="rounded-3xl border border-slate-200 dark:border-slate-800 bg-white/80 dark:bg-slate-900/50 p-6">
               <div className="flex items-center justify-between gap-3">
                 <div>
                   <p className="text-xs uppercase tracking-[0.2em] text-slate-500">{stepLabel(1)}</p>
@@ -989,17 +989,17 @@ function WorkshopPageInner() {
               </div>
             </div>
 
-            <div className="rounded-3xl border border-slate-800 bg-slate-900/50 p-6">
+            <div className="rounded-3xl border border-slate-200 dark:border-slate-800 bg-white/80 dark:bg-slate-900/50 p-6">
               <p className="text-xs uppercase tracking-[0.2em] text-slate-500">{stepLabel(2)}</p>
               <h2 className="mt-2 text-xl font-semibold">项目选择</h2>
 
               <div className="mt-5 space-y-4">
                 <label className="block space-y-2 text-sm">
-                  <span className="text-slate-300">关联项目（必选）</span>
+                  <span className="text-slate-700 dark:text-slate-300">关联项目（必选）</span>
                   <select
                     value={selectedProjectId}
                     onChange={(e) => setSelectedProjectId(e.target.value)}
-                    className="w-full rounded-xl border border-slate-700 bg-slate-950/70 px-4 py-3 text-sm text-white outline-none transition focus:border-blue-500"
+                    className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-100 dark:bg-slate-950/70 px-4 py-3 text-sm text-slate-900 dark:text-white outline-none transition focus:border-blue-500"
                   >
                     <option value="">选择项目…</option>
                     {projects.map((project) => (
@@ -1022,7 +1022,7 @@ function WorkshopPageInner() {
               </div>
             </div>
 
-            <div className="rounded-3xl border border-slate-800 bg-slate-900/50 p-6">
+            <div className="rounded-3xl border border-slate-200 dark:border-slate-800 bg-white/80 dark:bg-slate-900/50 p-6">
               <div className="flex items-center justify-between gap-3">
                 <div>
                   <p className="text-xs uppercase tracking-[0.2em] text-slate-500">{stepLabel(3)}</p>
@@ -1038,19 +1038,19 @@ function WorkshopPageInner() {
               </div>
 
               {!selectedProjectId ? (
-                <p className="mt-5 rounded-2xl border border-dashed border-slate-700 bg-slate-950/30 px-4 py-6 text-center text-sm text-slate-500">
+                <p className="mt-5 rounded-2xl border border-dashed border-slate-300 dark:border-slate-700 bg-slate-100/50 dark:bg-slate-950/30 px-4 py-6 text-center text-sm text-slate-500">
                   请先选择项目；将展示全部已发布场景，并默认选中项目快捷场景。
                 </p>
               ) : (
               <div className="mt-5 space-y-3 text-sm">
                 <div className="flex flex-wrap items-end justify-between gap-2">
-                  <span className="text-slate-300">已发布场景（与场景编排同源）</span>
+                  <span className="text-slate-700 dark:text-slate-300">已发布场景（与场景编排同源）</span>
                   <span className="text-xs text-slate-500">
                     服务端 {remoteScenarios.length} · 内置模板 {localTemplateCount}
                   </span>
                 </div>
                 {loadingBound ? (
-                  <p className="rounded-2xl border border-dashed border-slate-700 bg-slate-950/30 px-4 py-6 text-center text-sm text-slate-500">
+                  <p className="rounded-2xl border border-dashed border-slate-300 dark:border-slate-700 bg-slate-100/50 dark:bg-slate-950/30 px-4 py-6 text-center text-sm text-slate-500">
                     加载项目绑定…
                   </p>
                 ) : (
@@ -1070,12 +1070,12 @@ function WorkshopPageInner() {
                             active
                               ? "border-blue-500 bg-blue-500/10"
                               : executable
-                                ? "border-slate-700 bg-slate-950/60 hover:border-slate-600"
-                                : "border-slate-800 bg-slate-950/40 hover:border-slate-700"
+                                ? "border-slate-300 dark:border-slate-700 bg-slate-100/80 dark:bg-slate-950/60 hover:border-slate-300 dark:border-slate-600"
+                                : "border-slate-200 dark:border-slate-800 bg-slate-100/60 dark:bg-slate-950/40 hover:border-slate-300 dark:hover:border-slate-700"
                           }`}
                         >
                           <div className="flex items-start justify-between gap-2">
-                            <h3 className="font-semibold text-white">{scenario.title}</h3>
+                            <h3 className="font-semibold text-slate-900 dark:text-white">{scenario.title}</h3>
                             <span
                               className={`h-2 w-2 shrink-0 rounded-full ${
                                 active ? "bg-blue-400" : executable ? "bg-emerald-500/80" : "bg-slate-600"
@@ -1090,7 +1090,7 @@ function WorkshopPageInner() {
                               </span>
                             ) : null}
                             {scenario.isLocalTemplate ? (
-                              <span className="rounded-full border border-slate-600 px-2 py-0.5 text-[10px] text-slate-400">
+                              <span className="rounded-full border border-slate-300 dark:border-slate-600 px-2 py-0.5 text-[10px] text-slate-400">
                                 内置模板
                               </span>
                             ) : null}
@@ -1141,7 +1141,7 @@ function WorkshopPageInner() {
               </div>
               )}
 
-              <div className="mt-6 border-t border-slate-800 pt-5">
+              <div className="mt-6 border-t border-slate-200 dark:border-slate-800 pt-5">
                 <div className="mb-3 flex flex-wrap items-end justify-between gap-2">
                   <div>
                     <p className="text-xs uppercase tracking-[0.16em] text-slate-500">场景绑定技能</p>
@@ -1177,7 +1177,7 @@ function WorkshopPageInner() {
 
           <aside className="min-h-0 xl:sticky xl:top-6 xl:self-start">
             <div className="grid gap-6 xl:grid-cols-2">
-            <div className="min-h-0 rounded-3xl border border-slate-800 bg-slate-900/50 p-6 xl:max-h-[calc(100vh-3rem)] xl:overflow-y-auto">
+            <div className="min-h-0 rounded-3xl border border-slate-200 dark:border-slate-800 bg-white/80 dark:bg-slate-900/50 p-6 xl:max-h-[calc(100vh-3rem)] xl:overflow-y-auto">
               <p className="text-xs uppercase tracking-[0.2em] text-slate-500">{stepLabel(4)}</p>
               <h2 className="mt-2 text-xl font-semibold">任务信息</h2>
               <p className="mt-1 text-sm text-slate-500">
@@ -1192,7 +1192,7 @@ function WorkshopPageInner() {
                     value={taskTitleCustom}
                     onChange={(e) => setTaskTitleCustom(e.target.value)}
                     placeholder={derivedTaskTitle}
-                    className="w-full rounded-xl border border-slate-700 bg-slate-950/70 px-3 py-2.5 text-sm text-white outline-none transition focus:border-blue-500"
+                    className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-100 dark:bg-slate-950/70 px-3 py-2.5 text-sm text-slate-900 dark:text-white outline-none transition focus:border-blue-500"
                   />
                 </label>
                 <label className="block space-y-1.5 text-sm">
@@ -1202,7 +1202,7 @@ function WorkshopPageInner() {
                     onChange={(e) => setTaskBackground(e.target.value)}
                     rows={2}
                     placeholder="业务背景、已知事实、引用材料说明等"
-                    className="w-full resize-y rounded-xl border border-slate-700 bg-slate-950/70 px-3 py-2.5 text-sm text-white outline-none transition focus:border-blue-500"
+                    className="w-full resize-y rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-100 dark:bg-slate-950/70 px-3 py-2.5 text-sm text-slate-900 dark:text-white outline-none transition focus:border-blue-500"
                   />
                 </label>
                 <label className="block space-y-1.5 text-sm">
@@ -1212,7 +1212,7 @@ function WorkshopPageInner() {
                     onChange={(e) => setTaskObjective(e.target.value)}
                     rows={2}
                     placeholder="本轮要达成的结果、交付形态、读者等"
-                    className="w-full resize-y rounded-xl border border-slate-700 bg-slate-950/70 px-3 py-2.5 text-sm text-white outline-none transition focus:border-blue-500"
+                    className="w-full resize-y rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-100 dark:bg-slate-950/70 px-3 py-2.5 text-sm text-slate-900 dark:text-white outline-none transition focus:border-blue-500"
                   />
                 </label>
                 <label className="block space-y-1.5 text-sm">
@@ -1222,7 +1222,7 @@ function WorkshopPageInner() {
                     value={taskKeywords}
                     onChange={(e) => setTaskKeywords(e.target.value)}
                     placeholder="用逗号或中文逗号分隔"
-                    className="w-full rounded-xl border border-slate-700 bg-slate-950/70 px-3 py-2.5 text-sm text-white outline-none transition focus:border-blue-500"
+                    className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-100 dark:bg-slate-950/70 px-3 py-2.5 text-sm text-slate-900 dark:text-white outline-none transition focus:border-blue-500"
                   />
                 </label>
                 <label className="block space-y-1.5 text-sm">
@@ -1232,7 +1232,7 @@ function WorkshopPageInner() {
                     value={taskTone}
                     onChange={(e) => setTaskTone(e.target.value)}
                     placeholder="如：正式、简洁、口语化"
-                    className="w-full rounded-xl border border-slate-700 bg-slate-950/70 px-3 py-2.5 text-sm text-white outline-none transition focus:border-blue-500"
+                    className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-100 dark:bg-slate-950/70 px-3 py-2.5 text-sm text-slate-900 dark:text-white outline-none transition focus:border-blue-500"
                   />
                 </label>
                 <label className="block space-y-1.5 text-sm">
@@ -1242,7 +1242,7 @@ function WorkshopPageInner() {
                     onChange={(e) => setTaskExtra(e.target.value)}
                     rows={2}
                     placeholder="篇幅、禁忌、格式等一次性约束"
-                    className="w-full resize-y rounded-xl border border-slate-700 bg-slate-950/70 px-3 py-2.5 text-sm text-white outline-none transition focus:border-blue-500"
+                    className="w-full resize-y rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-100 dark:bg-slate-950/70 px-3 py-2.5 text-sm text-slate-900 dark:text-white outline-none transition focus:border-blue-500"
                   />
                 </label>
               </div>
@@ -1258,7 +1258,7 @@ function WorkshopPageInner() {
               ) : null}
 
               <div className="mt-5 space-y-4">
-                <details className="group rounded-2xl border border-slate-800 bg-slate-950/40 p-4 [&_summary::-webkit-details-marker]:hidden">
+                <details className="group rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-100/60 dark:bg-slate-950/40 p-4 [&_summary::-webkit-details-marker]:hidden">
                   <summary className="cursor-pointer list-none outline-none marker:content-none">
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0">
@@ -1271,7 +1271,7 @@ function WorkshopPageInner() {
                     </div>
                   </summary>
 
-                  <div className="mt-4 space-y-4 border-t border-slate-800/80 pt-4">
+                  <div className="mt-4 space-y-4 border-t border-slate-200/80 dark:border-slate-800/80 pt-4">
                     {(
                       [
                         { title: stepLabel(1), subtitle: "结果处理模式", rows: agentExecutePreview.step1Rows },
@@ -1280,17 +1280,17 @@ function WorkshopPageInner() {
                       ] as const
                     ).map((block) => (
                       <div key={block.title}>
-                        <p className="text-xs font-medium text-slate-300">
+                        <p className="text-xs font-medium text-slate-700 dark:text-slate-300">
                           {block.title} · {block.subtitle}
                         </p>
                         <dl className="mt-2 space-y-1.5 text-xs">
                           {block.rows.map((row) => (
                             <div
                               key={row.k}
-                              className="grid gap-1 rounded-lg bg-slate-900/40 px-2 py-1.5 sm:grid-cols-[minmax(0,10rem)_1fr]"
+                              className="grid gap-1 rounded-lg bg-slate-100/80 dark:bg-slate-900/40 px-2 py-1.5 sm:grid-cols-[minmax(0,10rem)_1fr]"
                             >
                               <dt className="text-slate-500">{row.k}</dt>
-                              <dd className="break-words font-mono text-[11px] leading-relaxed text-slate-200 sm:text-xs">
+                              <dd className="break-words font-mono text-[11px] leading-relaxed text-slate-800 dark:text-slate-200 sm:text-xs">
                                 {row.v}
                               </dd>
                             </div>
@@ -1300,13 +1300,13 @@ function WorkshopPageInner() {
                     ))}
                   </div>
 
-                  <div className="mt-4 border-t border-slate-800/80 pt-4">
+                  <div className="mt-4 border-t border-slate-200/80 dark:border-slate-800/80 pt-4">
                     <p className="text-xs font-medium text-slate-400">{taskInputSectionTitle()}</p>
-                    <pre className="mt-1 max-h-28 overflow-auto rounded-lg border border-slate-800 bg-slate-950/80 p-2 font-mono text-[11px] leading-relaxed text-slate-300">
+                    <pre className="mt-1 max-h-28 overflow-auto rounded-lg border border-slate-200 dark:border-slate-800 bg-slate-100 dark:bg-slate-950/80 p-2 font-mono text-[11px] leading-relaxed text-slate-700 dark:text-slate-300">
                       {agentExecutePreview.taskInputJson}
                     </pre>
                     <p className="mt-3 text-xs font-medium text-slate-400">{userMessageSectionTitle()}</p>
-                    <pre className="mt-1 max-h-36 overflow-auto rounded-lg border border-slate-800 bg-slate-950/80 p-2 font-mono text-[11px] leading-relaxed text-slate-300">
+                    <pre className="mt-1 max-h-36 overflow-auto rounded-lg border border-slate-200 dark:border-slate-800 bg-slate-100 dark:bg-slate-950/80 p-2 font-mono text-[11px] leading-relaxed text-slate-700 dark:text-slate-300">
                       {agentExecutePreview.userMessageJson}
                     </pre>
                   </div>
@@ -1319,7 +1319,7 @@ function WorkshopPageInner() {
                 disabled={genStatus === "generating"}
                 className={`mt-5 w-full rounded-2xl px-5 py-3 text-sm font-medium transition ${
                   genStatus === "generating"
-                    ? "cursor-not-allowed bg-slate-700 text-slate-500"
+                    ? "cursor-not-allowed bg-slate-300 dark:bg-slate-700 text-slate-500"
                     : "bg-blue-600 text-white hover:bg-blue-500"
                 }`}
               >
@@ -1327,7 +1327,7 @@ function WorkshopPageInner() {
               </button>
             </div>
 
-            <section className="min-h-0 rounded-3xl border border-slate-800 bg-slate-900/50 p-6 xl:max-h-[calc(100vh-3rem)] xl:overflow-y-auto">
+            <section className="min-h-0 rounded-3xl border border-slate-200 dark:border-slate-800 bg-white/80 dark:bg-slate-900/50 p-6 xl:max-h-[calc(100vh-3rem)] xl:overflow-y-auto">
               <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
                 <h2 className="text-xl font-semibold">执行结果</h2>
                 <div className="flex flex-wrap items-center gap-2 sm:gap-3">
@@ -1367,7 +1367,7 @@ function WorkshopPageInner() {
                       className={`rounded-lg border px-3 py-1.5 text-sm font-medium transition ${
                         copied
                           ? "border-green-500/50 bg-green-500/10 text-green-400"
-                          : "border-slate-600 bg-slate-700/60 text-slate-300 hover:bg-slate-700 hover:text-white"
+                          : "border-slate-300 dark:border-slate-600 bg-slate-300/60 dark:bg-slate-700/60 text-slate-700 dark:text-slate-300 hover:bg-slate-700 hover:text-slate-900 dark:hover:text-white"
                       }`}
                     >
                       {copied ? "✓ 已复制" : "复制全文"}
@@ -1379,7 +1379,7 @@ function WorkshopPageInner() {
               {genStatus === "done" && lastRunMeta?.output_id ? (
                 <p className="mb-3 text-xs text-slate-400">
                   本轮编排已写入项目输出{" "}
-                  <span className="font-mono text-slate-300">{lastRunMeta.output_id}</span>
+                  <span className="font-mono text-slate-700 dark:text-slate-300">{lastRunMeta.output_id}</span>
                   {selectedProjectId ? (
                     <>
                       {" "}
@@ -1423,11 +1423,11 @@ function WorkshopPageInner() {
                 outputEndRef={outputEndRef}
               />
 
-              <details className="group mt-4 rounded-2xl border border-slate-800 bg-slate-950/40 p-4 [&_summary::-webkit-details-marker]:hidden">
+              <details className="group mt-4 rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-100/60 dark:bg-slate-950/40 p-4 [&_summary::-webkit-details-marker]:hidden">
                 <summary className="cursor-pointer list-none outline-none marker:content-none">
                   <div className="flex flex-wrap items-start justify-between gap-2">
                     <div className="min-w-0">
-                      <h3 className="text-base font-semibold text-white">历史产出文件汇总</h3>
+                      <h3 className="text-base font-semibold text-slate-900 dark:text-white">历史产出文件汇总</h3>
                       <p className="mt-1 text-sm text-slate-400">
                         当前项目与{stepLabel(3)}所选场景的历史输出
                         {scenarioLinkedOutputs.length > 0 ? (
@@ -1469,16 +1469,16 @@ function WorkshopPageInner() {
                       return (
                         <li
                           key={o.id}
-                          className="rounded-xl border border-slate-800/90 bg-slate-900/50 px-3 py-2.5"
+                          className="rounded-xl border border-slate-200 dark:border-slate-800/90 bg-white/80 dark:bg-slate-900/50 px-3 py-2.5"
                         >
                           <div className="flex flex-wrap items-center justify-between gap-2">
-                            <span className="text-sm font-medium text-white">
+                            <span className="text-sm font-medium text-slate-900 dark:text-white">
                               {o.title?.trim() || "未命名输出"}
                             </span>
                             <span className="text-xs text-slate-500">{formatOutputTime(o.created_at)}</span>
                           </div>
                           <div className="mt-1 flex flex-wrap gap-2 text-xs text-slate-500">
-                            <span className="rounded border border-slate-700 px-1.5 py-0.5 text-slate-400">
+                            <span className="rounded border border-slate-300 dark:border-slate-700 px-1.5 py-0.5 text-slate-400">
                               {outputStatusLabel(o.status)}
                             </span>
                             {o.template_id ? (
@@ -1536,8 +1536,8 @@ function ScenarioSkillsBlock({
             const body = (
               <>
                 <div className="flex flex-wrap items-start justify-between gap-2">
-                  <span className="font-medium text-white">{binding.displayName}</span>
-                  <span className="rounded-full border border-slate-600 px-2 py-0.5 text-[10px] text-slate-400">
+                  <span className="font-medium text-slate-900 dark:text-white">{binding.displayName}</span>
+                  <span className="rounded-full border border-slate-300 dark:border-slate-600 px-2 py-0.5 text-[10px] text-slate-400">
                     {sourceLabel}
                   </span>
                 </div>
@@ -1550,7 +1550,7 @@ function ScenarioSkillsBlock({
                 {binding.resolvedTemplateLabel || binding.templatePath ? (
                   <p className="mt-2 text-xs text-slate-400">
                     输出模版：
-                    <span className="text-slate-200">
+                    <span className="text-slate-800 dark:text-slate-200">
                       {binding.resolvedTemplateLabel ?? binding.templatePath}
                     </span>
                   </p>
@@ -1572,7 +1572,7 @@ function ScenarioSkillsBlock({
                   className={`rounded-2xl border p-4 text-left text-sm transition ${
                     active
                       ? "border-blue-500 bg-blue-500/10"
-                      : "border-slate-700 bg-slate-950/60 hover:border-slate-600"
+                      : "border-slate-300 dark:border-slate-700 bg-slate-100/80 dark:bg-slate-950/60 hover:border-slate-300 dark:border-slate-600"
                   }`}
                 >
                   {body}
@@ -1582,7 +1582,7 @@ function ScenarioSkillsBlock({
             return (
               <div
                 key={`${binding.name}-${binding.source}`}
-                className="rounded-2xl border border-slate-800 bg-slate-950/60 p-4 text-sm"
+                className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-100/80 dark:bg-slate-950/60 p-4 text-sm"
               >
                 {body}
               </div>
@@ -1590,7 +1590,7 @@ function ScenarioSkillsBlock({
           })}
         </div>
       ) : (
-        <p className="rounded-2xl border border-dashed border-slate-700 bg-slate-950/30 px-4 py-6 text-center text-sm text-slate-400">
+        <p className="rounded-2xl border border-dashed border-slate-300 dark:border-slate-700 bg-slate-100/50 dark:bg-slate-950/30 px-4 py-6 text-center text-sm text-slate-400">
           本场景未强制绑定具体技能。
           {parsed.mode === "agent_select" || parsed.allowAgentFreeChoice
             ? " 若需固定技能，请在场景编排中开启「强制绑定技能」并选择技能包后发布。"
@@ -1609,9 +1609,9 @@ function ScenarioSkillsBlock({
 
 function SummaryCard({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-2xl border border-slate-800 bg-slate-900/50 p-4">
+    <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white/80 dark:bg-slate-900/50 p-4">
       <p className="text-xs uppercase tracking-[0.16em] text-slate-500">{label}</p>
-      <p className="mt-3 text-sm font-medium leading-relaxed text-white">{value}</p>
+      <p className="mt-3 text-sm font-medium leading-relaxed text-slate-900 dark:text-white">{value}</p>
     </div>
   );
 }
@@ -1634,12 +1634,12 @@ function ModeCard({
       className={`rounded-2xl border p-5 text-left transition ${
         active
           ? "border-blue-500 bg-blue-500/10"
-          : "border-slate-700 bg-slate-950/60 hover:border-slate-600 hover:bg-slate-900/70"
+          : "border-slate-300 dark:border-slate-700 bg-slate-100/80 dark:bg-slate-950/60 hover:border-slate-300 dark:border-slate-600 hover:bg-slate-200 dark:hover:bg-slate-900/70"
       }`}
     >
       <div className="flex items-start justify-between gap-3">
         <div>
-          <p className="text-base font-semibold text-white">{title}</p>
+          <p className="text-base font-semibold text-slate-900 dark:text-white">{title}</p>
           <p className="mt-2 text-sm leading-relaxed text-slate-400">{desc}</p>
         </div>
         <span

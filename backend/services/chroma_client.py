@@ -157,7 +157,7 @@ class ChromaHttpClient:
             "where": where,
             "limit": limit,
             "offset": offset,
-            "include": include or ["metadatas", "documents"],
+            "include": include if include is not None else ["metadatas", "documents"],
         }
         r = httpx.post(
             f"{self.base_url}/api/v1/collections/{collection_ref}/get",
@@ -166,6 +166,27 @@ class ChromaHttpClient:
         )
         r.raise_for_status()
         return r.json()
+
+    def list_all_ids(self, collection: str, *, batch_size: int = 5000) -> list[str]:
+        """分页拉取 collection 内全部 chunk id。"""
+        out: list[str] = []
+        offset = 0
+        while True:
+            data = self.get_by_where(
+                collection,
+                {},
+                limit=batch_size,
+                offset=offset,
+                include=[],
+            )
+            ids = flatten_chroma_get_ids(data)
+            if not ids:
+                break
+            out.extend(ids)
+            if len(ids) < batch_size:
+                break
+            offset += len(ids)
+        return out
 
     def update(
         self,

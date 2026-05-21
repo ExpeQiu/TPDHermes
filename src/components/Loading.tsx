@@ -33,20 +33,20 @@ export function Skeleton({ className = '', lines = 1 }: SkeletonProps) {
         {Array.from({ length: lines }).map((_, i) => (
           <div
             key={i}
-            className="h-4 bg-slate-700/50 rounded animate-pulse"
+            className="h-4 bg-slate-300 dark:bg-slate-700/50 rounded animate-pulse"
             style={{ width: i === lines - 1 ? '70%' : '100%' }}
           />
         ))}
       </div>
     )
   }
-  return <div className={`h-4 w-full bg-slate-700/50 rounded animate-pulse ${className}`} />
+  return <div className={`h-4 w-full bg-slate-300 dark:bg-slate-700/50 rounded animate-pulse ${className}`} />
 }
 
 // Card skeleton
 export function CardSkeleton() {
   return (
-    <div className="bg-slate-800/60 rounded-xl p-5 border border-slate-700/50 space-y-3">
+    <div className="bg-slate-200/60 dark:bg-slate-800/60 rounded-xl p-5 border border-slate-300 dark:border-slate-700/50 space-y-3">
       <Skeleton className="h-5 w-1/2" />
       <Skeleton lines={3} />
       <div className="flex gap-2 pt-1">

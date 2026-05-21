@@ -51,10 +51,14 @@ if [[ -f "$ROOT/.env.local" ]]; then
 fi
 export HERMES_CHAT_API_URL="${HERMES_CHAT_API_URL:-http://127.0.0.1:8642/v1/chat/completions}"
 export HERMES_CHAT_API_KEY="${HERMES_CHAT_API_KEY:-${API_SERVER_KEY:-}}"
+if [[ -f "$ROOT/.venv/bin/pip" && -f "$ROOT/requirements.txt" ]]; then
+  echo "[start] sync python deps (requirements.txt)"
+  "$ROOT/.venv/bin/pip" install -q -r "$ROOT/requirements.txt"
+fi
 echo "[start] backend uvicorn :8000"
 "$ROOT/.venv/bin/uvicorn" main:app --host 127.0.0.1 --port 8000 >>"$ROOT/logs/backend.log" 2>&1 &
 echo $! >"$ROOT/.backend.pid"
 echo "[start] frontend next dev :3000"
-npm run dev &
+npm run dev >>"$ROOT/logs/frontend.log" 2>&1 &
 echo $! >"$ROOT/.frontend.pid"
 echo "[start] PIDs -> .backend.pid .frontend.pid (use stop.sh)"

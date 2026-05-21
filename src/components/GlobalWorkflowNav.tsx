@@ -9,19 +9,19 @@ export default function GlobalWorkflowNav() {
   const pathname = usePathname();
 
   return (
-    <header className="sticky top-0 z-40 border-b border-slate-800 bg-slate-950/85 backdrop-blur-md">
+    <header className="sticky top-0 z-40 border-b border-slate-200 bg-white/85 backdrop-blur-md dark:border-slate-800 dark:bg-slate-950/85">
       <div className={GLOBAL_NAV_INNER_CLASS}>
         <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
           <div className="flex items-center gap-3">
             <Link
               href="/"
-              className="flex items-center gap-3 rounded-xl border border-slate-800 bg-slate-900/70 px-3 py-2 transition hover:border-slate-700 hover:bg-slate-900"
+              className="flex items-center gap-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 transition hover:border-slate-300 hover:bg-slate-100 dark:border-slate-800 dark:bg-slate-900/70 dark:hover:border-slate-700 dark:hover:bg-slate-900"
             >
               <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-blue-600 text-sm font-semibold text-white">
                 TH
               </div>
               <div>
-                <p className="text-sm font-semibold text-white">TPDHermes</p>
+                <p className="text-sm font-semibold text-slate-900 dark:text-white">TPDHermes</p>
                 <p className="text-xs text-slate-500">统一任务编排工作台</p>
               </div>
             </Link>
@@ -39,8 +39,8 @@ export default function GlobalWorkflowNav() {
                   href={item.href}
                   className={`whitespace-nowrap rounded-full border px-3 py-2 text-sm transition ${
                     active
-                      ? "border-blue-500/40 bg-blue-500/15 text-blue-200"
-                      : "border-slate-800 bg-slate-900/60 text-slate-400 hover:border-slate-700 hover:bg-slate-900 hover:text-slate-200"
+                      ? "border-blue-500/40 bg-blue-500/15 text-blue-700 dark:text-blue-200"
+                      : "border-slate-200 bg-slate-100 text-slate-600 hover:border-slate-300 hover:bg-slate-200 hover:text-slate-900 dark:border-slate-800 dark:bg-slate-900/60 dark:text-slate-400 dark:hover:border-slate-700 dark:hover:bg-slate-900 dark:hover:text-slate-200"
                   }`}
                 >
                   {item.shortLabel}

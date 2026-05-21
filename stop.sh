@@ -11,4 +11,12 @@ for f in .backend.pid .frontend.pid; do
     rm -f "$ROOT/$f"
   fi
 done
+# 清理可能残留的 next dev / uvicorn 子进程（避免端口占用与 500）
+for port in 3000 8000; do
+  pids="$(lsof -ti tcp:"$port" -sTCP:LISTEN 2>/dev/null || true)"
+  if [[ -n "${pids:-}" ]]; then
+    echo "[stop] kill listeners on :$port -> $pids"
+    kill $pids 2>/dev/null || true
+  fi
+done
 echo "[stop] done"

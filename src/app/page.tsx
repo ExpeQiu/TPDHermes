@@ -54,7 +54,7 @@ const entries = [
 
 export default function Home() {
   return (
-    <div className="relative min-h-dvh overflow-x-hidden bg-slate-950 text-slate-100">
+    <div className="relative min-h-dvh overflow-x-hidden bg-slate-50 text-slate-900 dark:bg-slate-950 dark:text-slate-100">
       <div
         className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_80%_50%_at_50%_-20%,rgba(59,130,246,0.22),transparent)]"
         aria-hidden
@@ -71,7 +71,7 @@ export default function Home() {
           <p className="text-xs font-medium uppercase tracking-[0.2em] text-slate-500">
             TPDHermes
           </p>
-          <h1 className="mt-3 text-balance bg-gradient-to-b from-white to-slate-400 bg-clip-text text-3xl font-semibold tracking-tight text-transparent sm:text-4xl md:text-5xl">
+          <h1 className="mt-3 text-balance bg-gradient-to-b from-slate-900 to-slate-500 bg-clip-text text-3xl font-semibold tracking-tight text-transparent dark:from-white dark:to-slate-400 sm:text-4xl md:text-5xl">
             技术推广内容共创平台
           </h1>
           <p className="mx-auto mt-4 max-w-2xl text-pretty text-sm text-slate-400 sm:text-base">
@@ -86,13 +86,13 @@ export default function Home() {
             </Link>
             <Link
               href="/chat"
-              className="inline-flex min-w-40 items-center justify-center rounded-xl border border-slate-700 bg-slate-900/60 px-5 py-3 text-sm font-medium text-slate-200 transition hover:border-slate-600 hover:bg-slate-900"
+              className="inline-flex min-w-40 items-center justify-center rounded-xl border border-slate-300 dark:border-slate-700 bg-white/90 dark:bg-slate-900/60 px-5 py-3 text-sm font-medium text-slate-800 dark:text-slate-200 transition hover:border-slate-300 dark:border-slate-600 hover:bg-slate-200 dark:hover:bg-slate-900"
             >
               对话创作
             </Link>
             <Link
               href="/workshop"
-              className="inline-flex min-w-40 items-center justify-center rounded-xl border border-slate-800 bg-slate-950/50 px-5 py-3 text-sm font-medium text-slate-300 transition hover:border-slate-600 hover:bg-slate-900/80"
+              className="inline-flex min-w-40 items-center justify-center rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-100/70 dark:bg-slate-950/50 px-5 py-3 text-sm font-medium text-slate-700 dark:text-slate-300 transition hover:border-slate-300 dark:border-slate-600 hover:bg-slate-200/80 dark:hover:bg-slate-900/80"
             >
               场景输出
             </Link>
@@ -104,15 +104,15 @@ export default function Home() {
           style={{ animationDelay: "80ms" }}
           aria-label="功能入口"
         >
-          <div className="rounded-3xl border border-slate-800/80 bg-slate-900/40 p-6 shadow-lg shadow-black/20">
+          <div className="rounded-3xl border border-slate-200/80 dark:border-slate-800/80 bg-slate-100/80 dark:bg-slate-900/40 p-6 shadow-lg shadow-black/20">
             <p className="text-xs font-medium uppercase tracking-[0.2em] text-slate-500">入口</p>
-            <h2 className="mt-2 text-xl font-semibold text-white sm:text-2xl">开始工作</h2>
+            <h2 className="mt-2 text-xl font-semibold text-slate-900 dark:text-white sm:text-2xl">开始工作</h2>
             <div className="mt-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
               {entries.map((item) => (
                 <Link
                   key={item.href}
                   href={item.href}
-                  className="group relative flex flex-col rounded-2xl border border-slate-800/80 bg-slate-950/70 p-5 outline-none ring-slate-700/0 transition-[transform,box-shadow,border-color,background-color] duration-200 hover:-translate-y-0.5 hover:border-slate-600/80 hover:bg-slate-900/80 hover:shadow-xl hover:shadow-black/20 focus-visible:ring-2 focus-visible:ring-blue-500/60"
+                  className="group relative flex flex-col rounded-2xl border border-slate-200/80 dark:border-slate-800/80 bg-slate-100 dark:bg-slate-950/70 p-5 outline-none ring-slate-700/0 transition-[transform,box-shadow,border-color,background-color] duration-200 hover:-translate-y-0.5 hover:border-slate-300 dark:border-slate-600/80 hover:bg-slate-200/80 dark:hover:bg-slate-900/80 hover:shadow-xl hover:shadow-black/20 focus-visible:ring-2 focus-visible:ring-blue-500/60"
                 >
                   <p className="text-[11px] font-medium uppercase tracking-[0.16em] text-slate-500">
                     {item.eyebrow}
@@ -121,7 +121,7 @@ export default function Home() {
                     className={`mt-4 h-1 w-12 rounded-full bg-gradient-to-r ${item.accent}`}
                     aria-hidden
                   />
-                  <h3 className="mt-4 text-lg font-semibold text-white group-hover:text-white">
+                  <h3 className="mt-4 text-lg font-semibold text-slate-900 dark:text-white group-hover:text-slate-900 dark:hover:text-white">
                     {item.title}
                   </h3>
                   <p className="mt-1 text-sm text-slate-500">{item.desc}</p>
@@ -141,7 +141,7 @@ export default function Home() {
         </section>
 
         <footer className="home-animate-in mt-12 pt-8 text-center text-xs text-slate-600" style={{ animationDelay: "120ms" }}>
-          <p>TPDHermes</p>
+          <p>2026@TPCM</p>
         </footer>
       </main>
     </div>

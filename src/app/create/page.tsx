@@ -21,6 +21,17 @@ import {
   loadDismissedPresetIds,
   type ScenarioApiRow,
 } from "@/lib/scenario-list";
+import {
+  accentEmeraldSoft,
+  accentLink,
+  btnAmberAction,
+  btnDangerGhost,
+  btnEmeraldAction,
+  chipBlueActive,
+  pillBlue,
+  pillEmerald,
+} from "@/lib/theme-text";
+import { SkillsScopePanel, type SkillScopeItem } from "@/components/skills/SkillsScopePanel";
 
 type SkillTemplateMeta = {
   id: string;
@@ -30,12 +41,32 @@ type SkillTemplateMeta = {
   sections?: string[];
 };
 
+type SkillTemplateOption = {
+  value: string;
+  label: string;
+  skillName: string;
+};
+
+type SkillTemplateGroup = {
+  skillName: string;
+  skillTitle: string;
+  templates: SkillTemplateOption[];
+};
+
+
 type SkillMetaRow = {
   name: string;
   display_name: string;
   description: string;
   templates: SkillTemplateMeta[];
 };
+
+function formatBoundSkillNames(
+  names: string[],
+  displayByName: Map<string, string>,
+): string {
+  return names.map((name) => skillLabel(name, displayByName.get(name))).join("、");
+}
 
 function resolveTemplateOutputTags(tpl: SkillTemplateMeta | null | undefined): string[] {
   if (!tpl) return [];
@@ -79,7 +110,7 @@ export default function CreatePage() {
   return (
     <Suspense
       fallback={
-        <div className="flex min-h-screen items-center justify-center bg-slate-950 text-sm text-slate-400">
+        <div className="flex min-h-screen items-center justify-center text-sm text-slate-500 dark:bg-slate-950 dark:text-slate-400">
           加载场景编排...
         </div>
       }
@@ -94,7 +125,7 @@ function CreatePageInner() {
   const returnProjectId = searchParams?.get("return_project_id")?.trim() ?? "";
 
   const [collections, setCollections] = useState<string[]>([]);
-  const [skillsList, setSkillsList] = useState<string[]>([]);
+  const [installedSkills, setInstalledSkills] = useState<SkillScopeItem[]>([]);
   const [skillMeta, setSkillMeta] = useState<SkillMetaRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedScenarioId, setSelectedScenarioId] = useState(DEFAULT_SCENARIO_ID);
@@ -126,16 +157,16 @@ function CreatePageInner() {
     let cancelled = false;
     Promise.allSettled([
       apiGet<{ collections: string[] }>("/kb/collections"),
-      apiGet<{ skills: string[] }>("/ws/skills"),
+      apiFetch("/skills/").then((res) => readJson<SkillScopeItem[]>(res)),
       apiGet<{ skills: SkillMetaRow[] }>("/ws/skills/metadata"),
     ]).then(([collectionsRes, skillsRes, metaRes]) => {
       if (cancelled) return;
       const nextCollections =
         collectionsRes.status === "fulfilled" ? collectionsRes.value.collections : [];
-      const nextSkills = skillsRes.status === "fulfilled" ? skillsRes.value.skills : [];
+      const nextSkills = skillsRes.status === "fulfilled" ? skillsRes.value : [];
       const nextMeta = metaRes.status === "fulfilled" ? metaRes.value.skills : [];
       setCollections(nextCollections);
-      setSkillsList(nextSkills);
+      setInstalledSkills(nextSkills);
       setSkillMeta(nextMeta);
       setLoading(false);
     });
@@ -166,6 +197,14 @@ function CreatePageInner() {
       return next.length === prev.length ? prev : next;
     });
   }, [publicCollections]);
+
+  useEffect(() => {
+    const installed = new Set(installedSkills.map((s) => s.name));
+    setContractAllowedSkills((prev) => {
+      const next = prev.filter((name) => installed.has(name));
+      return next.length === prev.length ? prev : next;
+    });
+  }, [installedSkills]);
 
   useEffect(() => {
     if (loading) return;
@@ -256,21 +295,46 @@ function CreatePageInner() {
     [skillMeta],
   );
 
-  const skillTemplateOptions = useMemo(() => {
+  const skillTemplateGroups = useMemo((): SkillTemplateGroup[] => {
     if (!forceBindSkill || contractAllowedSkills.length === 0) return [];
-    const opts: { value: string; label: string }[] = [];
+    const groups: SkillTemplateGroup[] = [];
     const seen = new Set<string>();
     for (const skillName of contractAllowedSkills) {
       const meta = skillMeta.find((m) => m.name === skillName);
+      const templates: SkillTemplateOption[] = [];
       for (const t of meta?.templates ?? []) {
         const value = encodeSkillTemplate(skillName, t.path);
         if (seen.has(value)) continue;
         seen.add(value);
-        opts.push({ value, label: t.label });
+        templates.push({
+          value,
+          label: t.label,
+          skillName,
+        });
       }
+      groups.push({
+        skillName,
+        skillTitle: skillLabel(skillName, meta?.display_name),
+        templates,
+      });
     }
-    return opts;
+    return groups;
   }, [forceBindSkill, contractAllowedSkills, skillMeta]);
+
+  const skillTemplateOptions = useMemo(
+    () => skillTemplateGroups.flatMap((group) => group.templates),
+    [skillTemplateGroups],
+  );
+
+  const boundSkillTitles = useMemo(
+    () => formatBoundSkillNames(contractAllowedSkills, skillDisplayByName),
+    [contractAllowedSkills, skillDisplayByName],
+  );
+
+  const skillsWithoutTemplates = useMemo(
+    () => skillTemplateGroups.filter((group) => group.templates.length === 0).map((g) => g.skillTitle),
+    [skillTemplateGroups],
+  );
 
   useEffect(() => {
     if (!selectedSkillTemplate) return;
@@ -564,13 +628,13 @@ function CreatePageInner() {
   }
 
   return (
-    <main className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 p-4 text-white sm:p-6 md:p-8">
+    <main className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-slate-100 p-4 text-slate-900 sm:p-6 md:p-8 dark:from-slate-950 dark:via-slate-900 dark:to-slate-950 dark:text-white">
       <div className={CONTENT_MAX_CLASS}>
         <header className="mb-8">
-          <Link href="/" className="text-sm text-slate-400 transition hover:text-white">
+          <Link href="/" className="text-sm text-slate-400 transition hover:text-slate-900 dark:hover:text-white">
             ← 返回首页
           </Link>
-          <div className="mt-3 inline-flex items-center gap-2 rounded-full border border-blue-500/30 bg-blue-500/10 px-3 py-1 text-xs font-medium text-blue-200">
+          <div className={`mt-3 inline-flex items-center gap-2 px-3 py-1 text-xs ${pillBlue}`}>
             <span className="h-2 w-2 rounded-full bg-blue-400" aria-hidden />
             场景编排
           </div>
@@ -582,7 +646,7 @@ function CreatePageInner() {
 
         <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_minmax(0,1.15fr)_minmax(0,1fr)]">
           {/* Step 1: 场景列表 */}
-          <section className="rounded-3xl border border-slate-800 bg-slate-900/50 p-6">
+          <section className="rounded-3xl border border-slate-200 dark:border-slate-800 bg-white/80 dark:bg-slate-900/50 p-6">
             <div className="flex items-start justify-between gap-3">
               <div>
                 <p className="text-xs uppercase tracking-[0.2em] text-slate-500">{stepLabel(1)}</p>
@@ -593,7 +657,7 @@ function CreatePageInner() {
                   type="button"
                   onClick={openAddScenarioModal}
                   disabled={deleteBusy}
-                  className="rounded-xl border border-slate-600 bg-slate-800/80 px-3 py-1.5 text-xs font-medium hover:bg-slate-700 disabled:opacity-50"
+                  className="rounded-xl border border-slate-300 dark:border-slate-600 bg-slate-200/80 dark:bg-slate-800/80 px-3 py-1.5 text-xs font-medium hover:bg-slate-300 dark:bg-slate-700 disabled:opacity-50"
                 >
                   新增
                 </button>
@@ -606,7 +670,7 @@ function CreatePageInner() {
                       ? "删除当前选中的服务端场景"
                       : "仅本地预设或无服务端记录时不可删"
                   }
-                  className="rounded-xl border border-red-700/60 bg-red-950/40 px-3 py-1.5 text-xs font-medium text-red-200 hover:bg-red-900/50 disabled:cursor-not-allowed disabled:opacity-40"
+                  className={`rounded-xl px-3 py-1.5 text-xs disabled:cursor-not-allowed disabled:opacity-40 ${btnDangerGhost}`}
                 >
                   {deleteBusy ? "删除中…" : "删除"}
                 </button>
@@ -631,7 +695,7 @@ function CreatePageInner() {
                       className={`rounded-2xl border p-4 text-left transition ${
                         active
                           ? "border-blue-500 bg-blue-500/10"
-                          : "border-slate-700 bg-slate-950/60 hover:border-slate-600"
+                          : "border-slate-300 dark:border-slate-700 bg-slate-100/80 dark:bg-slate-950/60 hover:border-slate-300 dark:border-slate-600"
                       }`}
                     >
                       <div className="flex items-start justify-between gap-2">
@@ -643,12 +707,12 @@ function CreatePageInner() {
                       <p className="mt-1 line-clamp-2 text-xs text-slate-400">{scenario.summary}</p>
                       <div className="mt-2 flex flex-wrap gap-2">
                         {remote ? (
-                          <span className="rounded-full border border-emerald-700/50 bg-emerald-500/10 px-2 py-0.5 text-[10px] text-emerald-200">
+                          <span className={`px-2 py-0.5 text-[10px] ${pillEmerald}`}>
                             {scenarioStatusLabel(remote.status)} · v{remote.version}
                           </span>
                         ) : null}
                         {isLocalTemplate ? (
-                          <span className="rounded-full border border-slate-600 px-2 py-0.5 text-[10px] text-slate-400">
+                          <span className="rounded-full border border-slate-300 dark:border-slate-600 px-2 py-0.5 text-[10px] text-slate-400">
                             内置模板
                           </span>
                         ) : null}
@@ -661,81 +725,36 @@ function CreatePageInner() {
           </section>
 
           {/* Step 2: 场景配置 */}
-          <section className="rounded-3xl border border-slate-800 bg-slate-900/50 p-6">
+          <section className="rounded-3xl border border-slate-200 dark:border-slate-800 bg-white/80 dark:bg-slate-900/50 p-6">
             <p className="text-xs uppercase tracking-[0.2em] text-slate-500">{stepLabel(2)}</p>
             <h2 className="mt-2 text-xl font-semibold">场景配置</h2>
 
             <div className="mt-5 space-y-4">
               <label className="block space-y-2 text-sm">
-                <span className="text-slate-300">场景说明（输入）</span>
+                <span className="text-slate-700 dark:text-slate-300">场景说明（输入）</span>
                 <textarea
                   value={sceneDescription}
                   onChange={(e) => setSceneDescription(e.target.value)}
                   rows={4}
                   placeholder="描述本场景的业务背景、约束与输入材料…"
-                  className="w-full rounded-xl border border-slate-700 bg-slate-950/70 px-4 py-3 text-sm outline-none focus:border-blue-500"
+                  className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-100 dark:bg-slate-950/70 px-4 py-3 text-sm outline-none focus:border-blue-500"
                 />
               </label>
 
               <label className="block space-y-2 text-sm">
-                <span className="text-slate-300">结果说明（输出）</span>
+                <span className="text-slate-700 dark:text-slate-300">结果说明（输出）</span>
                 <textarea
                   value={resultDescription}
                   onChange={(e) => setResultDescription(e.target.value)}
                   rows={3}
                   placeholder="描述期望交付物形态、用途与质量标准…"
-                  className="w-full rounded-xl border border-slate-700 bg-slate-950/70 px-4 py-3 text-sm outline-none focus:border-blue-500"
+                  className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-100 dark:bg-slate-950/70 px-4 py-3 text-sm outline-none focus:border-blue-500"
                 />
               </label>
 
               <div className="space-y-2 text-sm">
                 <label className="flex items-center justify-between gap-3">
-                  <span className="text-slate-300">强制绑定技能（可选）</span>
-                  <input
-                    type="checkbox"
-                    checked={forceBindSkill}
-                    onChange={(e) => {
-                      setForceBindSkill(e.target.checked);
-                      if (!e.target.checked) {
-                        setContractAllowedSkills([]);
-                        setSelectedSkillTemplate("");
-                      }
-                    }}
-                    aria-label="强制绑定技能"
-                  />
-                </label>
-                <div className="rounded-2xl border border-slate-800 bg-slate-950/60 p-4">
-                  {forceBindSkill ? (
-                    <div className="flex flex-wrap gap-2">
-                      {skillsList.length === 0 ? (
-                        <p className="text-xs text-slate-500">暂无已安装技能</p>
-                      ) : (
-                        skillsList.map((name) => (
-                          <button
-                            key={name}
-                            type="button"
-                            title={name}
-                            onClick={() => toggleSkill(name)}
-                            className={`rounded-full border px-3 py-1 text-xs ${
-                              contractAllowedSkills.includes(name)
-                                ? "border-blue-500/70 bg-blue-500/15 text-blue-100"
-                                : "border-slate-600 text-slate-400"
-                            }`}
-                          >
-                            {skillLabel(name, skillDisplayByName.get(name))}
-                          </button>
-                        ))
-                      )}
-                    </div>
-                  ) : (
-                    <p className="text-xs text-slate-500">未开启时由智能体按场景自选技能</p>
-                  )}
-                </div>
-              </div>
-
-              <div className="space-y-2 text-sm">
-                <label className="flex items-center justify-between gap-3">
-                  <span className="text-slate-300">强制绑定知识库（可选）</span>
+                  <span className="text-slate-700 dark:text-slate-300">强制绑定知识库（可选）</span>
                   <input
                     type="checkbox"
                     checked={forceBindKb}
@@ -747,7 +766,7 @@ function CreatePageInner() {
                     aria-label="强制绑定知识库"
                   />
                 </label>
-                <div className="rounded-2xl border border-slate-800 bg-slate-950/60 p-4">
+                <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-100/80 dark:bg-slate-950/60 p-4">
                 {forceBindKb ? (
                   publicCollections.length === 0 ? (
                     <p className="text-xs text-slate-500">暂无公共知识库集合</p>
@@ -773,47 +792,99 @@ function CreatePageInner() {
                 </div>
               </div>
 
+              <div className="space-y-2 text-sm">
+                <label className="flex items-center justify-between gap-3">
+                  <span className="text-slate-700 dark:text-slate-300">强制绑定技能（可选）</span>
+                  <input
+                    type="checkbox"
+                    checked={forceBindSkill}
+                    onChange={(e) => {
+                      setForceBindSkill(e.target.checked);
+                      if (!e.target.checked) {
+                        setContractAllowedSkills([]);
+                        setSelectedSkillTemplate("");
+                      }
+                    }}
+                    aria-label="强制绑定技能"
+                  />
+                </label>
+                {forceBindSkill ? (
+                  <SkillsScopePanel
+                    skills={installedSkills}
+                    loading={loading}
+                    mode="select"
+                    selectedNames={contractAllowedSkills}
+                    onToggleSelect={toggleSkill}
+                  />
+                ) : (
+                  <div className="rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-200/60 dark:bg-slate-800/60 p-4">
+                    <p className="text-xs text-slate-500">未开启时由智能体按场景自选技能</p>
+                  </div>
+                )}
+              </div>
+
               <label className="block space-y-2 text-sm">
-                <span className="text-slate-300">输出模版（可选，来自技能配置）</span>
+                <span className="text-slate-700 dark:text-slate-300">
+                  输出模版（来自上方已选绑定技能）
+                </span>
                 <select
                   value={selectedSkillTemplate}
                   onChange={(e) => setSelectedSkillTemplate(e.target.value)}
-                  disabled={!forceBindSkill || skillTemplateOptions.length === 0}
-                  className="w-full rounded-xl border border-slate-700 bg-slate-950/70 px-4 py-3 text-sm outline-none focus:border-blue-500 disabled:opacity-50"
+                  disabled={!forceBindSkill || contractAllowedSkills.length === 0 || skillTemplateOptions.length === 0}
+                  className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-100 dark:bg-slate-950/70 px-4 py-3 text-sm outline-none focus:border-blue-500 disabled:opacity-50"
                 >
                   <option value="">不指定模版</option>
-                  {skillTemplateOptions.map((o) => (
-                    <option key={o.value} value={o.value}>
-                      {o.label}
-                    </option>
-                  ))}
+                  {skillTemplateGroups.map((group) =>
+                    group.templates.length > 0 ? (
+                      <optgroup key={group.skillName} label={`${group.skillTitle}（${group.skillName}）`}>
+                        {group.templates.map((o) => (
+                          <option key={o.value} value={o.value}>
+                            {o.label}
+                          </option>
+                        ))}
+                      </optgroup>
+                    ) : null,
+                  )}
                 </select>
-                {forceBindSkill && contractAllowedSkills.length > 0 && skillTemplateOptions.length === 0 ? (
-                  <p className="text-xs text-amber-400/90">所选技能未配置输出模版字段</p>
-                ) : null}
+                {!forceBindSkill ? (
+                  <p className="text-xs text-slate-500">请先开启「强制绑定技能」并在上方选择技能</p>
+                ) : contractAllowedSkills.length === 0 ? (
+                  <p className="text-xs text-slate-500">请先在上方选择要绑定的技能，模版选项将来自所选技能的 skill.json 配置</p>
+                ) : skillTemplateOptions.length === 0 ? (
+                  <p className="text-xs text-amber-400/90">
+                    已选技能「{boundSkillTitles}」未配置输出模版，请在技能包中补充 skill.json 的 template / templates 字段
+                  </p>
+                ) : (
+                  <p className="text-xs text-slate-500">
+                    可选模版来自已选绑定技能：{boundSkillTitles}
+                    {skillsWithoutTemplates.length > 0
+                      ? `（${skillsWithoutTemplates.join("、")} 暂无模版）`
+                      : ""}
+                  </p>
+                )}
               </label>
 
             </div>
           </section>
 
           {/* Step 3: 合同预览与保存 */}
-          <aside className="rounded-3xl border border-slate-800 bg-slate-900/50 p-6">
+          <aside className="rounded-3xl border border-slate-200 dark:border-slate-800 bg-white/80 dark:bg-slate-900/50 p-6">
             <p className="text-xs uppercase tracking-[0.2em] text-slate-500">{stepLabel(3)}</p>
             <h2 className="mt-2 text-xl font-semibold">合同预览与保存</h2>
 
             <div className="mt-5 space-y-4">
-              <div className="rounded-2xl border border-slate-800 bg-slate-950/60 p-4 text-sm">
+              <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-100/80 dark:bg-slate-950/60 p-4 text-sm">
                 <p className="text-xs text-slate-500">摘要信息</p>
                 <div className="mt-3 space-y-3">
                   <div>
                     <span className="text-slate-500">场景说明（输入）</span>
-                    <p className="mt-1 whitespace-pre-wrap text-slate-200">
+                    <p className="mt-1 whitespace-pre-wrap text-slate-800 dark:text-slate-200">
                       {sceneDescription.trim() || "（未填写）"}
                     </p>
                   </div>
                   <div>
                     <span className="text-slate-500">结果说明（输出）</span>
-                    <p className="mt-1 whitespace-pre-wrap text-slate-200">
+                    <p className="mt-1 whitespace-pre-wrap text-slate-800 dark:text-slate-200">
                       {resultDescription.trim() || "（未填写）"}
                     </p>
                   </div>
@@ -828,7 +899,7 @@ function CreatePageInner() {
                 )}
               </div>
 
-              <div className="rounded-2xl border border-slate-800 bg-slate-950/60 p-4 text-sm">
+              <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-100/80 dark:bg-slate-950/60 p-4 text-sm">
                 <p className="text-xs text-slate-500">任务信息</p>
                 <div className="mt-3 space-y-4">
                   <div>
@@ -840,7 +911,7 @@ function CreatePageInner() {
                             <span
                               key={name}
                               title={name}
-                              className="rounded-full border border-blue-500/70 bg-blue-500/15 px-2.5 py-1 text-xs text-blue-100"
+                              className={`rounded-full border px-2.5 py-1 text-xs ${chipBlueActive}`}
                             >
                               {skillLabel(name, skillDisplayByName.get(name))}
                             </span>
@@ -857,7 +928,7 @@ function CreatePageInner() {
                     <span className="text-slate-500">强制绑定知识库（可选）</span>
                     {forceBindKb ? (
                       kbOrdered.length > 0 ? (
-                        <ul className="mt-2 max-h-28 space-y-1 overflow-y-auto text-xs text-slate-300">
+                        <ul className="mt-2 max-h-28 space-y-1 overflow-y-auto text-xs text-slate-700 dark:text-slate-300">
                           {kbOrdered.map((name) => (
                             <li key={name} className="truncate" title={name}>
                               {kbCollectionLabel(name)}
@@ -874,21 +945,22 @@ function CreatePageInner() {
                 </div>
               </div>
 
-              <div className="rounded-2xl border border-slate-800 bg-slate-950/60 p-4">
+              <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-100/80 dark:bg-slate-950/60 p-4">
                 <p className="text-sm font-medium">输出物标签</p>
-                {selectedTemplateMeta ? (
+                {selectedTemplateMeta && decodedTemplate ? (
                   <p className="mt-1 truncate text-xs text-slate-500" title={selectedTemplateMeta.label}>
-                    来自模版：{selectedTemplateMeta.label}
+                    来自绑定技能 {skillLabel(decodedTemplate.skillName, skillDisplayByName.get(decodedTemplate.skillName))}
+                    （{decodedTemplate.skillName}）· 模版：{selectedTemplateMeta.label}
                   </p>
                 ) : (
-                  <p className="mt-1 text-xs text-slate-500">请在左侧选择输出模版</p>
+                  <p className="mt-1 text-xs text-slate-500">请在左侧从已选绑定技能中选择输出模版</p>
                 )}
                 <div className="mt-3 flex flex-wrap gap-2">
                   {outputTags.length > 0 ? (
                     outputTags.map((tag) => (
                       <span
                         key={tag}
-                        className="rounded-full border border-blue-500/70 bg-blue-500/15 px-3 py-1 text-xs text-blue-100"
+                        className={`rounded-full border px-3 py-1 text-xs ${chipBlueActive}`}
                       >
                         {tag}
                       </span>
@@ -903,12 +975,12 @@ function CreatePageInner() {
                 type="button"
                 onClick={runServerPreview}
                 disabled={previewBusy}
-                className="w-full rounded-2xl border border-slate-600 bg-slate-800/40 py-3 text-sm hover:bg-slate-800 disabled:opacity-50"
+                className="w-full rounded-2xl border border-slate-300 dark:border-slate-600 bg-slate-200/40 dark:bg-slate-800/40 py-3 text-sm hover:bg-slate-800 disabled:opacity-50"
               >
                 {previewBusy ? "生成中…" : "编排合同预览"}
               </button>
               {previewText ? (
-                <pre className="max-h-48 overflow-auto rounded-2xl border border-slate-800 bg-slate-950/80 p-3 text-xs text-slate-300">
+                <pre className="max-h-48 overflow-auto rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-100 dark:bg-slate-950/80 p-3 text-xs text-slate-700 dark:text-slate-300">
                   {previewText}
                 </pre>
               ) : null}
@@ -917,7 +989,7 @@ function CreatePageInner() {
                 type="button"
                 onClick={saveScenarioDraft}
                 disabled={saveBusy || publishBusy}
-                className="w-full rounded-2xl border border-emerald-600/50 bg-emerald-500/15 py-3 text-sm font-medium text-emerald-100 disabled:opacity-50"
+                className={`w-full rounded-2xl border py-3 text-sm disabled:opacity-50 ${btnEmeraldAction}`}
               >
                 {saveBusy ? "保存中…" : "场景保存"}
               </button>
@@ -925,14 +997,14 @@ function CreatePageInner() {
                 type="button"
                 onClick={() => void publishScenario()}
                 disabled={saveBusy || publishBusy}
-                className="w-full rounded-2xl border border-amber-500/50 bg-amber-500/15 py-3 text-sm font-medium text-amber-100 disabled:opacity-50"
+                className={`w-full rounded-2xl border py-3 text-sm disabled:opacity-50 ${btnAmberAction}`}
               >
                 {publishBusy ? "发布中…" : "发布场景"}
               </button>
               {saveMessage ? (
                 <p
                   className={`text-center text-xs ${
-                    saveMessage.includes("失败") ? "text-red-400" : "text-emerald-300/90"
+                    saveMessage.includes("失败") ? "text-red-600 dark:text-red-400" : accentEmeraldSoft
                   }`}
                 >
                   {saveMessage}
@@ -940,7 +1012,7 @@ function CreatePageInner() {
               ) : null}
               {returnProjectId ? (
                 <p className="text-center text-xs text-slate-500">
-                  <Link href={`/projects/${returnProjectId}`} className="text-blue-400 hover:underline">
+                  <Link href={`/projects/${returnProjectId}`} className={`${accentLink} hover:underline`}>
                     返回项目绑定场景 →
                   </Link>
                 </p>
@@ -960,7 +1032,7 @@ function CreatePageInner() {
           onClick={() => !addBusy && setAddOpen(false)}
         >
           <div
-            className="w-full max-w-md rounded-2xl border border-slate-700 bg-slate-900 p-6"
+            className="w-full max-w-md rounded-2xl border border-slate-300 dark:border-slate-700 bg-slate-100 dark:bg-slate-900 p-6"
             onClick={(e) => e.stopPropagation()}
           >
             <h3 className="text-lg font-semibold">新增场景</h3>
@@ -969,25 +1041,25 @@ function CreatePageInner() {
                 value={newScenarioName}
                 onChange={(e) => setNewScenarioName(e.target.value)}
                 placeholder="场景名称"
-                className="w-full rounded-xl border border-slate-700 bg-slate-950/70 px-3 py-2"
+                className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-100 dark:bg-slate-950/70 px-3 py-2"
               />
               <input
                 value={newScenarioCode}
                 onChange={(e) => setNewScenarioCode(e.target.value)}
                 placeholder="场景编码"
-                className="w-full rounded-xl border border-slate-700 bg-slate-950/70 px-3 py-2 font-mono text-xs"
+                className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-100 dark:bg-slate-950/70 px-3 py-2 font-mono text-xs"
               />
               <textarea
                 value={newScenarioDesc}
                 onChange={(e) => setNewScenarioDesc(e.target.value)}
                 placeholder="描述（可选）"
                 rows={2}
-                className="w-full rounded-xl border border-slate-700 bg-slate-950/70 px-3 py-2"
+                className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-100 dark:bg-slate-950/70 px-3 py-2"
               />
             </div>
             {addError ? <p className="mt-2 text-xs text-red-400">{addError}</p> : null}
             <div className="mt-4 flex justify-end gap-2">
-              <button type="button" onClick={() => setAddOpen(false)} className="rounded-xl border border-slate-600 px-4 py-2 text-sm">
+              <button type="button" onClick={() => setAddOpen(false)} className="rounded-xl border border-slate-300 dark:border-slate-600 px-4 py-2 text-sm">
                 取消
               </button>
               <button

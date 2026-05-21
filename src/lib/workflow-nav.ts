@@ -52,7 +52,7 @@ export const WORKFLOW_NAV_ITEMS: WorkflowNavItem[] = [
     href: "/settings",
     label: "用户设置",
     shortLabel: "设置",
-    description: "本地用户 ID、角色与飞书会话键。",
+    description: "用户身份、Hermes-agent MCP 工具白名单。",
   },
 ];
 

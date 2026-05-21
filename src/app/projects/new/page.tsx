@@ -67,7 +67,7 @@ export default function NewProjectPage() {
     "w-full bg-slate-800 border border-slate-600 rounded-lg px-4 py-2.5 text-white placeholder-slate-500 focus:outline-none focus:border-blue-500 transition";
 
   return (
-    <main className="min-h-screen bg-gradient-to-br from-slate-900 to-slate-800 text-white p-4 sm:p-6 md:p-8">
+    <main className="min-h-screen bg-gradient-to-br from-slate-100 to-slate-200 p-4 text-slate-900 sm:p-6 md:p-8 dark:from-slate-900 dark:to-slate-800 dark:text-white">
       <div className={CONTENT_MAX_CLASS}>
         <div className="mx-auto max-w-2xl">
           <h1 className="text-3xl font-bold mb-6">新建项目</h1>
@@ -81,7 +81,7 @@ export default function NewProjectPage() {
         <form onSubmit={handleSubmit} className="space-y-5">
           {/* 项目名称 */}
           <div>
-            <label className="block text-sm font-medium text-slate-300 mb-1.5">
+            <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1.5">
               项目名称 <span className="text-red-400">*</span>
             </label>
             <input
@@ -98,7 +98,7 @@ export default function NewProjectPage() {
 
           {/* 项目背景 */}
           <div>
-            <label className="block text-sm font-medium text-slate-300 mb-1.5">
+            <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1.5">
               项目背景
             </label>
             <textarea
@@ -114,7 +114,7 @@ export default function NewProjectPage() {
 
           {/* 目标受众 */}
           <div>
-            <label className="block text-sm font-medium text-slate-300 mb-1.5">
+            <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1.5">
               目标受众
             </label>
             <input
@@ -130,7 +130,7 @@ export default function NewProjectPage() {
 
           {/* 截止日期 */}
           <div>
-            <label className="block text-sm font-medium text-slate-300 mb-1.5">
+            <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1.5">
               截止日期
             </label>
             <input
@@ -145,7 +145,7 @@ export default function NewProjectPage() {
 
           {/* 约束条件 */}
           <div>
-            <label className="block text-sm font-medium text-slate-300 mb-1.5">
+            <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1.5">
               约束条件
             </label>
             <textarea
@@ -171,7 +171,7 @@ export default function NewProjectPage() {
             <button
               type="button"
               onClick={() => router.back()}
-              className="px-6 py-2.5 bg-slate-700 rounded-lg hover:bg-slate-600 transition font-medium"
+              className="px-6 py-2.5 bg-slate-300 dark:bg-slate-700 rounded-lg hover:bg-slate-600 transition font-medium"
             >
               取消
             </button>

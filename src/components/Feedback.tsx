@@ -84,7 +84,7 @@ function StarPicker({
 
 function ReviewCard({ review }: { review: Review }) {
   return (
-    <div className="bg-slate-800/50 border border-slate-700 rounded-lg p-4">
+    <div className="bg-slate-200 dark:bg-slate-800/50 border border-slate-300 dark:border-slate-700 rounded-lg p-4">
       <div className="flex items-center justify-between mb-2">
         <div className="flex items-center gap-2">
           <div className="w-7 h-7 rounded-full bg-blue-600/30 flex items-center justify-center text-xs font-medium text-blue-400">
@@ -106,7 +106,7 @@ function ReviewCard({ review }: { review: Review }) {
           <span className="text-xs text-slate-500">{review.created_at}</span>
         </div>
       </div>
-      <p className="text-slate-300 text-sm leading-relaxed">{review.comment}</p>
+      <p className="text-slate-700 dark:text-slate-300 text-sm leading-relaxed">{review.comment}</p>
       <div className="mt-2 flex items-center gap-1 text-xs text-slate-500">
         <span>👍</span>
         <span>{review.helpful} 人觉得有用</span>
@@ -197,7 +197,7 @@ export default function Feedback({
   return (
     <div className="space-y-6">
       {/* Summary */}
-      <div className="bg-slate-800/60 border border-slate-700 rounded-xl p-5">
+      <div className="bg-slate-200/60 dark:bg-slate-800/60 border border-slate-300 dark:border-slate-700 rounded-xl p-5">
         <h3 className="text-lg font-semibold mb-4">用户反馈</h3>
         <div className="flex flex-col sm:flex-row sm:items-center gap-4">
           <div className="text-center sm:text-left">
@@ -214,7 +214,7 @@ export default function Feedback({
             </div>
             <p className="text-slate-500 text-xs">{reviews.length} 条评价</p>
           </div>
-          <div className="hidden sm:block w-px h-16 bg-slate-700 mx-2" />
+          <div className="hidden sm:block w-px h-16 bg-slate-300 dark:bg-slate-700 mx-2" />
           <div className="flex-1">
             {[5, 4, 3, 2, 1].map((star) => {
               const count = reviews.filter((r) => r.rating === star).length;
@@ -223,7 +223,7 @@ export default function Feedback({
                 <div key={star} className="flex items-center gap-2 text-xs mb-1">
                   <span className="text-slate-400 w-4">{star}</span>
                   <span className="text-yellow-400">★</span>
-                  <div className="flex-1 bg-slate-700 rounded-full h-1.5">
+                  <div className="flex-1 bg-slate-300 dark:bg-slate-700 rounded-full h-1.5">
                     <div
                       className="bg-yellow-400 h-1.5 rounded-full transition-all"
                       style={{ width: `${pct}%` }}
@@ -238,7 +238,7 @@ export default function Feedback({
       </div>
 
       {/* Review Form */}
-      <div className="bg-slate-800/60 border border-slate-700 rounded-xl p-5">
+      <div className="bg-slate-200/60 dark:bg-slate-800/60 border border-slate-300 dark:border-slate-700 rounded-xl p-5">
         <h3 className="text-base font-semibold mb-3">发表评价</h3>
 
         {submitted && (
@@ -279,7 +279,7 @@ export default function Feedback({
               onChange={(e) => setName(e.target.value)}
               placeholder="匿名用户"
               maxLength={30}
-              className="w-full bg-slate-700/60 border border-slate-600 rounded-lg px-3 py-2 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-blue-500 transition"
+              className="w-full bg-slate-300/60 dark:bg-slate-700/60 border border-slate-300 dark:border-slate-600 rounded-lg px-3 py-2 text-sm text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:border-blue-500 transition"
             />
           </div>
 
@@ -294,7 +294,7 @@ export default function Feedback({
               placeholder={`分享您使用「${skillName}」的体验…`}
               rows={3}
               maxLength={500}
-              className="w-full bg-slate-700/60 border border-slate-600 rounded-lg px-3 py-2 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-blue-500 transition resize-none"
+              className="w-full bg-slate-300/60 dark:bg-slate-700/60 border border-slate-300 dark:border-slate-600 rounded-lg px-3 py-2 text-sm text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:border-blue-500 transition resize-none"
             />
             <p className="text-xs text-slate-500 mt-1 text-right">{comment.length}/500</p>
           </div>
@@ -308,7 +308,7 @@ export default function Feedback({
             disabled={submitting}
             className={`px-5 py-2 rounded-lg text-sm font-medium transition ${
               submitting
-                ? "bg-slate-700 text-slate-400 cursor-not-allowed"
+                ? "bg-slate-300 dark:bg-slate-700 text-slate-400 cursor-not-allowed"
                 : "bg-blue-600 hover:bg-blue-500 text-white"
             }`}
           >
