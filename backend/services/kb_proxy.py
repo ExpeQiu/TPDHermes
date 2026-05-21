@@ -7,6 +7,7 @@ KBProxy 服务：外部 ChromaDB/LLM 服务的 REST 代理层
 3. 提供统一的知识查询接口
 """
 
+import asyncio
 import logging
 import os
 from typing import Any, Optional
@@ -14,6 +15,15 @@ from typing import Any, Optional
 import httpx
 
 from backend.services.kb_cache import kb_cache_service
+from backend.services.kb_chroma_query import build_query_result, parse_chroma_query_response
+from backend.services.kb_embedding import (
+    cosine_scores,
+    embed_enabled,
+    embed_query_texts,
+    embed_texts_sync,
+    extract_searchable_text,
+    local_rank_max_docs,
+)
 
 logger = logging.getLogger("tpdx.hermes")
 
@@ -127,6 +137,164 @@ class KBProxyService:
         except Exception:
             return None
 
+    async def _build_chroma_query_payload(
+        self,
+        query_text: str,
+        n_results: int,
+    ) -> dict[str, Any]:
+        payload: dict[str, Any] = {
+            "n_results": n_results,
+            "include": ["documents", "metadatas", "distances"],
+        }
+        q = (query_text or "").strip()
+        if embed_enabled() and q:
+            embeddings = await embed_query_texts([q])
+            if embeddings and embeddings[0]:
+                payload["query_embeddings"] = embeddings
+                return payload
+            logger.warning("kb embed query returned empty vectors, fallback query_texts")
+        if q:
+            payload["query_texts"] = [q]
+        return payload
+
+    async def _post_chroma_query(
+        self,
+        client: httpx.AsyncClient,
+        collection_ref: str,
+        collection_name: str,
+        query_text: str,
+        n_results: int,
+    ) -> dict[str, Any] | None:
+        payload = await self._build_chroma_query_payload(query_text, n_results)
+        resp = await client.post(
+            f"{self.chroma_host}/api/v1/collections/{collection_ref}/query",
+            json=payload,
+        )
+        if resp.status_code == 422 and "query_texts" in payload and embed_enabled():
+            q = (query_text or "").strip()
+            if q:
+                embeddings = await embed_query_texts([q])
+                if embeddings and embeddings[0]:
+                    retry_payload = {
+                        "query_embeddings": embeddings,
+                        "n_results": n_results,
+                        "include": ["documents", "metadatas", "distances"],
+                    }
+                    resp = await client.post(
+                        f"{self.chroma_host}/api/v1/collections/{collection_ref}/query",
+                        json=retry_payload,
+                    )
+        if resp.status_code != 200:
+            logger.info(
+                "chroma query non-200 collection=%s status=%s body=%s",
+                collection_name,
+                resp.status_code,
+                (resp.text or "")[:300],
+            )
+            return None
+        self._clear_readonly_after_upstream_ok()
+        results = parse_chroma_query_response(resp.json(), collection_name=collection_name)
+        return build_query_result(results, source="chroma")
+
+    async def _fetch_collection_documents(
+        self,
+        collection_ref: str,
+        *,
+        limit: int,
+    ) -> list[tuple[str, dict[str, Any]]]:
+        try:
+            async with httpx.AsyncClient(timeout=20.0) as client:
+                resp = await client.post(
+                    f"{self.chroma_host}/api/v1/collections/{collection_ref}/get",
+                    json={
+                        "limit": limit,
+                        "offset": 0,
+                        "include": ["documents", "metadatas"],
+                    },
+                )
+                if resp.status_code != 200:
+                    return []
+                data = resp.json()
+                docs = data.get("documents") or []
+                metas = data.get("metadatas") or []
+                if docs and isinstance(docs[0], list):
+                    docs = docs[0]
+                if metas and isinstance(metas[0], list):
+                    metas = metas[0]
+                pairs: list[tuple[str, dict[str, Any]]] = []
+                for doc, meta in zip(docs, metas):
+                    pairs.append((str(doc or ""), dict(meta or {})))
+                return pairs
+        except Exception as e:
+            logger.debug("chroma fetch documents failed: %s", e)
+            return []
+
+    async def _query_collection_via_local_embed(
+        self,
+        collection_ref: str,
+        collection_name: str,
+        query_text: str,
+        n_results: int,
+    ) -> dict[str, Any] | None:
+        q = (query_text or "").strip()
+        if not q or not embed_enabled():
+            return None
+
+        pairs = await self._fetch_collection_documents(
+            collection_ref,
+            limit=local_rank_max_docs(),
+        )
+        if not pairs:
+            return None
+
+        searchable: list[tuple[str, dict[str, Any], str]] = []
+        for doc, meta in pairs:
+            text = extract_searchable_text(doc, meta)
+            if text:
+                searchable.append((doc, meta, text))
+        if not searchable:
+            return None
+
+        try:
+            texts = [q] + [item[2] for item in searchable]
+            vectors = await asyncio.to_thread(embed_texts_sync, texts)
+        except Exception as e:
+            logger.warning("local embed rank failed collection=%s err=%s", collection_name, e)
+            return None
+
+        if not vectors or len(vectors) < 2:
+            return None
+
+        q_vec = vectors[0]
+        doc_vecs = vectors[1:]
+        scores = cosine_scores(q_vec, doc_vecs)
+        ranked = sorted(
+            zip(searchable, scores),
+            key=lambda x: x[1],
+            reverse=True,
+        )[:n_results]
+
+        results: list[dict[str, Any]] = []
+        for (doc, meta, _text), score in ranked:
+            if score < 0:
+                continue
+            m = dict(meta)
+            m.setdefault("collection", collection_name)
+            results.append(
+                {
+                    "content": doc,
+                    "metadata": m,
+                    "distance": 1.0 - float(score),
+                }
+            )
+        if not results:
+            return None
+        return build_query_result(
+            results,
+            source="chroma",
+            warning="local_embed_rank_fallback",
+        )
+
     async def _probe_chroma(self) -> bool:
         try:
             async with httpx.AsyncClient(timeout=5.0) as client:
@@ -169,78 +337,43 @@ class KBProxyService:
         """
         try:
             collection_ref = await self._resolve_collection_ref(collection_name)
-            async with httpx.AsyncClient(timeout=10.0) as client:
-                resp = await client.post(
-                    f"{self.chroma_host}/api/v1/collections/{collection_ref}/query",
-                    json={
-                        "query_texts": [query_text],
-                        "n_results": n_results,
-                        "include": ["documents", "metadatas", "distances"],
-                    },
+            async with httpx.AsyncClient(timeout=15.0) as client:
+                semantic = await self._post_chroma_query(
+                    client,
+                    collection_ref,
+                    collection_name,
+                    query_text,
+                    n_results,
                 )
-                if resp.status_code == 200:
-                    self._clear_readonly_after_upstream_ok()
-                    data = resp.json()
-                    docs_outer = data.get("documents", [])
-                    metas_outer = data.get("metadatas", [])
-                    dists_outer = data.get("distances", [])
+                if semantic and int(semantic.get("count") or 0) > 0:
+                    return semantic
 
-                    if isinstance(docs_outer, list) and len(docs_outer) > 0 and isinstance(docs_outer[0], list):
-                        docs = docs_outer[0]
-                    else:
-                        docs = docs_outer if isinstance(docs_outer, list) else []
+                local = await self._query_collection_via_local_embed(
+                    collection_ref,
+                    collection_name,
+                    query_text,
+                    n_results,
+                )
+                if local and int(local.get("count") or 0) > 0:
+                    return local
 
-                    if isinstance(metas_outer, list) and len(metas_outer) > 0 and isinstance(metas_outer[0], list):
-                        metas = metas_outer[0]
-                    else:
-                        metas = metas_outer if isinstance(metas_outer, list) else []
-
-                    if isinstance(dists_outer, list) and len(dists_outer) > 0 and isinstance(dists_outer[0], list):
-                        dists = dists_outer[0]
-                    else:
-                        dists = dists_outer if isinstance(dists_outer, list) else []
-
-                    results = []
-                    for doc, meta, dist in zip(docs, metas, dists):
-                        m = dict(meta or {})
-                        if "collection" not in m:
-                            m["collection"] = collection_name
-                        results.append(
-                            {
-                                "content": doc,
-                                "metadata": m,
-                                "distance": dist,
-                            }
-                        )
-                    if not results and (query_text or "").strip():
-                        contains_fallback = await self._query_collection_via_get(
-                            collection_ref=collection_ref,
-                            collection_name=collection_name,
-                            query_text=query_text,
-                            n_results=n_results,
-                        )
-                        if contains_fallback and contains_fallback.get("count", 0) > 0:
-                            contains_fallback["warning"] = (
-                                (contains_fallback.get("warning") or "")
-                                + (" | " if contains_fallback.get("warning") else "")
-                                + "semantic_empty_used_contains_fallback"
-                            ).strip(" | ")
-                            return contains_fallback
-                    return {
-                        "results": results,
-                        "source": "chroma",
-                        "count": len(results),
-                    }
-                if resp.status_code == 422:
-                    fallback = await self._query_collection_via_get(
+                if (query_text or "").strip():
+                    contains_fallback = await self._query_collection_via_get(
                         collection_ref=collection_ref,
                         collection_name=collection_name,
                         query_text=query_text,
                         n_results=n_results,
                     )
-                    if fallback is not None:
-                        self._clear_readonly_after_upstream_ok()
-                        return fallback
+                    if contains_fallback and contains_fallback.get("count", 0) > 0:
+                        contains_fallback["warning"] = (
+                            (contains_fallback.get("warning") or "")
+                            + (" | " if contains_fallback.get("warning") else "")
+                            + "semantic_empty_used_contains_fallback"
+                        ).strip(" | ")
+                        return contains_fallback
+
+                if semantic is not None:
+                    return semantic
         except Exception as e:
             logger.debug("chroma query_collection failed: %s", e)
 
@@ -295,57 +428,36 @@ class KBProxyService:
             per = max(2, min(30, max(n_results * 3 // max(len(names), 1), n_results)))
             merged: list[dict[str, Any]] = []
             try:
-                async with httpx.AsyncClient(timeout=15.0) as client:
+                async with httpx.AsyncClient(timeout=20.0) as client:
                     for col_name in names:
                         collection_ref = await self._resolve_collection_ref(col_name)
-                        resp = await client.post(
-                            f"{self.chroma_host}/api/v1/collections/{collection_ref}/query",
-                            json={
-                                "query_texts": [query_text],
-                                "n_results": per,
-                                "include": ["documents", "metadatas", "distances"],
-                            },
+                        hit = await self._post_chroma_query(
+                            client,
+                            collection_ref,
+                            col_name,
+                            query_text,
+                            per,
                         )
-                        if resp.status_code == 422:
-                            fallback = await self._query_collection_via_get(
-                                collection_ref=collection_ref,
-                                collection_name=col_name,
-                                query_text=query_text,
-                                n_results=per,
-                            )
-                            if fallback is not None:
-                                merged.extend(fallback["results"])
+                        if hit and hit.get("results"):
+                            merged.extend(hit["results"])
                             continue
-                        if resp.status_code != 200:
+                        local = await self._query_collection_via_local_embed(
+                            collection_ref,
+                            col_name,
+                            query_text,
+                            per,
+                        )
+                        if local and local.get("results"):
+                            merged.extend(local["results"])
                             continue
-                        self._clear_readonly_after_upstream_ok()
-                        data = resp.json()
-                        docs_outer = data.get("documents", [])
-                        metas_outer = data.get("metadatas", [])
-                        dists_outer = data.get("distances", [])
-                        if isinstance(docs_outer, list) and docs_outer and isinstance(docs_outer[0], list):
-                            docs = docs_outer[0]
-                        else:
-                            docs = docs_outer if isinstance(docs_outer, list) else []
-                        if isinstance(metas_outer, list) and metas_outer and isinstance(metas_outer[0], list):
-                            metas = metas_outer[0]
-                        else:
-                            metas = metas_outer if isinstance(metas_outer, list) else []
-                        if isinstance(dists_outer, list) and dists_outer and isinstance(dists_outer[0], list):
-                            dists = dists_outer[0]
-                        else:
-                            dists = dists_outer if isinstance(dists_outer, list) else []
-
-                        for doc, meta, dist in zip(docs, metas, dists):
-                            m = dict(meta or {})
-                            m["collection"] = m.get("collection") or col_name
-                            merged.append(
-                                {
-                                    "content": doc,
-                                    "metadata": m,
-                                    "distance": dist,
-                                }
-                            )
+                        fallback = await self._query_collection_via_get(
+                            collection_ref=collection_ref,
+                            collection_name=col_name,
+                            query_text=query_text,
+                            n_results=per,
+                        )
+                        if fallback is not None:
+                            merged.extend(fallback["results"])
                 merged.sort(key=lambda r: float(r.get("distance") or 1.0))
                 sliced = merged[:n_results]
                 return {"results": sliced, "source": "chroma", "count": len(sliced)}

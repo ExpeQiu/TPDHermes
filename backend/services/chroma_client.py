@@ -119,17 +119,20 @@ class ChromaHttpClient:
         ids: list[str],
         documents: list[str],
         metadatas: list[dict[str, Any]],
+        embeddings: Optional[list[list[float]]] = None,
     ) -> None:
         existing_names = self.collection_names()
         if collection in existing_names:
             collection_ref = self._resolve_collection_ref(collection)
         else:
             collection_ref = self.ensure_collection(collection)
-        payload = {
+        payload: dict[str, Any] = {
             "ids": ids,
             "documents": documents,
             "metadatas": [chroma_sanitize_metadata(m) for m in metadatas],
         }
+        if embeddings is not None:
+            payload["embeddings"] = embeddings
         r = httpx.post(
             f"{self.base_url}/api/v1/collections/{collection_ref}/upsert",
             json=payload,

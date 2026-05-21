@@ -17,6 +17,11 @@ from typing import Any, Callable, Optional
 import httpx
 
 from backend.services.chroma_client import ChromaHttpClient, flatten_chroma_get_ids
+from backend.services.kb_embedding import (
+    embed_on_upsert_enabled,
+    embed_texts_sync,
+    extract_searchable_text,
+)
 from backend.services.kb_vault_assets import vault_relative_file
 from backend.services.kb_contract import KB_DOMAIN_ENUM, KB_REQUIRED_METADATA_KEYS
 
@@ -317,11 +322,22 @@ def run_kb_ingestion(
 
         try:
             for i in range(0, len(ids), batch_chunk_size):
+                batch_ids = ids[i : i + batch_chunk_size]
+                batch_docs = docs_out[i : i + batch_chunk_size]
+                batch_metas = metas_out[i : i + batch_chunk_size]
+                batch_embeddings = None
+                if embed_on_upsert_enabled():
+                    embed_inputs = [
+                        extract_searchable_text(doc, meta)
+                        for doc, meta in zip(batch_docs, batch_metas)
+                    ]
+                    batch_embeddings = embed_texts_sync(embed_inputs)
                 client.upsert(
                     col,
-                    ids[i : i + batch_chunk_size],
-                    docs_out[i : i + batch_chunk_size],
-                    metas_out[i : i + batch_chunk_size],
+                    batch_ids,
+                    batch_docs,
+                    batch_metas,
+                    embeddings=batch_embeddings,
                 )
             chunks_deleted_stale += delete_stale_chunks_for_doc(
                 client, col, doc_id, set(ids)
