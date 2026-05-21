@@ -34,17 +34,35 @@
 | `deploy/hermes-agent/config.yaml` | 否 | `hermes-agent`（`restart` 即可） |
 | Hermes 源码 / Agent Dockerfile | `hermes-agent` | `hermes-agent` |
 
-4. **推荐：日常 TPDHermes 增量发布命令**（不构建 Hermes）
+4. **推荐：使用 `scripts/deploy_prod.sh` 增量发布**（不构建 Hermes 镜像）
+
+脚本会按 git 变更自动选择构建 `frontend` / `backend` / `tphermes-mcp`，仅在 `deploy/hermes-agent/` 变更时 `restart hermes-agent`；`backend.Dockerfile` 已固定 CPU 版 PyTorch 并在镜像内预下载 embedding 模型，避免服务器 pip 拉 CUDA 大包。
+
+本机一键（rsync + 远程构建）：
+
+```bash
+cd /path/to/TPDHermes
+DEPLOY_SSH_PASS='你的密码' ./scripts/deploy_prod.sh --remote
+```
+
+服务器上（代码已同步后）：
+
+```bash
+cd /opt/tpdhermes/TPDHermes
+./scripts/deploy_prod.sh              # 按最近一次提交变更自动裁剪
+./scripts/deploy_prod.sh --all        # 构建 frontend + backend + tphermes-mcp
+./scripts/deploy_prod.sh --services backend,tphermes-mcp
+```
+
+手动等价命令（不构建 Hermes）：
 
 ```bash
 cd /opt/tpdhermes/TPDHermes
 
-# 仅构建 TPDHermes 相关镜像（勿加 docker-compose.src-hermes.yml）
 DOCKER_BUILDKIT=1 docker compose -f docker-compose.prod.yml build frontend backend tphermes-mcp
 
-# 拉起变更服务；hermes-agent 使用已有镜像，--no-build 禁止误触发构建
 docker compose -f docker-compose.prod.yml -f docker-compose.src-hermes.yml \
-  up -d --no-build frontend backend tphermes-mcp nginx hermes-agent
+  up -d --no-build frontend backend tphermes-mcp nginx
 ```
 
 按变更裁剪服务名，例如只改前端：
