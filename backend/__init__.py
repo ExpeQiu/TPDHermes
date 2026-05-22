@@ -137,6 +137,7 @@ from backend.routes.scenarios import router as scenarios_router
 from backend.routes.templates import router as templates_router
 from backend.routes.me import router as me_router
 from backend.routes.mcp import router as mcp_router
+from backend.routes.metrics import router as metrics_router
 
 include_router_with_version(me_router)
 include_router_with_version(mcp_router, strip_prefix="/mcp")
@@ -154,6 +155,7 @@ include_router_with_version(scenarios_router, strip_prefix="/scenarios")
 include_router_with_version(templates_router, strip_prefix="/templates")
 include_router_with_version(feishu_router,   strip_prefix="/feishu")
 include_router_with_version(feishu_bot_router, strip_prefix="/feishu/bot")
+include_router_with_version(metrics_router, strip_prefix="/metrics")
 
 
 # ── 根路径 & 健康检查 ───────────────────────────────────────

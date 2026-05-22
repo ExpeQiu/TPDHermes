@@ -24,7 +24,7 @@ import {
 import { getApiHeaders } from "@/lib/api-headers";
 import { useEffectiveUserScopeId } from "@/lib/use-effective-user-scope-id";
 import { CONTENT_MAX_CLASS } from "@/lib/content-shell";
-import { chatTransportLabel } from "@/lib/ui-labels";
+import { chatTransportLabel, kbCollectionLabel } from "@/lib/ui-labels";
 import { ChatMarkdownBody } from "@/components/chat-markdown-body";
 import { ChatMessageQuickActions } from "@/components/chat-message-quick-actions";
 
@@ -260,7 +260,7 @@ export default function ChatPage() {
   return (
     <Suspense
       fallback={
-        <div className="flex h-screen items-center justify-center bg-slate-100 text-sm text-slate-500 dark:bg-slate-900 dark:text-slate-400">
+        <div className="flex min-h-0 flex-1 items-center justify-center bg-slate-100 text-sm text-slate-500 dark:bg-slate-900 dark:text-slate-400">
           加载对话…
         </div>
       }
@@ -414,9 +414,6 @@ function ChatTaskBoundaryPanel({
                 </option>
               ))}
             </select>
-            <p className="mt-2 text-xs text-slate-600">
-              {useOrchestration ? "请求体标准字段 project_id，并拉取项目 context 摘要" : "调用 mcp_tphermes_project_get"}
-            </p>
           </div>
         </div>
 
@@ -461,7 +458,7 @@ function ChatTaskBoundaryPanel({
                   {collections.length === 0 && <option value="">暂无集合</option>}
                   {collections.map((collection) => (
                     <option key={collection} value={collection}>
-                      {collection}
+                      {kbCollectionLabel(collection)}
                     </option>
                   ))}
                 </select>
@@ -1508,13 +1505,13 @@ function ChatPageInner() {
   };
 
   return (
-    <div className="flex h-screen overflow-hidden bg-slate-100 text-slate-900 dark:bg-slate-900 dark:text-white">
+    <div className="flex min-h-0 flex-1 overflow-hidden bg-slate-100 text-slate-900 dark:bg-slate-900 dark:text-white">
       <aside
         className={`${
           sidebarOpen ? "w-64" : "w-0"
-        } flex-shrink-0 bg-slate-200 dark:bg-slate-800 border-r border-slate-300 dark:border-slate-700 flex flex-col transition-all overflow-hidden`}
+        } flex h-full min-h-0 shrink-0 flex-col overflow-hidden border-r border-slate-300 bg-slate-200 transition-all dark:border-slate-700 dark:bg-slate-800`}
       >
-        <div className="p-4 border-b border-slate-300 dark:border-slate-700 flex items-center justify-between">
+        <div className="flex shrink-0 items-center justify-between border-b border-slate-300 p-4 dark:border-slate-700">
           <span className="text-sm font-semibold text-slate-700 dark:text-slate-300">历史对话</span>
           <button
             onClick={createSession}
@@ -1524,7 +1521,7 @@ function ChatPageInner() {
           </button>
         </div>
 
-        <div className="flex-1 overflow-y-auto">
+        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
           {sessions.map((session) => (
             <div
               key={session.id}
@@ -1552,8 +1549,8 @@ function ChatPageInner() {
       </aside>
 
       <div className="flex min-h-0 min-w-0 flex-1 flex-col lg:flex-row">
-        <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-          <header className="flex items-center gap-3 px-4 py-3 border-b border-slate-300 dark:border-slate-700 bg-slate-200/80 dark:bg-slate-800/80">
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+          <header className="flex shrink-0 items-center gap-3 border-b border-slate-300 bg-slate-200/80 px-4 py-3 dark:border-slate-700 dark:bg-slate-800/80">
             <button
               onClick={() => setSidebarOpen((v) => !v)}
               className="text-slate-400 hover:text-slate-900 dark:hover:text-white transition text-sm"
@@ -1574,7 +1571,7 @@ function ChatPageInner() {
             )}
           </header>
 
-          <details className="group border-b border-slate-300 dark:border-slate-700 bg-slate-200/40 dark:bg-slate-800/40 lg:hidden">
+          <details className="group shrink-0 border-b border-slate-300 bg-slate-200/40 dark:border-slate-700 dark:bg-slate-800/40 lg:hidden">
             <summary className="flex cursor-pointer list-none items-center justify-between px-4 py-2.5 text-sm font-medium text-slate-800 dark:text-slate-200 [&::-webkit-details-marker]:hidden">
               <span>创作边界</span>
               <span className="text-xs text-slate-500 group-open:hidden">展开</span>
@@ -1585,9 +1582,9 @@ function ChatPageInner() {
             </div>
           </details>
 
-        <div className="flex-1 overflow-y-auto space-y-4 px-4 py-4 sm:px-6 md:px-8">
+        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain space-y-4 px-4 py-4 sm:px-6 md:px-8">
           {(!activeSession || activeSession.messages.length === 0) && (
-            <div className="flex flex-col items-center justify-center h-full text-slate-500">
+            <div className="flex min-h-full flex-col items-center justify-center text-slate-500">
               <p className="text-4xl mb-4">💬</p>
               <p className="text-sm">开始一段新对话吧</p>
               <p className="text-xs mt-1 text-slate-600">回车发送 · Shift+回车换行</p>
@@ -1695,7 +1692,7 @@ function ChatPageInner() {
           <div ref={messagesEndRef} />
         </div>
 
-        <div className="border-t border-slate-300 dark:border-slate-700 bg-slate-200/60 dark:bg-slate-800/60 py-4">
+        <div className="shrink-0 border-t border-slate-300 bg-slate-200/60 py-4 dark:border-slate-700 dark:bg-slate-800/60">
           {useOrchestration && orchestrationSink && selectedProjectId && includeProjectContext ? (
             <div
               className={`${CONTENT_MAX_CLASS} mb-3 px-4 text-xs leading-relaxed sm:px-6 md:px-8 ${
@@ -1767,11 +1764,11 @@ function ChatPageInner() {
         </div>
         </div>
 
-        <aside className="hidden min-h-0 w-[min(22rem,32vw)] max-w-sm shrink-0 flex-col border-l border-slate-300 dark:border-slate-700 bg-slate-200/40 dark:bg-slate-800/40 lg:flex">
-          <div className="shrink-0 border-b border-slate-300 dark:border-slate-700/80 px-3 py-2 text-xs font-medium uppercase tracking-[0.16em] text-slate-500">
+        <aside className="hidden h-full min-h-0 w-[min(22rem,32vw)] max-w-sm shrink-0 flex-col overflow-hidden border-l border-slate-300 bg-slate-200/40 dark:border-slate-700 dark:bg-slate-800/40 lg:flex">
+          <div className="shrink-0 border-b border-slate-300 px-3 py-2 text-xs font-medium uppercase tracking-[0.16em] text-slate-500 dark:border-slate-700/80">
             创作边界
           </div>
-          <div className="min-h-0 flex-1 overflow-y-auto p-3">
+          <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-3">
             <ChatTaskBoundaryPanel model={boundaryModel} narrow />
           </div>
         </aside>

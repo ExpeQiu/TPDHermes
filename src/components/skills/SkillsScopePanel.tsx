@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { skillLabel } from "@/lib/ui-labels";
 
 export type SkillScopeItem = {
   id: string;
@@ -21,6 +22,7 @@ type SkillsScopePanelProps = {
   onSkillClick?: (skill: SkillScopeItem) => void;
   onToggleSelect?: (name: string) => void;
   showManageLink?: boolean;
+  displayNameByName?: Map<string, string>;
   className?: string;
   emptyHint?: string;
 };
@@ -39,6 +41,7 @@ function SkillScopeCard({
   showManageLink,
   onSkillClick,
   onToggleSelect,
+  displayNameByName,
 }: {
   skill: SkillScopeItem;
   mode: "browse" | "select";
@@ -47,10 +50,12 @@ function SkillScopeCard({
   showManageLink: boolean;
   onSkillClick?: (skill: SkillScopeItem) => void;
   onToggleSelect?: (name: string) => void;
+  displayNameByName?: Map<string, string>;
 }) {
   const highlighted = mode === "browse" ? active : selected;
   const scopeLabel = skill.owner_id && String(skill.owner_id).trim() ? "个人" : "公共";
   const selectable = mode === "select" && skill.enabled;
+  const displayName = skillLabel(skill.name, displayNameByName?.get(skill.name));
 
   return (
     <button
@@ -68,7 +73,7 @@ function SkillScopeCard({
       } ${mode === "select" && !skill.enabled ? "cursor-not-allowed opacity-50" : ""}`}
     >
       <div className="flex items-center justify-between gap-2">
-        <span className="text-sm font-medium">{skill.name}</span>
+        <span className="text-sm font-medium">{displayName}</span>
         <span
           className={`shrink-0 rounded-full px-1.5 py-0.5 text-xs ${
             skill.enabled ? "bg-green-500/20 text-green-400" : "bg-orange-500/20 text-orange-400"
@@ -106,6 +111,7 @@ function SkillScopeSection({
   showManageLink,
   onSkillClick,
   onToggleSelect,
+  displayNameByName,
   emptyText,
 }: {
   title: string;
@@ -117,6 +123,7 @@ function SkillScopeSection({
   showManageLink: boolean;
   onSkillClick?: (skill: SkillScopeItem) => void;
   onToggleSelect?: (name: string) => void;
+  displayNameByName?: Map<string, string>;
   emptyText: string;
 }) {
   return (
@@ -137,6 +144,7 @@ function SkillScopeSection({
               showManageLink={showManageLink}
               onSkillClick={onSkillClick}
               onToggleSelect={onToggleSelect}
+              displayNameByName={displayNameByName}
             />
           ))}
         </div>
@@ -154,6 +162,7 @@ export function SkillsScopePanel({
   onSkillClick,
   onToggleSelect,
   showManageLink = true,
+  displayNameByName,
   className = "",
   emptyHint,
 }: SkillsScopePanelProps) {
@@ -195,6 +204,7 @@ export function SkillsScopePanel({
         showManageLink={showManageLink}
         onSkillClick={onSkillClick}
         onToggleSelect={onToggleSelect}
+        displayNameByName={displayNameByName}
         emptyText="暂无公共技能条目"
       />
       <section className="border-t border-slate-300 dark:border-slate-700 pt-4">
@@ -208,6 +218,7 @@ export function SkillsScopePanel({
           showManageLink={showManageLink}
           onSkillClick={onSkillClick}
           onToggleSelect={onToggleSelect}
+          displayNameByName={displayNameByName}
           emptyText="暂无上传技能，可使用技能页「上传技能」"
         />
       </section>

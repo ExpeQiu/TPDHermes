@@ -8,6 +8,9 @@ import { USER_ROLE_STORAGE_KEY } from "@/lib/api-headers";
 import {
   FEISHU_SESSION_STORAGE_KEY,
   USER_ID_STORAGE_KEY,
+  ensureDerivedUserId,
+  fetchDerivedUserId,
+  getEffectiveUserIdSync,
   loadFeishuSessionFromStorage,
   loadUserIdFromStorage,
   normalizeUserId,
@@ -30,7 +33,8 @@ const SETTINGS_TABS: { id: SettingsTab; label: string; description: string }[] =
   {
     id: "identity",
     label: "用户与身份",
-    description: "本地 user_id 与 API 请求头 X-User-ID 对齐；飞书登录后可改为 feishu:...。",
+    description:
+      "未保存时默认按本机 IP + 浏览器标识生成 auto_* 匿名 ID；保存后与 X-User-ID 对齐，飞书登录可改为 feishu:...。",
   },
   {
     id: "mcp",
@@ -94,16 +98,24 @@ function SettingsPageContent() {
   }, []);
 
   useEffect(() => {
-    setUserId(loadUserIdFromStorage().trim() || "default");
+    const stored = loadUserIdFromStorage().trim();
+    if (stored) {
+      setUserId(stored);
+    } else {
+      void fetchDerivedUserId()
+        .then((id) => setUserId(id))
+        .catch(() => setUserId(getEffectiveUserIdSync()));
+    }
     if (typeof window !== "undefined") {
       setRole(window.localStorage.getItem(USER_ROLE_STORAGE_KEY)?.trim() || "tenant_admin");
     }
     refreshMe();
   }, [refreshMe]);
 
-  const save = () => {
+  const save = async () => {
     if (typeof window === "undefined") return;
-    const u = normalizeUserId(userId.trim() || "default");
+    const raw = userId.trim();
+    const u = raw ? normalizeUserId(raw) : await ensureDerivedUserId();
     window.localStorage.setItem(USER_ID_STORAGE_KEY, u);
     window.localStorage.setItem(USER_ROLE_STORAGE_KEY, (role || "tenant_admin").trim() || "tenant_admin");
     setUserId(u);
@@ -121,7 +133,7 @@ function SettingsPageContent() {
         >
           ← 返回首页
         </Link>
-        <h1 className="mt-6 text-2xl font-semibold">设置</h1>
+        <h1 className="mt-4 text-3xl font-bold text-slate-900 dark:text-white sm:text-4xl">设置</h1>
 
         <div
           role="tablist"
@@ -222,7 +234,7 @@ function SettingsPageContent() {
                   className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
                   value={userId}
                   onChange={(e) => setUserId(e.target.value)}
-                  placeholder="default 或自定义 ID"
+                  placeholder="auto_…（由 IP+UA 生成）或自定义"
                 />
               </label>
               <label className="block text-sm">
@@ -235,8 +247,9 @@ function SettingsPageContent() {
                 />
               </label>
               <p className="text-xs text-slate-500">
-                飞书会话 token 键：<code>{FEISHU_SESSION_STORAGE_KEY}</code>，当前
-                {loadFeishuSessionFromStorage() ? "已设置" : "未设置"}。
+                未点击保存前，匿名 ID 仅在本会话内存缓存；保存后写入本机{" "}
+                <code>{USER_ID_STORAGE_KEY}</code>。飞书会话键 <code>{FEISHU_SESSION_STORAGE_KEY}</code>
+                ，当前{loadFeishuSessionFromStorage() ? "已设置" : "未设置"}。
               </p>
               {err && <p className="text-sm text-red-500 dark:text-red-400">{err}</p>}
               <button

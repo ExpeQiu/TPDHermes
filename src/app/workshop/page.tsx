@@ -1600,7 +1600,7 @@ function ScenarioSkillsBlock({
 
       {bindings.length > 0 && runSkillNames.length === 0 ? (
         <p className="text-xs text-amber-400/90">
-          已展示绑定信息，但尚无可执行白名单。请在场景编排中将技能加入「强制绑定 Skill」并发布后，再在本页执行。
+          已展示绑定信息，但尚无可执行白名单。请在场景编排中将技能加入「强制绑定技能」并发布后，再在本页执行。
         </p>
       ) : null}
     </div>

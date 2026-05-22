@@ -6,12 +6,19 @@ from fastapi import APIRouter, Request
 
 from backend.services.feishu_auth import get_user_session
 from backend.services.user_identity import (
+    derive_user_id,
     effective_user_id_for_api,
     feishu_effective_user_id,
     viewer_role,
 )
 
 router = APIRouter(tags=["user"])
+
+
+@router.get("/me/derived-user-id")
+async def api_derived_user_id(req: Request):
+    """按 IP + User-Agent 生成匿名 ID（与未传 X-User-ID 时服务端推导一致）。"""
+    return {"user_id": derive_user_id(req, None)}
 
 
 @router.get("/me")

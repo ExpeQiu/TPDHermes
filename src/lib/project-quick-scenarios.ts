@@ -1,4 +1,4 @@
-import { loadUserIdFromStorage, normalizeUserId } from "@/lib/user-id";
+import { getEffectiveUserIdSync } from "@/lib/user-id";
 
 export type ProjectQuickScenarios = {
   scenarioIds: string[];
@@ -7,7 +7,7 @@ export type ProjectQuickScenarios = {
 
 export function quickScenariosScopeId(): string {
   if (typeof window === "undefined") return "default";
-  return normalizeUserId(loadUserIdFromStorage() || "default");
+  return getEffectiveUserIdSync() || "default";
 }
 
 export function quickScenariosStorageKey(scopeUserId: string, projectId: string): string {

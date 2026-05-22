@@ -21,6 +21,7 @@ import {
   runStatusLabel,
   scenarioStatusLabel,
 } from "@/lib/ui-labels";
+import { trackUsage } from "@/lib/usage-tracker";
 
 interface Project {
   id: string;
@@ -406,6 +407,13 @@ export default function ProjectDetailPage() {
 
   const saveQuickScenarios = async () => {
     if (!id) return;
+    trackUsage({
+      eventName: "project_quick_scenarios_save",
+      feature: "projects",
+      action: "save_quick_scenarios",
+      projectId: String(id),
+      properties: { selected_count: quickDraft.scenarioIds.length },
+    });
     setQuickSaveBusy(true);
     try {
       saveProjectQuickScenarios(scopeUserId, String(id), quickDraft);
@@ -432,6 +440,12 @@ export default function ProjectDetailPage() {
 
   useEffect(() => {
     if (!id) return;
+    trackUsage({
+      eventName: "project_detail_view",
+      feature: "projects",
+      action: "detail_view",
+      projectId: String(id),
+    });
     let cancelled = false;
     setLoading(true);
     setError(null);
@@ -506,6 +520,13 @@ export default function ProjectDetailPage() {
 
   const handleApproveProjectOutput = async () => {
     if (!id || !selectedOutput) return;
+    trackUsage({
+      eventName: "project_output_approve_click",
+      feature: "projects_outputs",
+      action: "approve_click",
+      projectId: String(id),
+      properties: { output_id: selectedOutput.id },
+    });
     setOutputGovernBusy(true);
     try {
       const res = await apiFetch(`/projects/${String(id)}/outputs/${selectedOutput.id}/approve`, {
@@ -525,6 +546,13 @@ export default function ProjectDetailPage() {
 
   const handleArchiveProjectOutput = async () => {
     if (!id || !selectedOutput) return;
+    trackUsage({
+      eventName: "project_output_archive_click",
+      feature: "projects_outputs",
+      action: "archive_click",
+      projectId: String(id),
+      properties: { output_id: selectedOutput.id },
+    });
     setOutputGovernBusy(true);
     try {
       const res = await apiFetch(`/projects/${String(id)}/outputs/${selectedOutput.id}/archive`, {
@@ -542,6 +570,12 @@ export default function ProjectDetailPage() {
   };
 
   const handlePickAttachment = () => {
+    trackUsage({
+      eventName: "project_attachment_pick_click",
+      feature: "projects_attachments",
+      action: "pick_click",
+      projectId: id ? String(id) : undefined,
+    });
     setAttachmentError(null);
     fileInputRef.current?.click();
   };
@@ -550,6 +584,13 @@ export default function ProjectDetailPage() {
     const file = e.target.files?.[0];
     e.target.value = "";
     if (!file || !id) return;
+    trackUsage({
+      eventName: "project_attachment_upload",
+      feature: "projects_attachments",
+      action: "upload",
+      projectId: String(id),
+      properties: { file_name: file.name, size: file.size },
+    });
     setAttachmentUploading(true);
     setAttachmentError(null);
     const fd = new FormData();
@@ -738,7 +779,16 @@ export default function ProjectDetailPage() {
               ].map((tab) => (
                 <button
                   key={tab.key}
-                  onClick={() => setActiveTab(tab.key as typeof activeTab)}
+                  onClick={() => {
+                    trackUsage({
+                      eventName: "project_tab_switch",
+                      feature: "projects",
+                      action: "switch_tab",
+                      projectId: id ? String(id) : undefined,
+                      properties: { tab: tab.key },
+                    });
+                    setActiveTab(tab.key as typeof activeTab);
+                  }}
                   className={`flex items-center gap-1.5 px-4 py-2.5 text-sm font-medium border-b-2 transition whitespace-nowrap ${
                     activeTab === tab.key
                       ? "border-blue-500 text-slate-900 dark:text-white"
@@ -979,7 +1029,7 @@ export default function ProjectDetailPage() {
                             className="flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-slate-300 dark:border-slate-700 bg-white/90 dark:bg-slate-900/60 px-3 py-2.5 text-sm"
                           >
                             <div className="min-w-0 flex-1">
-                              <p className="truncate font-medium text-slate-100" title={a.original_filename}>
+                              <p className="truncate font-semibold text-slate-900 dark:text-slate-100" title={a.original_filename}>
                                 {a.original_filename}
                               </p>
                               <p className="text-xs text-slate-500">
@@ -1086,7 +1136,16 @@ export default function ProjectDetailPage() {
                     {outputs.map((output) => (
                       <div
                         key={output.id}
-                        onClick={() => setSelectedOutput(output)}
+                        onClick={() => {
+                          trackUsage({
+                            eventName: "project_output_open",
+                            feature: "projects_outputs",
+                            action: "open_output",
+                            projectId: id ? String(id) : undefined,
+                            properties: { output_id: output.id },
+                          });
+                          setSelectedOutput(output);
+                        }}
                         className={`cursor-pointer rounded-xl border bg-slate-200/60 dark:bg-slate-800/60 p-4 transition hover:border-slate-300 dark:border-slate-600 ${
                           selectedOutput?.id === output.id ? "border-blue-500" : "border-slate-300 dark:border-slate-700"
                         }`}

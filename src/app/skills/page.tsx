@@ -1,12 +1,13 @@
 "use client";
 
-import { useEffect, useState, useCallback, useRef } from "react";
+import { useEffect, useState, useCallback, useMemo, useRef } from "react";
 import Link from "next/link";
 import { apiFetch, readJson } from "@/lib/api";
 import { CONTENT_MAX_CLASS } from "@/lib/content-shell";
 import { SkillPackageLayoutTags } from "@/components/skills/SkillPackageLayoutTags";
 import { SkillsScopePanel } from "@/components/skills/SkillsScopePanel";
-import { skillScopeLabel } from "@/lib/ui-labels";
+import { skillLabel, skillScopeLabel } from "@/lib/ui-labels";
+import { trackUsage } from "@/lib/usage-tracker";
 
 interface Skill {
     id: string;
@@ -25,6 +26,11 @@ interface Skill {
   installed_at: string;
   updated_at: string;
 }
+
+type SkillMetaRow = {
+  name: string;
+  display_name?: string;
+};
 
 const SKILLS_BASE = "/skills/";
 
@@ -56,15 +62,27 @@ export default function SkillsPage() {
   const [actionMsg, setActionMsg] = useState("");
   const [uploading, setUploading] = useState(false);
   const [uploadNameHint, setUploadNameHint] = useState("");
+  const [skillMeta, setSkillMeta] = useState<SkillMetaRow[]>([]);
   const uploadInputRef = useRef<HTMLInputElement>(null);
 
   const fetchSkills = useCallback(async () => {
     setLoading(true);
     setError("");
     try {
-      const res = await apiFetch(SKILLS_BASE);
-      const data = await readJson<Skill[]>(res);
-      setSkills(data);
+      const [skillsRes, metaRes] = await Promise.allSettled([
+        apiFetch(SKILLS_BASE).then((res) => readJson<Skill[]>(res)),
+        apiFetch("/ws/skills/metadata").then((res) =>
+          readJson<{ skills: SkillMetaRow[] }>(res),
+        ),
+      ]);
+      if (skillsRes.status === "fulfilled") {
+        setSkills(skillsRes.value);
+      } else {
+        throw skillsRes.reason;
+      }
+      if (metaRes.status === "fulfilled") {
+        setSkillMeta(metaRes.value.skills ?? []);
+      }
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : "加载失败";
       setError(msg);
@@ -77,12 +95,40 @@ export default function SkillsPage() {
     fetchSkills();
   }, [fetchSkills]);
 
+  useEffect(() => {
+    trackUsage({
+      eventName: "skills_page_view",
+      feature: "skills",
+      action: "view",
+    });
+  }, []);
+
+  const skillDisplayByName = useMemo(
+    () =>
+      new Map(
+        skillMeta
+          .map((m) => [m.name, m.display_name?.trim() ?? ""] as const)
+          .filter(([, displayName]) => displayName.length > 0),
+      ),
+    [skillMeta],
+  );
+
+  const selectedSkillTitle = selectedSkill
+    ? skillLabel(selectedSkill.name, skillDisplayByName.get(selectedSkill.name))
+    : "";
+
   const showMsg = (msg: string) => {
     setActionMsg(msg);
     setTimeout(() => setActionMsg(""), 3000);
   };
 
   const handleToggle = async (skill: Skill) => {
+    trackUsage({
+      eventName: "skills_toggle_click",
+      feature: "skills",
+      action: "toggle_click",
+      properties: { skill_name: skill.name, enabled_to: !skill.enabled },
+    });
     try {
       const res = await apiFetch(`${SKILLS_BASE}${skill.name}/enable`, {
         method: "PATCH",
@@ -98,7 +144,13 @@ export default function SkillsPage() {
   };
 
   const handleUninstall = async (name: string) => {
-    if (!confirm(`确定要卸载 Skill「${name}」吗？`)) return;
+    if (!confirm(`确定要卸载技能「${name}」吗？`)) return;
+    trackUsage({
+      eventName: "skills_uninstall_click",
+      feature: "skills",
+      action: "uninstall_click",
+      properties: { skill_name: name },
+    });
     try {
       const res = await apiFetch(`${SKILLS_BASE}${name}`, { method: "DELETE" });
       await readJson(res);
@@ -138,6 +190,12 @@ export default function SkillsPage() {
     const file = e.target.files?.[0];
     e.target.value = "";
     if (!file) return;
+    trackUsage({
+      eventName: "skills_upload_select",
+      feature: "skills",
+      action: "upload_select",
+      properties: { file_name: file.name, size: file.size },
+    });
     setUploading(true);
     try {
       const fd = new FormData();
@@ -244,7 +302,14 @@ export default function SkillsPage() {
               loading={loading}
               mode="browse"
               selectedSkillId={selectedSkill?.id ?? null}
+              displayNameByName={skillDisplayByName}
               onSkillClick={(skill) => {
+                trackUsage({
+                  eventName: "skills_panel_select",
+                  feature: "skills_scope_panel",
+                  action: "select_skill",
+                  properties: { skill_name: skill.name },
+                });
                 const full = skills.find((s) => s.id === skill.id);
                 if (full) setSelectedSkill(full);
               }}
@@ -262,7 +327,8 @@ export default function SkillsPage() {
               <div className="bg-slate-200/60 dark:bg-slate-800/60 border border-slate-300 dark:border-slate-700 rounded-xl p-6 space-y-5">
                 <div className="flex items-start justify-between">
                   <div>
-                    <h2 className="text-2xl font-bold">{selectedSkill.name}</h2>
+                    <h2 className="text-2xl font-bold">{selectedSkillTitle}</h2>
+                    <p className="mt-1 text-xs text-slate-500">技能标识：{selectedSkill.name}</p>
                     <p className="text-slate-400 text-sm mt-1">{selectedSkill.description || "暂无描述"}</p>
                   </div>
                   <span className={`text-xs px-2 py-1 rounded-full font-medium ${

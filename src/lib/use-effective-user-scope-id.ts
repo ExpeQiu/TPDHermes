@@ -1,9 +1,14 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { USER_ID_STORAGE_KEY, loadUserIdFromStorage, normalizeUserId } from "./user-id";
+import {
+  USER_ID_STORAGE_KEY,
+  ensureDerivedUserId,
+  getEffectiveUserIdSync,
+  hasStoredUserId,
+} from "./user-id";
 
-/** 与 API 头一致的有效用户 ID；随 localStorage / 焦点同步（多标签） */
+/** 与 API 头一致的有效用户 ID；随 localStorage / 匿名推导 / 焦点同步（多标签） */
 export function useEffectiveUserScopeId(): string {
   const [epoch, setEpoch] = useState(0);
 
@@ -14,6 +19,9 @@ export function useEffectiveUserScopeId(): string {
       if (event.key === USER_ID_STORAGE_KEY) bump();
     };
     window.addEventListener("storage", onStorage);
+    if (!hasStoredUserId()) {
+      void ensureDerivedUserId().then(bump).catch(() => bump());
+    }
     return () => {
       window.removeEventListener("focus", bump);
       window.removeEventListener("storage", onStorage);
@@ -21,5 +29,5 @@ export function useEffectiveUserScopeId(): string {
   }, []);
 
   void epoch;
-  return normalizeUserId(loadUserIdFromStorage() || "default");
+  return getEffectiveUserIdSync();
 }

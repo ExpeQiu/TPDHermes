@@ -3,6 +3,7 @@ import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import GlobalWorkflowNav from "@/components/GlobalWorkflowNav";
 import { ThemeInit } from "@/components/ThemeInit";
+import { UserIdentityInit } from "@/components/UserIdentityInit";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -47,10 +48,11 @@ export default function RootLayout({
           }}
         />
       </head>
-      <body className="min-h-dvh bg-slate-50 font-sans text-slate-900 antialiased dark:bg-slate-950 dark:text-slate-100">
+      <body className="flex h-dvh min-h-0 flex-col bg-slate-50 font-sans text-slate-900 antialiased dark:bg-slate-950 dark:text-slate-100">
         <ThemeInit />
+        <UserIdentityInit />
         <GlobalWorkflowNav />
-        {children}
+        <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">{children}</div>
       </body>
     </html>
   );

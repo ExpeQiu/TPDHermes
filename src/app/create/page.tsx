@@ -815,6 +815,7 @@ function CreatePageInner() {
                     mode="select"
                     selectedNames={contractAllowedSkills}
                     onToggleSelect={toggleSkill}
+                    displayNameByName={skillDisplayByName}
                   />
                 ) : (
                   <div className="rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-200/60 dark:bg-slate-800/60 p-4">

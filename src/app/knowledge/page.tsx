@@ -2392,7 +2392,7 @@ export default function KnowledgePage() {
   const renderSearchView = () => (
     <div>
       <p className="text-xs text-slate-500 mb-2">
-        默认跨全部 collection 检索（/kb/query-all）；可选限定其一。
+        默认跨全部知识集合检索（/kb/query-all）；可选限定其一。
       </p>
       <div className="flex flex-wrap gap-3 mb-4">
         <select
@@ -2400,7 +2400,7 @@ export default function KnowledgePage() {
           onChange={(e) => setSearchScopeCollection(e.target.value)}
           className="rounded-lg border border-slate-300 dark:border-slate-700 bg-slate-100 dark:bg-slate-900 px-3 py-2 text-sm text-slate-900 dark:text-white min-w-[200px]"
         >
-          <option value="">全部 collection</option>
+          <option value="">全部知识集合</option>
           {(collections.length ? collections : MOCK_COLLECTIONS).map((c) => (
             <option key={c.name} value={c.name}>
               {kbCollectionLabel(c.name, { projectNames: projectNameMap })}

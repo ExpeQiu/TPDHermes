@@ -39,3 +39,4 @@ from backend.models.kb_kg_link import KbKgLink as _KbKgLink  # noqa: E402, F401
 from backend.models.kb_ingest_job import KbIngestJob as _KbIngestJob  # noqa: E402, F401
 from backend.models.kb_source_file import KbSourceFile as _KbSourceFile  # noqa: E402, F401
 from backend.models import kg_entities as _kg_entities  # noqa: E402, F401
+from backend.models.usage_event import UsageEvent as _UsageEvent  # noqa: E402, F401

@@ -4,8 +4,8 @@
 import {
   FEISHU_SESSION_STORAGE_KEY,
   USER_ID_STORAGE_KEY,
+  getEffectiveUserIdSync,
   loadFeishuSessionFromStorage,
-  loadUserIdFromStorage,
   normalizeUserId,
 } from "./user-id";
 
@@ -22,11 +22,13 @@ export function loadUserRoleFromStorage(): string {
 
 export function getApiHeaders(): Record<string, string> {
   if (typeof window === "undefined") return {};
-  const userId = normalizeUserId(loadUserIdFromStorage().trim() || "default");
   const headers: Record<string, string> = {
-    "X-User-ID": userId,
     "X-User-Role": loadUserRoleFromStorage(),
   };
+  const userId = getEffectiveUserIdSync();
+  if (userId) {
+    headers["X-User-ID"] = userId;
+  }
   const sess =
     loadFeishuSessionFromStorage().trim() ||
     (typeof window !== "undefined"

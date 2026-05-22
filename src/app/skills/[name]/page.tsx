@@ -10,7 +10,8 @@ import {
 } from "@/components/skills/SkillPackageLayoutTags";
 import { apiFetch, readJson } from "@/lib/api";
 import { CONTENT_MAX_CLASS } from "@/lib/content-shell";
-import { skillScopeLabel } from "@/lib/ui-labels";
+import { skillLabel, skillScopeLabel } from "@/lib/ui-labels";
+import { trackUsage } from "@/lib/usage-tracker";
 
 interface SkillMeta {
   id: string;
@@ -41,6 +42,11 @@ interface SkillPackage {
   tree: PackageTreeNode[];
 }
 
+interface SkillMetaRow {
+  name: string;
+  display_name?: string;
+}
+
 interface PackageFilePayload {
   path: string;
   editable: boolean;
@@ -51,6 +57,15 @@ interface PackageFilePayload {
 }
 
 const SKILLS_BASE = "/skills/";
+
+function skillSourceLabel(source: string | null | undefined): string {
+  if (!source) return "未知";
+  const k = source.toLowerCase();
+  if (k === "local") return "本地";
+  if (k === "upload" || k === "zip") return "上传";
+  if (k === "marketplace") return "市场";
+  return source;
+}
 
 function formatBytes(n: number): string {
   if (n < 1024) return `${n} B`;
@@ -126,6 +141,10 @@ export default function SkillDetailPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [actionMsg, setActionMsg] = useState("");
+  const [displayName, setDisplayName] = useState("");
+  const [editingDisplayName, setEditingDisplayName] = useState(false);
+  const [draftDisplayName, setDraftDisplayName] = useState("");
+  const [savingDisplayName, setSavingDisplayName] = useState(false);
 
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
   const [fileContent, setFileContent] = useState("");
@@ -153,6 +172,17 @@ export default function SkillDetailPage() {
       const packageData = await readJson<SkillPackage>(pkgRes);
       setSkill(meta);
       setPkg(packageData);
+      try {
+        const metadataRes = await apiFetch("/ws/skills/metadata");
+        const metadata = await readJson<{ skills: SkillMetaRow[] }>(metadataRes);
+        const matched = metadata.skills.find((item) => item.name === meta.name);
+        const nextDisplayName = matched?.display_name?.trim() ?? "";
+        setDisplayName(nextDisplayName);
+        setDraftDisplayName(nextDisplayName || meta.name);
+      } catch {
+        setDisplayName("");
+        setDraftDisplayName(meta.name);
+      }
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "加载失败");
     } finally {
@@ -164,8 +194,24 @@ export default function SkillDetailPage() {
     if (skillName) loadAll();
   }, [skillName, loadAll]);
 
+  useEffect(() => {
+    if (!skillName) return;
+    trackUsage({
+      eventName: "skill_detail_view",
+      feature: "skills",
+      action: "detail_view",
+      properties: { skill_name: skillName },
+    });
+  }, [skillName]);
+
   const loadFile = useCallback(
     async (relPath: string) => {
+      trackUsage({
+        eventName: "skill_package_file_open",
+        feature: "skills_package",
+        action: "open_file",
+        properties: { skill_name: skillName, path: relPath },
+      });
       setFileLoading(true);
       setSelectedPath(relPath);
       setFileDirty(false);
@@ -195,6 +241,12 @@ export default function SkillDetailPage() {
 
   const handleSaveFile = async () => {
     if (!selectedPath || !fileEditable) return;
+    trackUsage({
+      eventName: "skill_package_file_save",
+      feature: "skills_package",
+      action: "save_file",
+      properties: { skill_name: skillName, path: selectedPath },
+    });
     setSaving(true);
     try {
       const res = await apiFetch(
@@ -217,6 +269,12 @@ export default function SkillDetailPage() {
   };
 
   const handleCreateLayoutItem = async (itemKey: string) => {
+    trackUsage({
+      eventName: "skill_package_layout_create",
+      feature: "skills_package",
+      action: "create_layout_item",
+      properties: { skill_name: skillName, item_key: itemKey },
+    });
     setCreatingItem(itemKey);
     try {
       const res = await apiFetch(
@@ -241,6 +299,12 @@ export default function SkillDetailPage() {
 
   const handleToggle = async () => {
     if (!skill) return;
+    trackUsage({
+      eventName: "skill_toggle_click",
+      feature: "skills",
+      action: "toggle_click",
+      properties: { skill_name: skill.name, enabled_to: !skill.enabled },
+    });
     try {
       const res = await apiFetch(`${SKILLS_BASE}${skill.name}/enable`, {
         method: "PATCH",
@@ -252,6 +316,58 @@ export default function SkillDetailPage() {
       showMsg(`${skill.name} 已${updated.enabled ? "启用" : "禁用"}`);
     } catch (e: unknown) {
       showMsg(`操作失败: ${e instanceof Error ? e.message : ""}`);
+    }
+  };
+
+  const handleSaveDisplayName = async () => {
+    if (!skill) return;
+    const next = draftDisplayName.trim();
+    if (!next) {
+      showMsg("显示名不能为空");
+      return;
+    }
+    setSavingDisplayName(true);
+    try {
+      let currentMeta: Record<string, unknown> = {};
+      try {
+        const readRes = await apiFetch(
+          `${SKILLS_BASE}${encodeURIComponent(skill.name)}/package/file?path=${encodeURIComponent("skill.json")}`,
+        );
+        const payload = await readJson<PackageFilePayload>(readRes);
+        if (payload.content?.trim()) {
+          const parsed = JSON.parse(payload.content);
+          if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+            currentMeta = parsed as Record<string, unknown>;
+          }
+        }
+      } catch {
+        currentMeta = {};
+      }
+      const updatedMeta: Record<string, unknown> = {
+        ...currentMeta,
+        name: next,
+      };
+      const writeRes = await apiFetch(
+        `${SKILLS_BASE}${encodeURIComponent(skill.name)}/package/file`,
+        {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            path: "skill.json",
+            content: `${JSON.stringify(updatedMeta, null, 2)}\n`,
+          }),
+        },
+      );
+      await readJson(writeRes);
+      setDisplayName(next);
+      setDraftDisplayName(next);
+      setEditingDisplayName(false);
+      await loadAll();
+      showMsg("显示名已更新");
+    } catch (e: unknown) {
+      showMsg(`显示名保存失败: ${e instanceof Error ? e.message : ""}`);
+    } finally {
+      setSavingDisplayName(false);
     }
   };
 
@@ -276,6 +392,8 @@ export default function SkillDetailPage() {
     );
   }
 
+  const skillTitle = skillLabel(skill.name, displayName);
+
   return (
     <main className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-slate-100 p-4 text-slate-900 sm:p-6 md:p-8 dark:from-slate-950 dark:via-slate-900 dark:to-slate-950 dark:text-white">
       <div className={CONTENT_MAX_CLASS}>
@@ -284,10 +402,42 @@ export default function SkillDetailPage() {
             <Link href="/skills" className="text-sm text-slate-400 transition hover:text-slate-900 dark:hover:text-white">
               ← 技能策略
             </Link>
-            <h1 className="mt-3 text-2xl font-bold sm:text-3xl">{skill.name}</h1>
+            <div className="mt-3 flex flex-wrap items-center gap-2">
+              <h1 className="text-2xl font-bold sm:text-3xl">{skillTitle}</h1>
+              <button
+                type="button"
+                onClick={() => {
+                  setDraftDisplayName(displayName || skill.name);
+                  setEditingDisplayName((v) => !v);
+                }}
+                className="rounded-lg border border-slate-300 dark:border-slate-600 bg-slate-200/60 dark:bg-slate-800/60 px-2.5 py-1 text-xs transition hover:border-blue-500"
+              >
+                {editingDisplayName ? "收起修改" : "修改显示名"}
+              </button>
+            </div>
+            <p className="mt-1 text-xs text-slate-500">技能标识：{skill.name}</p>
             <p className="mt-1 max-w-2xl text-sm text-slate-500">
               {skill.description || "暂无描述"} · v{skill.version} · {skillScopeLabel(skill.scope)}
             </p>
+            {editingDisplayName ? (
+              <div className="mt-3 flex max-w-xl flex-wrap items-center gap-2 rounded-lg border border-slate-300 dark:border-slate-700 bg-slate-200/40 dark:bg-slate-800/40 p-3">
+                <input
+                  type="text"
+                  value={draftDisplayName}
+                  onChange={(e) => setDraftDisplayName(e.target.value)}
+                  placeholder="请输入显示名"
+                  className="min-w-[14rem] flex-1 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950/70 px-3 py-2 text-sm outline-none focus:border-blue-500"
+                />
+                <button
+                  type="button"
+                  disabled={savingDisplayName}
+                  onClick={() => void handleSaveDisplayName()}
+                  className="rounded-lg bg-blue-600 px-3 py-2 text-xs font-medium text-white disabled:opacity-50"
+                >
+                  {savingDisplayName ? "保存中…" : "保存"}
+                </button>
+              </div>
+            ) : null}
           </div>
           <div className="flex flex-wrap gap-2">
             <span
@@ -319,7 +469,7 @@ export default function SkillDetailPage() {
 
         <div className="mb-6 grid grid-cols-1 gap-4 lg:grid-cols-3">
           <div className="rounded-2xl border border-slate-200 bg-white/80 p-4 dark:border-slate-800 dark:bg-slate-900/50 lg:col-span-2">
-            <h2 className="text-sm font-semibold text-slate-700 dark:text-slate-300">标准 Skill 目录结构</h2>
+            <h2 className="text-sm font-semibold text-slate-700 dark:text-slate-300">标准技能目录结构</h2>
             <pre className="mt-3 overflow-x-auto rounded-lg bg-slate-100 p-3 font-mono text-xs text-slate-700 dark:bg-slate-950 dark:text-slate-300">
 {`${skill.name}/
 ├── SKILL.md          # 核心（Agent 规则）
@@ -346,7 +496,7 @@ export default function SkillDetailPage() {
             <dl className="mt-3 space-y-2 text-xs">
               <div>
                 <dt className="text-slate-500">来源</dt>
-                <dd className="font-medium">{skill.source}</dd>
+                <dd className="font-medium">{skillSourceLabel(skill.source)}</dd>
               </div>
               <div>
                 <dt className="text-slate-500">安装</dt>

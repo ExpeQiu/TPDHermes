@@ -9,7 +9,7 @@ export default function GlobalWorkflowNav() {
   const pathname = usePathname();
 
   return (
-    <header className="sticky top-0 z-40 border-b border-slate-200 bg-white/85 backdrop-blur-md dark:border-slate-800 dark:bg-slate-950/85">
+    <header className="z-40 shrink-0 border-b border-slate-200 bg-white/85 backdrop-blur-md dark:border-slate-800 dark:bg-slate-950/85">
       <div className={GLOBAL_NAV_INNER_CLASS}>
         <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
           <div className="flex items-center gap-3">
