@@ -70,9 +70,17 @@ async def lifespan(app: FastAPI):
         await conn.run_sync(Base.metadata.create_all)
         await conn.run_sync(run_sqlite_migrations)
     logger.info("Database ready.")
-    from backend.services.kb_embedding import warmup_embed_model
+    from backend.services.kb_embedding import (
+        embed_warmup_blocking_enabled,
+        warmup_embed_model,
+    )
 
-    asyncio.create_task(warmup_embed_model())
+    if embed_warmup_blocking_enabled():
+        logger.info("KB embedding warmup mode=blocking")
+        await warmup_embed_model()
+    else:
+        logger.info("KB embedding warmup mode=background")
+        asyncio.create_task(warmup_embed_model())
     yield
     logger.info("Shutting down...")
 

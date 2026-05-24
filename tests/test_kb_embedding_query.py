@@ -4,6 +4,8 @@ import pytest
 
 from backend.services.kb_embedding import (
     cosine_scores,
+    embed_warmup_blocking_enabled,
+    embed_warmup_timeout_sec,
     extract_searchable_text,
 )
 from backend.services.kb_proxy import KBProxyService
@@ -90,3 +92,20 @@ async def test_semantic_empty_then_contains_fallback(monkeypatch):
     assert out["count"] == 1
     assert out["source"] == "chroma"
     assert "semantic_empty_used_contains_fallback" in (out.get("warning") or "")
+
+
+def test_embed_warmup_blocking_env(monkeypatch):
+    monkeypatch.setenv("KB_EMBED_ENABLED", "1")
+    monkeypatch.setenv("KB_EMBED_WARMUP", "1")
+    monkeypatch.setenv("KB_EMBED_WARMUP_BLOCKING", "true")
+    assert embed_warmup_blocking_enabled() is True
+
+    monkeypatch.setenv("KB_EMBED_WARMUP_BLOCKING", "0")
+    assert embed_warmup_blocking_enabled() is False
+
+
+def test_embed_warmup_timeout_env(monkeypatch):
+    monkeypatch.setenv("KB_EMBED_WARMUP_TIMEOUT_SEC", "12.5")
+    assert embed_warmup_timeout_sec() == 12.5
+    monkeypatch.setenv("KB_EMBED_WARMUP_TIMEOUT_SEC", "bad")
+    assert embed_warmup_timeout_sec() == 180.0

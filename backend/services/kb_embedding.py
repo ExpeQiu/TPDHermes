@@ -12,6 +12,7 @@ import logging
 import os
 import re
 from functools import lru_cache
+from pathlib import Path
 from typing import Any, Sequence
 
 logger = logging.getLogger("tpdx.hermes.kb_embed")
@@ -32,6 +33,27 @@ def embed_on_upsert_enabled() -> bool:
 
 def embed_model_name() -> str:
     return os.getenv("KB_EMBED_MODEL", "BAAI/bge-small-zh-v1.5").strip()
+
+
+def _default_embed_cache_dir() -> str:
+    # backend/services/kb_embedding.py -> 项目根目录
+    root = Path(__file__).resolve().parents[2]
+    return str(root / ".cache" / "huggingface")
+
+
+def embed_cache_dir() -> str:
+    return os.getenv("KB_EMBED_CACHE_DIR", _default_embed_cache_dir()).strip()
+
+
+def _configure_embed_cache_env() -> str:
+    cache_root = embed_cache_dir()
+    Path(cache_root).mkdir(parents=True, exist_ok=True)
+    # 统一 HuggingFace / Transformers / SentenceTransformers 缓存根目录
+    os.environ.setdefault("HF_HOME", cache_root)
+    os.environ.setdefault("HUGGINGFACE_HUB_CACHE", str(Path(cache_root) / "hub"))
+    os.environ.setdefault("TRANSFORMERS_CACHE", str(Path(cache_root) / "transformers"))
+    os.environ.setdefault("SENTENCE_TRANSFORMERS_HOME", str(Path(cache_root) / "sentence_transformers"))
+    return cache_root
 
 
 def local_rank_max_docs() -> int:
@@ -58,7 +80,8 @@ def _load_model():
     from sentence_transformers import SentenceTransformer
 
     name = embed_model_name()
-    logger.info("loading sentence-transformers model=%s", name)
+    cache_root = _configure_embed_cache_env()
+    logger.info("loading sentence-transformers model=%s cache_dir=%s", name, cache_root)
     return SentenceTransformer(name)
 
 
@@ -91,13 +114,35 @@ def embed_warmup_enabled() -> bool:
     return embed_enabled() and raw not in ("0", "false", "no", "off")
 
 
+def embed_warmup_blocking_enabled() -> bool:
+    """是否在启动阶段阻塞等待 embedding 预热完成。"""
+    raw = os.getenv("KB_EMBED_WARMUP_BLOCKING", "0").strip().lower()
+    return embed_warmup_enabled() and raw in ("1", "true", "yes", "on")
+
+
+def embed_warmup_timeout_sec() -> float:
+    """阻塞预热超时时间，0 或负值表示不设超时。"""
+    raw = os.getenv("KB_EMBED_WARMUP_TIMEOUT_SEC", "180").strip()
+    try:
+        val = float(raw)
+    except ValueError:
+        val = 180.0
+    return val
+
+
 async def warmup_embed_model() -> None:
     """后台预加载 embedding 模型，避免首条 KB 查询冷启动。"""
     if not embed_warmup_enabled():
         return
+    timeout_sec = embed_warmup_timeout_sec()
     try:
-        await asyncio.to_thread(embed_texts_sync, ["warmup"])
+        if timeout_sec > 0:
+            await asyncio.wait_for(asyncio.to_thread(embed_texts_sync, ["warmup"]), timeout=timeout_sec)
+        else:
+            await asyncio.to_thread(embed_texts_sync, ["warmup"])
         logger.info("kb embed model warmup ok model=%s", embed_model_name())
+    except asyncio.TimeoutError:
+        logger.warning("kb embed model warmup timeout model=%s timeout=%ss", embed_model_name(), timeout_sec)
     except Exception as e:
         logger.warning("kb embed model warmup failed: %s", e)
 

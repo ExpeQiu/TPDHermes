@@ -51,6 +51,13 @@ if [[ -f "$ROOT/.env.local" ]]; then
 fi
 export HERMES_CHAT_API_URL="${HERMES_CHAT_API_URL:-http://127.0.0.1:8642/v1/chat/completions}"
 export HERMES_CHAT_API_KEY="${HERMES_CHAT_API_KEY:-${API_SERVER_KEY:-}}"
+export KB_EMBED_CACHE_DIR="${KB_EMBED_CACHE_DIR:-$ROOT/.cache/huggingface}"
+export HF_HOME="${HF_HOME:-$KB_EMBED_CACHE_DIR}"
+export HUGGINGFACE_HUB_CACHE="${HUGGINGFACE_HUB_CACHE:-$KB_EMBED_CACHE_DIR/hub}"
+export TRANSFORMERS_CACHE="${TRANSFORMERS_CACHE:-$KB_EMBED_CACHE_DIR/transformers}"
+export SENTENCE_TRANSFORMERS_HOME="${SENTENCE_TRANSFORMERS_HOME:-$KB_EMBED_CACHE_DIR/sentence_transformers}"
+mkdir -p "$KB_EMBED_CACHE_DIR" "$HUGGINGFACE_HUB_CACHE" "$TRANSFORMERS_CACHE" "$SENTENCE_TRANSFORMERS_HOME"
+echo "[start] KB embedding cache dir: $KB_EMBED_CACHE_DIR"
 if [[ -f "$ROOT/.venv/bin/pip" && -f "$ROOT/requirements.txt" ]]; then
   echo "[start] sync python deps (requirements.txt)"
   "$ROOT/.venv/bin/pip" install -q -r "$ROOT/requirements.txt"

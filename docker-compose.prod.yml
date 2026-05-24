@@ -4,8 +4,12 @@ services:
     container_name: tphermes-nginx
     restart: unless-stopped
     depends_on:
-      - frontend
-      - backend
+      frontend:
+        condition: service_started
+      backend:
+        condition: service_healthy
+      hermes-agent:
+        condition: service_started
     ports:
       - "8033:80"
     volumes:
@@ -24,7 +28,8 @@ services:
     container_name: tphermes-frontend
     restart: unless-stopped
     depends_on:
-      - backend
+      backend:
+        condition: service_healthy
     environment:
       - NODE_ENV=production
       - PORT=3000
@@ -41,8 +46,6 @@ services:
     image: ${TPDHERMES_BACKEND_IMAGE:-tphermes-backend:prod}
     container_name: tphermes-backend
     restart: unless-stopped
-    depends_on:
-      - hermes-agent
     environment:
       - DATABASE_URL=${DATABASE_URL:-sqlite+aiosqlite:////app/data/tphermes.db}
       - HERMES_CHAT_API_URL=${HERMES_CHAT_API_URL:-http://hermes-agent:8642/v1/chat/completions}
@@ -54,14 +57,33 @@ services:
       - KB_EMBED_ENABLED=${KB_EMBED_ENABLED:-1}
       - KB_EMBED_ON_UPSERT=${KB_EMBED_ON_UPSERT:-1}
       - KB_EMBED_MODEL=${KB_EMBED_MODEL:-BAAI/bge-small-zh-v1.5}
+      - KB_EMBED_CACHE_DIR=${KB_EMBED_CACHE_DIR:-/app/.cache/huggingface}
+      - KB_EMBED_WARMUP=${KB_EMBED_WARMUP:-1}
+      - KB_EMBED_WARMUP_BLOCKING=${KB_EMBED_WARMUP_BLOCKING:-1}
+      - KB_EMBED_WARMUP_TIMEOUT_SEC=${KB_EMBED_WARMUP_TIMEOUT_SEC:-180}
+      - HF_HOME=${HF_HOME:-/app/.cache/huggingface}
+      - HUGGINGFACE_HUB_CACHE=${HUGGINGFACE_HUB_CACHE:-/app/.cache/huggingface/hub}
+      - TRANSFORMERS_CACHE=${TRANSFORMERS_CACHE:-/app/.cache/huggingface/transformers}
+      - SENTENCE_TRANSFORMERS_HOME=${SENTENCE_TRANSFORMERS_HOME:-/app/.cache/huggingface/sentence_transformers}
       - KB_LOCAL_RANK_MAX_DOCS=${KB_LOCAL_RANK_MAX_DOCS:-500}
       - FEISHU_APP_ID=${FEISHU_APP_ID:-}
       - FEISHU_APP_SECRET=${FEISHU_APP_SECRET:-}
       - HERMES_AGENT_CONFIG_PATH=${HERMES_AGENT_CONFIG_PATH:-/app/hermes-agent/config.yaml}
     expose:
       - "8000"
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >
+          python -c "import sys, urllib.request;
+          sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3).getcode() == 200 else 1)"
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 120s
     volumes:
       - tphermes-data:/app/data
+      - tphermes-hf-cache:/app/.cache/huggingface
       - ./deploy/hermes-agent/config.yaml:/app/hermes-agent/config.yaml
     networks:
       - tphermes-net
@@ -79,6 +101,14 @@ services:
       - KB_EMBED_ENABLED=${KB_EMBED_ENABLED:-1}
       - KB_EMBED_ON_UPSERT=${KB_EMBED_ON_UPSERT:-1}
       - KB_EMBED_MODEL=${KB_EMBED_MODEL:-BAAI/bge-small-zh-v1.5}
+      - KB_EMBED_CACHE_DIR=${KB_EMBED_CACHE_DIR:-/app/.cache/huggingface}
+      - KB_EMBED_WARMUP=${KB_EMBED_WARMUP:-1}
+      - KB_EMBED_WARMUP_BLOCKING=${KB_EMBED_WARMUP_BLOCKING:-1}
+      - KB_EMBED_WARMUP_TIMEOUT_SEC=${KB_EMBED_WARMUP_TIMEOUT_SEC:-180}
+      - HF_HOME=${HF_HOME:-/app/.cache/huggingface}
+      - HUGGINGFACE_HUB_CACHE=${HUGGINGFACE_HUB_CACHE:-/app/.cache/huggingface/hub}
+      - TRANSFORMERS_CACHE=${TRANSFORMERS_CACHE:-/app/.cache/huggingface/transformers}
+      - SENTENCE_TRANSFORMERS_HOME=${SENTENCE_TRANSFORMERS_HOME:-/app/.cache/huggingface/sentence_transformers}
       - KB_LOCAL_RANK_MAX_DOCS=${KB_LOCAL_RANK_MAX_DOCS:-500}
       - TAVILY_API_KEY=${TAVILY_API_KEY:-}
       - TAVILY_REMOTE_MCP_URL=${TAVILY_REMOTE_MCP_URL:-https://mcp.tavily.com/mcp/}
@@ -94,6 +124,7 @@ services:
       - "8801"
     volumes:
       - tphermes-data:/app/data
+      - tphermes-hf-cache:/app/.cache/huggingface
     networks:
       - tphermes-net
 
@@ -106,7 +137,10 @@ services:
     container_name: hermes-agent
     restart: unless-stopped
     depends_on:
-      - tphermes-mcp
+      tphermes-mcp:
+        condition: service_started
+      backend:
+        condition: service_healthy
     command: ["gateway", "run"]
     environment:
       - HERMES_UID=${HERMES_UID:-10000}
@@ -155,6 +189,7 @@ services:
 
 volumes:
   tphermes-data:
+  tphermes-hf-cache:
   hermes-agent-data:
 
 networks:
