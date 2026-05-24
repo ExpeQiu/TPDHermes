@@ -56,6 +56,46 @@ router = APIRouter(prefix="/tasks", tags=["tasks"])
 runs_router = APIRouter(prefix="/runs", tags=["runs"])
 
 
+def _env_int(name: str, default: int, *, min_value: int = 1, max_value: int = 100_000) -> int:
+    raw = os.getenv(name, "").strip()
+    if not raw:
+        return default
+    try:
+        v = int(raw)
+    except ValueError:
+        return default
+    return max(min_value, min(max_value, v))
+
+
+def _trim_chat_messages(messages: list[dict[str, str]]) -> list[dict[str, str]]:
+    """
+    P0：限制历史窗口，避免每轮输入无限膨胀。
+    仅保留最近 N 条，并截断超长 content。
+    """
+    max_messages = _env_int("CHAT_HISTORY_MAX_MESSAGES", 12, min_value=2, max_value=200)
+    max_chars = _env_int("CHAT_HISTORY_MAX_CHARS_PER_MESSAGE", 2000, min_value=200, max_value=20_000)
+    if len(messages) > max_messages:
+        messages = messages[-max_messages:]
+    out: list[dict[str, str]] = []
+    for m in messages:
+        content = (m.get("content") or "").strip()
+        if len(content) > max_chars:
+            content = content[:max_chars] + "\n...(历史过长已截断)"
+        out.append({"role": m.get("role", "user"), "content": content})
+    return out
+
+
+def _apply_chat_generation_limits(body: dict[str, Any]) -> None:
+    """
+    P0：默认注入输出上限，降低长响应导致的 20s+ 等待。
+    """
+    cap = _env_int("CHAT_MAX_TOKENS", 700, min_value=64, max_value=8_192)
+    body.setdefault("max_tokens", cap)
+    # 兼容不同上游字段命名（OpenAI/Anthropic 风格）。
+    body.setdefault("max_completion_tokens", cap)
+    body.setdefault("max_output_tokens", cap)
+
+
 def _chat_client(timeout: httpx.Timeout) -> httpx.AsyncClient:
     return httpx.AsyncClient(timeout=timeout, trust_env=False)
 
@@ -446,13 +486,14 @@ async def execute_task(req: Request, task_req: TaskExecuteRequest, db: AsyncSess
             },
         )
 
-    messages = merge_chat_messages(eff_request.messages, user_text)
+    messages = _trim_chat_messages(merge_chat_messages(eff_request.messages, user_text))
     upstream_body = build_chat_completion_body(
         payload,
         messages,
         workshop_skill_name=workshop_skill if is_workshop else None,
         task_input=eff_request.task_input if is_workshop else None,
     )
+    _apply_chat_generation_limits(upstream_body)
     upstream_body["stream"] = eff_request.stream
 
     if not eff_request.stream:

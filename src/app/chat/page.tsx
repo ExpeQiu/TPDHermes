@@ -60,6 +60,12 @@ interface ChatSession {
   taskEntrySummary?: string;
   /** /create 多选知识库、技能子集与输出预设，供编排 overrides 与上下文构建 */
   quickCreateOverrides?: QuickCreateFlowOverrides;
+  /** 会话级上下文开关与选择，避免跨会话串扰 */
+  selectedProjectId?: string;
+  selectedCollection?: string;
+  includeProjectContext?: boolean;
+  includeKnowledgeContext?: boolean;
+  includeSkillsContext?: boolean;
 }
 
 function chatSessionsStorageKey(scopeUserId: string): string {
@@ -555,6 +561,7 @@ function ChatPageInner() {
   const sessionsRef = useRef<ChatSession[]>([]);
   const chatDeepLinkAppliedRef = useRef(false);
   const activeIdRef = useRef<string | null>(null);
+  const sessionScopeHydratingRef = useRef(false);
 
   const chatApiBase =
     process.env.NEXT_PUBLIC_CHAT_API_URL ??
@@ -678,6 +685,11 @@ function ChatPageInner() {
         title: "新对话",
         messages: [],
         createdAt: Date.now(),
+        selectedProjectId: "",
+        selectedCollection: "",
+        includeProjectContext: false,
+        includeKnowledgeContext: false,
+        includeSkillsContext: false,
       };
       saveSessions(scopeUserId, [first]);
       sessionsRef.current = [first];
@@ -830,17 +842,76 @@ function ChatPageInner() {
     }
   }, [activeSession, updateSession]);
 
+  // 切换会话时恢复该会话自己的上下文范围（与其它会话隔离）
+  useEffect(() => {
+    if (!activeSession) return;
+    sessionScopeHydratingRef.current = true;
+    setSelectedProjectId(activeSession.selectedProjectId ?? "");
+    setSelectedCollection(activeSession.selectedCollection ?? "");
+    setIncludeProjectContext(activeSession.includeProjectContext ?? false);
+    setIncludeKnowledgeContext(activeSession.includeKnowledgeContext ?? false);
+    setIncludeSkillsContext(activeSession.includeSkillsContext ?? false);
+    const timer = window.setTimeout(() => {
+      sessionScopeHydratingRef.current = false;
+    }, 0);
+    return () => {
+      window.clearTimeout(timer);
+    };
+  }, [activeSession?.id]);
+
+  // 将当前上下文选择回写到活动会话，确保会话间状态独立
+  useEffect(() => {
+    if (!activeSession || sessionScopeHydratingRef.current) return;
+    const same =
+      (activeSession.selectedProjectId ?? "") === selectedProjectId &&
+      (activeSession.selectedCollection ?? "") === selectedCollection &&
+      (activeSession.includeProjectContext ?? false) === includeProjectContext &&
+      (activeSession.includeKnowledgeContext ?? false) === includeKnowledgeContext &&
+      (activeSession.includeSkillsContext ?? false) === includeSkillsContext;
+    if (same) return;
+    updateSession(activeSession.id, (session) => ({
+      ...session,
+      selectedProjectId,
+      selectedCollection,
+      includeProjectContext,
+      includeKnowledgeContext,
+      includeSkillsContext,
+    }));
+  }, [
+    activeSession,
+    includeKnowledgeContext,
+    includeProjectContext,
+    includeSkillsContext,
+    selectedCollection,
+    selectedProjectId,
+    updateSession,
+  ]);
+
   const selectSession = (id: string) => {
     setActiveId(id);
     localStorage.setItem(chatActiveStorageKey(scopeUserId), id);
   };
 
   const createSession = () => {
+    abortRef.current?.abort();
+    setStreaming(false);
+    setPreparingContext(false);
+    setError("");
+    setInput("");
+    setOrchestrationPreview(null);
+    setProjectTaskContext(null);
+    setOrchestrationSink(null);
+    taskMetaRef.current = null;
     const session: ChatSession = {
       id: uuid(),
       title: "新对话",
       messages: [],
       createdAt: Date.now(),
+      selectedProjectId: "",
+      selectedCollection: "",
+      includeProjectContext: false,
+      includeKnowledgeContext: false,
+      includeSkillsContext: false,
     };
     const next = [session, ...sessionsRef.current];
     saveAndSet(next);

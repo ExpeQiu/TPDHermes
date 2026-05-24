@@ -27,9 +27,13 @@ RUN mkdir -p /app/.cache/huggingface \
 COPY main.py .
 COPY backend ./backend
 COPY skills ./skills
+COPY scripts/docker/backend-entrypoint.sh /app/scripts/docker/backend-entrypoint.sh
 COPY schema.sql .
+
+RUN chmod +x /app/scripts/docker/backend-entrypoint.sh
 
 ENV PYTHONPATH=/app
 EXPOSE 8000
 
+ENTRYPOINT ["/app/scripts/docker/backend-entrypoint.sh"]
 CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]

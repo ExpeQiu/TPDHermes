@@ -31,6 +31,43 @@ class ChatCompletionRequest(BaseModel):
     stream: bool = True
 
 
+def _env_int(name: str, default: int, *, min_value: int = 1, max_value: int = 100_000) -> int:
+    raw = os.getenv(name, "").strip()
+    if not raw:
+        return default
+    try:
+        v = int(raw)
+    except ValueError:
+        return default
+    return max(min_value, min(max_value, v))
+
+
+def _trim_payload_messages(payload: dict[str, Any]) -> None:
+    max_messages = _env_int("CHAT_HISTORY_MAX_MESSAGES", 12, min_value=2, max_value=200)
+    max_chars = _env_int("CHAT_HISTORY_MAX_CHARS_PER_MESSAGE", 2000, min_value=200, max_value=20_000)
+    msgs = payload.get("messages")
+    if not isinstance(msgs, list):
+        return
+    if len(msgs) > max_messages:
+        msgs = msgs[-max_messages:]
+    trimmed: list[dict[str, Any]] = []
+    for m in msgs:
+        if not isinstance(m, dict):
+            continue
+        content = str(m.get("content") or "")
+        if len(content) > max_chars:
+            content = content[:max_chars] + "\n...(历史过长已截断)"
+        trimmed.append({"role": m.get("role", "user"), "content": content})
+    payload["messages"] = trimmed
+
+
+def _apply_generation_limits(payload: dict[str, Any]) -> None:
+    cap = _env_int("CHAT_MAX_TOKENS", 700, min_value=64, max_value=8_192)
+    payload.setdefault("max_tokens", cap)
+    payload.setdefault("max_completion_tokens", cap)
+    payload.setdefault("max_output_tokens", cap)
+
+
 def _resolve_chat_target() -> tuple[str, str] | None:
     """
     返回 (url, api_key)；若未配置 URL：
@@ -110,6 +147,8 @@ async def chat_completions(req: Request, request: ChatCompletionRequest):
     target_url, api_key = _chat_target_required()
     payload = request.model_dump(exclude_none=True)
     payload.setdefault("model", os.getenv("HERMES_CHAT_MODEL", "hermes-agent"))
+    _trim_payload_messages(payload)
+    _apply_generation_limits(payload)
 
     headers = {"Content-Type": "application/json"}
     if api_key:
