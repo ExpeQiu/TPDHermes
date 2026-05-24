@@ -18,6 +18,7 @@ import httpx
 
 from backend.services.chroma_client import ChromaHttpClient, flatten_chroma_get_ids
 from backend.services.kb_embedding import (
+    embed_model_name,
     embed_on_upsert_enabled,
     embed_texts_sync,
     extract_searchable_text,
@@ -189,6 +190,15 @@ def run_kb_ingestion(
     if not dry_run and not client.heartbeat():
         raise RuntimeError(f"Chroma 不可达: {chroma_url}")
 
+    if not dry_run:
+        client.ensure_collection(
+            col,
+            metadata={
+                "kb_embed_model": embed_model_name(),
+                "kb_embed_client": "tpdhermes",
+            },
+        )
+
     for doc in documents:
         doc_total += 1
         if not isinstance(doc, dict):
@@ -349,6 +359,13 @@ def run_kb_ingestion(
             msg = str(e)
             errors.append({"doc": doc_id, "error": f"chroma_upsert:{msg}"})
             logger.exception("kb ingest upsert failed doc_id=%s", doc_id)
+
+    try:
+        from backend.services.kb_proxy import kb_proxy_service
+
+        kb_proxy_service.clear_caches()
+    except Exception:
+        pass
 
     finished = _iso_now()
     status = "failed" if doc_succeeded == 0 and doc_failed > 0 else "completed"

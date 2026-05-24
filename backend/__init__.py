@@ -8,6 +8,7 @@ TPDHermes FastAPI Application
 - API 版本控制 (/api/v1/)
 - CORS 可配置
 """
+import asyncio
 import os
 import logging
 from contextlib import asynccontextmanager
@@ -69,6 +70,9 @@ async def lifespan(app: FastAPI):
         await conn.run_sync(Base.metadata.create_all)
         await conn.run_sync(run_sqlite_migrations)
     logger.info("Database ready.")
+    from backend.services.kb_embedding import warmup_embed_model
+
+    asyncio.create_task(warmup_embed_model())
     yield
     logger.info("Shutting down...")
 

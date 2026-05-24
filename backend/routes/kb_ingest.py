@@ -29,6 +29,7 @@ from backend.services.kb_ingest_core import (
     sha256_file,
 )
 from backend.services.kb_proxy import CHROMA_HOST
+from backend.services.kb_reembed import reembed_chroma_collection
 from backend.services.kb_entry_manage import (
     create_kb_manual_entry,
     delete_kb_collection,
@@ -435,3 +436,34 @@ async def kb_publish(body: KbPublishRequest):
         )
     detail["cache_synced"] = bool(body.sync_cache)
     return detail
+
+
+class KbReembedRequest(BaseModel):
+    collection: str
+    batch_size: int = Field(64, ge=1, le=256)
+    dry_run: bool = False
+    chroma_url: Optional[str] = None
+
+
+@router.post("/collections/reembed")
+async def kb_reembed_collection(body: KbReembedRequest):
+    """
+    对已有 collection 全量重算 embeddings（修复 Chroma dimension=null / 查询降级）。
+    """
+    chroma = (body.chroma_url or CHROMA_HOST).strip()
+    try:
+        report = await asyncio.to_thread(
+            reembed_chroma_collection,
+            chroma_url=chroma,
+            collection=body.collection,
+            batch_size=body.batch_size,
+            dry_run=body.dry_run,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    except RuntimeError as e:
+        raise HTTPException(status_code=503, detail=str(e)) from e
+    except Exception as e:
+        log.exception("kb_reembed failed collection=%s", body.collection)
+        raise HTTPException(status_code=500, detail=str(e)) from e
+    return report

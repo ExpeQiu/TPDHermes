@@ -7,9 +7,13 @@ KBProxy 服务：外部 ChromaDB/LLM 服务的 REST 代理层
 3. 提供统一的知识查询接口
 """
 
+from __future__ import annotations
+
 import asyncio
 import logging
 import os
+import time
+from dataclasses import dataclass
 from typing import Any, Optional
 
 import httpx
@@ -27,8 +31,9 @@ from backend.services.kb_embedding import (
 
 logger = logging.getLogger("tpdx.hermes")
 
-# 外部 ChromaDB 服务地址（可通过环境变量覆盖）
 CHROMA_HOST = os.getenv("CHROMA_HOST", "http://localhost:8001")
+_REF_MAP_TTL_SEC = float(os.getenv("KB_REF_MAP_TTL_SEC", "60"))
+_LOCAL_RANK_CACHE_TTL_SEC = float(os.getenv("KB_LOCAL_RANK_CACHE_TTL_SEC", "300"))
 
 
 async def _notify_kb(event_type: str, **kwargs: Any) -> None:
@@ -38,6 +43,13 @@ async def _notify_kb(event_type: str, **kwargs: Any) -> None:
         await notify_kb_event(event_type, **kwargs)
     except Exception:
         pass
+
+
+@dataclass
+class _LocalRankCacheEntry:
+    monotonic_ts: float
+    searchable: list[tuple[str, dict[str, Any], str]]
+    doc_vectors: list[list[float]]
 
 
 class KBProxyService:
@@ -55,9 +67,17 @@ class KBProxyService:
         self.chroma_host = chroma_host
         self._readonly_mode = False
         self._health_cache: Optional[dict] = None
+        self._ref_map_cache: tuple[float, dict[str, str]] | None = None
+        self._local_rank_cache: dict[tuple[str, int], _LocalRankCacheEntry] = {}
+        self._cache_lock = asyncio.Lock()
 
     def _clear_readonly_after_upstream_ok(self) -> None:
         self._readonly_mode = False
+
+    def clear_caches(self) -> None:
+        """测试或 ingest 后可选调用。"""
+        self._ref_map_cache = None
+        self._local_rank_cache.clear()
 
     @staticmethod
     def _extract_collection_ref(item: Any) -> str | None:
@@ -67,28 +87,65 @@ class KBProxyService:
             return str(item.get("name") or item.get("id") or "") or None
         return None
 
-    async def _resolve_collection_ref(self, name_or_id: str) -> str:
+    @staticmethod
+    def _build_ref_map_from_list(data: list[Any]) -> dict[str, str]:
+        ref_map: dict[str, str] = {}
+        for item in data:
+            if isinstance(item, str):
+                ref_map[item] = item
+                continue
+            if not isinstance(item, dict):
+                continue
+            item_name = item.get("name")
+            item_id = item.get("id")
+            ref = str(item_id or item_name or "")
+            if not ref:
+                continue
+            ref_map[ref] = ref
+            if item_name:
+                ref_map[str(item_name)] = ref
+            if item_id and item_id != item_name:
+                ref_map[str(item_id)] = ref
+        return ref_map
+
+    async def _fetch_collection_ref_map(
+        self,
+        client: httpx.AsyncClient | None = None,
+    ) -> dict[str, str]:
+        now = time.monotonic()
+        if self._ref_map_cache and now - self._ref_map_cache[0] < _REF_MAP_TTL_SEC:
+            return self._ref_map_cache[1]
+
+        async def _load(c: httpx.AsyncClient) -> dict[str, str]:
+            resp = await c.get(f"{self.chroma_host}/api/v1/collections")
+            if resp.status_code != 200:
+                return {}
+            data = resp.json()
+            if not isinstance(data, list):
+                return {}
+            return self._build_ref_map_from_list(data)
+
         try:
-            async with httpx.AsyncClient(timeout=5.0) as client:
-                resp = await client.get(f"{self.chroma_host}/api/v1/collections")
-                if resp.status_code != 200:
-                    return name_or_id
-                data = resp.json()
-                if not isinstance(data, list):
-                    return name_or_id
-                for item in data:
-                    if isinstance(item, str):
-                        if item == name_or_id:
-                            return name_or_id
-                        continue
-                    if not isinstance(item, dict):
-                        continue
-                    item_name = item.get("name")
-                    item_id = item.get("id")
-                    if item_name == name_or_id or item_id == name_or_id:
-                        return str(item_id or item_name)
+            if client is not None:
+                ref_map = await _load(client)
+            else:
+                async with httpx.AsyncClient(timeout=5.0) as c:
+                    ref_map = await _load(c)
         except Exception:
-            return name_or_id
+            ref_map = {}
+
+        if ref_map:
+            self._ref_map_cache = (now, ref_map)
+        return ref_map
+
+    async def _resolve_collection_ref(
+        self,
+        name_or_id: str,
+        client: httpx.AsyncClient | None = None,
+    ) -> str:
+        ref_map = await self._fetch_collection_ref_map(client)
+        if ref_map:
+            return ref_map.get(name_or_id, name_or_id)
         return name_or_id
 
     async def _query_collection_via_get(
@@ -97,43 +154,51 @@ class KBProxyService:
         collection_name: str,
         query_text: str,
         n_results: int,
+        *,
+        client: httpx.AsyncClient | None = None,
     ) -> dict[str, Any] | None:
         q = (query_text or "").strip()
         if not q:
             return None
-        try:
-            async with httpx.AsyncClient(timeout=10.0) as client:
-                resp = await client.post(
-                    f"{self.chroma_host}/api/v1/collections/{collection_ref}/get",
-                    json={
-                        "where_document": {"$contains": q},
-                        "limit": n_results,
-                        "offset": 0,
-                        "include": ["documents", "metadatas"],
-                    },
+
+        async def _do_get(c: httpx.AsyncClient) -> dict[str, Any] | None:
+            resp = await c.post(
+                f"{self.chroma_host}/api/v1/collections/{collection_ref}/get",
+                json={
+                    "where_document": {"$contains": q},
+                    "limit": n_results,
+                    "offset": 0,
+                    "include": ["documents", "metadatas"],
+                },
+            )
+            if resp.status_code != 200:
+                return None
+            data = resp.json()
+            docs = data.get("documents") or []
+            metas = data.get("metadatas") or []
+            results = []
+            for doc, meta in zip(docs, metas):
+                m = dict(meta or {})
+                if "collection" not in m:
+                    m["collection"] = collection_name
+                results.append(
+                    {
+                        "content": doc,
+                        "metadata": m,
+                        "distance": 0.0,
+                    }
                 )
-                if resp.status_code != 200:
-                    return None
-                data = resp.json()
-                docs = data.get("documents") or []
-                metas = data.get("metadatas") or []
-                results = []
-                for doc, meta in zip(docs, metas):
-                    m = dict(meta or {})
-                    if "collection" not in m:
-                        m["collection"] = collection_name
-                    results.append(
-                        {
-                            "content": doc,
-                            "metadata": m,
-                            "distance": 0.0,
-                        }
-                    )
-                return {
-                    "results": results,
-                    "source": "chroma",
-                    "count": len(results),
-                }
+            return {
+                "results": results,
+                "source": "chroma",
+                "count": len(results),
+            }
+
+        try:
+            if client is not None:
+                return await _do_get(client)
+            async with httpx.AsyncClient(timeout=10.0) as c:
+                return await _do_get(c)
         except Exception:
             return None
 
@@ -170,9 +235,9 @@ class KBProxyService:
             f"{self.chroma_host}/api/v1/collections/{collection_ref}/query",
             json=payload,
         )
-        if resp.status_code == 422 and "query_texts" in payload and embed_enabled():
-            q = (query_text or "").strip()
-            if q:
+        q = (query_text or "").strip()
+        if resp.status_code == 422 and embed_enabled() and q:
+            if "query_texts" in payload or "query_embeddings" not in payload:
                 embeddings = await embed_query_texts([q])
                 if embeddings and embeddings[0]:
                     retry_payload = {
@@ -201,48 +266,57 @@ class KBProxyService:
         collection_ref: str,
         *,
         limit: int,
+        client: httpx.AsyncClient | None = None,
     ) -> list[tuple[str, dict[str, Any]]]:
+        async def _do_fetch(c: httpx.AsyncClient) -> list[tuple[str, dict[str, Any]]]:
+            resp = await c.post(
+                f"{self.chroma_host}/api/v1/collections/{collection_ref}/get",
+                json={
+                    "limit": limit,
+                    "offset": 0,
+                    "include": ["documents", "metadatas"],
+                },
+            )
+            if resp.status_code != 200:
+                return []
+            data = resp.json()
+            docs = data.get("documents") or []
+            metas = data.get("metadatas") or []
+            if docs and isinstance(docs[0], list):
+                docs = docs[0]
+            if metas and isinstance(metas[0], list):
+                metas = metas[0]
+            pairs: list[tuple[str, dict[str, Any]]] = []
+            for doc, meta in zip(docs, metas):
+                pairs.append((str(doc or ""), dict(meta or {})))
+            return pairs
+
         try:
-            async with httpx.AsyncClient(timeout=20.0) as client:
-                resp = await client.post(
-                    f"{self.chroma_host}/api/v1/collections/{collection_ref}/get",
-                    json={
-                        "limit": limit,
-                        "offset": 0,
-                        "include": ["documents", "metadatas"],
-                    },
-                )
-                if resp.status_code != 200:
-                    return []
-                data = resp.json()
-                docs = data.get("documents") or []
-                metas = data.get("metadatas") or []
-                if docs and isinstance(docs[0], list):
-                    docs = docs[0]
-                if metas and isinstance(metas[0], list):
-                    metas = metas[0]
-                pairs: list[tuple[str, dict[str, Any]]] = []
-                for doc, meta in zip(docs, metas):
-                    pairs.append((str(doc or ""), dict(meta or {})))
-                return pairs
+            if client is not None:
+                return await _do_fetch(client)
+            async with httpx.AsyncClient(timeout=20.0) as c:
+                return await _do_fetch(c)
         except Exception as e:
             logger.debug("chroma fetch documents failed: %s", e)
             return []
 
-    async def _query_collection_via_local_embed(
+    async def _get_local_rank_index(
         self,
         collection_ref: str,
-        collection_name: str,
-        query_text: str,
-        n_results: int,
-    ) -> dict[str, Any] | None:
-        q = (query_text or "").strip()
-        if not q or not embed_enabled():
-            return None
+        *,
+        limit: int,
+        client: httpx.AsyncClient | None = None,
+    ) -> tuple[list[tuple[str, dict[str, Any], str]], list[list[float]]] | None:
+        key = (collection_ref, limit)
+        now = time.monotonic()
+        cached = self._local_rank_cache.get(key)
+        if cached and now - cached.monotonic_ts < _LOCAL_RANK_CACHE_TTL_SEC:
+            return cached.searchable, cached.doc_vectors
 
         pairs = await self._fetch_collection_documents(
             collection_ref,
-            limit=local_rank_max_docs(),
+            limit=limit,
+            client=client,
         )
         if not pairs:
             return None
@@ -256,18 +330,60 @@ class KBProxyService:
             return None
 
         try:
-            texts = [q] + [item[2] for item in searchable]
-            vectors = await asyncio.to_thread(embed_texts_sync, texts)
+            doc_vectors = await asyncio.to_thread(
+                embed_texts_sync,
+                [item[2] for item in searchable],
+            )
+        except Exception as e:
+            logger.warning(
+                "local embed index build failed collection_ref=%s err=%s",
+                collection_ref,
+                e,
+            )
+            return None
+        if not doc_vectors:
+            return None
+
+        async with self._cache_lock:
+            self._local_rank_cache[key] = _LocalRankCacheEntry(
+                now, searchable, doc_vectors
+            )
+        return searchable, doc_vectors
+
+    async def _query_collection_via_local_embed(
+        self,
+        collection_ref: str,
+        collection_name: str,
+        query_text: str,
+        n_results: int,
+        *,
+        client: httpx.AsyncClient | None = None,
+    ) -> dict[str, Any] | None:
+        q = (query_text or "").strip()
+        if not q or not embed_enabled():
+            return None
+
+        limit = local_rank_max_docs()
+        index = await self._get_local_rank_index(
+            collection_ref,
+            limit=limit,
+            client=client,
+        )
+        if not index:
+            return None
+
+        searchable, doc_vectors = index
+        try:
+            q_vectors = await asyncio.to_thread(embed_texts_sync, [q])
         except Exception as e:
             logger.warning("local embed rank failed collection=%s err=%s", collection_name, e)
             return None
 
-        if not vectors or len(vectors) < 2:
+        if not q_vectors or not q_vectors[0]:
             return None
 
-        q_vec = vectors[0]
-        doc_vecs = vectors[1:]
-        scores = cosine_scores(q_vec, doc_vecs)
+        q_vec = q_vectors[0]
+        scores = cosine_scores(q_vec, doc_vectors)
         ranked = sorted(
             zip(searchable, scores),
             key=lambda x: x[1],
@@ -288,12 +404,69 @@ class KBProxyService:
                 }
             )
         if not results:
-            return None
+            return build_query_result([], source="chroma", warning="local_embed_rank_fallback")
         return build_query_result(
             results,
             source="chroma",
             warning="local_embed_rank_fallback",
         )
+
+    async def _query_collection_on_chroma(
+        self,
+        client: httpx.AsyncClient,
+        collection_ref: str,
+        collection_name: str,
+        query_text: str,
+        n_results: int,
+    ) -> dict[str, Any] | None:
+        """
+        单 collection Chroma 检索：semantic → local embed → keyword（仅 embed 未启用或 local 未拉取到文档时）。
+        """
+        semantic = await self._post_chroma_query(
+            client,
+            collection_ref,
+            collection_name,
+            query_text,
+            n_results,
+        )
+        if semantic and int(semantic.get("count") or 0) > 0:
+            return semantic
+
+        q = (query_text or "").strip()
+        local: dict[str, Any] | None = None
+        if embed_enabled() and q:
+            local = await self._query_collection_via_local_embed(
+                collection_ref,
+                collection_name,
+                query_text,
+                n_results,
+                client=client,
+            )
+            if local and int(local.get("count") or 0) > 0:
+                return local
+            # local 已全量扫描：空结果则不再 keyword
+            if local is not None:
+                return semantic if semantic is not None else local
+
+        if q:
+            contains_fallback = await self._query_collection_via_get(
+                collection_ref=collection_ref,
+                collection_name=collection_name,
+                query_text=query_text,
+                n_results=n_results,
+                client=client,
+            )
+            if contains_fallback and contains_fallback.get("count", 0) > 0:
+                contains_fallback["warning"] = (
+                    (contains_fallback.get("warning") or "")
+                    + (" | " if contains_fallback.get("warning") else "")
+                    + "semantic_empty_used_contains_fallback"
+                ).strip(" | ")
+                return contains_fallback
+
+        if semantic is not None:
+            return semantic
+        return local
 
     async def _probe_chroma(self) -> bool:
         try:
@@ -304,17 +477,10 @@ class KBProxyService:
             return False
 
     async def health_check(self) -> dict:
-        """
-        健康检查：探测外部 ChromaDB 是否可达
-
-        Returns:
-            {"external_kb": "up"|"down", "cache_mode": bool, "cached_entries": int}
-        """
         cache_stats = await kb_cache_service.get_cache_stats(project_id="__all__")
 
         external_ok = await self._probe_chroma()
         if external_ok:
-            # 上游已恢复：清除代理层粘性只读（与「曾 fallback」解耦）
             self._clear_readonly_after_upstream_ok()
 
         return {
@@ -330,54 +496,23 @@ class KBProxyService:
         n_results: int = 10,
         project_id: Optional[str] = None,
     ) -> dict:
-        """
-        按 collection 名称查询知识库
-
-        优先透传到外部 ChromaDB；降级时回退到本地缓存。
-        """
         try:
-            collection_ref = await self._resolve_collection_ref(collection_name)
             async with httpx.AsyncClient(timeout=15.0) as client:
-                semantic = await self._post_chroma_query(
+                collection_ref = await self._resolve_collection_ref(
+                    collection_name, client
+                )
+                hit = await self._query_collection_on_chroma(
                     client,
                     collection_ref,
                     collection_name,
                     query_text,
                     n_results,
                 )
-                if semantic and int(semantic.get("count") or 0) > 0:
-                    return semantic
-
-                local = await self._query_collection_via_local_embed(
-                    collection_ref,
-                    collection_name,
-                    query_text,
-                    n_results,
-                )
-                if local and int(local.get("count") or 0) > 0:
-                    return local
-
-                if (query_text or "").strip():
-                    contains_fallback = await self._query_collection_via_get(
-                        collection_ref=collection_ref,
-                        collection_name=collection_name,
-                        query_text=query_text,
-                        n_results=n_results,
-                    )
-                    if contains_fallback and contains_fallback.get("count", 0) > 0:
-                        contains_fallback["warning"] = (
-                            (contains_fallback.get("warning") or "")
-                            + (" | " if contains_fallback.get("warning") else "")
-                            + "semantic_empty_used_contains_fallback"
-                        ).strip(" | ")
-                        return contains_fallback
-
-                if semantic is not None:
-                    return semantic
+                if hit is not None:
+                    return hit
         except Exception as e:
             logger.debug("chroma query_collection failed: %s", e)
 
-        # 降级：回退到本地缓存
         self._readonly_mode = True
         await _notify_kb("query_fallback", source="kb_proxy", collection=collection_name)
         cached = await kb_cache_service.get_cached_entries(
@@ -406,9 +541,6 @@ class KBProxyService:
         project_id: Optional[str] = None,
         collection: Optional[str] = None,
     ) -> dict:
-        """
-        跨全部（或单个）collection 检索并合并结果；上行正常时逐 collection 调 Chroma。
-        """
         col_res = await self.list_collections(project_id=project_id)
         names_all = [str(x) for x in (col_res.get("collections") or []) if x]
         if collection:
@@ -426,12 +558,13 @@ class KBProxyService:
 
         if col_res.get("source") == "chroma":
             per = max(2, min(30, max(n_results * 3 // max(len(names), 1), n_results)))
-            merged: list[dict[str, Any]] = []
             try:
                 async with httpx.AsyncClient(timeout=20.0) as client:
-                    for col_name in names:
-                        collection_ref = await self._resolve_collection_ref(col_name)
-                        hit = await self._post_chroma_query(
+                    ref_map = await self._fetch_collection_ref_map(client)
+
+                    async def _query_one(col_name: str) -> list[dict[str, Any]]:
+                        collection_ref = ref_map.get(col_name, col_name)
+                        hit = await self._query_collection_on_chroma(
                             client,
                             collection_ref,
                             col_name,
@@ -439,32 +572,29 @@ class KBProxyService:
                             per,
                         )
                         if hit and hit.get("results"):
-                            merged.extend(hit["results"])
+                            return list(hit["results"])
+                        return []
+
+                    batch = await asyncio.gather(
+                        *[_query_one(col_name) for col_name in names],
+                        return_exceptions=True,
+                    )
+                    merged: list[dict[str, Any]] = []
+                    for col_name, part in zip(names, batch):
+                        if isinstance(part, Exception):
+                            logger.debug(
+                                "chroma query_all collection=%s failed: %s",
+                                col_name,
+                                part,
+                            )
                             continue
-                        local = await self._query_collection_via_local_embed(
-                            collection_ref,
-                            col_name,
-                            query_text,
-                            per,
-                        )
-                        if local and local.get("results"):
-                            merged.extend(local["results"])
-                            continue
-                        fallback = await self._query_collection_via_get(
-                            collection_ref=collection_ref,
-                            collection_name=col_name,
-                            query_text=query_text,
-                            n_results=per,
-                        )
-                        if fallback is not None:
-                            merged.extend(fallback["results"])
+                        merged.extend(part)
                 merged.sort(key=lambda r: float(r.get("distance") or 1.0))
                 sliced = merged[:n_results]
                 return {"results": sliced, "source": "chroma", "count": len(sliced)}
             except Exception as e:
                 logger.debug("chroma query_all failed, fallback cache: %s", e)
 
-        # 全缓存：子串检索（验证用）
         self._readonly_mode = True
         await _notify_kb("query_fallback", source="kb_proxy", collection="__multi__")
         q_lower = (query_text or "").lower()
@@ -498,17 +628,17 @@ class KBProxyService:
         }
 
     async def list_collections(self, project_id: Optional[str] = None) -> dict:
-        """
-        列出可用 collection
-
-        优先从 ChromaDB 获取；降级时从本地缓存获取。
-        """
         try:
             async with httpx.AsyncClient(timeout=5.0) as client:
                 resp = await client.get(f"{self.chroma_host}/api/v1/collections")
                 if resp.status_code == 200:
                     self._clear_readonly_after_upstream_ok()
                     collections = resp.json()
+                    if isinstance(collections, list):
+                        self._ref_map_cache = (
+                            time.monotonic(),
+                            self._build_ref_map_from_list(collections),
+                        )
                     return {
                         "collections": [
                             self._extract_collection_ref(c) for c in collections
@@ -527,5 +657,4 @@ class KBProxyService:
         }
 
 
-# 全局单例
 kb_proxy_service = KBProxyService()

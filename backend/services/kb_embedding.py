@@ -86,6 +86,22 @@ async def embed_query_texts(texts: Sequence[str]) -> list[list[float]]:
     return await embed_texts(texts)
 
 
+def embed_warmup_enabled() -> bool:
+    raw = os.getenv("KB_EMBED_WARMUP", "1").strip().lower()
+    return embed_enabled() and raw not in ("0", "false", "no", "off")
+
+
+async def warmup_embed_model() -> None:
+    """后台预加载 embedding 模型，避免首条 KB 查询冷启动。"""
+    if not embed_warmup_enabled():
+        return
+    try:
+        await asyncio.to_thread(embed_texts_sync, ["warmup"])
+        logger.info("kb embed model warmup ok model=%s", embed_model_name())
+    except Exception as e:
+        logger.warning("kb embed model warmup failed: %s", e)
+
+
 def cosine_scores(query_vec: list[float], doc_vecs: list[list[float]]) -> list[float]:
     if not query_vec or not doc_vecs:
         return []

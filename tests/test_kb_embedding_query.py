@@ -40,14 +40,9 @@ async def test_build_chroma_query_payload_uses_embeddings(monkeypatch):
 @pytest.mark.asyncio
 async def test_semantic_empty_uses_local_embed_rank(monkeypatch):
     svc = KBProxyService(chroma_host="http://chroma-test")
+    monkeypatch.setattr("backend.services.kb_proxy.embed_enabled", lambda: True)
 
-    async def resolve(self, _name: str) -> str:
-        return "col-id"
-
-    async def empty_semantic(self, *_a, **_k):
-        return {"results": [], "source": "chroma", "count": 0}
-
-    async def local_rank(self, *_a, **_k):
+    async def chroma_hit(_self, _client, _ref, _name, _q, _n):
         return {
             "results": [{"content": "GEA 说明", "metadata": {}, "distance": 0.1}],
             "source": "chroma",
@@ -55,14 +50,7 @@ async def test_semantic_empty_uses_local_embed_rank(monkeypatch):
             "warning": "local_embed_rank_fallback",
         }
 
-    monkeypatch.setattr(KBProxyService, "_resolve_collection_ref", resolve)
-    monkeypatch.setattr(KBProxyService, "_post_chroma_query", empty_semantic)
-    monkeypatch.setattr(KBProxyService, "_query_collection_via_local_embed", local_rank)
-
-    async def no_get(self, **_k):
-        return None
-
-    monkeypatch.setattr(KBProxyService, "_query_collection_via_get", no_get)
+    monkeypatch.setattr(KBProxyService, "_query_collection_on_chroma", chroma_hit)
 
     out = await svc.query_collection("public.structured_tech.geely_tech", "GEA", n_results=3)
     assert out["count"] == 1
@@ -72,8 +60,9 @@ async def test_semantic_empty_uses_local_embed_rank(monkeypatch):
 @pytest.mark.asyncio
 async def test_semantic_empty_then_contains_fallback(monkeypatch):
     svc = KBProxyService(chroma_host="http://chroma-test")
+    monkeypatch.setattr("backend.services.kb_proxy.embed_enabled", lambda: False)
 
-    async def resolve(self, _name: str) -> str:
+    async def resolve(self, _name, client=None):
         return "col-id"
 
     async def empty_semantic(self, *_a, **_k):
@@ -86,15 +75,11 @@ async def test_semantic_empty_then_contains_fallback(monkeypatch):
             "count": 1,
         }
 
-    async def no_local(self, _ref, _name, _query, _n):
-        return None
-
     async def empty_cache(**_k):
         return []
 
     monkeypatch.setattr(KBProxyService, "_resolve_collection_ref", resolve)
     monkeypatch.setattr(KBProxyService, "_post_chroma_query", empty_semantic)
-    monkeypatch.setattr(KBProxyService, "_query_collection_via_local_embed", no_local)
     monkeypatch.setattr(KBProxyService, "_query_collection_via_get", via_get)
     monkeypatch.setattr(
         "backend.services.kb_proxy.kb_cache_service.get_cached_entries",

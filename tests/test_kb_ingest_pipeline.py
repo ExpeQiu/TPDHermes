@@ -87,8 +87,11 @@ def test_delete_stale_chunks_removes_extra():
     assert set(del_ids) == {"d_chunk_0002", "d_chunk_0003"}
 
 
+@patch("backend.services.kb_ingest_core.embed_on_upsert_enabled", return_value=False)
 @patch("backend.services.kb_ingest_core.ChromaHttpClient")
-def test_run_kb_ingestion_deletes_stale_after_upsert(MockClient, tmp_path: Path):
+def test_run_kb_ingestion_deletes_stale_after_upsert(
+    MockClient, _embed_off, tmp_path: Path
+):
     p = tmp_path / "a.md"
     p.write_text("# hi\n", encoding="utf-8")
     cli = MagicMock()

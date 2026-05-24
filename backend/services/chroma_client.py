@@ -103,12 +103,15 @@ class ChromaHttpClient:
         r.raise_for_status()
         return name
 
-    def ensure_collection(self, name: str) -> str:
-        ref = self._resolve_collection_ref(name)
-        if ref != name or name in self.collection_names():
-            return ref
+    def ensure_collection(
+        self,
+        name: str,
+        metadata: Optional[dict[str, Any]] = None,
+    ) -> str:
+        if name in self.collection_names():
+            return self._resolve_collection_ref(name)
         try:
-            return self.create_collection(name)
+            return self.create_collection(name, metadata=metadata)
         except httpx.HTTPStatusError as e:
             logger.warning("chroma create_collection %s: %s", name, e)
             raise
@@ -125,7 +128,7 @@ class ChromaHttpClient:
         if collection in existing_names:
             collection_ref = self._resolve_collection_ref(collection)
         else:
-            collection_ref = self.ensure_collection(collection)
+            collection_ref = self.ensure_collection(collection, metadata=None)
         payload: dict[str, Any] = {
             "ids": ids,
             "documents": documents,
@@ -139,7 +142,7 @@ class ChromaHttpClient:
             timeout=self.timeout,
         )
         if r.status_code in (400, 404):
-            collection_ref = self.ensure_collection(collection)
+            collection_ref = self.ensure_collection(collection, metadata=None)
             r = httpx.post(
                 f"{self.base_url}/api/v1/collections/{collection_ref}/upsert",
                 json=payload,
