@@ -7,6 +7,7 @@ import pytest
 from backend.services.kb_entry_manage import (
     _update_kb_entry_sync,
     delete_cached_entries_by_doc_id,
+    delete_cached_entry_by_id,
     delete_kb_entry,
 )
 
@@ -33,6 +34,33 @@ async def test_delete_cached_entries_by_doc_id():
 
     n = await delete_cached_entries_by_doc_id("doc_a", collection="public.test.col")
     assert n >= 1
+
+
+@pytest.mark.asyncio
+async def test_delete_cached_entry_by_id_chunk_ref():
+    from backend.db import async_session_maker
+    from backend.models.kb_cache import KBCache
+
+    async with async_session_maker() as db:
+        db.add(
+            KBCache(
+                id="harvest_deadbeef_chunk_0001",
+                project_id="__all__",
+                collection="internal.structured_tech.smoke",
+                content="body",
+                metadata_='{"doc_id":"harvest_deadbeef"}',
+                source="harvest",
+                created_at="2026-01-01",
+                updated_at="2026-01-01",
+            )
+        )
+        await db.commit()
+
+    ok = await delete_cached_entry_by_id(
+        "harvest_deadbeef_chunk_0099",
+        collection="internal.structured_tech.smoke",
+    )
+    assert ok is True
 
 
 @patch("backend.services.kb_entry_manage.ChromaHttpClient")

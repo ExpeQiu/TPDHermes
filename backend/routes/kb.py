@@ -278,14 +278,33 @@ async def get_cached_entry_by_id(entry_id: str):
 
 
 @router.delete("/cache/entry/{entry_id}")
-async def delete_cached_entry_by_id_route(entry_id: str):
-    """按 kb_cache 主键删除（适用于无 Chroma doc_id、仅本地缓存的条目）。"""
+async def delete_cached_entry_by_id_route(
+    entry_id: str,
+    collection: Optional[str] = Query(None, description="可选，缩小 doc_id 回退删除范围"),
+):
+    """按 kb_cache 主键删除；chunk id 可回退为按 doc_id 批量清理。"""
     from backend.services.kb_entry_manage import delete_cached_entry_by_id
 
-    ok = await delete_cached_entry_by_id(entry_id)
+    ok = await delete_cached_entry_by_id(entry_id, collection=collection)
     if not ok:
         raise HTTPException(status_code=404, detail="cache_entry_not_found")
     return {"ok": True, "id": entry_id.strip()}
+
+
+@router.delete("/cache/by-doc/{doc_id}")
+async def delete_cached_entries_by_doc_id_route(
+    doc_id: str,
+    collection: Optional[str] = Query(None),
+):
+    """按逻辑 doc_id 清理 kb_cache（含 *_chunk_* 行）。"""
+    from backend.services.kb_entry_manage import delete_cached_entries_by_doc_id
+
+    removed = await delete_cached_entries_by_doc_id(doc_id.strip(), collection=collection)
+    if removed <= 0 and collection:
+        removed = await delete_cached_entries_by_doc_id(doc_id.strip(), collection=None)
+    if removed <= 0:
+        raise HTTPException(status_code=404, detail="cache_entry_not_found")
+    return {"ok": True, "doc_id": doc_id.strip(), "removed": removed}
 
 
 @router.get("/cache/entries/{project_id}")

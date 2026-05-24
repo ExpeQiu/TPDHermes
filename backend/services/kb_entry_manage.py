@@ -27,6 +27,7 @@ from backend.services.kb_ingest_core import (
 from backend.services.kb_metadata import normalize_kb_metadata_dict
 from backend.services.kb_proxy import CHROMA_HOST
 from backend.services.kb_write import build_markdown_body, kb_upload_root
+from backend.services.kb_ids import kb_doc_id_from_ref
 from backend.services.project_kb_ingest import delete_doc_from_collection
 
 log = logging.getLogger("tpdx.hermes")
@@ -97,20 +98,35 @@ async def _sync_cache(
         return {"error": str(e)}
 
 
-async def delete_cached_entry_by_id(entry_id: str) -> bool:
-    """按 kb_cache 主键删除单条（仅本地缓存、无 Chroma doc 的条目）。"""
+async def delete_cached_entry_by_id(entry_id: str, *, collection: str | None = None) -> bool:
+    """按 kb_cache 主键删除；chunk id 未命中时按 doc_id 清理关联行。"""
     await kb_cache_service.ensure_table()
     eid = entry_id.strip()
     if not eid:
         return False
     async with async_session_maker() as db:
         row = await db.get(KBCache, eid)
-        if not row:
-            return False
-        await db.delete(row)
-        await db.commit()
-    log.info("kb_cache delete by id=%s", eid)
-    return True
+        if row:
+            await db.delete(row)
+            await db.commit()
+            log.info("kb_cache delete by id=%s", eid)
+            return True
+    doc_id = kb_doc_id_from_ref(eid)
+    if doc_id and doc_id != eid:
+        removed = await delete_cached_entries_by_doc_id(doc_id, collection=collection)
+        if removed > 0:
+            log.info("kb_cache delete by doc_id=%s (from ref=%s) removed=%s", doc_id, eid, removed)
+            return True
+        if collection:
+            removed = await delete_cached_entries_by_doc_id(doc_id, collection=None)
+            if removed > 0:
+                log.info(
+                    "kb_cache delete by doc_id=%s cross-collection removed=%s",
+                    doc_id,
+                    removed,
+                )
+                return True
+    return False
 
 
 async def delete_cached_entries_by_doc_id(
@@ -348,6 +364,8 @@ async def delete_kb_entry(
         return {"ok": False, "message": "kb_unavailable"}
 
     cache_removed = await delete_cached_entries_by_doc_id(did, collection=col)
+    if chroma_removed <= 0 and cache_removed <= 0 and col:
+        cache_removed = await delete_cached_entries_by_doc_id(did, collection=None)
     if chroma_removed <= 0 and cache_removed <= 0:
         return {
             "ok": False,

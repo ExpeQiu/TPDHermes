@@ -9,6 +9,7 @@ import logging
 from typing import Any
 
 from backend.services.kb_cache import kb_cache_service
+from backend.services.kb_ids import kb_doc_id_from_ref
 from backend.services.kb_metadata import normalize_kb_metadata_dict
 
 logger = logging.getLogger("tpdx.hermes")
@@ -190,9 +191,17 @@ async def build_browse_tree(
             folder_parts = [p for p in parsed["folder_path"].split("/") if p] if parsed["folder_path"] else []
 
             title = parsed["title"] or (row.get("content") or "")[:80] or row.get("id", "未命名")
+            row_id = str(row.get("id") or "").strip()
+            meta_doc = meta_raw.get("doc_id") if isinstance(meta_raw, dict) else None
+            doc_id = (
+                meta_doc.strip()
+                if isinstance(meta_doc, str) and meta_doc.strip()
+                else kb_doc_id_from_ref(row_id)
+            )
 
             doc = {
-                "id": row.get("id"),
+                "id": row_id,
+                "doc_id": doc_id,
                 "project_id": row.get("project_id"),
                 "collection": row.get("collection"),
                 "title": title,

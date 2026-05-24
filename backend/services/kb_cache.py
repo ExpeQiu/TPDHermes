@@ -6,11 +6,12 @@ import json
 import uuid
 from datetime import datetime
 from typing import Any, Optional
-from sqlalchemy import select
+from sqlalchemy import or_, select
 
 from backend.models.kb_cache import KBCache
 from backend.db import engine, async_session_maker
 from backend.db import Base
+from backend.services.kb_ids import kb_doc_id_from_ref
 from backend.services.kb_metadata import normalize_kb_metadata_dict
 
 ALL_PROJECT_IDS = {"__all__", "*", "all"}
@@ -308,27 +309,52 @@ class KBCacheService:
                 for e in entries
             ]
 
+    def _format_cache_row(self, e: KBCache) -> dict:
+        return {
+            "id": e.id,
+            "project_id": e.project_id,
+            "collection": e.collection,
+            "content": e.content,
+            "metadata": normalize_kb_metadata_dict(
+                json.loads(e.metadata_) if e.metadata_ else {}
+            ),
+            "source": e.source,
+            "reliability": e.reliability,
+            "created_at": e.created_at,
+            "updated_at": e.updated_at,
+        }
+
     async def get_cached_entry_by_id(self, entry_id: str) -> dict | None:
-        """按主键 id 取单条（kb_cache.id 全局唯一）。"""
+        """按主键 id 取单条；chunk id 未命中时按 doc_id / chunk 前缀回退。"""
         await self.ensure_table()
+        eid = (entry_id or "").strip()
+        if not eid:
+            return None
         async with async_session_maker() as db:
-            row = await db.get(KBCache, entry_id)
-            if not row:
-                return None
-            e = row
-            return {
-                "id": e.id,
-                "project_id": e.project_id,
-                "collection": e.collection,
-                "content": e.content,
-                "metadata": normalize_kb_metadata_dict(
-                    json.loads(e.metadata_) if e.metadata_ else {}
-                ),
-                "source": e.source,
-                "reliability": e.reliability,
-                "created_at": e.created_at,
-                "updated_at": e.updated_at,
-            }
+            row = await db.get(KBCache, eid)
+            if row:
+                return self._format_cache_row(row)
+            doc_id = kb_doc_id_from_ref(eid)
+            if doc_id and doc_id != eid:
+                row = await db.get(KBCache, doc_id)
+                if row:
+                    return self._format_cache_row(row)
+                prefix = f"{doc_id}_chunk_"
+                alt = (
+                    await db.execute(
+                        select(KBCache)
+                        .where(
+                            or_(
+                                KBCache.id == doc_id,
+                                KBCache.id.like(f"{prefix}%"),
+                            )
+                        )
+                        .limit(1)
+                    )
+                ).scalar_one_or_none()
+                if alt:
+                    return self._format_cache_row(alt)
+            return None
 
     async def get_cache_stats(self, project_id: str) -> dict:
         """获取项目缓存统计信息"""

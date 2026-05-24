@@ -64,6 +64,8 @@ interface ProjectLite {
 
 interface BrowseDoc {
   id: string;
+  /** 逻辑 doc_id（browse-tree 返回；与 id 可能为 chunk 主键不同） */
+  doc_id?: string;
   project_id: string;
   collection: string;
   title: string;
@@ -366,6 +368,34 @@ function isCacheOnlyKbEntry(entry: Pick<KBEntry, "id" | "doc_id">): boolean {
   if (!id) return false;
   if (isKbCachePrimaryId(id)) return true;
   return !resolveChromaDocId(entry);
+}
+
+/** 目录树 / 缓存引用 → 逻辑 doc_id */
+function kbRefDocId(ref: string, explicitDocId?: string | null): string {
+  const hint = explicitDocId?.trim();
+  if (hint && !isKbCachePrimaryId(hint)) return hint;
+  return resolveChromaDocId({ id: ref, doc_id: hint }) ?? ref.trim();
+}
+
+async function fetchKbCacheRow(
+  refId: string,
+  docIdHint?: string | null,
+): Promise<Record<string, unknown> | null> {
+  const candidates = [
+    ...new Set(
+      [refId.trim(), kbRefDocId(refId, docIdHint)].filter((x) => x.length > 0),
+    ),
+  ];
+  for (const id of candidates) {
+    try {
+      return await apiGet<Record<string, unknown>>(
+        `/kb/cache/entry/${encodeURIComponent(id)}`,
+      );
+    } catch {
+      /* try next ref */
+    }
+  }
+  return null;
 }
 
 function entryBodyText(entry: Pick<KBEntry, "body" | "summary">): string {
@@ -1447,7 +1477,7 @@ export default function KnowledgePageClient() {
   ) => {
     if (USE_MOCK_KB || entryManageBusy) return false;
     const cacheId = entry.id?.trim();
-    const chromaDocId = resolveChromaDocId(entry);
+    const chromaDocId = resolveChromaDocId(entry) ?? (cacheId ? kbRefDocId(cacheId, entry.doc_id) : null);
     const cacheOnly = isCacheOnlyKbEntry(entry);
     if (!cacheOnly && !chromaDocId) {
       const msg = "无法解析 doc_id，暂不支持删除。";
@@ -1476,25 +1506,44 @@ export default function KnowledgePageClient() {
     setEntryManageBusy(true);
     setEntryManageMessage(null);
     setNodeManageMessage(null);
+    const colQ = encodeURIComponent(entry.collection);
+    const projQ = encodeURIComponent(projectId);
+    const cacheEntryUrl = (id: string) =>
+      `/kb/cache/entry/${encodeURIComponent(id)}?collection=${colQ}`;
+    const cacheByDocUrl = (docId: string) =>
+      `/kb/cache/by-doc/${encodeURIComponent(docId)}?collection=${colQ}`;
+
     try {
       const useCacheDelete =
         (cacheOnly && !!cacheId) || (!!cacheId && isKbCachePrimaryId(cacheId));
-      if (useCacheDelete) {
-        await apiDelete(`/kb/cache/entry/${encodeURIComponent(cacheId!)}`);
+      if (useCacheDelete && cacheId) {
+        await apiDelete(cacheEntryUrl(cacheId));
       } else if (chromaDocId) {
+        let removed = false;
         try {
           await apiDelete(
-            `/kb/entries/${encodeURIComponent(chromaDocId)}?collection=${encodeURIComponent(entry.collection)}&project_id=${encodeURIComponent(projectId)}`,
+            `/kb/entries/${encodeURIComponent(chromaDocId)}?collection=${colQ}&project_id=${projQ}`,
           );
-        } catch (chromaErr) {
-          if (cacheId) {
-            await apiDelete(`/kb/cache/entry/${encodeURIComponent(cacheId)}`);
-          } else {
-            throw chromaErr;
+          removed = true;
+        } catch {
+          /* Chroma 可能已不存在，继续清缓存 */
+        }
+        if (!removed) {
+          try {
+            await apiDelete(cacheByDocUrl(chromaDocId));
+            removed = true;
+          } catch {
+            if (cacheId) {
+              await apiDelete(cacheEntryUrl(cacheId));
+              removed = true;
+            }
           }
         }
+        if (!removed) {
+          throw new Error("entry_not_found");
+        }
       } else if (cacheId) {
-        await apiDelete(`/kb/cache/entry/${encodeURIComponent(cacheId)}`);
+        await apiDelete(cacheEntryUrl(cacheId));
       }
       if (
         selectedEntry &&
@@ -1539,6 +1588,7 @@ export default function KnowledgePageClient() {
     await deleteKbDocument(
       full ?? {
         id: d.id,
+        doc_id: d.doc_id,
         collection: d.collection,
         projects: [],
         title: d.title,
@@ -1921,10 +1971,8 @@ export default function KnowledgePageClient() {
 
     void (async () => {
       try {
-        const row = await apiGet<Record<string, unknown>>(
-          `/kb/cache/entry/${encodeURIComponent(fromEntry.id)}`,
-        );
-        if (ac.signal.aborted) return;
+        const row = await fetchKbCacheRow(fromEntry.id, fromEntry.doc_id);
+        if (ac.signal.aborted || !row) return;
         const mapped = mapCacheRow(row);
         setBrowseEntries((prev) => {
           const idx = prev.findIndex((e) => e.id === mapped.id);
@@ -1971,24 +2019,33 @@ export default function KnowledgePageClient() {
   }, [browseEntries, selectedEntryId, entryById]);
 
   const openTreeDocument = async (d: BrowseDoc) => {
-    const existing = entryById.get(d.id);
+    const docRef = kbRefDocId(d.id, d.doc_id);
+    const existing =
+      entryById.get(d.id) ??
+      browseEntriesRef.current.find(
+        (e) =>
+          e.id === d.id ||
+          resolveDocId(e) === docRef ||
+          resolveChromaDocId(e) === docRef,
+      );
     if (existing) {
-      handleEntryClick({ ...existing, title: d.title || existing.title });
+      handleEntryClick({
+        ...existing,
+        title: d.title || existing.title,
+        doc_id: existing.doc_id ?? d.doc_id,
+      });
       return;
     }
     if (USE_MOCK_KB) return;
-    try {
-      const row = await apiGet<Record<string, unknown>>(
-        `/kb/cache/entry/${encodeURIComponent(d.id)}`,
-      );
-      const mapped = mapCacheRow(row as Record<string, unknown>);
-      setBrowseEntries((prev) =>
-        prev.some((e) => e.id === mapped.id) ? prev : [...prev, mapped],
-      );
-      handleEntryClick({ ...mapped, title: d.title || mapped.title });
-    } catch {
-      /* ignore */
-    }
+    const row = await fetchKbCacheRow(d.id, d.doc_id);
+    if (!row) return;
+    const mapped = mapCacheRow(row);
+    setBrowseEntries((prev) =>
+      prev.some((e) => e.id === mapped.id || resolveDocId(e) === resolveDocId(mapped))
+        ? prev
+        : [...prev, mapped],
+    );
+    handleEntryClick({ ...mapped, title: d.title || mapped.title });
   };
 
   const renderTreeDocRow = (d: BrowseDoc) => {
