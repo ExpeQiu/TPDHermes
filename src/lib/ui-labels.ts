@@ -227,10 +227,41 @@ const KB_TOPIC_LABELS: Record<string, string> = {
   vehicle_model_library: "车型库",
 };
 
+/** folder_path 单段 → 中文展示名（存储值不变，仅 UI） */
+const KB_FOLDER_SEGMENT_LABELS: Record<string, string> = {
+  attachments: "项目附件",
+  conversation_harvest: "对话收割",
+  outputs: "项目输出",
+};
+
+function hasCjk(text: string): boolean {
+  return /[\u4e00-\u9fff]/.test(text);
+}
+
 function humanizeKbSegment(seg: string): string {
   const k = seg.trim();
   if (!k) return "";
   return KB_TOPIC_LABELS[k] ?? k.replace(/_/g, " ");
+}
+
+/** folder_path 单段 → 中文展示名 */
+export function kbFolderSegmentLabel(segment: string | undefined | null): string {
+  const k = (segment ?? "").trim();
+  if (!k) return "";
+  if (KB_FOLDER_SEGMENT_LABELS[k]) return KB_FOLDER_SEGMENT_LABELS[k];
+  if (hasCjk(k)) return k;
+  return humanizeKbSegment(k);
+}
+
+/** folder_path 完整路径 → 中文展示名（/ 分隔） */
+export function kbFolderPathLabel(folderPath: string | undefined | null): string {
+  const raw = (folderPath ?? "").trim().replace(/^\/+|\/+$/g, "");
+  if (!raw) return "";
+  return raw
+    .split("/")
+    .filter(Boolean)
+    .map(kbFolderSegmentLabel)
+    .join(" / ");
 }
 
 /** 知识库 collection 展示名（规范名 → 中文可读标签） */

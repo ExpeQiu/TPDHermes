@@ -7,6 +7,7 @@ import pytest
 from backend.services.kb_entry_manage import (
     _update_kb_entry_sync,
     delete_cached_entries_by_doc_id,
+    delete_kb_entry,
 )
 
 
@@ -71,3 +72,22 @@ def test_update_metadata_only(MockClient):
     assert result["ok"] is True
     assert result["updated"] == "metadata"
     assert client.update.call_count == 2
+
+
+@pytest.mark.asyncio
+@patch("backend.services.kb_entry_manage.delete_cached_entries_by_doc_id", return_value=2)
+@patch("backend.services.kb_entry_manage.delete_doc_from_collection", return_value=0)
+@patch("backend.services.kb_entry_manage.ChromaHttpClient")
+async def test_delete_kb_entry_cache_only(MockClient, _mock_del_chroma, mock_del_cache):
+    client = MockClient.return_value
+    client.heartbeat.return_value = True
+
+    result = await delete_kb_entry(
+        collection="public.test.col",
+        doc_id="orphan_doc",
+        sync_cache=False,
+    )
+    assert result["ok"] is True
+    assert result["removed_chunks"] == 0
+    assert result["cache_removed"] == 2
+    mock_del_cache.assert_awaited_once()

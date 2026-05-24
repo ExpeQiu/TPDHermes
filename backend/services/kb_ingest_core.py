@@ -240,6 +240,11 @@ def run_kb_ingestion(
             published = bool(defaults.get("published", True))
         published = bool(published)
 
+        source_type = str(
+            merged.get("source_type") or defaults.get("source_type") or ""
+        ).strip()
+        skip_embed_upsert = source_type == "conversation_harvest"
+
         chunks = chunk_markdown_text(body)
         chunk_count = len(chunks)
         checksum = sha256_file(path)
@@ -336,7 +341,7 @@ def run_kb_ingestion(
                 batch_docs = docs_out[i : i + batch_chunk_size]
                 batch_metas = metas_out[i : i + batch_chunk_size]
                 batch_embeddings = None
-                if embed_on_upsert_enabled():
+                if embed_on_upsert_enabled() and not skip_embed_upsert:
                     embed_inputs = [
                         extract_searchable_text(doc, meta)
                         for doc, meta in zip(batch_docs, batch_metas)

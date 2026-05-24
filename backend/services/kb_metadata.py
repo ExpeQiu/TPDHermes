@@ -45,5 +45,7 @@ def normalize_kb_metadata_dict(meta: dict[str, Any] | None) -> dict[str, Any]:
     pub = out.get("published")
     if isinstance(pub, str):
         out["published"] = pub.strip().lower() in ("1", "true", "yes", "on")
+    elif isinstance(pub, (int, float)) and not isinstance(pub, bool):
+        out["published"] = pub != 0
 
     return out

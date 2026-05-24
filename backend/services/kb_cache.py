@@ -5,7 +5,7 @@ KBCache 服务：管理本地 SQLite kb_cache 表，与外部 ChromaDB 保持元
 import json
 import uuid
 from datetime import datetime
-from typing import Optional
+from typing import Any, Optional
 from sqlalchemy import select
 
 from backend.models.kb_cache import KBCache
@@ -179,6 +179,85 @@ class KBCacheService:
             data={"synced": results["synced"], "failed": results["failed"], "skipped": results["skipped"]},
         )
         return results
+
+    async def upsert_cache_chunks(
+        self,
+        *,
+        project_id: str,
+        collection: str,
+        items: list[dict[str, Any]],
+    ) -> int:
+        """
+        将指定 chunk 列表写入 kb_cache（对话收割等增量场景，避免全库 sync）。
+        每项需含 id、content、metadata（dict）。
+        """
+        if not items:
+            return 0
+        await self.ensure_table()
+        pid = str(project_id).strip() or "__all__"
+        col = str(collection).strip()
+        now = datetime.now().isoformat()
+        written = 0
+
+        async def _notify(event_type: str, **extra: object) -> None:
+            try:
+                from backend.routes.kb_sse import notify_kb_event
+
+                await notify_kb_event(event_type, source="kb_cache", **extra)
+            except Exception:
+                pass
+
+        async with async_session_maker() as db:
+            for raw in items:
+                chunk_id = str(raw.get("id") or "").strip()
+                if not chunk_id:
+                    continue
+                content = str(raw.get("content") or "")
+                metadata = normalize_kb_metadata_dict(
+                    raw.get("metadata") if isinstance(raw.get("metadata"), dict) else {}
+                )
+                entry_id = str(metadata.get("id") or chunk_id)
+                existing = await db.execute(
+                    select(KBCache).where(
+                        KBCache.id == entry_id,
+                        KBCache.project_id == pid,
+                    )
+                )
+                row = existing.scalar_one_or_none()
+                source = str(metadata.get("source") or "")
+                if row:
+                    row.content = content
+                    row.collection = col
+                    row.metadata_ = json.dumps(metadata, ensure_ascii=False)
+                    row.source = source
+                    row.updated_at = now
+                    row.sync_status = "synced"
+                else:
+                    db.add(
+                        KBCache(
+                            id=entry_id,
+                            project_id=pid,
+                            collection=col,
+                            content=content,
+                            metadata_=json.dumps(metadata, ensure_ascii=False),
+                            source=source,
+                            created_at=now,
+                            updated_at=now,
+                            sync_status="synced",
+                            reliability=0.8,
+                            version=1,
+                        )
+                    )
+                written += 1
+            await db.commit()
+
+        if written:
+            await _notify(
+                "sync_complete",
+                project_id=pid,
+                data={"synced": written, "failed": 0, "skipped": 0, "incremental": True},
+            )
+        return written
 
     async def get_cached_entries(
         self,

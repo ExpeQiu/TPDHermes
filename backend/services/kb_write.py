@@ -14,9 +14,11 @@ from typing import Any, Optional
 
 from backend.services.chroma_client import ChromaHttpClient, flatten_chroma_get_ids
 from backend.services.kb_cache import kb_cache_service
+from backend.services.kb_metadata import normalize_kb_metadata_dict
 from backend.services.kb_contract import KB_DOMAIN_ENUM
 from backend.services.kb_ingest_core import (
     build_manifest_from_harvest,
+    chunk_markdown_text,
     new_ingest_job_id,
     run_kb_ingestion,
 )
@@ -274,8 +276,137 @@ def _add_kb_harvest_entry_sync_inner(
             "chroma_url": chroma,
             "project_id": sync_project,
             "collections": [collection_name],
+            "doc_id": doc_id,
+            "local_path": str(path),
+            "defaults": defaults,
+            "title": title.strip(),
         },
     }
+
+
+def _chroma_chunks_for_doc(
+    client: ChromaHttpClient,
+    collection_name: str,
+    doc_id: str,
+) -> list[dict[str, Any]]:
+    """按 doc_id 拉取刚写入的 chunk，供 kb_cache 增量同步。"""
+    data = client.get_by_where(
+        collection_name,
+        {"doc_id": doc_id},
+        limit=64,
+        include=["metadatas", "documents"],
+    )
+    ids = flatten_chroma_get_ids(data)
+    if not ids:
+        return []
+
+    docs_raw = data.get("documents") or []
+    metas_raw = data.get("metadatas") or []
+    if docs_raw and isinstance(docs_raw[0], list):
+        docs_list: list[Any] = docs_raw[0]
+    else:
+        docs_list = docs_raw if isinstance(docs_raw, list) else []
+    if metas_raw and isinstance(metas_raw[0], list):
+        metas_list: list[Any] = metas_raw[0]
+    else:
+        metas_list = metas_raw if isinstance(metas_raw, list) else []
+
+    items: list[dict[str, Any]] = []
+    for i, cid in enumerate(ids):
+        meta = (metas_list[i] if i < len(metas_list) else {}) or {}
+        if not isinstance(meta, dict):
+            meta = {}
+        items.append(
+            {
+                "id": cid,
+                "content": docs_list[i] if i < len(docs_list) else "",
+                "metadata": normalize_kb_metadata_dict(meta),
+            }
+        )
+    return items
+
+
+def _harvest_chunks_from_local_file(
+    *,
+    path: Path,
+    doc_id: str,
+    collection_name: str,
+    defaults: dict[str, Any],
+    title: str,
+) -> list[dict[str, Any]]:
+    """Chroma 拉取失败时，用本地 harvest 文件重建 cache 条目。"""
+    body = path.read_text(encoding="utf-8", errors="replace")
+    parts = chunk_markdown_text(body)
+    chunk_count = len(parts) or 1
+    items: list[dict[str, Any]] = []
+    for idx, ch in enumerate(parts or [body]):
+        chunk_index = idx + 1
+        chunk_id = f"{doc_id}_chunk_{chunk_index:04d}"
+        meta = normalize_kb_metadata_dict(
+            {
+                **defaults,
+                "id": chunk_id,
+                "title": title,
+                "doc_id": doc_id,
+                "chunk_index": chunk_index,
+                "chunk_count": chunk_count,
+                "collection": collection_name,
+            }
+        )
+        items.append({"id": chunk_id, "content": ch, "metadata": meta})
+    return items
+
+
+async def sync_harvest_doc_to_cache(
+    *,
+    chroma_url: str,
+    project_id: str,
+    collection_name: str,
+    doc_id: str,
+    local_path: Optional[Path] = None,
+    defaults: Optional[dict[str, Any]] = None,
+    title: str = "",
+) -> int:
+    """对话收割：仅同步当前 doc 的 chunk 到 kb_cache（避免全 collection sync 超时）。"""
+    chroma = chroma_url.strip()
+
+    def _read() -> list[dict[str, Any]]:
+        client = ChromaHttpClient(chroma)
+        return _chroma_chunks_for_doc(client, collection_name, doc_id)
+
+    chunks = await asyncio.to_thread(_read)
+    if not chunks and local_path and local_path.is_file() and defaults:
+        chunks = _harvest_chunks_from_local_file(
+            path=local_path,
+            doc_id=doc_id,
+            collection_name=collection_name,
+            defaults=defaults,
+            title=title,
+        )
+        log.info(
+            "kb_harvest cache incremental from local file doc_id=%s chunks=%s",
+            doc_id,
+            len(chunks),
+        )
+    if not chunks:
+        log.warning(
+            "kb_harvest cache incremental: no chunks doc_id=%s collection=%s",
+            doc_id,
+            collection_name,
+        )
+        return 0
+    n = await kb_cache_service.upsert_cache_chunks(
+        project_id=project_id,
+        collection=collection_name,
+        items=chunks,
+    )
+    log.info(
+        "kb_harvest cache incremental doc_id=%s collection=%s chunks=%s",
+        doc_id,
+        collection_name,
+        n,
+    )
+    return n
 
 
 async def add_kb_harvest_entry(
@@ -313,12 +444,23 @@ async def add_kb_harvest_entry(
     )
     sync = result.pop("_sync", None)
     if result.get("ok") and sync:
-        try:
-            await kb_cache_service.sync_from_external(
-                external_kb_url=str(sync["chroma_url"]),
-                project_id=str(sync["project_id"]),
-                collections=list(sync["collections"]),
-            )
-        except Exception as sync_e:
-            log.warning("kb_harvest cache sync failed trace=%s: %s", result.get("trace_id"), sync_e)
+        doc_id = str(result.get("doc_id") or sync.get("doc_id") or "").strip()
+        if doc_id:
+            try:
+                local_path = Path(str(sync.get("local_path") or ""))
+                await sync_harvest_doc_to_cache(
+                    chroma_url=str(sync["chroma_url"]),
+                    project_id=str(sync["project_id"]),
+                    collection_name=str(sync["collections"][0]),
+                    doc_id=doc_id,
+                    local_path=local_path if local_path.is_file() else None,
+                    defaults=sync.get("defaults") if isinstance(sync.get("defaults"), dict) else None,
+                    title=str(sync.get("title") or ""),
+                )
+            except Exception as sync_e:
+                log.warning(
+                    "kb_harvest cache incremental failed trace=%s: %s",
+                    result.get("trace_id"),
+                    sync_e,
+                )
     return result

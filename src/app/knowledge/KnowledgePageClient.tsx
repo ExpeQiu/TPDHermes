@@ -6,6 +6,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type ReactNode,
 } from "react";
 import KBDegradedBanner from "@/components/kb/KBDegradedBanner";
 import Link from "next/link";
@@ -19,6 +20,8 @@ import {
   kbCollectionLabel,
   KB_DOMAIN_LABELS,
   kbDomainLabel,
+  kbFolderPathLabel,
+  kbFolderSegmentLabel,
   kbSourceTypeLabel,
   kgKindLabel,
   runStatusLabel,
@@ -199,7 +202,8 @@ function mapCacheRow(row: Record<string, unknown>): KBEntry {
     typeof meta.source_type === "string" && meta.source_type
       ? meta.source_type
       : undefined;
-  const doc_id = typeof meta.doc_id === "string" && meta.doc_id ? meta.doc_id : undefined;
+  const rawId = String(row.id ?? "").trim();
+  const doc_id = chromaDocIdFromParts(rawId, meta) ?? undefined;
   const conversation_id =
     typeof meta.conversation_id === "string" && meta.conversation_id
       ? meta.conversation_id
@@ -214,7 +218,7 @@ function mapCacheRow(row: Record<string, unknown>): KBEntry {
   else if (typeof h === "string")
     harvested = ["1", "true", "yes", "on"].includes(h.toLowerCase());
   return {
-    id: String(row.id ?? ""),
+    id: rawId,
     doc_id,
     title,
     source: String(row.source ?? meta.source ?? "缓存"),
@@ -305,12 +309,63 @@ function formatDate(dateStr: string): string {
   return dateStr || "未知";
 }
 
+/** kb_cache 主键形态（测试/仅缓存），不得当作 Chroma doc_id */
+const KB_CACHE_PRIMARY_ID_RE = /^(qa|qb|unit)-[0-9a-f-]{8,}$/i;
+
+function isKbCachePrimaryId(id: string | null | undefined): boolean {
+  const s = id?.trim() ?? "";
+  return s.length > 0 && KB_CACHE_PRIMARY_ID_RE.test(s);
+}
+
+/** Chroma 侧真实 doc_id：metadata.doc_id 或从 chunk id 解析；不含 qa-/unit- 等纯缓存主键 */
+function chromaDocIdFromParts(
+  rawId: string,
+  meta?: Record<string, unknown> | null,
+): string | null {
+  const raw = rawId.trim();
+  const metaDoc =
+    meta && typeof meta.doc_id === "string" && meta.doc_id.trim() ? meta.doc_id.trim() : "";
+  if (metaDoc) {
+    if (isKbCachePrimaryId(metaDoc) || (raw && metaDoc === raw && isKbCachePrimaryId(raw))) {
+      return null;
+    }
+    return metaDoc;
+  }
+  if (!raw) return null;
+  const m = /^(.+)_chunk_\d+$/i.exec(raw);
+  if (m?.[1]) {
+    const base = m[1].trim();
+    return isKbCachePrimaryId(base) ? null : base;
+  }
+  return null;
+}
+
+function resolveChromaDocId(entry: Pick<KBEntry, "id" | "doc_id">): string | null {
+  const raw = entry.id?.trim() ?? "";
+  let doc = entry.doc_id?.trim() ?? "";
+  if (doc && (isKbCachePrimaryId(doc) || (raw && doc === raw && isKbCachePrimaryId(raw)))) {
+    doc = "";
+  }
+  if (doc) return doc;
+  const m = /^(.+)_chunk_\d+$/i.exec(raw);
+  if (m?.[1]) {
+    const base = m[1].trim();
+    return isKbCachePrimaryId(base) ? null : base;
+  }
+  return null;
+}
+
+/** 合并/去重：Chroma doc_id，否则回落到缓存主键 id */
 function resolveDocId(entry: Pick<KBEntry, "id" | "doc_id">): string | null {
-  const explicit = entry.doc_id?.trim();
-  if (explicit) return explicit;
-  const m = /^(.+)_chunk_\d+$/.exec(entry.id);
-  if (m?.[1]) return m[1];
-  return entry.id?.trim() || null;
+  return resolveChromaDocId(entry) ?? (entry.id?.trim() || null);
+}
+
+/** 仅 kb_cache 行（无 Chroma doc），如测试数据 qa-* / unit-* */
+function isCacheOnlyKbEntry(entry: Pick<KBEntry, "id" | "doc_id">): boolean {
+  const id = entry.id?.trim();
+  if (!id) return false;
+  if (isKbCachePrimaryId(id)) return true;
+  return !resolveChromaDocId(entry);
 }
 
 function entryBodyText(entry: Pick<KBEntry, "body" | "summary">): string {
@@ -326,6 +381,11 @@ function mergeBodiesForDoc(entry: KBEntry, all: KBEntry[]): string {
     if (b.length > best.length) best = b;
   }
   return best || entryBodyText(entry);
+}
+
+/** 对话收割待审核：未发布或 published 未写入缓存（undefined） */
+function isHarvestDraftEntry(e: KBEntry): boolean {
+  return e.published !== true;
 }
 
 function dedupeKbEntriesByDocId(entries: KBEntry[]): KBEntry[] {
@@ -349,11 +409,20 @@ function dedupeBrowseDocsByDocId(docs: BrowseDoc[]): BrowseDoc[] {
   return [...seen.values()];
 }
 
+function harvestDefaultFolderPath(entry: KBEntry): string {
+  const raw = entry.folder_path?.trim() ?? "";
+  if (!raw || raw === "conversation_harvest" || raw === entry.source_type) {
+    return "02-知识库/对话收割";
+  }
+  return raw;
+}
+
 function entryEditFormFrom(entry: KBEntry, body: string) {
+  const isHarvest = entry.source_type === "conversation_harvest";
   return {
     title: entry.title,
     domain: entry.domain && entry.domain !== "_uncategorized" ? entry.domain : "structured_tech",
-    folder_path: entry.folder_path || "02-知识库/导入",
+    folder_path: isHarvest ? harvestDefaultFolderPath(entry) : entry.folder_path || "02-知识库/导入",
     published: entry.published !== false,
     content: body,
   };
@@ -437,7 +506,7 @@ function treeNodeDisplayLabel(node: TreeNode, depth: number): string {
   if (depth === 0 && node.domain) {
     return kbDomainLabel(node.domain);
   }
-  if (node.segment) return node.segment;
+  if (node.segment) return kbFolderSegmentLabel(node.segment);
   return "本目录";
 }
 
@@ -458,6 +527,90 @@ function entryClassifyStatus(entry: Pick<KBEntry, "domain" | "folder_path">): {
     return { ok: false, label: "缺业务域", hint: "metadata.domain 未设置" };
   }
   return { ok: false, label: "缺目录路径", hint: "metadata.folder_path 未设置" };
+}
+
+function entryMetadataDirty(
+  entry: Pick<KBEntry, "domain" | "folder_path">,
+  draft: { domain: string; folder_path: string },
+): boolean {
+  const baseDomain =
+    entry.domain && entry.domain !== "_uncategorized" ? entry.domain : "structured_tech";
+  const basePath = entry.folder_path?.trim() ?? "";
+  return (
+    draft.domain.trim() !== baseDomain || draft.folder_path.trim() !== basePath
+  );
+}
+
+function KbEntryMetadataFields({
+  domain,
+  folderPath,
+  disabled,
+  busy,
+  dirty,
+  onDomainChange,
+  onFolderPathChange,
+  onSave,
+}: {
+  domain: string;
+  folderPath: string;
+  disabled?: boolean;
+  busy?: boolean;
+  dirty?: boolean;
+  onDomainChange: (value: string) => void;
+  onFolderPathChange: (value: string) => void;
+  onSave: () => void;
+}) {
+  const classify = entryClassifyStatus({ domain, folder_path: folderPath });
+  return (
+    <div className="space-y-2">
+      <label className="block text-sm">
+        <span className="text-slate-500 text-xs">业务域</span>
+        <select
+          value={domain}
+          disabled={disabled}
+          onChange={(e) => onDomainChange(e.target.value)}
+          className="mt-1 w-full rounded border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2 text-sm disabled:opacity-50"
+        >
+          {Object.entries(KB_DOMAIN_LABELS)
+            .filter(([k]) => k !== "_uncategorized")
+            .map(([k, label]) => (
+              <option key={k} value={k}>
+                {label}
+              </option>
+            ))}
+        </select>
+      </label>
+      <label className="block text-sm">
+        <span className="text-slate-500 text-xs">目录路径</span>
+        <input
+          value={folderPath}
+          disabled={disabled}
+          onChange={(e) => onFolderPathChange(e.target.value)}
+          placeholder="02-知识库/子目录"
+          className="mt-1 w-full rounded border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2 text-sm disabled:opacity-50"
+        />
+      </label>
+      <p
+        className={`text-xs ${
+          classify.ok
+            ? "text-emerald-700 dark:text-emerald-300/90"
+            : "text-amber-700 dark:text-amber-300/90"
+        }`}
+        title={classify.hint}
+      >
+        {classify.label}
+        {!classify.ok ? ` · ${classify.hint}` : null}
+      </p>
+      <button
+        type="button"
+        disabled={disabled || busy || !dirty}
+        onClick={onSave}
+        className="w-full rounded-lg bg-blue-600 px-3 py-1.5 text-sm text-white disabled:opacity-40"
+      >
+        {busy ? "保存中…" : "保存分类"}
+      </button>
+    </div>
+  );
 }
 
 function KbClassifyRulesHint({ compact }: { compact?: boolean }) {
@@ -575,6 +728,29 @@ function TreeNav({
   );
 }
 
+/** 筛选工具栏下方：条目列表（左 1/3）与详情（右 2/3） */
+function KbEntryListDetailSplit({
+  list,
+  detail,
+}: {
+  list: ReactNode;
+  detail: ReactNode | null;
+}) {
+  if (!detail) {
+    return <>{list}</>;
+  }
+  return (
+    <div className="grid w-full gap-4 grid-cols-[minmax(0,1fr)_minmax(0,2fr)] items-start">
+      <div className="min-w-0 max-h-[min(75vh,calc(100vh-14rem))] overflow-y-auto">
+        {list}
+      </div>
+      <div className="min-w-0 lg:sticky lg:top-4 max-h-[min(85vh,calc(100vh-8rem))] overflow-y-auto">
+        {detail}
+      </div>
+    </div>
+  );
+}
+
 // ============== 页面 ==============
 export default function KnowledgePageClient() {
   const [workspaceMode, setWorkspaceMode] = useState<
@@ -625,6 +801,12 @@ export default function KnowledgePageClient() {
   const [treeTargetFolderPath, setTreeTargetFolderPath] = useState("");
   const [treeNodeDocFilter, setTreeNodeDocFilter] = useState<Set<string> | null>(null);
   const [nodeManageMessage, setNodeManageMessage] = useState<string | null>(null);
+  const [showAddCategoryPanel, setShowAddCategoryPanel] = useState(false);
+  const [addCategoryDomain, setAddCategoryDomain] = useState("structured_tech");
+  const [addCategoryParentPath, setAddCategoryParentPath] = useState("02-知识库");
+  const [addCategorySegment, setAddCategorySegment] = useState("");
+  const [addCategoryMessage, setAddCategoryMessage] = useState<string | null>(null);
+  const [addCategoryBusy, setAddCategoryBusy] = useState(false);
   const [showUnclassifiedOnly, setShowUnclassifiedOnly] = useState(false);
 
   const [entryEditing, setEntryEditing] = useState(false);
@@ -651,7 +833,7 @@ export default function KnowledgePageClient() {
   const [kgLinks, setKgLinks] = useState<KgLinkRow[]>([]);
   const [kgLinkKind, setKgLinkKind] = useState<string>("CoreTech");
   const [kgLinkNodeId, setKgLinkNodeId] = useState("");
-  const [previewMode, setPreviewMode] = useState<"summary" | "markdown">("markdown");
+  const [previewMode, setPreviewMode] = useState<"summary" | "markdown">("summary");
 
   const [ingestCollection, setIngestCollection] = useState("");
   const [ingestDomain, setIngestDomain] = useState("structured_tech");
@@ -979,20 +1161,118 @@ export default function KnowledgePageClient() {
     handleWorkspaceMode("ingest");
   };
 
-  const jumpToCreateFromTree = () => {
-    const col =
-      treeNodeStats.collectionCounts[0]?.name ||
-      collections.find((c) => c.name.includes(treeTargetDomain))?.name ||
-      collections[0]?.name ||
-      "";
+  const pickDefaultCollection = useCallback(
+    (domain: string) => {
+      const dom = domain.trim();
+      const fromTree = treeNodeStats.collectionCounts[0]?.name;
+      if (fromTree) return fromTree;
+      const byDomain = collections.find((c) => c.name.includes(dom))?.name;
+      if (byDomain) return byDomain;
+      const publicCol = collections.find((c) => isPublicKbCollection(c.name))?.name;
+      if (publicCol) return publicCol;
+      return collections[0]?.name ?? "";
+    },
+    [collections, treeNodeStats.collectionCounts],
+  );
+
+  const addCategoryFullPath = useMemo(() => {
+    const parent = addCategoryParentPath.trim().replace(/\/+$/, "");
+    const seg = addCategorySegment.trim().replace(/^\/+|\/+$/g, "");
+    if (!seg) return parent;
+    return parent ? `${parent}/${seg}` : seg;
+  }, [addCategoryParentPath, addCategorySegment]);
+
+  const applyCategoryTarget = useCallback((path: string, domain: string) => {
+    const dom = domain.trim() || "structured_tech";
+    const fp = path.trim() || "02-知识库/手动录入";
+    setTreeTargetDomain(dom);
+    setTreeTargetFolderPath(fp);
+    setIngestDomain(dom);
+    setIngestFolderPath(fp);
+    return { domain: dom, folder_path: fp };
+  }, []);
+
+  const toggleAddCategoryPanel = () => {
+    setShowAddCategoryPanel((open) => {
+      const next = !open;
+      if (next) {
+        setAddCategoryDomain(
+          selectedTreeNode?.domain?.trim() || treeTargetDomain.trim() || "structured_tech",
+        );
+        setAddCategoryParentPath(
+          selectedTreeFolderPath.trim() || treeTargetFolderPath.trim() || "02-知识库",
+        );
+        setAddCategorySegment("");
+        setAddCategoryMessage(null);
+      }
+      return next;
+    });
+  };
+
+  const jumpToCreateFromTree = (opts?: { domain?: string; folder_path?: string }) => {
+    const domain = opts?.domain?.trim() || treeTargetDomain.trim() || "structured_tech";
+    const folder_path = opts?.folder_path?.trim() || treeTargetFolderPath.trim() || "02-知识库/手动录入";
+    const col = pickDefaultCollection(domain);
     setCreateEntryForm((f) => ({
       ...f,
       collection: col,
-      domain: treeTargetDomain.trim() || "structured_tech",
-      folder_path: treeTargetFolderPath.trim() || "02-知识库/手动录入",
+      domain,
+      folder_path,
     }));
     setShowCreateEntry(true);
     setPage(0);
+  };
+
+  const jumpToIngestFromTreeWithTarget = (opts?: { domain?: string; folder_path?: string }) => {
+    const { domain, folder_path } = applyCategoryTarget(
+      opts?.folder_path ?? treeTargetFolderPath,
+      opts?.domain ?? treeTargetDomain,
+    );
+    setIngestDomain(domain);
+    setIngestFolderPath(folder_path);
+    handleWorkspaceMode("ingest");
+  };
+
+  const createCategoryIndexEntry = async () => {
+    if (USE_MOCK_KB || addCategoryBusy) return;
+    const path = addCategoryFullPath.trim();
+    const seg = addCategorySegment.trim();
+    if (!seg) {
+      setAddCategoryMessage("请填写新分类名称。");
+      return;
+    }
+    if (!path) {
+      setAddCategoryMessage("目录路径无效，请检查父路径与新分类名称。");
+      return;
+    }
+    const col = pickDefaultCollection(addCategoryDomain);
+    if (!col) {
+      setAddCategoryMessage("暂无可用知识集合，请先创建或同步集合。");
+      return;
+    }
+    setAddCategoryBusy(true);
+    setAddCategoryMessage(null);
+    try {
+      const domain = addCategoryDomain.trim() || "structured_tech";
+      await apiPost<{ entry_id?: string; doc_id?: string }>("/kb/entries/manual", {
+        collection: col,
+        project_id: ingestProjectId || "__all__",
+        title: `${seg}（分类索引）`,
+        content: `# ${seg}\n\n> 本条目用于在目录树中占位展示「${path}」分类，可在详情页编辑或替换为正式文档。`,
+        domain,
+        folder_path: path,
+        published: true,
+        sync_cache: true,
+      });
+      applyCategoryTarget(path, domain);
+      setAddCategoryMessage(`已创建分类索引：${path}`);
+      await reloadKbBrowse();
+      await reloadBrowseTree();
+    } catch (e) {
+      setAddCategoryMessage(e instanceof Error ? e.message : "创建分类索引失败");
+    } finally {
+      setAddCategoryBusy(false);
+    }
   };
 
   const jumpToCollectionsForNode = () => {
@@ -1092,7 +1372,7 @@ export default function KnowledgePageClient() {
   const saveEntryEdit = async () => {
     if (!selectedEntry || USE_MOCK_KB || entryManageBusy) return;
     const fromEntry = entryById.get(selectedEntry.id) ?? selectedEntry;
-    const docId = resolveDocId(fromEntry);
+    const docId = resolveChromaDocId(fromEntry);
     if (!docId) {
       setEntryManageMessage("无法解析 doc_id，暂不支持编辑。");
       return;
@@ -1125,22 +1405,68 @@ export default function KnowledgePageClient() {
     }
   };
 
+  const saveEntryMetadata = async () => {
+    if (!selectedEntry || USE_MOCK_KB || entryManageBusy) return;
+    const fromEntry = entryById.get(selectedEntry.id) ?? selectedEntry;
+    const docId = resolveChromaDocId(fromEntry);
+    if (!docId) {
+      setEntryManageMessage("无法解析 doc_id，暂不支持保存分类。");
+      return;
+    }
+    const projectId =
+      fromEntry.projects[0] != null ? String(fromEntry.projects[0]) : "__all__";
+    const body = fullContent(fromEntry) || entryEditForm.content;
+    setEntryManageBusy(true);
+    setEntryManageMessage(null);
+    try {
+      await apiPatch("/kb/entries/" + encodeURIComponent(docId), {
+        collection: fromEntry.collection,
+        project_id: projectId,
+        sync_cache: true,
+        title: fromEntry.title,
+        content: body,
+        metadata: {
+          domain: entryEditForm.domain.trim(),
+          folder_path: entryEditForm.folder_path.trim(),
+          published: fromEntry.published !== false,
+        },
+      });
+      setEntryManageMessage("已保存业务域与目录路径。");
+      await reloadKbBrowse();
+      await reloadBrowseTree();
+    } catch (e) {
+      setEntryManageMessage(e instanceof Error ? e.message : "保存分类失败");
+    } finally {
+      setEntryManageBusy(false);
+    }
+  };
+
   const deleteKbDocument = async (
     entry: Pick<KBEntry, "id" | "doc_id" | "collection" | "projects" | "title">,
     confirmTitle?: string,
   ) => {
     if (USE_MOCK_KB || entryManageBusy) return false;
-    const docId = resolveDocId(entry);
-    if (!docId) {
+    const cacheId = entry.id?.trim();
+    const chromaDocId = resolveChromaDocId(entry);
+    const cacheOnly = isCacheOnlyKbEntry(entry);
+    if (!cacheOnly && !chromaDocId) {
       const msg = "无法解析 doc_id，暂不支持删除。";
       setEntryManageMessage(msg);
       setNodeManageMessage(msg);
       return false;
     }
-    const label = confirmTitle || entry.title || docId;
+    if (cacheOnly && !cacheId) {
+      const msg = "无法解析缓存条目 id。";
+      setEntryManageMessage(msg);
+      setNodeManageMessage(msg);
+      return false;
+    }
+    const label = confirmTitle || entry.title || chromaDocId || cacheId || "条目";
     if (
       !window.confirm(
-        `确定删除知识点「${label}」？\n将移除 Chroma 中该 doc 的全部 chunk，不可恢复。`,
+        cacheOnly
+          ? `确定删除缓存知识点「${label}」？\n（仅本地 kb_cache，无 Chroma 文档）`
+          : `确定删除知识点「${label}」？\n将移除 Chroma 中该 doc 的全部 chunk，不可恢复。`,
       )
     ) {
       return false;
@@ -1151,20 +1477,49 @@ export default function KnowledgePageClient() {
     setEntryManageMessage(null);
     setNodeManageMessage(null);
     try {
-      await apiDelete(
-        `/kb/entries/${encodeURIComponent(docId)}?collection=${encodeURIComponent(entry.collection)}&project_id=${encodeURIComponent(projectId)}`,
-      );
-      if (selectedEntry && resolveDocId(selectedEntry) === docId) {
+      const useCacheDelete =
+        (cacheOnly && !!cacheId) || (!!cacheId && isKbCachePrimaryId(cacheId));
+      if (useCacheDelete) {
+        await apiDelete(`/kb/cache/entry/${encodeURIComponent(cacheId!)}`);
+      } else if (chromaDocId) {
+        try {
+          await apiDelete(
+            `/kb/entries/${encodeURIComponent(chromaDocId)}?collection=${encodeURIComponent(entry.collection)}&project_id=${encodeURIComponent(projectId)}`,
+          );
+        } catch (chromaErr) {
+          if (cacheId) {
+            await apiDelete(`/kb/cache/entry/${encodeURIComponent(cacheId)}`);
+          } else {
+            throw chromaErr;
+          }
+        }
+      } else if (cacheId) {
+        await apiDelete(`/kb/cache/entry/${encodeURIComponent(cacheId)}`);
+      }
+      if (
+        selectedEntry &&
+        (selectedEntry.id === entry.id ||
+          (chromaDocId && resolveChromaDocId(selectedEntry) === chromaDocId))
+      ) {
         setSelectedEntry(null);
         setEntryEditing(false);
       }
       await reloadKbBrowse();
       await reloadBrowseTree();
-      setNodeManageMessage(`已删除：${label}`);
+      const okMsg = `已删除：${label}`;
+      setEntryManageMessage(okMsg);
+      setNodeManageMessage(okMsg);
       return true;
     } catch (e) {
       const msg = e instanceof Error ? e.message : "删除失败";
-      const hint = msg.includes("404") ? "删除接口不可用，请重启后端（./stop.sh && ./start.sh）" : msg;
+      let hint = msg;
+      if (msg.includes("entry_not_found") || msg.includes("cache_entry_not_found")) {
+        hint = cacheOnly
+          ? `未找到缓存条目 id=${cacheId}，请刷新列表后重试`
+          : `未在 Chroma/缓存中找到 doc_id=${chromaDocId ?? cacheId}，请刷新后重试`;
+      } else if (msg.includes("404")) {
+        hint = "删除接口不可用，请重启后端（./stop.sh && ./start.sh）";
+      }
       setEntryManageMessage(hint);
       setNodeManageMessage(hint);
       return false;
@@ -1184,7 +1539,6 @@ export default function KnowledgePageClient() {
     await deleteKbDocument(
       full ?? {
         id: d.id,
-        doc_id: resolveDocId({ id: d.id }) ?? undefined,
         collection: d.collection,
         projects: [],
         title: d.title,
@@ -1275,27 +1629,60 @@ export default function KnowledgePageClient() {
   };
 
   const publishHarvestEntry = async (entry: KBEntry, published: boolean) => {
-    const docId = entry.doc_id?.trim();
-    if (!docId || USE_MOCK_KB || publishBusy) return;
+    const fromEntry = entryById.get(entry.id) ?? entry;
+    const docId = resolveChromaDocId(fromEntry);
+    if (!docId || USE_MOCK_KB || publishBusy) {
+      if (!docId && !USE_MOCK_KB) {
+        setPublishMessage("无法解析 doc_id，无法更新发布状态。");
+      }
+      return;
+    }
     const projectId =
-      entry.projects[0] != null ? String(entry.projects[0]) : "__all__";
+      fromEntry.projects[0] != null ? String(fromEntry.projects[0]) : "__all__";
     setPublishBusy(true);
     setPublishMessage(null);
     try {
+      const sameSelection = selectedEntry?.id === fromEntry.id;
+      const draft = sameSelection
+        ? entryEditForm
+        : entryEditFormFrom(fromEntry, fullContent(fromEntry));
+      const metadataDirty = entryMetadataDirty(fromEntry, draft);
+      if (metadataDirty) {
+        const body = fullContent(fromEntry) || draft.content;
+        await apiPatch("/kb/entries/" + encodeURIComponent(docId), {
+          collection: fromEntry.collection,
+          project_id: projectId,
+          sync_cache: true,
+          title: fromEntry.title,
+          content: body,
+          metadata: {
+            domain: draft.domain.trim(),
+            folder_path: draft.folder_path.trim(),
+            published: fromEntry.published !== false,
+          },
+        });
+      }
       await apiPost("/kb/publish", {
-        collection: entry.collection,
+        collection: fromEntry.collection,
         doc_ids: [docId],
         published,
         project_id: projectId,
         sync_cache: true,
       });
-      setPublishMessage(published ? "已发布并完成缓存同步。" : "已保持草稿（未对外发布）。");
-      await reloadKbBrowse();
-      setSelectedEntry((prev) =>
-        prev && prev.id === entry.id ? { ...prev, published } : prev,
+      setPublishMessage(
+        published
+          ? metadataDirty
+            ? "已保存分类并发布，缓存已同步。"
+            : "已发布并完成缓存同步。"
+          : "已保持草稿（未对外发布）。",
       );
-    } catch {
-      setPublishMessage("发布状态更新失败。");
+      await reloadKbBrowse();
+      await reloadBrowseTree();
+      setSelectedEntry((prev) =>
+        prev && prev.id === fromEntry.id ? { ...prev, published } : prev,
+      );
+    } catch (e) {
+      setPublishMessage(e instanceof Error ? e.message : "发布状态更新失败。");
     } finally {
       setPublishBusy(false);
     }
@@ -1328,8 +1715,8 @@ export default function KnowledgePageClient() {
   );
 
   const harvestStats = useMemo(() => {
-    const draft = harvestAllEntries.filter((e) => e.published === false);
-    const published = harvestAllEntries.filter((e) => e.published !== false);
+    const draft = harvestAllEntries.filter(isHarvestDraftEntry);
+    const published = harvestAllEntries.filter((e) => e.published === true);
     return {
       total: harvestAllEntries.length,
       draft: draft.length,
@@ -1339,10 +1726,10 @@ export default function KnowledgePageClient() {
 
   const harvestVisibleEntries = useMemo(() => {
     if (harvestPublishFilter === "draft") {
-      return harvestAllEntries.filter((e) => e.published === false);
+      return harvestAllEntries.filter(isHarvestDraftEntry);
     }
     if (harvestPublishFilter === "published") {
-      return harvestAllEntries.filter((e) => e.published !== false);
+      return harvestAllEntries.filter((e) => e.published === true);
     }
     return harvestAllEntries;
   }, [harvestAllEntries, harvestPublishFilter]);
@@ -1626,7 +2013,7 @@ export default function KnowledgePageClient() {
           >
             <div className="font-medium text-slate-900 dark:text-white truncate">{d.title}</div>
             <div className="text-xs text-slate-500 mt-1 truncate">
-              {d.folder_path || "—"} · {kbCollectionLabel(d.collection, { projectNames: projectNameMap })}
+              {kbFolderPathLabel(d.folder_path) || "—"} · {kbCollectionLabel(d.collection, { projectNames: projectNameMap })}
             </div>
           </button>
           <div className="flex flex-col items-end gap-1 shrink-0">
@@ -1664,7 +2051,10 @@ export default function KnowledgePageClient() {
             <button
               type="button"
               disabled={entryManageBusy}
-              onClick={() => void deleteTreeDocument(d)}
+              onClick={(ev) => {
+                ev.stopPropagation();
+                void deleteTreeDocument(d);
+              }}
               className="rounded px-2 py-0.5 text-[11px] border border-rose-400/60 text-rose-700 hover:bg-rose-50 dark:border-rose-500/50 dark:text-rose-400 dark:hover:bg-rose-500/10 disabled:opacity-40"
             >
               删除
@@ -1687,70 +2077,8 @@ export default function KnowledgePageClient() {
             ? treeNodeStats.unclassifiedCount
             : subtreeCount;
 
-    return (
-    <div className="space-y-4">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <KbClassifyRulesHint compact />
-        <div className="flex flex-wrap gap-2">
-          <button
-            type="button"
-            onClick={() => {
-              void reloadKbBrowse();
-              void reloadBrowseTree();
-            }}
-            className="rounded-lg border border-slate-300 dark:border-slate-600 px-3 py-1.5 text-xs text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:bg-slate-800"
-          >
-            刷新数据
-          </button>
-          {unclassifiedCount > 0 ? (
-            <button
-              type="button"
-              onClick={() => {
-                setShowUnclassifiedOnly(true);
-                handleWorkspaceMode("collections");
-              }}
-              className={`rounded-lg px-3 py-1.5 text-xs font-medium ${KB_BTN_AMBER}`}
-            >
-              {unclassifiedCount} 条未完整分类
-            </button>
-          ) : null}
-        </div>
-      </div>
-    <div className="grid gap-4 lg:grid-cols-12 min-h-[480px]">
-      <div className="lg:col-span-3 rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-200/40 dark:bg-slate-800/40 p-3 overflow-auto max-h-[70vh]">
-        <p className="text-xs text-slate-400 mb-2 font-medium">业务域 / 目录路径</p>
-        {treeLoading ? (
-          <p className="text-slate-400 text-sm">加载目录树…</p>
-        ) : treeError ? (
-          <p className="text-amber-400 text-sm">{treeError}</p>
-        ) : browseTree.length === 0 ? (
-          <div className="space-y-3">
-            <p className="text-slate-500 text-sm">
-              暂无目录树。条目需在 metadata 中填写 domain 与 folder_path。
-            </p>
-            <button
-              type="button"
-              onClick={() => handleWorkspaceMode("collections")}
-              className="text-xs text-blue-400 hover:text-blue-300"
-            >
-              切换到「按集合」浏览 →
-            </button>
-          </div>
-        ) : (
-          <TreeNav
-            nodes={browseTree}
-            depth={0}
-            selectedPath={selectedTreeKey}
-            onSelect={onTreeSelect}
-          />
-        )}
-        {treeMeta?.truncated ? (
-          <p className="text-xs text-amber-400 mt-2">
-            已截断（扫描 {treeMeta.entry_count_scanned} 条），可调大 /kb/browse-tree limit。
-          </p>
-        ) : null}
-      </div>
-      <div className="lg:col-span-5 flex flex-col rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-200/40 dark:bg-slate-800/40 p-3 max-h-[70vh]">
+    const treeDocListPanel = (
+      <div className="flex flex-col rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-200/40 dark:bg-slate-800/40 p-3 max-h-[70vh] min-h-[320px]">
         <div className="flex flex-wrap gap-2 mb-2 items-center justify-between">
           <div className="flex gap-2">
             <button
@@ -1806,7 +2134,7 @@ export default function KnowledgePageClient() {
           placeholder="筛选当前节点文档…"
           className="mb-2 w-full rounded-lg border border-slate-300 dark:border-slate-700 bg-slate-100 dark:bg-slate-900 px-3 py-1.5 text-sm text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder-slate-500"
         />
-        <div className="flex-1 overflow-auto space-y-2">
+        <div className="flex-1 overflow-auto space-y-2 min-h-0">
           {displayTreeDocs.length === 0 ? (
             <p className="text-slate-500 text-sm">
               {subtreeCount === 0 ? "该节点下暂无文档" : "无匹配文档，请调整筛选词"}
@@ -1835,6 +2163,201 @@ export default function KnowledgePageClient() {
           )}
         </div>
       </div>
+    );
+
+    return (
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <KbClassifyRulesHint compact />
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={toggleAddCategoryPanel}
+            className={`rounded-lg border px-3 py-1.5 text-xs font-medium transition ${
+              showAddCategoryPanel
+                ? "border-emerald-500/60 bg-emerald-50 text-emerald-900 dark:border-emerald-500/40 dark:bg-emerald-500/15 dark:text-emerald-200"
+                : "border-emerald-400/70 text-emerald-800 hover:bg-emerald-50 dark:text-emerald-300 dark:hover:bg-emerald-500/10"
+            }`}
+          >
+            新增分类及功能
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              void reloadKbBrowse();
+              void reloadBrowseTree();
+            }}
+            className="rounded-lg border border-slate-300 dark:border-slate-600 px-3 py-1.5 text-xs text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:bg-slate-800"
+          >
+            刷新数据
+          </button>
+          {unclassifiedCount > 0 ? (
+            <button
+              type="button"
+              onClick={() => {
+                setShowUnclassifiedOnly(true);
+                handleWorkspaceMode("collections");
+              }}
+              className={`rounded-lg px-3 py-1.5 text-xs font-medium ${KB_BTN_AMBER}`}
+            >
+              {unclassifiedCount} 条未完整分类
+            </button>
+          ) : null}
+        </div>
+      </div>
+      {showAddCategoryPanel ? (
+        <div className="rounded-xl border border-emerald-400/50 bg-emerald-50/80 dark:border-emerald-500/30 dark:bg-emerald-950/20 p-4 space-y-3">
+          <div className="flex items-start justify-between gap-2">
+            <div>
+              <p className="text-sm font-medium text-emerald-900 dark:text-emerald-100">新增分类及功能</p>
+              <p className="text-xs text-slate-600 dark:text-slate-400 mt-0.5">
+                目录树由条目的 domain + folder_path 聚合；创建分类索引可在左侧树中占位展示。
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setShowAddCategoryPanel(false)}
+              className="text-slate-400 hover:text-slate-700 dark:hover:text-white text-lg leading-none shrink-0"
+              aria-label="关闭"
+            >
+              ×
+            </button>
+          </div>
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            <label className="block text-xs">
+              <span className="text-slate-500">业务域</span>
+              <select
+                value={addCategoryDomain}
+                onChange={(e) => setAddCategoryDomain(e.target.value)}
+                className="mt-1 w-full rounded border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-2 py-1.5 text-sm"
+              >
+                {Object.entries(KB_DOMAIN_LABELS)
+                  .filter(([k]) => k !== "_uncategorized")
+                  .map(([k, label]) => (
+                    <option key={k} value={k}>
+                      {label}
+                    </option>
+                  ))}
+              </select>
+            </label>
+            <label className="block text-xs sm:col-span-2">
+              <span className="text-slate-500">父级路径</span>
+              <input
+                value={addCategoryParentPath}
+                onChange={(e) => setAddCategoryParentPath(e.target.value)}
+                placeholder="如 02-知识库/智能驾驶"
+                className="mt-1 w-full rounded border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-2 py-1.5 text-sm font-mono"
+              />
+            </label>
+            <label className="block text-xs">
+              <span className="text-slate-500">新分类名称</span>
+              <input
+                value={addCategorySegment}
+                onChange={(e) => setAddCategorySegment(e.target.value)}
+                placeholder="如 NOA/城市NOA"
+                className="mt-1 w-full rounded border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-2 py-1.5 text-sm"
+              />
+            </label>
+          </div>
+          <p className="text-xs text-slate-600 dark:text-slate-400 font-mono">
+            完整路径：
+            <span className="text-emerald-800 dark:text-emerald-200 ml-1">
+              {addCategoryFullPath || "—"}
+            </span>
+          </p>
+          <div className="flex flex-wrap gap-2">
+            {!USE_MOCK_KB ? (
+              <button
+                type="button"
+                disabled={addCategoryBusy || !addCategorySegment.trim()}
+                onClick={() => void createCategoryIndexEntry()}
+                className="rounded-lg bg-emerald-600/90 px-3 py-1.5 text-xs font-medium text-white hover:bg-emerald-500 disabled:opacity-40"
+              >
+                {addCategoryBusy ? "创建中…" : "创建分类索引"}
+              </button>
+            ) : null}
+            {!USE_MOCK_KB ? (
+              <button
+                type="button"
+                disabled={!addCategorySegment.trim()}
+                onClick={() => {
+                  const path = addCategoryFullPath.trim();
+                  applyCategoryTarget(path, addCategoryDomain);
+                  jumpToCreateFromTree({
+                    domain: addCategoryDomain.trim(),
+                    folder_path: path,
+                  });
+                  setShowAddCategoryPanel(false);
+                }}
+                className="rounded-lg bg-blue-600/90 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-500 disabled:opacity-40"
+              >
+                新建条目
+              </button>
+            ) : null}
+            <button
+              type="button"
+              disabled={!addCategorySegment.trim()}
+              onClick={() => {
+                jumpToIngestFromTreeWithTarget({
+                  domain: addCategoryDomain,
+                  folder_path: addCategoryFullPath,
+                });
+                setShowAddCategoryPanel(false);
+              }}
+              className="rounded-lg border border-slate-300 dark:border-slate-600 px-3 py-1.5 text-xs text-slate-800 dark:text-slate-200 hover:bg-slate-200 dark:bg-slate-800 disabled:opacity-40"
+            >
+              导入到此分类
+            </button>
+          </div>
+          {addCategoryMessage ? (
+            <p className={`text-xs whitespace-pre-wrap ${KB_TEXT_EMERALD}`}>{addCategoryMessage}</p>
+          ) : null}
+        </div>
+      ) : null}
+    <div className="grid gap-4 lg:grid-cols-12 min-h-[480px]">
+      <div className="lg:col-span-3 rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-200/40 dark:bg-slate-800/40 p-3 overflow-auto max-h-[70vh]">
+        <p className="text-xs text-slate-400 mb-2 font-medium">业务域 / 目录路径</p>
+        {treeLoading ? (
+          <p className="text-slate-400 text-sm">加载目录树…</p>
+        ) : treeError ? (
+          <p className="text-amber-400 text-sm">{treeError}</p>
+        ) : browseTree.length === 0 ? (
+          <div className="space-y-3">
+            <p className="text-slate-500 text-sm">
+              暂无目录树。条目需在 metadata 中填写 domain 与 folder_path。
+            </p>
+            <button
+              type="button"
+              onClick={() => handleWorkspaceMode("collections")}
+              className="text-xs text-blue-400 hover:text-blue-300"
+            >
+              切换到「按集合」浏览 →
+            </button>
+          </div>
+        ) : (
+          <TreeNav
+            nodes={browseTree}
+            depth={0}
+            selectedPath={selectedTreeKey}
+            onSelect={onTreeSelect}
+          />
+        )}
+        {treeMeta?.truncated ? (
+          <p className="text-xs text-amber-400 mt-2">
+            已截断（扫描 {treeMeta.entry_count_scanned} 条），可调大 /kb/browse-tree limit。
+          </p>
+        ) : null}
+      </div>
+      {selectedEntry ? (
+        <div className="lg:col-span-9 grid gap-4 grid-cols-[minmax(0,1fr)_minmax(0,2fr)] items-start min-w-0">
+          <div className="min-w-0">{treeDocListPanel}</div>
+          <div className="min-w-0 max-h-[min(85vh,calc(100vh-8rem))] overflow-y-auto lg:sticky lg:top-4">
+            {renderDetailPanel(selectedEntry)}
+          </div>
+        </div>
+      ) : (
+        <>
+      <div className="lg:col-span-5">{treeDocListPanel}</div>
       <div className="lg:col-span-4 rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-200/40 dark:bg-slate-800/40 p-3 overflow-auto max-h-[70vh]">
         <p className="text-xs text-slate-400 mb-3 font-medium">节点管理</p>
         {selectedTreeNode ? (
@@ -1852,7 +2375,8 @@ export default function KnowledgePageClient() {
               <p>
                 <span className="text-slate-500">目录路径：</span>
                 <span className="break-all text-slate-900 dark:text-white">
-                  {selectedTreeFolderPath || "（域根 · 条目可能无 folder_path）"}
+                  {kbFolderPathLabel(selectedTreeFolderPath) ||
+                    "（域根 · 条目可能无 folder_path）"}
                 </span>
               </p>
               <div className="grid grid-cols-2 gap-x-2 gap-y-1 text-xs pt-1 border-t border-slate-300/50 dark:border-slate-700/50">
@@ -1960,7 +2484,7 @@ export default function KnowledgePageClient() {
               {!USE_MOCK_KB ? (
                 <button
                   type="button"
-                  onClick={jumpToCreateFromTree}
+                  onClick={() => jumpToCreateFromTree()}
                   className="rounded-lg bg-blue-600/90 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-500"
                 >
                   新建条目
@@ -2021,19 +2545,9 @@ export default function KnowledgePageClient() {
         ) : (
           <p className="text-slate-500 text-sm">选择左侧节点</p>
         )}
-        {selectedEntry ? (
-          <div className="mt-4 border-t border-slate-300 dark:border-slate-700 pt-4">
-            <p className="text-xs uppercase text-slate-500 mb-2">选中条目</p>
-            <p className="font-medium text-slate-900 dark:text-white">{selectedEntry.title}</p>
-            <p className="text-xs text-slate-500 mt-1">
-              {kbDomainLabel(selectedEntry.domain)} · {selectedEntry.folder_path || "—"}
-            </p>
-            <p className="text-xs text-slate-500 mt-1">
-              {kbCollectionLabel(selectedEntry.collection, { projectNames: projectNameMap })}
-            </p>
-          </div>
-        ) : null}
       </div>
+        </>
+      )}
     </div>
     </div>
     );
@@ -2064,7 +2578,7 @@ export default function KnowledgePageClient() {
                 {classify.label}
               </span>
             ) : null}
-            {entry.source_type === "conversation_harvest" && entry.published === false ? (
+            {entry.source_type === "conversation_harvest" && isHarvestDraftEntry(entry) ? (
               <span className={`text-xs px-2 py-1 rounded font-medium ${KB_BADGE_DRAFT}`}>
                 待审核
               </span>
@@ -2100,7 +2614,7 @@ export default function KnowledgePageClient() {
                 <>
                   <span>·</span>
                   <span className="truncate max-w-[240px]" title={entry.folder_path}>
-                    {entry.folder_path}
+                    {kbFolderPathLabel(entry.folder_path)}
                   </span>
                 </>
               ) : null}
@@ -2118,8 +2632,8 @@ export default function KnowledgePageClient() {
             </>
           )}
         </div>
-        {workspaceMode !== "harvest" && !classify.ok ? (
-          <div className="mt-3 flex flex-wrap gap-2" onClick={(e) => e.stopPropagation()}>
+        <div className="mt-3 flex flex-wrap gap-2" onClick={(e) => e.stopPropagation()}>
+          {workspaceMode !== "harvest" && !classify.ok ? (
             <button
               type="button"
               onClick={() => {
@@ -2136,8 +2650,25 @@ export default function KnowledgePageClient() {
             >
               补全分类（导入）
             </button>
-          </div>
-        ) : null}
+          ) : null}
+          {!USE_MOCK_KB ? (
+            <button
+              type="button"
+              disabled={entryManageBusy || !entry.id?.trim()}
+              title={
+                isCacheOnlyKbEntry(entry)
+                  ? "删除本地缓存条目"
+                  : resolveChromaDocId(entry)
+                    ? "删除该知识点"
+                    : "无法删除"
+              }
+              onClick={() => void deleteKbDocument(entry, entry.title)}
+              className="rounded px-2 py-1 text-[11px] border border-rose-400/60 text-rose-700 hover:bg-rose-50 dark:border-rose-500/50 dark:text-rose-400 dark:hover:bg-rose-500/10 disabled:opacity-40"
+            >
+              删除
+            </button>
+          ) : null}
+        </div>
       </div>
     );
   };
@@ -2160,7 +2691,7 @@ export default function KnowledgePageClient() {
         <div className="mb-4 rounded-lg border border-emerald-500/30 bg-emerald-500/5 px-4 py-3 text-sm text-emerald-100/90">
           <p className={`font-medium ${KB_TEXT_EMERALD}`}>对话收割审核队列</p>
           <p className="text-xs text-slate-400 mt-1">
-            来自对话「存入知识库」的摘录，默认草稿。选中条目后：左栏审正文与操作，右栏看配置导引与元数据。
+            来自对话「存入知识库」的摘录，默认草稿。左侧点选条目，右侧展开审核与配置面板。
           </p>
         </div>
         <div className="flex flex-wrap gap-2 mb-4 items-center">
@@ -2200,43 +2731,50 @@ export default function KnowledgePageClient() {
         {entryManageMessage ? (
           <p className={`text-xs mb-3 whitespace-pre-wrap ${KB_TEXT_AMBER}`}>{entryManageMessage}</p>
         ) : null}
-        <div className="space-y-3">
-          {rows.length === 0 && (
-            <p className="text-slate-500 text-center py-12 text-sm">
-              {harvestStats.total === 0
-                ? "暂无对话收割条目。请在工坊对话中点击「存入知识库」。"
-                : harvestPublishFilter === "draft"
-                  ? "没有待审核草稿，可查看「已发布」或「全部」。"
-                  : "当前筛选下无条目。"}
-            </p>
-          )}
-          {rows.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE).map((entry) =>
-            renderBrowseEntryRow(entry),
-          )}
-        </div>
-        {rows.length > PAGE_SIZE && (
-          <div className="flex justify-center gap-3 mt-6">
-            <button
-              type="button"
-              onClick={() => setPage((p) => Math.max(0, p - 1))}
-              disabled={page === 0}
-              className="px-4 py-2 bg-slate-200 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg text-sm hover:bg-slate-300 dark:bg-slate-700 disabled:opacity-40"
-            >
-              上一页
-            </button>
-            <span className="px-4 py-2 text-slate-400 text-sm">第 {page + 1} 页</span>
-            <button
-              type="button"
-              onClick={() =>
-                setPage((p) => ((p + 1) * PAGE_SIZE < rows.length ? p + 1 : p))
-              }
-              disabled={(page + 1) * PAGE_SIZE >= rows.length}
-              className="px-4 py-2 bg-slate-200 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg text-sm hover:bg-slate-300 dark:bg-slate-700 disabled:opacity-40"
-            >
-              下一页
-            </button>
-          </div>
-        )}
+        <KbEntryListDetailSplit
+          list={
+            <>
+              <div className="space-y-3">
+                {rows.length === 0 && (
+                  <p className="text-slate-500 text-center py-12 text-sm">
+                    {harvestStats.total === 0
+                      ? "暂无对话收割条目。请在工坊对话中点击「存入知识库」。"
+                      : harvestPublishFilter === "draft"
+                        ? "没有待审核草稿，可查看「已发布」或「全部」。"
+                        : "当前筛选下无条目。"}
+                  </p>
+                )}
+                {rows.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE).map((entry) =>
+                  renderBrowseEntryRow(entry),
+                )}
+              </div>
+              {rows.length > PAGE_SIZE && (
+                <div className="flex justify-center gap-3 mt-6">
+                  <button
+                    type="button"
+                    onClick={() => setPage((p) => Math.max(0, p - 1))}
+                    disabled={page === 0}
+                    className="px-4 py-2 bg-slate-200 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg text-sm hover:bg-slate-300 dark:bg-slate-700 disabled:opacity-40"
+                  >
+                    上一页
+                  </button>
+                  <span className="px-4 py-2 text-slate-400 text-sm">第 {page + 1} 页</span>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setPage((p) => ((p + 1) * PAGE_SIZE < rows.length ? p + 1 : p))
+                    }
+                    disabled={(page + 1) * PAGE_SIZE >= rows.length}
+                    className="px-4 py-2 bg-slate-200 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg text-sm hover:bg-slate-300 dark:bg-slate-700 disabled:opacity-40"
+                  >
+                    下一页
+                  </button>
+                </div>
+              )}
+            </>
+          }
+          detail={selectedEntry ? renderDetailPanel(selectedEntry) : null}
+        />
       </div>
     );
   };
@@ -2468,43 +3006,50 @@ export default function KnowledgePageClient() {
         {entryManageMessage && workspaceMode === "collections" ? (
           <p className={`text-xs mb-3 whitespace-pre-wrap ${KB_TEXT_AMBER}`}>{entryManageMessage}</p>
         ) : null}
-        <div className="space-y-3">
-          {rows.length === 0 && (
-            <p className="text-slate-500 text-center py-8 text-sm">
-              {showUnclassifiedOnly
-                ? "所有条目均已填写 domain 与 folder_path。"
-                : "暂无条目。可在外部 KB 同步后刷新，或切换到「检索验证」。"}
-            </p>
-          )}
-          {rows.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE).map((entry) =>
-            renderBrowseEntryRow(entry),
-          )}
-        </div>
-        {rows.length > PAGE_SIZE && (
-          <div className="flex justify-center gap-3 mt-6">
-            <button
-              type="button"
-              onClick={() => setPage((p) => Math.max(0, p - 1))}
-              disabled={page === 0}
-              className="px-4 py-2 bg-slate-200 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg text-sm hover:bg-slate-300 dark:bg-slate-700 disabled:opacity-40"
-            >
-              上一页
-            </button>
-            <span className="px-4 py-2 text-slate-400 text-sm">第 {page + 1} 页</span>
-            <button
-              type="button"
-              onClick={() =>
-                setPage((p) =>
-                  (p + 1) * PAGE_SIZE < rows.length ? p + 1 : p,
-                )
-              }
-              disabled={(page + 1) * PAGE_SIZE >= rows.length}
-              className="px-4 py-2 bg-slate-200 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg text-sm hover:bg-slate-300 dark:bg-slate-700 disabled:opacity-40"
-            >
-              下一页
-            </button>
-          </div>
-        )}
+        <KbEntryListDetailSplit
+          list={
+            <>
+              <div className="space-y-3">
+                {rows.length === 0 && (
+                  <p className="text-slate-500 text-center py-8 text-sm">
+                    {showUnclassifiedOnly
+                      ? "所有条目均已填写 domain 与 folder_path。"
+                      : "暂无条目。可在外部 KB 同步后刷新，或切换到「检索验证」。"}
+                  </p>
+                )}
+                {rows.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE).map((entry) =>
+                  renderBrowseEntryRow(entry),
+                )}
+              </div>
+              {rows.length > PAGE_SIZE && (
+                <div className="flex justify-center gap-3 mt-6">
+                  <button
+                    type="button"
+                    onClick={() => setPage((p) => Math.max(0, p - 1))}
+                    disabled={page === 0}
+                    className="px-4 py-2 bg-slate-200 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg text-sm hover:bg-slate-300 dark:bg-slate-700 disabled:opacity-40"
+                  >
+                    上一页
+                  </button>
+                  <span className="px-4 py-2 text-slate-400 text-sm">第 {page + 1} 页</span>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setPage((p) =>
+                        (p + 1) * PAGE_SIZE < rows.length ? p + 1 : p,
+                      )
+                    }
+                    disabled={(page + 1) * PAGE_SIZE >= rows.length}
+                    className="px-4 py-2 bg-slate-200 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg text-sm hover:bg-slate-300 dark:bg-slate-700 disabled:opacity-40"
+                  >
+                    下一页
+                  </button>
+                </div>
+              )}
+            </>
+          }
+          detail={selectedEntry ? renderDetailPanel(selectedEntry) : null}
+        />
       </div>
     );
   };
@@ -2552,47 +3097,54 @@ export default function KnowledgePageClient() {
           未找到与「{searchQuery}」相关的条目
         </p>
       ) : (
-        <div className="space-y-3">
-          {searchResults.map((entry) => (
-            <div
-              key={entry.id}
-              onClick={() => handleEntryClick(entry)}
-              className={`bg-slate-200/60 dark:bg-slate-800/60 border rounded-xl p-5 cursor-pointer transition ${
-                selectedEntry?.id === entry.id
-                  ? "border-blue-500 bg-slate-300/60 dark:bg-slate-700/60"
-                  : "border-slate-300 dark:border-slate-700 hover:bg-slate-300/40 dark:bg-slate-700/40"
-              }`}
-            >
-              <div className="flex items-start justify-between mb-2">
-                <h3 className="text-lg font-semibold text-slate-900 dark:text-white">{entry.title}</h3>
-                <span className="text-xs text-slate-500 bg-slate-300 dark:bg-slate-700 px-2 py-1 rounded">
-                  {entry.collection}
-                </span>
-              </div>
-              <p className="text-slate-400 text-sm mb-2 line-clamp-2">{entry.summary}</p>
-              {entry.folder_path ? (
-                <p className="text-xs text-emerald-400/90">路径：{entry.folder_path}</p>
-              ) : null}
-              <div className="flex gap-4 text-xs text-slate-500 mt-2">
-                <span>来源：{entry.source}</span>
-                <span>·</span>
-                <span>{formatDate(entry.created_at)}</span>
-              </div>
-              {!USE_MOCK_KB ? (
-                <div className="mt-3" onClick={(e) => e.stopPropagation()}>
-                  <button
-                    type="button"
-                    disabled={entryManageBusy}
-                    onClick={() => void deleteKbDocument(entry, entry.title)}
-                    className="rounded px-2 py-1 text-[11px] border border-rose-400/60 text-rose-700 hover:bg-rose-50 dark:border-rose-500/50 dark:text-rose-400 dark:hover:bg-rose-500/10 disabled:opacity-40"
-                  >
-                    删除知识点
-                  </button>
+        <KbEntryListDetailSplit
+          list={
+            <div className="space-y-3">
+              {searchResults.map((entry) => (
+              <div
+                key={entry.id}
+                onClick={() => handleEntryClick(entry)}
+                className={`bg-slate-200/60 dark:bg-slate-800/60 border rounded-xl p-5 cursor-pointer transition ${
+                  selectedEntry?.id === entry.id
+                    ? "border-blue-500 bg-slate-300/60 dark:bg-slate-700/60"
+                    : "border-slate-300 dark:border-slate-700 hover:bg-slate-300/40 dark:bg-slate-700/40"
+                }`}
+              >
+                <div className="flex items-start justify-between mb-2">
+                  <h3 className="text-lg font-semibold text-slate-900 dark:text-white">{entry.title}</h3>
+                  <span className="text-xs text-slate-500 bg-slate-300 dark:bg-slate-700 px-2 py-1 rounded">
+                    {entry.collection}
+                  </span>
                 </div>
-              ) : null}
+                <p className="text-slate-400 text-sm mb-2 line-clamp-2">{entry.summary}</p>
+                {entry.folder_path ? (
+                  <p className="text-xs text-emerald-400/90" title={entry.folder_path}>
+                    路径：{kbFolderPathLabel(entry.folder_path)}
+                  </p>
+                ) : null}
+                <div className="flex gap-4 text-xs text-slate-500 mt-2">
+                  <span>来源：{entry.source}</span>
+                  <span>·</span>
+                  <span>{formatDate(entry.created_at)}</span>
+                </div>
+                {!USE_MOCK_KB ? (
+                  <div className="mt-3" onClick={(e) => e.stopPropagation()}>
+                    <button
+                      type="button"
+                      disabled={entryManageBusy}
+                      onClick={() => void deleteKbDocument(entry, entry.title)}
+                      className="rounded px-2 py-1 text-[11px] border border-rose-400/60 text-rose-700 hover:bg-rose-50 dark:border-rose-500/50 dark:text-rose-400 dark:hover:bg-rose-500/10 disabled:opacity-40"
+                    >
+                      删除知识点
+                    </button>
+                  </div>
+                ) : null}
+              </div>
+            ))}
             </div>
-          ))}
-        </div>
+          }
+          detail={selectedEntry ? renderDetailPanel(selectedEntry) : null}
+        />
       )}
     </div>
   );
@@ -3175,10 +3727,14 @@ export default function KnowledgePageClient() {
     const displayBody = mdBody.trim();
     const bodyCharCount = displayBody.length;
 
-    const docId = resolveDocId(fromEntry);
+    const chromaDocId = resolveChromaDocId(fromEntry);
+    const cacheOnlyEntry = isCacheOnlyKbEntry(fromEntry);
+    const cacheEntryId = fromEntry.id?.trim() || null;
+    const displayDocId = chromaDocId ?? cacheEntryId;
+    const canDeleteEntry = !!cacheEntryId;
 
     const renderHarvestAuditActions = () =>
-      fromEntry.source_type === "conversation_harvest" && docId ? (
+      fromEntry.source_type === "conversation_harvest" && chromaDocId ? (
         <div className="flex flex-wrap gap-2">
           <button
             type="button"
@@ -3212,7 +3768,7 @@ export default function KnowledgePageClient() {
       ) : null;
 
     return (
-      <div className="bg-slate-200/60 dark:bg-slate-800/60 border border-blue-500 rounded-xl p-6 mt-4">
+      <div className="bg-slate-200/60 dark:bg-slate-800/60 border border-blue-500 rounded-xl p-4 sm:p-5">
         <div className="flex items-start justify-between mb-4 gap-2 flex-wrap">
           <div className="flex flex-col gap-1">
             <h3 className="text-xl font-bold text-slate-900 dark:text-white">{entry.title}</h3>
@@ -3226,43 +3782,61 @@ export default function KnowledgePageClient() {
             </div>
           </div>
           <div className="flex items-center gap-2">
-            {!USE_MOCK_KB && docId ? (
+            {!USE_MOCK_KB ? (
               <>
-                {entryEditing ? (
-                  <>
+                {chromaDocId && !cacheOnlyEntry ? (
+                  entryEditing ? (
+                    <>
+                      <button
+                        type="button"
+                        disabled={entryManageBusy}
+                        onClick={() => void saveEntryEdit()}
+                        className="rounded-lg bg-blue-600 px-3 py-1.5 text-sm text-white disabled:opacity-40"
+                      >
+                        {entryManageBusy ? "保存中…" : "保存"}
+                      </button>
+                      <button
+                        type="button"
+                        disabled={entryManageBusy}
+                        onClick={() => {
+                          setEntryEditing(false);
+                          setEntryEditForm(entryEditFormFrom(fromEntry, mdBody));
+                        }}
+                        className="rounded-lg border border-slate-300 dark:border-slate-600 px-3 py-1.5 text-sm text-slate-700 dark:text-slate-300"
+                      >
+                        取消
+                      </button>
+                    </>
+                  ) : (
                     <button
                       type="button"
-                      disabled={entryManageBusy}
-                      onClick={() => void saveEntryEdit()}
-                      className="rounded-lg bg-blue-600 px-3 py-1.5 text-sm text-white disabled:opacity-40"
+                      onClick={() => setEntryEditing(true)}
+                      className="rounded-lg border border-slate-300 dark:border-slate-600 px-3 py-1.5 text-sm text-slate-800 dark:text-slate-200 hover:bg-slate-200 dark:bg-slate-800"
                     >
-                      {entryManageBusy ? "保存中…" : "保存"}
+                      编辑
                     </button>
-                    <button
-                      type="button"
-                      disabled={entryManageBusy}
-                      onClick={() => {
-                        setEntryEditing(false);
-                        setEntryEditForm(entryEditFormFrom(fromEntry, mdBody));
-                      }}
-                      className="rounded-lg border border-slate-300 dark:border-slate-600 px-3 py-1.5 text-sm text-slate-700 dark:text-slate-300"
-                    >
-                      取消
-                    </button>
-                  </>
+                  )
+                ) : cacheOnlyEntry ? (
+                  <span className="text-xs text-slate-500">仅本地缓存，无 Chroma 正文编辑</span>
                 ) : (
-                  <button
-                    type="button"
-                    onClick={() => setEntryEditing(true)}
-                    className="rounded-lg border border-slate-300 dark:border-slate-600 px-3 py-1.5 text-sm text-slate-800 dark:text-slate-200 hover:bg-slate-200 dark:bg-slate-800"
-                  >
-                    编辑
-                  </button>
+                  <span className="text-xs text-amber-600 dark:text-amber-300/90">
+                    无法解析 doc_id
+                  </span>
                 )}
                 <button
                   type="button"
-                  disabled={entryManageBusy}
-                  onClick={() => void deleteSelectedEntry()}
+                  disabled={entryManageBusy || !canDeleteEntry}
+                  title={
+                    canDeleteEntry
+                      ? cacheOnlyEntry
+                        ? "删除本地缓存条目"
+                        : "删除该知识点"
+                      : "无法删除"
+                  }
+                  onClick={(ev) => {
+                    ev.stopPropagation();
+                    void deleteSelectedEntry();
+                  }}
                   className="rounded-lg border border-rose-400/60 px-3 py-1.5 text-sm text-rose-700 hover:bg-rose-50 dark:border-rose-500/50 dark:text-rose-300 dark:hover:bg-rose-500/10 disabled:opacity-40"
                 >
                   删除
@@ -3383,13 +3957,41 @@ export default function KnowledgePageClient() {
                       <strong className="text-slate-700 dark:text-slate-300">发布后</strong>
                       ：同步缓存并对外可见
                     </li>
-                    <li>需要修改分类或正文时，使用左栏上方「编辑」</li>
+                    <li>右侧「分类配置」可修改业务域与目录路径，点「保存分类」或「通过后发布」时一并写入</li>
+                    <li>需要修改正文时，使用左栏上方「编辑」</li>
                   </ul>
                 </section>
                 <section className="rounded-xl border border-slate-300 dark:border-slate-600 bg-slate-100/80 dark:bg-slate-900/60 p-4 space-y-3 text-sm">
                   <p className="text-xs font-medium uppercase tracking-wide text-slate-500">
                     条目配置
                   </p>
+                  <div className="rounded-lg border border-blue-500/25 bg-blue-500/5 dark:bg-blue-950/30 p-3 space-y-1">
+                    <p className="text-xs font-medium text-blue-800 dark:text-blue-200">
+                      分类配置（审核必填）
+                    </p>
+                    <p className="text-[11px] text-slate-500 leading-relaxed">
+                      发布后参与目录树与检索，请确认业务域与目录路径
+                    </p>
+                    <KbEntryMetadataFields
+                      domain={entryEditForm.domain}
+                      folderPath={entryEditForm.folder_path}
+                      disabled={USE_MOCK_KB || !chromaDocId}
+                      busy={entryManageBusy || publishBusy}
+                      dirty={entryMetadataDirty(entry, entryEditForm)}
+                      onDomainChange={(value) =>
+                        setEntryEditForm((f) => ({ ...f, domain: value }))
+                      }
+                      onFolderPathChange={(value) =>
+                        setEntryEditForm((f) => ({ ...f, folder_path: value }))
+                      }
+                      onSave={() => void saveEntryMetadata()}
+                    />
+                    {cacheOnlyEntry ? (
+                      <p className="text-[11px] text-amber-700 dark:text-amber-300/90">
+                        仅本地缓存条目，分类保存需先导入 Chroma 或删除本条
+                      </p>
+                    ) : null}
+                  </div>
                   <div>
                     <p className="text-xs text-slate-500 mb-0.5">发布状态</p>
                     <p
@@ -3412,20 +4014,6 @@ export default function KnowledgePageClient() {
                     </p>
                   </div>
                   <div>
-                    <p className="text-xs text-slate-500 mb-0.5">域 / 路径</p>
-                    <p className="text-slate-700 dark:text-slate-300 text-sm">
-                      {kbDomainLabel(entry.domain)}
-                      {entry.domain ? (
-                        <span className="text-slate-600 font-mono text-xs ml-1">
-                          ({entry.domain})
-                        </span>
-                      ) : null}
-                    </p>
-                    {entry.folder_path ? (
-                      <p className="text-xs text-slate-600 mt-0.5 break-all">{entry.folder_path}</p>
-                    ) : null}
-                  </div>
-                  <div>
                     <p className="text-xs text-slate-500 mb-0.5">来源</p>
                     <p className="text-slate-700 dark:text-slate-300">{entry.source}</p>
                     {entry.source_type ? (
@@ -3442,11 +4030,13 @@ export default function KnowledgePageClient() {
                       </p>
                     </div>
                   ) : null}
-                  {docId ? (
+                  {displayDocId ? (
                     <div>
-                      <p className="text-xs text-slate-500 mb-0.5">{fieldLabel("doc_id")}</p>
+                      <p className="text-xs text-slate-500 mb-0.5">
+                        {chromaDocId ? fieldLabel("doc_id") : "缓存 ID"}
+                      </p>
                       <p className="font-mono text-xs break-all text-slate-700 dark:text-slate-300">
-                        {docId}
+                        {displayDocId}
                       </p>
                     </div>
                   ) : null}
@@ -3464,35 +4054,7 @@ export default function KnowledgePageClient() {
                 </section>
                 {entryEditing ? (
                   <section className="rounded-xl border border-slate-300 dark:border-slate-600 bg-slate-100 dark:bg-slate-900/70 p-4 space-y-3">
-                    <p className="text-xs uppercase text-slate-500">编辑配置</p>
-                    <label className="block text-sm">
-                      <span className="text-slate-400">业务域</span>
-                      <select
-                        value={entryEditForm.domain}
-                        onChange={(e) =>
-                          setEntryEditForm((f) => ({ ...f, domain: e.target.value }))
-                        }
-                        className="mt-1 w-full rounded border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 px-3 py-2 text-sm"
-                      >
-                        {Object.entries(KB_DOMAIN_LABELS)
-                          .filter(([k]) => k !== "_uncategorized")
-                          .map(([k, label]) => (
-                            <option key={k} value={k}>
-                              {label}
-                            </option>
-                          ))}
-                      </select>
-                    </label>
-                    <label className="block text-sm">
-                      <span className="text-slate-400">目录路径</span>
-                      <input
-                        value={entryEditForm.folder_path}
-                        onChange={(e) =>
-                          setEntryEditForm((f) => ({ ...f, folder_path: e.target.value }))
-                        }
-                        className="mt-1 w-full rounded border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 px-3 py-2 text-sm"
-                      />
-                    </label>
+                    <p className="text-xs uppercase text-slate-500">发布选项</p>
                     <label className="flex items-center gap-2 text-sm text-slate-700 dark:text-slate-300">
                       <input
                         type="checkbox"
@@ -3561,8 +4123,10 @@ export default function KnowledgePageClient() {
                         className="mt-1 w-full flex-1 min-h-[12rem] rounded border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 px-3 py-2 text-sm font-mono"
                       />
                     </label>
-                    {docId ? (
-                      <p className="text-xs text-slate-600 font-mono shrink-0">doc_id: {docId}</p>
+                    {displayDocId ? (
+                      <p className="text-xs text-slate-600 font-mono shrink-0">
+                        {chromaDocId ? "doc_id" : "cache_id"}: {displayDocId}
+                      </p>
                     ) : null}
                   </div>
                 ) : (
@@ -3598,7 +4162,7 @@ export default function KnowledgePageClient() {
                     ) : null}
                   </>
                 )}
-                {fromEntry.source_type === "conversation_harvest" && docId ? (
+                {fromEntry.source_type === "conversation_harvest" && chromaDocId ? (
                   <div className="mt-4 pt-3 border-t border-slate-300/60 dark:border-slate-700 shrink-0">
                     <p className="text-xs uppercase text-slate-500 mb-2">草稿审核</p>
                     {renderHarvestAuditActions()}
@@ -3638,22 +4202,26 @@ export default function KnowledgePageClient() {
                     ) : null}
                   </div>
                   <div>
-                    <p className="text-xs text-slate-500 mb-0.5">域 / 路径</p>
-                    <p className="text-slate-700 dark:text-slate-300">
-                      {kbDomainLabel(entry.domain)}
-                      {entry.domain ? (
-                        <span className="text-slate-600 font-mono text-xs ml-1">
-                          ({entry.domain})
-                        </span>
-                      ) : null}
-                    </p>
-                    {entry.folder_path ? (
-                      <p className="text-xs text-slate-600 mt-0.5 break-all">{entry.folder_path}</p>
-                    ) : (
-                      <p className="text-xs text-amber-600 dark:text-amber-300/90 mt-0.5">
-                        未填写目录路径
+                    <p className="text-xs text-slate-500 mb-1">域 / 路径</p>
+                    <KbEntryMetadataFields
+                      domain={entryEditForm.domain}
+                      folderPath={entryEditForm.folder_path}
+                      disabled={USE_MOCK_KB || !chromaDocId}
+                      busy={entryManageBusy}
+                      dirty={entryMetadataDirty(entry, entryEditForm)}
+                      onDomainChange={(value) =>
+                        setEntryEditForm((f) => ({ ...f, domain: value }))
+                      }
+                      onFolderPathChange={(value) =>
+                        setEntryEditForm((f) => ({ ...f, folder_path: value }))
+                      }
+                      onSave={() => void saveEntryMetadata()}
+                    />
+                    {cacheOnlyEntry ? (
+                      <p className="text-[11px] text-amber-700 dark:text-amber-300/90">
+                        仅本地缓存，无法写入 Chroma 分类
                       </p>
-                    )}
+                    ) : null}
                   </div>
                   <div>
                     <p className="text-xs text-slate-500 mb-0.5">发布状态</p>
@@ -3684,35 +4252,7 @@ export default function KnowledgePageClient() {
                 </section>
                 {entryEditing ? (
                   <section className="rounded-xl border border-slate-300 dark:border-slate-600 bg-slate-100 dark:bg-slate-900/70 p-4 space-y-3">
-                    <p className="text-xs uppercase text-slate-500">编辑配置</p>
-                    <label className="block text-sm">
-                      <span className="text-slate-400">业务域</span>
-                      <select
-                        value={entryEditForm.domain}
-                        onChange={(e) =>
-                          setEntryEditForm((f) => ({ ...f, domain: e.target.value }))
-                        }
-                        className="mt-1 w-full rounded border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 px-3 py-2 text-sm"
-                      >
-                        {Object.entries(KB_DOMAIN_LABELS)
-                          .filter(([k]) => k !== "_uncategorized")
-                          .map(([k, label]) => (
-                            <option key={k} value={k}>
-                              {label}
-                            </option>
-                          ))}
-                      </select>
-                    </label>
-                    <label className="block text-sm">
-                      <span className="text-slate-400">目录路径</span>
-                      <input
-                        value={entryEditForm.folder_path}
-                        onChange={(e) =>
-                          setEntryEditForm((f) => ({ ...f, folder_path: e.target.value }))
-                        }
-                        className="mt-1 w-full rounded border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 px-3 py-2 text-sm"
-                      />
-                    </label>
+                    <p className="text-xs uppercase text-slate-500">发布选项</p>
                     <label className="flex items-center gap-2 text-sm text-slate-700 dark:text-slate-300">
                       <input
                         type="checkbox"
@@ -3808,6 +4348,21 @@ export default function KnowledgePageClient() {
       </div>
     );
   };
+
+  const kbWorkspaceBody = (
+    <>
+      {entryManageMessage && showCreateEntry ? (
+        <p className={`text-xs mb-3 whitespace-pre-wrap ${KB_TEXT_AMBER}`}>{entryManageMessage}</p>
+      ) : null}
+      {renderCreateEntryPanel()}
+      {workspaceMode === "tree" && renderTreeWorkspace()}
+      {workspaceMode === "collections" && renderCollectionWorkspace()}
+      {workspaceMode === "harvest" && renderHarvestWorkspace()}
+      {workspaceMode === "search" && renderSearchView()}
+      {workspaceMode === "graph" && renderGraphWorkspace()}
+      {workspaceMode === "ingest" && renderIngestWorkspace()}
+    </>
+  );
 
   return (
     <main className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-slate-100 p-4 text-slate-900 sm:p-6 md:p-8 dark:from-slate-950 dark:via-slate-900 dark:to-slate-950 dark:text-white">
@@ -3921,24 +4476,8 @@ export default function KnowledgePageClient() {
             </div>
           </div>
 
-          <div className="mt-6">
-            {entryManageMessage && showCreateEntry ? (
-              <p className={`text-xs mb-3 whitespace-pre-wrap ${KB_TEXT_AMBER}`}>{entryManageMessage}</p>
-            ) : null}
-            {renderCreateEntryPanel()}
-            {workspaceMode === "tree" && renderTreeWorkspace()}
-            {workspaceMode === "collections" && renderCollectionWorkspace()}
-            {workspaceMode === "harvest" && renderHarvestWorkspace()}
-            {workspaceMode === "search" && renderSearchView()}
-            {workspaceMode === "graph" && renderGraphWorkspace()}
-            {workspaceMode === "ingest" && renderIngestWorkspace()}
-          </div>
+          <div className="mt-6">{kbWorkspaceBody}</div>
         </section>
-
-        {selectedEntry &&
-          workspaceMode !== "graph" &&
-          workspaceMode !== "ingest" &&
-          renderDetailPanel(selectedEntry)}
       </div>
     </main>
   );

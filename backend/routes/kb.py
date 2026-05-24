@@ -277,6 +277,17 @@ async def get_cached_entry_by_id(entry_id: str):
     return row
 
 
+@router.delete("/cache/entry/{entry_id}")
+async def delete_cached_entry_by_id_route(entry_id: str):
+    """按 kb_cache 主键删除（适用于无 Chroma doc_id、仅本地缓存的条目）。"""
+    from backend.services.kb_entry_manage import delete_cached_entry_by_id
+
+    ok = await delete_cached_entry_by_id(entry_id)
+    if not ok:
+        raise HTTPException(status_code=404, detail="cache_entry_not_found")
+    return {"ok": True, "id": entry_id.strip()}
+
+
 @router.get("/cache/entries/{project_id}")
 async def get_cached_entries(
     project_id: str,

@@ -97,6 +97,22 @@ async def _sync_cache(
         return {"error": str(e)}
 
 
+async def delete_cached_entry_by_id(entry_id: str) -> bool:
+    """按 kb_cache 主键删除单条（仅本地缓存、无 Chroma doc 的条目）。"""
+    await kb_cache_service.ensure_table()
+    eid = entry_id.strip()
+    if not eid:
+        return False
+    async with async_session_maker() as db:
+        row = await db.get(KBCache, eid)
+        if not row:
+            return False
+        await db.delete(row)
+        await db.commit()
+    log.info("kb_cache delete by id=%s", eid)
+    return True
+
+
 async def delete_cached_entries_by_doc_id(
     doc_id: str,
     collection: str | None = None,
@@ -320,21 +336,33 @@ async def delete_kb_entry(
     col = collection.strip()
     did = doc_id.strip()
 
-    def _delete_sync() -> dict[str, Any]:
+    def _delete_sync() -> int:
         client = ChromaHttpClient(chroma)
         if not client.heartbeat():
-            return {"ok": False, "message": "kb_unavailable"}
-        removed = delete_doc_from_collection(col, did, chroma)
-        if removed <= 0:
-            return {"ok": False, "message": "entry_not_found", "doc_id": did, "removed_chunks": 0}
-        return {"ok": True, "doc_id": did, "removed_chunks": removed}
+            raise RuntimeError("kb_unavailable")
+        return delete_doc_from_collection(col, did, chroma)
 
-    result = await asyncio.to_thread(_delete_sync)
-    if not result.get("ok"):
-        return result
+    try:
+        chroma_removed = await asyncio.to_thread(_delete_sync)
+    except RuntimeError:
+        return {"ok": False, "message": "kb_unavailable"}
 
     cache_removed = await delete_cached_entries_by_doc_id(did, collection=col)
-    result["cache_removed"] = cache_removed
+    if chroma_removed <= 0 and cache_removed <= 0:
+        return {
+            "ok": False,
+            "message": "entry_not_found",
+            "doc_id": did,
+            "removed_chunks": 0,
+            "cache_removed": 0,
+        }
+
+    result: dict[str, Any] = {
+        "ok": True,
+        "doc_id": did,
+        "removed_chunks": chroma_removed,
+        "cache_removed": cache_removed,
+    }
 
     if sync_cache:
         cache_detail = await _sync_cache(

@@ -64,6 +64,12 @@ async def test_cache_get_entry_by_id_roundtrip():
     assert body["id"] == rid
     assert "alpha-beta" in body["content"]
 
+    with TestClient(app) as client:
+        dr = client.delete(f"/api/v1/kb/cache/entry/{rid}")
+    assert dr.status_code == 200
+    with TestClient(app) as client:
+        assert client.get(f"/api/v1/kb/cache/entry/{rid}").status_code == 404
+
 
 @pytest.mark.asyncio
 async def test_query_all_finds_across_collections_in_cache_mode(monkeypatch):
