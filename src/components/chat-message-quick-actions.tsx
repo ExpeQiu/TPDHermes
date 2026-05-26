@@ -144,7 +144,7 @@ export function ChatMessageQuickActions({
         setFeedbackState("ok");
         setFeedbackHint(
           reaction === "rewrite"
-            ? "已记录，可点「再次生成」重写"
+            ? "已记录，正在重写…"
             : level === "full"
               ? "已采纳"
               : level === "reject"
@@ -358,17 +358,6 @@ export function ChatMessageQuickActions({
       <button type="button" className={btnClass} onClick={onExport} disabled={actionsDisabled}>
         {exportFlash ? "✓ 已导出" : "导出"}
       </button>
-      {role === "assistant" && onRegenerate && messageId ? (
-        <button
-          type="button"
-          className={btnClass}
-          disabled={actionsDisabled}
-          title="删除本条回复并基于上一条用户问题重新生成"
-          onClick={() => void onRegenerate(messageId)}
-        >
-          {actionsDisabled ? "生成中…" : "再次生成"}
-        </button>
-      ) : null}
       {canSaveVersion ? (
         <button
           type="button"

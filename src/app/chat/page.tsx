@@ -475,7 +475,7 @@ function ChatTaskBoundaryPanel({
               <input
                 type="checkbox"
                 checked={includeFileContext || chatMode === "doc_optimize"}
-                disabled={fileSelectDisabled || chatMode === "doc_optimize"}
+                disabled={fileSelectDisabled}
                 onChange={(e) => setIncludeFileContext(e.target.checked)}
               />
             </div>

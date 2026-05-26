@@ -17,8 +17,9 @@
 | 方法 | 路径 | 说明 |
 |------|------|------|
 | GET | `/skills/` | 已安装列表 |
-| GET | `/skills/marketplace` | 市场目录（静态） |
+| GET | `/skills/marketplace` | 市场目录（聚合全体用户已发布技能） |
 | GET | `/skills/marketplace/categories` | 市场分类 |
+| POST | `/skills/marketplace/install` | 从市场安装到当前用户技能仓库（支持同名自动副本） |
 | POST | `/skills/` | 安装（body: `name`, `description`, `config?`, `source?`） |
 | GET | `/skills/{name}` | 详情 |
 | PATCH | `/skills/{name}/enable` | 启停 |

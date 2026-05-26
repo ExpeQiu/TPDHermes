@@ -19,6 +19,8 @@ interface MarketSkill {
   review_count: number;
   updated_at: string;
   changelog?: string;
+  publisher_id?: string;
+  source?: string;
 }
 
 interface Category {
@@ -183,6 +185,11 @@ const MOCK_MARKET: MarketSkill[] = [
 
 function catalogItemToMarket(row: Record<string, unknown>): MarketSkill {
   const pkg = String(row.name ?? "");
+  const updatedAtRaw = String(row.updated_at ?? "2026-01-01");
+  const updatedAt =
+    updatedAtRaw.length >= 10 && updatedAtRaw[4] === "-" && updatedAtRaw[7] === "-"
+      ? updatedAtRaw.slice(0, 10)
+      : "2026-01-01";
   return {
     id: pkg,
     name: String(row.display_name ?? row.name ?? pkg),
@@ -195,7 +202,9 @@ function catalogItemToMarket(row: Record<string, unknown>): MarketSkill {
     install_count: typeof row.installs === "number" ? row.installs : Number(row.installs ?? 0),
     rating: typeof row.rating === "number" ? row.rating : Number(row.rating ?? 0),
     review_count: 0,
-    updated_at: "2026-01-01",
+    updated_at: updatedAt,
+    publisher_id: String(row.publisher_id ?? ""),
+    source: String(row.source ?? ""),
   };
 }
 
@@ -221,6 +230,15 @@ function formatCount(n: number): string {
   return String(n);
 }
 
+function sourceTypeLabel(skill: MarketSkill): "官方" | "用户" {
+  return skill.publisher_id ? "用户" : "官方";
+}
+
+function publisherLabel(skill: MarketSkill): string {
+  if (skill.publisher_id) return skill.publisher_id;
+  return skill.author || "TPD Team";
+}
+
 /** Tab 为「文档」「文案」等短名，后端目录为「文档类」「文案类」时仍能筛选 */
 function uiCategoryMatchesBackendTab(
   uiTabId: string,
@@ -242,6 +260,7 @@ export default function SkillMarketPage() {
   const [sortBy, setSortBy] = useState<"installs" | "rating" | "updated">("installs");
   const [installing, setInstalling] = useState<string | null>(null);
   const [installedSet, setInstalledSet] = useState<Set<string>>(new Set());
+  const [installedSourceSet, setInstalledSourceSet] = useState<Set<string>>(new Set());
   const [actionMsg, setActionMsg] = useState("");
 
   const fetchMarket = useCallback(async () => {
@@ -260,10 +279,19 @@ export default function SkillMarketPage() {
 
   const refreshInstalled = useCallback(async () => {
     try {
-      const rows = await apiGet<Array<{ name: string }>>("/skills/");
-      setInstalledSet(new Set(rows.map((r) => r.name)));
+      const rows = await apiGet<Array<{ name: string; config?: Record<string, unknown> }>>("/skills/");
+      const names = new Set<string>();
+      const sources = new Set<string>();
+      for (const row of rows) {
+        names.add(row.name);
+        const marketSource = String(row.config?.market_source_name ?? "");
+        if (marketSource) sources.add(marketSource);
+      }
+      setInstalledSet(names);
+      setInstalledSourceSet(sources);
     } catch {
       setInstalledSet(new Set());
+      setInstalledSourceSet(new Set());
     }
   }, []);
 
@@ -283,18 +311,20 @@ export default function SkillMarketPage() {
   const handleInstall = async (skill: MarketSkill) => {
     setInstalling(skill.id);
     try {
-      const res = await apiFetch("/skills/", {
+      const res = await apiFetch("/skills/marketplace/install", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           name: skill.id,
           description: skill.description || skill.name,
-          source: "local",
         }),
       });
-      await readJson(res);
-      setInstalledSet((prev) => new Set([...prev, skill.id]));
-      showMsg(`「${skill.name}」安装成功！`);
+      const installed = await readJson<{ name?: string }>(res);
+      const installedName = String(installed?.name ?? skill.id);
+      setInstalledSet((prev) => new Set([...prev, installedName]));
+      setInstalledSourceSet((prev) => new Set([...prev, skill.id]));
+      const renamed = installedName !== skill.id;
+      showMsg(renamed ? `「${skill.name}」已安装为「${installedName}」` : `「${skill.name}」安装成功！`);
       await refreshInstalled();
     } catch (e) {
       showMsg(`安装失败：${e instanceof Error ? e.message : "未知错误"}`);
@@ -340,7 +370,9 @@ export default function SkillMarketPage() {
           <div className="mt-4 flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
             <div>
               <h1 className="text-3xl font-bold sm:text-4xl">技能市场</h1>
-              <p className="mt-2 max-w-2xl text-sm text-slate-400 sm:text-base">发现、安装技能，安装后在技能策略页启用。</p>
+              <p className="mt-2 max-w-2xl text-sm text-slate-400 sm:text-base">
+                汇总全体用户发布技能，支持安装到自己的技能仓库，安装后可在技能策略页启用。
+              </p>
             </div>
             <div className="flex flex-wrap gap-2">
               <Link
@@ -448,7 +480,7 @@ export default function SkillMarketPage() {
             {!loading && filtered.length > 0 && (
               <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
                 {filtered.map((skill) => {
-                  const isInstalled = installedSet.has(skill.id);
+                  const isInstalled = installedSet.has(skill.id) || installedSourceSet.has(skill.id);
                   const isInstalling = installing === skill.id;
 
                   return (
@@ -461,9 +493,20 @@ export default function SkillMarketPage() {
                           <span className="text-3xl">{skill.icon}</span>
                           <div>
                             <h3 className="text-sm font-semibold leading-tight sm:text-base">{skill.name}</h3>
-                            <p className="mt-0.5 text-xs text-slate-500">
-                              by {skill.author} · v{skill.version}
-                            </p>
+                            <div className="mt-0.5 flex flex-wrap items-center gap-1.5 text-xs text-slate-500">
+                              <span>发布者 {publisherLabel(skill)}</span>
+                              <span>·</span>
+                              <span>v{skill.version}</span>
+                              <span
+                                className={`rounded-full px-1.5 py-0.5 text-[10px] ${
+                                  sourceTypeLabel(skill) === "用户"
+                                    ? "bg-blue-500/20 text-blue-300"
+                                    : "bg-emerald-500/20 text-emerald-300"
+                                }`}
+                              >
+                                {sourceTypeLabel(skill)}
+                              </span>
+                            </div>
                           </div>
                         </div>
                         <span className="shrink-0 rounded-full bg-slate-300 dark:bg-slate-700/80 px-2 py-0.5 text-xs text-slate-400">

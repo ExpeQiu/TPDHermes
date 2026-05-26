@@ -77,11 +77,75 @@ def test_skill_version_load_after_snapshot():
     assert data.get("version_loaded") == "1.0.0"
 
 
-def test_marketplace_lists_only_real_skill_names():
+def test_marketplace_lists_user_created_skills():
+    skill_name = f"market_user_skill_{uuid.uuid4().hex[:8]}"
     with TestClient(app) as client:
+        created = client.post(
+            "/api/v1/skills/upload",
+            headers={"X-User-ID": "u_market_creator"},
+            files={
+                "file": (
+                    f"{skill_name}.zip",
+                    _build_skill_zip(skill_name),
+                    "application/zip",
+                )
+            },
+            data={"description": "market user skill"},
+        )
+        assert created.status_code == 200, created.text
         r = client.get("/api/v1/skills/marketplace")
-    assert r.status_code == 200
-    names = {x["name"] for x in r.json()}
-    assert "video_script_skill" not in names
-    assert "hello_skill" in names
-    assert names <= {"hello_skill", "speech_skill", "video_skill", "a4_skill"}
+        assert r.status_code == 200
+        rows = r.json()
+        names = {x["name"] for x in rows}
+        assert skill_name in names
+        created_row = next(x for x in rows if x["name"] == skill_name)
+        assert created_row.get("publisher_id") == "u_market_creator"
+
+        # 清理安装记录
+        client.delete(f"/api/v1/skills/{skill_name}", headers={"X-User-ID": "u_market_creator"})
+
+
+def test_marketplace_install_allows_cross_user_copy():
+    base_name = f"market_install_skill_{uuid.uuid4().hex[:8]}"
+    with TestClient(app) as client:
+        created = client.post(
+            "/api/v1/skills/upload",
+            headers={"X-User-ID": "u_creator_install"},
+            files={
+                "file": (
+                    f"{base_name}.zip",
+                    _build_skill_zip(base_name),
+                    "application/zip",
+                )
+            },
+            data={"description": "creator skill"},
+        )
+        assert created.status_code == 200, created.text
+
+        installed = client.post(
+            "/api/v1/skills/marketplace/install",
+            headers={"X-User-ID": "u_consumer_install"},
+            json={"name": base_name},
+        )
+        assert installed.status_code == 200, installed.text
+        payload = installed.json()
+        assert payload["owner_id"] == "u_consumer_install"
+        assert payload["name"] != ""
+        assert payload["name"].startswith(base_name)
+
+        # 清理：创建者原技能 + 使用者副本
+        client.delete(f"/api/v1/skills/{base_name}", headers={"X-User-ID": "u_creator_install"})
+        client.delete(f"/api/v1/skills/{payload['name']}", headers={"X-User-ID": "u_consumer_install"})
+
+
+def _build_skill_zip(skill_name: str) -> bytes:
+    import io
+    import zipfile
+
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr(
+            f"{skill_name}/SKILL.md",
+            f"---\nname: {skill_name}\ndescription: test\n---\n\n# {skill_name}\n",
+        )
+    return buf.getvalue()

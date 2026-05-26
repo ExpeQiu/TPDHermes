@@ -874,10 +874,10 @@ function CreatePageInner() {
             </div>
           </section>
 
-          {/* Step 3: 合同预览与保存 */}
+          {/* Step 3: 场景预览与保存 */}
           <aside className="rounded-3xl border border-slate-200 dark:border-slate-800 bg-white/80 dark:bg-slate-900/50 p-6">
             <p className="text-xs uppercase tracking-[0.2em] text-slate-500">{stepLabel(3)}</p>
-            <h2 className="mt-2 text-xl font-semibold">合同预览与保存</h2>
+            <h2 className="mt-2 text-xl font-semibold">场景预览与保存</h2>
 
             <div className="mt-5 space-y-4">
               <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-100/80 dark:bg-slate-950/60 p-4 text-sm">
@@ -984,7 +984,7 @@ function CreatePageInner() {
                 disabled={previewBusy}
                 className="w-full rounded-2xl border border-slate-300 dark:border-slate-600 bg-slate-200/40 dark:bg-slate-800/40 py-3 text-sm hover:bg-slate-800 disabled:opacity-50"
               >
-                {previewBusy ? "生成中…" : "编排合同预览"}
+                {previewBusy ? "生成中…" : "编排预览"}
               </button>
               {previewText ? (
                 <pre className="max-h-48 overflow-auto rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-100 dark:bg-slate-950/80 p-3 text-xs text-slate-700 dark:text-slate-300">

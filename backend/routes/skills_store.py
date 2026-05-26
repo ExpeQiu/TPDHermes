@@ -16,6 +16,7 @@ Skills Store API - 技能商店
 from __future__ import annotations
 
 import logging
+import shutil
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Depends, Query, File, UploadFile, Form
@@ -75,6 +76,12 @@ class SkillPackageFileWriteRequest(BaseModel):
 
 class SkillLayoutItemRequest(BaseModel):
     item: str
+
+
+class MarketplaceInstallRequest(BaseModel):
+    name: str
+    target_name: str = ""
+    description: str = ""
 
 
 class SkillResponse(BaseModel):
@@ -169,6 +176,91 @@ async def _resolve_skill_package_root(
     return skill, root
 
 
+def _safe_owner_alias(owner_id: str) -> str:
+    trimmed = (owner_id or "").strip()
+    if not trimmed:
+        return "TPD Team"
+    if len(trimmed) <= 12:
+        return trimmed
+    return f"{trimmed[:6]}...{trimmed[-4:]}"
+
+
+def _normalize_market_tags(config: Dict[str, Any]) -> list[str]:
+    tags = config.get("market_tags")
+    if isinstance(tags, list):
+        return [str(x).strip() for x in tags if str(x).strip()][:8]
+    return []
+
+
+def _normalize_market_icon(config: Dict[str, Any]) -> str:
+    icon = str(config.get("market_icon") or "").strip()
+    return icon or "📦"
+
+
+def _normalize_market_category(config: Dict[str, Any], source: str) -> str:
+    category = str(config.get("market_category") or "").strip()
+    if category:
+        return category
+    if source == "upload":
+        return "文档类"
+    if source == "user":
+        return "知识类"
+    return "效率类"
+
+
+def _date_only(iso_text: str) -> str:
+    raw = (iso_text or "").strip()
+    if len(raw) >= 10 and raw[4] == "-" and raw[7] == "-":
+        return raw[:10]
+    return "1970-01-01"
+
+
+def _skill_to_market_row(skill: Dict[str, Any]) -> Dict[str, Any]:
+    config = skill.get("config") if isinstance(skill.get("config"), dict) else {}
+    source = str(skill.get("source") or "local").strip().lower()
+    owner_id = str(skill.get("owner_id") or "").strip()
+    return {
+        "name": skill.get("name", ""),
+        "display_name": skill.get("name", ""),
+        "description": skill.get("description", ""),
+        "icon": _normalize_market_icon(config),
+        "category": _normalize_market_category(config, source),
+        "latest_version": skill.get("version", "1.0.0"),
+        "author": _safe_owner_alias(owner_id),
+        "tags": _normalize_market_tags(config),
+        "installs": max(len(skill.get("version_history") or []), 1),
+        "rating": float(config.get("market_rating") or 4.6),
+        "updated_at": _date_only(str(skill.get("updated_at") or "")),
+        "publisher_id": owner_id,
+        "source": source,
+    }
+
+
+async def _resolve_market_install_name(
+    svc: SkillLifecycleService,
+    preferred_name: str,
+    effective_uid: str,
+) -> str:
+    base = preferred_name.strip()
+    if not base:
+        raise HTTPException(status_code=400, detail="技能名不能为空")
+    existing = await svc.get_skill(base)
+    if not existing:
+        return base
+    existing_owner = (existing.get("owner_id") or "").strip()
+    if existing_owner == (effective_uid or "").strip():
+        return base
+    uid_part = (effective_uid or "user").replace(":", "_").replace("-", "_")[:12]
+    candidate = f"{base}__{uid_part}"
+    if not await svc.get_skill(candidate):
+        return candidate
+    for idx in range(2, 200):
+        name = f"{candidate}_{idx}"
+        if not await svc.get_skill(name):
+            return name
+    raise HTTPException(status_code=409, detail="无法为安装副本分配唯一名称")
+
+
 # ─── Endpoints ─────────────────────────────────────────────────────────────────
 
 @router.get("/", response_model=List[SkillResponse])
@@ -187,9 +279,17 @@ async def list_skills(
 async def get_marketplace(
     q: str = Query("", description="搜索关键词"),
     category: str = Query("", description="分类筛选"),
+    db: AsyncSession = Depends(get_db),
+    effective_uid: str = Depends(get_effective_user_id),
 ):
-    """浏览 Skill 市场目录（支持搜索和分类筛选）"""
-    results = MARKETPLACE_CATALOG
+    """浏览 Skill 市场目录（汇总全体用户创建并已安装的技能）。"""
+    svc = SkillLifecycleService(db, get_loader())
+    all_skills = await svc.list_skills(enabled_only=False, viewer_user_id=None)
+    if all_skills:
+        results = [_skill_to_market_row(skill) for skill in all_skills]
+    else:
+        # 兼容空库启动：保留原型数据
+        results = MARKETPLACE_CATALOG
     if q:
         q_lower = q.lower()
         results = [
@@ -201,14 +301,92 @@ async def get_marketplace(
         ]
     if category:
         results = [s for s in results if s["category"] == category]
+    logger.info(
+        "skills_marketplace list viewer=%s total=%s after_filter=%s q=%s category=%s",
+        effective_uid[:24],
+        len(all_skills),
+        len(results),
+        q,
+        category,
+    )
     return results
 
 
 @router.get("/marketplace/categories", response_model=List[str])
-async def get_categories():
-    """获取市场分类列表"""
-    cats = sorted(set(s["category"] for s in MARKETPLACE_CATALOG))
+async def get_categories(db: AsyncSession = Depends(get_db)):
+    """获取市场分类列表（动态）。"""
+    svc = SkillLifecycleService(db, get_loader())
+    all_skills = await svc.list_skills(enabled_only=False, viewer_user_id=None)
+    rows = [_skill_to_market_row(skill) for skill in all_skills] if all_skills else MARKETPLACE_CATALOG
+    cats = sorted(set(s["category"] for s in rows))
     return cats
+
+
+@router.post("/marketplace/install", response_model=SkillResponse)
+async def install_skill_from_marketplace(
+    data: MarketplaceInstallRequest,
+    db: AsyncSession = Depends(get_db),
+    effective_uid: str = Depends(get_effective_user_id),
+):
+    """从市场安装技能；当同名被他人占用时自动创建个人副本名。"""
+    source_name = (data.name or "").strip()
+    if not source_name:
+        raise HTTPException(status_code=400, detail="name 不能为空")
+    svc = SkillLifecycleService(db, get_loader())
+    source_skill = await svc.get_skill(source_name)
+    if not source_skill:
+        raise HTTPException(status_code=404, detail=f"Skill '{source_name}' not found in marketplace")
+
+    requested_name = (data.target_name or "").strip() or source_name
+    target_name = await _resolve_market_install_name(svc, requested_name, effective_uid)
+    target_skill = await svc.get_skill(target_name)
+    if target_skill and (target_skill.get("owner_id") or "").strip() == (effective_uid or "").strip():
+        logger.info("skills_marketplace install skip existing user=%s skill=%s", effective_uid[:24], target_name)
+        return target_skill
+
+    source_root = get_loader().skills_root / source_name
+    if not source_root.is_dir() or not (source_root / "__init__.py").is_file():
+        raise HTTPException(status_code=400, detail=f"市场技能目录不可用：{source_name}")
+
+    target_root = get_loader().skills_root / target_name
+    if source_name != target_name:
+        if target_root.exists():
+            raise HTTPException(status_code=409, detail=f"目标目录已存在：{target_name}")
+        shutil.copytree(source_root, target_root)
+
+    description = (data.description or "").strip() or str(source_skill.get("description") or "")
+    source_config = source_skill.get("config") if isinstance(source_skill.get("config"), dict) else {}
+    install_config = {
+        **source_config,
+        "market_source_name": source_name,
+        "market_source_owner": str(source_skill.get("owner_id") or ""),
+    }
+    try:
+        installed = await svc.install(
+            name=target_name,
+            description=description,
+            config=install_config,
+            source="user",
+            owner_id=effective_uid,
+        )
+        logger.info(
+            "skills_marketplace install ok user=%s source=%s target=%s",
+            effective_uid[:24],
+            source_name,
+            target_name,
+        )
+        return installed
+    except ValueError as e:
+        if source_name != target_name and target_root.exists():
+            shutil.rmtree(target_root, ignore_errors=True)
+        logger.warning(
+            "skills_marketplace install failed user=%s source=%s target=%s err=%s",
+            effective_uid[:24],
+            source_name,
+            target_name,
+            e,
+        )
+        raise HTTPException(status_code=409, detail=str(e)) from e
 
 
 @router.post("/upload", response_model=SkillResponse)
