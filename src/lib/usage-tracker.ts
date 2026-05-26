@@ -1,6 +1,7 @@
 "use client";
 
 import { apiV1 } from "@/lib/api";
+import { mergeApiHeaders } from "@/lib/api-headers";
 import { getEffectiveUserIdSync } from "@/lib/user-id";
 
 type UsageEventInput = {
@@ -38,6 +39,7 @@ const FEATURE_ACTION_WHITELIST: Record<string, Set<string>> = {
   projects_outputs: new Set(["open_output", "approve_click", "archive_click"]),
   projects_attachments: new Set(["pick_click", "upload"]),
   chat_feedback: new Set(["thumbs_up", "thumbs_down", "adopt", "rewrite"]),
+  usage_dashboard: new Set(["view"]),
 };
 
 const queue: UsageEventPayload[] = [];
@@ -125,12 +127,19 @@ function bindLifecycleListeners() {
 }
 
 async function sendWithFetch(events: UsageEventPayload[]) {
-  await fetch(apiV1("/metrics/events"), {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ events }),
-    keepalive: true,
-  });
+  const res = await fetch(
+    apiV1("/metrics/events"),
+    mergeApiHeaders({
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ events }),
+      keepalive: true,
+    }),
+  );
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new Error(`metrics/events HTTP ${res.status}: ${text.slice(0, 200)}`);
+  }
 }
 
 function sendWithBeacon(events: UsageEventPayload[]) {
@@ -153,7 +162,11 @@ export async function flushUsageEvents(forceBeacon = false): Promise<void> {
     }
     const ok = sendWithBeacon(batch);
     if (!ok) await sendWithFetch(batch);
-  } catch {
+  } catch (e) {
+    console.warn("[usage-tracker] flush failed, re-queued", {
+      count: batch.length,
+      error: e instanceof Error ? e.message : String(e),
+    });
     queue.unshift(...batch);
   } finally {
     flushing = false;

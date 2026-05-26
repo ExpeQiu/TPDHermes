@@ -21,7 +21,7 @@ export default function GlobalWorkflowNav() {
                 TH
               </div>
               <div>
-                <p className="text-sm font-semibold text-slate-900 dark:text-white">TPDHermes</p>
+                <p className="text-sm font-semibold text-slate-900 dark:text-white">TPCM</p>
                 <p className="text-xs text-slate-500">统一任务编排工作台</p>
               </div>
             </Link>

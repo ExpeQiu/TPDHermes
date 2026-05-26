@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import logging
 import uuid
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel, Field
@@ -12,10 +12,23 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.db import get_db
 from backend.models.usage_event import UsageEvent
+from backend.services.chat_wordcloud_service import build_chat_wordcloud
+from backend.services.conversation_metrics_service import build_conversation_metrics
+from backend.services.skill_metrics_service import build_skill_metrics
 from backend.services.user_identity import get_effective_user_id
 
 router = APIRouter(prefix="/metrics", tags=["metrics"])
 logger = logging.getLogger("tpdx.hermes.metrics")
+
+
+def _utc_now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
+
+
+def _since_iso(days: int) -> str:
+    return (
+        datetime.now(timezone.utc) - timedelta(days=days)
+    ).isoformat(timespec="milliseconds").replace("+00:00", "Z")
 
 
 class UsageEventIn(BaseModel):
@@ -59,14 +72,49 @@ class DailyUsageRow(BaseModel):
     user_count: int
 
 
+class SkillUsageRow(BaseModel):
+    skill_name: str
+    call_count: int
+    user_count: int
+    feedback_count: int
+    adoption_rate: float | None = None
+    full_count: int = 0
+    partial_count: int = 0
+    reject_count: int = 0
+
+
+class DailyConversationRow(BaseModel):
+    date: str
+    session_count: int
+    avg_rounds: float
+
+
+class ChatWordTermRow(BaseModel):
+    text: str
+    count: int
+    weight: float = 0.0
+
+
 class UsageOverviewResponse(BaseModel):
     days: int
     total_events: int
     total_users: int
+    skills_total_calls: int = 0
+    skills_feedback_count: int = 0
+    skills_overall_adoption_rate: float | None = None
+    chat_run_count: int = 0
+    chat_session_count: int = 0
+    avg_conversation_rounds: float | None = None
+    max_conversation_rounds: int = 0
+    new_conversation_count: int = 0
+    chat_wordcloud_mode: str = "fallback"
     feature_usage: list[FeatureUsageRow]
     user_usage: list[UserUsageRow]
     feature_user_frequency: list[FeatureUserFrequencyRow]
     daily_usage: list[DailyUsageRow]
+    skill_usage: list[SkillUsageRow] = Field(default_factory=list)
+    daily_conversation: list[DailyConversationRow] = Field(default_factory=list)
+    chat_wordcloud_terms: list[ChatWordTermRow] = Field(default_factory=list)
 
 
 @router.post("/events")
@@ -78,7 +126,7 @@ async def ingest_usage_events(
 ):
     if not body.events:
         return {"accepted": 0}
-    now = datetime.now().isoformat()
+    now = _utc_now_iso()
     rows: list[UsageEvent] = []
     for item in body.events:
         uid = (item.user_id or "").strip() or effective_uid
@@ -113,7 +161,7 @@ async def get_feature_usage_overview(
 ):
     q_days = min(max(days, 1), 60)
     q_top = min(max(top, 5), 100)
-    since = (datetime.now() - timedelta(days=q_days)).isoformat()
+    since = _since_iso(q_days)
 
     total_row = (
         await db.execute(
@@ -182,10 +230,23 @@ async def get_feature_usage_overview(
         )
     ).all()
 
+    skill_metrics = await build_skill_metrics(db, since=since, top=q_top)
+    conversation_metrics = await build_conversation_metrics(db, since=since)
+    wordcloud_metrics = await build_chat_wordcloud(db, since=since, top=30)
+
     return UsageOverviewResponse(
         days=q_days,
         total_events=total_events,
         total_users=total_users,
+        skills_total_calls=int(skill_metrics.get("skills_total_calls") or 0),
+        skills_feedback_count=int(skill_metrics.get("skills_feedback_count") or 0),
+        skills_overall_adoption_rate=skill_metrics.get("skills_overall_adoption_rate"),
+        chat_run_count=int(conversation_metrics.get("chat_run_count") or 0),
+        chat_session_count=int(conversation_metrics.get("chat_session_count") or 0),
+        avg_conversation_rounds=conversation_metrics.get("avg_conversation_rounds"),
+        max_conversation_rounds=int(conversation_metrics.get("max_conversation_rounds") or 0),
+        new_conversation_count=int(wordcloud_metrics.get("new_conversation_count") or 0),
+        chat_wordcloud_mode=str(wordcloud_metrics.get("segmentation_mode") or "fallback"),
         feature_usage=[
             FeatureUsageRow(
                 feature=str(row[0] or "unknown"),
@@ -218,5 +279,34 @@ async def get_feature_usage_overview(
                 user_count=int(row[2] or 0),
             )
             for row in daily_rows
+        ],
+        skill_usage=[
+            SkillUsageRow(
+                skill_name=str(row.get("skill_name") or "unknown"),
+                call_count=int(row.get("call_count") or 0),
+                user_count=int(row.get("user_count") or 0),
+                feedback_count=int(row.get("feedback_count") or 0),
+                adoption_rate=row.get("adoption_rate"),
+                full_count=int(row.get("full_count") or 0),
+                partial_count=int(row.get("partial_count") or 0),
+                reject_count=int(row.get("reject_count") or 0),
+            )
+            for row in skill_metrics.get("skill_usage") or []
+        ],
+        daily_conversation=[
+            DailyConversationRow(
+                date=str(row.get("date") or ""),
+                session_count=int(row.get("session_count") or 0),
+                avg_rounds=float(row.get("avg_rounds") or 0),
+            )
+            for row in conversation_metrics.get("daily_conversation") or []
+        ],
+        chat_wordcloud_terms=[
+            ChatWordTermRow(
+                text=str(row.get("text") or ""),
+                count=int(row.get("count") or 0),
+                weight=float(row.get("weight") or 0),
+            )
+            for row in wordcloud_metrics.get("terms") or []
         ],
     )

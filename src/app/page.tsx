@@ -32,7 +32,7 @@ const entries = [
   {
     href: "/create",
     title: "场景编排",
-    desc: "维护场景合同（说明、技能、模板与规则）",
+    desc: "维护场景（说明、技能、模版与规则）",
     accent: "from-sky-600 to-blue-500",
     eyebrow: "编排",
   },
@@ -68,9 +68,6 @@ export default function Home() {
         className={`relative flex min-h-dvh flex-col px-4 pb-16 pt-12 sm:px-6 sm:pt-16 md:px-8 md:pt-20 ${CONTENT_MAX_CLASS}`}
       >
         <header className="home-animate-in mx-auto max-w-4xl text-center">
-          <p className="text-xs font-medium uppercase tracking-[0.2em] text-slate-500">
-            TPDHermes
-          </p>
           <h1 className="mt-3 text-balance bg-gradient-to-b from-slate-900 to-slate-500 bg-clip-text text-3xl font-semibold tracking-tight text-transparent dark:from-white dark:to-slate-400 sm:text-4xl md:text-5xl">
             技术推广内容共创平台
           </h1>
