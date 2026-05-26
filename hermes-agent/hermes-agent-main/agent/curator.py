@@ -327,6 +327,36 @@ CURATOR_DRY_RUN_BANNER = (
 )
 
 
+def _load_tpd_learning_hints_block() -> str:
+    """读取 TPD 导出的学习信号，供 Curator 参考（可选）。"""
+    candidates: list[Path] = []
+    env_path = (os.getenv("TPD_LEARNING_HINTS_PATH") or "").strip()
+    if env_path:
+        candidates.append(Path(env_path))
+    candidates.append(get_hermes_home() / "tpd_learning_hints.json")
+    for path in candidates:
+        try:
+            if not path.is_file():
+                continue
+            data = json.loads(path.read_text(encoding="utf-8"))
+            signals = data.get("signals") if isinstance(data, dict) else None
+            if not isinstance(signals, list) or not signals:
+                continue
+            lines = ["TPD learning signals (from user feedback — review for skill/KB updates):"]
+            for sig in signals[:12]:
+                if not isinstance(sig, dict):
+                    continue
+                st = sig.get("signal_type", "?")
+                label = sig.get("entity_label", sig.get("entity_id", "?"))
+                payload = sig.get("payload") if isinstance(sig.get("payload"), dict) else {}
+                suggestion = payload.get("suggestion", "")
+                lines.append(f"- [{st}] {label}: {suggestion}")
+            return "\n".join(lines) + "\n\n"
+        except Exception as e:
+            logger.debug("tpd learning hints load failed path=%s: %s", path, e)
+    return ""
+
+
 CURATOR_REVIEW_PROMPT = (
     "You are running as Hermes' background skill CURATOR. This is an "
     "UMBRELLA-BUILDING consolidation pass, not a passive audit and not a "
@@ -1466,13 +1496,15 @@ def run_curator_review(
                 }
             else:
                 if dry_run:
+                    tpd_hints = _load_tpd_learning_hints_block()
                     prompt = (
                         f"{CURATOR_DRY_RUN_BANNER}\n\n"
                         f"{CURATOR_REVIEW_PROMPT}\n\n"
-                        f"{candidate_list}"
+                        f"{tpd_hints}{candidate_list}"
                     )
                 else:
-                    prompt = f"{CURATOR_REVIEW_PROMPT}\n\n{candidate_list}"
+                    tpd_hints = _load_tpd_learning_hints_block()
+                    prompt = f"{CURATOR_REVIEW_PROMPT}\n\n{tpd_hints}{candidate_list}"
                 llm_meta = _run_llm_review(prompt)
                 final_summary = (
                     f"{prefix}{auto_summary}; llm: {llm_meta.get('summary', 'no change')}"

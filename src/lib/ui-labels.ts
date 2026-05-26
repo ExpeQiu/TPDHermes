@@ -158,7 +158,25 @@ const SOURCE_TYPE_LABELS: Record<string, string> = {
   upload: "上传",
   project_output: "项目输出",
   project_attachment: "项目附件",
+  tpd_experience: "经验库",
 };
+
+/** TPD 经验库 Chroma collection 规范名 */
+export const TPD_EXPERIENCE_COLLECTION = "public.internal_methodology.tpd_experience";
+
+export function isTpdExperienceCollection(name: string | null | undefined): boolean {
+  return (name ?? "").trim() === TPD_EXPERIENCE_COLLECTION;
+}
+
+export function isTpdExperienceEntry(entry: {
+  collection?: string;
+  source_type?: string;
+}): boolean {
+  return (
+    isTpdExperienceCollection(entry.collection) ||
+    entry.source_type === "tpd_experience"
+  );
+}
 
 export function kbSourceTypeLabel(sourceType: string | null | undefined): string {
   if (!sourceType) return "—";
@@ -271,6 +289,10 @@ export function kbCollectionLabel(
 ): string {
   const key = name.trim();
   if (!key) return "—";
+
+  if (isTpdExperienceCollection(key)) {
+    return "经验库";
+  }
 
   const projectKbMatch = /^project\.([^.]+)\.kb$/.exec(key);
   if (projectKbMatch) {

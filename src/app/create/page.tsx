@@ -123,6 +123,7 @@ export default function CreatePage() {
 function CreatePageInner() {
   const searchParams = useSearchParams();
   const returnProjectId = searchParams?.get("return_project_id")?.trim() ?? "";
+  const scenarioFromUrl = searchParams?.get("scenario")?.trim() ?? "";
 
   const [collections, setCollections] = useState<string[]>([]);
   const [installedSkills, setInstalledSkills] = useState<SkillScopeItem[]>([]);
@@ -180,6 +181,11 @@ function CreatePageInner() {
       .then(setRemoteList)
       .catch(() => setRemoteList([]));
   }, []);
+
+  useEffect(() => {
+    if (!scenarioFromUrl) return;
+    setSelectedScenarioId(scenarioFromUrl);
+  }, [scenarioFromUrl]);
 
   const remoteById = useMemo(
     () => new Map(remoteList.map((r) => [r.id, r] as const)),

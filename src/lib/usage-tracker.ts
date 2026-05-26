@@ -37,7 +37,7 @@ const FEATURE_ACTION_WHITELIST: Record<string, Set<string>> = {
   projects: new Set(["detail_view", "switch_tab", "save_quick_scenarios"]),
   projects_outputs: new Set(["open_output", "approve_click", "archive_click"]),
   projects_attachments: new Set(["pick_click", "upload"]),
-  usage_dashboard: new Set(["view"]),
+  chat_feedback: new Set(["thumbs_up", "thumbs_down", "adopt", "rewrite"]),
 };
 
 const queue: UsageEventPayload[] = [];

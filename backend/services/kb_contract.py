@@ -16,6 +16,9 @@ KB_DOMAIN_ENUM: frozenset[str] = frozenset(
     }
 )
 
+# TPD 经验库 collection 命名（第五层知识）
+TPD_EXPERIENCE_COLLECTION = "public.internal_methodology.tpd_experience"
+
 # 文档级 chunk metadata 必填（写入 Chroma 前校验）
 KB_REQUIRED_METADATA_KEYS: tuple[str, ...] = (
     "id",

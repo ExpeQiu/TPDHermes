@@ -10,6 +10,7 @@ import {
 } from "react";
 import KBDegradedBanner from "@/components/kb/KBDegradedBanner";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { apiDelete, apiFetch, apiGet, apiPatch, apiPost, getPublicApiBase } from "@/lib/api";
 import { CONTENT_MAX_CLASS } from "@/lib/content-shell";
 import { KbMarkdown } from "@/components/kb-markdown";
@@ -17,6 +18,8 @@ import type { KbMarkdownAssetContext } from "@/lib/kb-markdown-assets";
 import {
   fieldLabel,
   isPublicKbCollection,
+  isTpdExperienceCollection,
+  isTpdExperienceEntry,
   kbCollectionLabel,
   KB_DOMAIN_LABELS,
   kbDomainLabel,
@@ -25,6 +28,7 @@ import {
   kbSourceTypeLabel,
   kgKindLabel,
   runStatusLabel,
+  TPD_EXPERIENCE_COLLECTION,
 } from "@/lib/ui-labels";
 
 // ============== 类型 ==============
@@ -150,6 +154,7 @@ const KG_KINDS = [
 type SourceTypeFilter =
   | "all"
   | "conversation_harvest"
+  | "tpd_experience"
   | "file"
   | "upload";
 
@@ -783,8 +788,9 @@ function KbEntryListDetailSplit({
 
 // ============== 页面 ==============
 export default function KnowledgePageClient() {
+  const searchParams = useSearchParams();
   const [workspaceMode, setWorkspaceMode] = useState<
-    "tree" | "collections" | "search" | "graph" | "ingest" | "harvest"
+    "tree" | "collections" | "search" | "graph" | "ingest" | "harvest" | "experience"
   >("tree");
 
   const [searchScopeCollection, setSearchScopeCollection] = useState<string>("");
@@ -1163,14 +1169,35 @@ export default function KnowledgePageClient() {
     void loadKgLinks(selectedEntry.id, pid);
   }, [selectedEntry, entryById, loadKgLinks]);
 
+  const [experiencePublishFilter, setExperiencePublishFilter] = useState<
+    "draft" | "published" | "all"
+  >("all");
+
+  useEffect(() => {
+    if (searchParams.get("mode") !== "experience") return;
+    setFilterCollection(TPD_EXPERIENCE_COLLECTION);
+    setFilterSourceType("all");
+    setWorkspaceMode("experience");
+    setSelectedEntry(null);
+    setPage(0);
+  }, [searchParams]);
+
   const handleWorkspaceMode = (m: typeof workspaceMode) => {
     if (m === "harvest") {
       setFilterSourceType("conversation_harvest");
       setFilterCollection(null);
       setShowUnclassifiedOnly(false);
       setHarvestPublishFilter("draft");
-    } else if (workspaceMode === "harvest") {
+    } else if (m === "experience") {
       setFilterSourceType("all");
+      setFilterCollection(TPD_EXPERIENCE_COLLECTION);
+      setShowUnclassifiedOnly(false);
+      setExperiencePublishFilter("all");
+    } else if (workspaceMode === "harvest" || workspaceMode === "experience") {
+      setFilterSourceType("all");
+      if (workspaceMode === "experience") {
+        setFilterCollection(null);
+      }
     }
     if (m !== "collections") {
       setTreeNodeDocFilter(null);
@@ -1740,6 +1767,7 @@ export default function KnowledgePageClient() {
 
   function entryMatchesSourceFilter(e: KBEntry): boolean {
     if (filterSourceType === "all") return true;
+    if (filterSourceType === "tpd_experience") return isTpdExperienceEntry(e);
     const st = e.source_type ?? "file";
     return st === filterSourceType;
   }
@@ -1783,6 +1811,31 @@ export default function KnowledgePageClient() {
     }
     return harvestAllEntries;
   }, [harvestAllEntries, harvestPublishFilter]);
+
+  const experienceAllEntries = useMemo(
+    () => dedupeKbEntriesByDocId(browseEntries.filter((e) => isTpdExperienceEntry(e))),
+    [browseEntries],
+  );
+
+  const experienceStats = useMemo(() => {
+    const draft = experienceAllEntries.filter((e) => e.published !== true);
+    const published = experienceAllEntries.filter((e) => e.published === true);
+    return {
+      total: experienceAllEntries.length,
+      draft: draft.length,
+      published: published.length,
+    };
+  }, [experienceAllEntries]);
+
+  const experienceVisibleEntries = useMemo(() => {
+    if (experiencePublishFilter === "draft") {
+      return experienceAllEntries.filter((e) => e.published !== true);
+    }
+    if (experiencePublishFilter === "published") {
+      return experienceAllEntries.filter((e) => e.published === true);
+    }
+    return experienceAllEntries;
+  }, [experienceAllEntries, experiencePublishFilter]);
   const projectBoundCount = browseEntries.filter(
     (entry) => entry.projects.length > 0,
   ).length;
@@ -2640,6 +2693,11 @@ export default function KnowledgePageClient() {
                 待审核
               </span>
             ) : null}
+            {isTpdExperienceEntry(entry) ? (
+              <span className="text-xs px-2 py-1 rounded font-medium bg-violet-500/20 text-violet-800 dark:text-violet-200 border border-violet-500/30">
+                经验库
+              </span>
+            ) : null}
             {entry.source_type && workspaceMode !== "harvest" ? (
               <span
                 className="text-xs font-semibold text-emerald-800 dark:text-emerald-100 bg-emerald-500/25 dark:bg-emerald-500/30 px-2.5 py-1 rounded-md shrink-0 border border-emerald-500/30"
@@ -2836,6 +2894,84 @@ export default function KnowledgePageClient() {
     );
   };
 
+  const renderExperienceWorkspace = () => {
+    const rows =
+      experienceVisibleEntries.length > 0
+        ? experienceVisibleEntries
+        : USE_MOCK_KB
+          ? MOCK_ENTRIES.filter((e) => isTpdExperienceEntry(e))
+          : [];
+
+    return (
+      <div>
+        {kbLoadError && (
+          <p className="text-sm text-amber-400 mb-3">知识库数据加载异常：{kbLoadError}</p>
+        )}
+        <div className="mb-4 rounded-lg border border-violet-500/30 bg-violet-500/5 px-4 py-3 text-sm">
+          <p className="font-medium text-violet-900 dark:text-violet-100">TPD 经验库</p>
+          <p className="text-xs text-slate-500 mt-1">
+            来自对话 👍/「采纳」的结构化经验，集合{" "}
+            <code className="text-violet-700 dark:text-violet-300">{TPD_EXPERIENCE_COLLECTION}</code>
+            。可在{" "}
+            <Link href="/learning" className="text-blue-600 hover:underline dark:text-blue-400">
+              学习中心
+            </Link>{" "}
+            查看索引与溯源。
+          </p>
+        </div>
+        <div className="flex flex-wrap gap-2 mb-4 items-center">
+          <button
+            type="button"
+            onClick={() => void reloadKbBrowse()}
+            className="rounded-lg border border-slate-300 dark:border-slate-600 px-3 py-1.5 text-xs text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:bg-slate-800"
+          >
+            刷新
+          </button>
+          {(
+            [
+              ["all", "全部", experienceStats.total],
+              ["draft", "草稿", experienceStats.draft],
+              ["published", "已发布", experienceStats.published],
+            ] as const
+          ).map(([key, label, count]) => (
+            <button
+              key={key}
+              type="button"
+              onClick={() => {
+                setExperiencePublishFilter(key);
+                setPage(0);
+              }}
+              className={`px-4 py-2 rounded-lg text-sm border transition ${
+                experiencePublishFilter === key
+                  ? "bg-violet-600 border-violet-500 text-white"
+                  : "bg-slate-200 dark:bg-slate-800 border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-300"
+              }`}
+            >
+              {label} ({count})
+            </button>
+          ))}
+        </div>
+        <KbEntryListDetailSplit
+          list={
+            <div className="space-y-3">
+              {rows.length === 0 && (
+                <p className="text-slate-500 text-center py-12 text-sm">
+                  {experienceStats.total === 0
+                    ? "暂无经验条目。请在对话中对助手回复点击 👍 或「采纳」。"
+                    : "当前筛选下无条目。"}
+                </p>
+              )}
+              {rows.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE).map((entry) =>
+                renderBrowseEntryRow(entry),
+              )}
+            </div>
+          }
+          detail={selectedEntry ? renderDetailPanel(selectedEntry) : null}
+        />
+      </div>
+    );
+  };
+
   const renderCollectionWorkspace = () => {
     const cols = collections.length > 0 ? collections : MOCK_COLLECTIONS;
     const publicCols = cols.filter((c) => isPublicKbCollection(c.name));
@@ -2867,7 +3003,14 @@ export default function KnowledgePageClient() {
           }`}
           title={col.name}
         >
-          <span className="block font-medium text-slate-900 dark:text-white">{label}</span>
+          <span className="block font-medium text-slate-900 dark:text-white">
+            {label}
+            {isTpdExperienceCollection(col.name) ? (
+              <span className="ml-1.5 inline-block rounded bg-violet-500/15 px-1.5 py-0.5 text-[10px] font-normal text-violet-700 dark:text-violet-300">
+                经验库
+              </span>
+            ) : null}
+          </span>
           <span className="text-slate-400 text-xs font-mono">{col.name}</span>
           <span className="ml-0 mt-0.5 block text-slate-400 text-xs">({col.entry_count} 条)</span>
         </button>
@@ -3027,6 +3170,7 @@ export default function KnowledgePageClient() {
             >
               <option value="all">全部</option>
               <option value="conversation_harvest">对话收割</option>
+              <option value="tpd_experience">经验库</option>
               <option value="file">文件导入</option>
               <option value="upload">上传导入</option>
             </select>
@@ -4415,6 +4559,7 @@ export default function KnowledgePageClient() {
       {workspaceMode === "tree" && renderTreeWorkspace()}
       {workspaceMode === "collections" && renderCollectionWorkspace()}
       {workspaceMode === "harvest" && renderHarvestWorkspace()}
+      {workspaceMode === "experience" && renderExperienceWorkspace()}
       {workspaceMode === "search" && renderSearchView()}
       {workspaceMode === "graph" && renderGraphWorkspace()}
       {workspaceMode === "ingest" && renderIngestWorkspace()}
@@ -4448,12 +4593,12 @@ export default function KnowledgePageClient() {
               >
                 查看项目中心
               </Link>
-              <a
-                href="#kb-workspace"
-                className={`rounded-xl px-4 py-2.5 text-sm font-medium transition ${KB_BTN_EMERALD}`}
+              <Link
+                href="/learning"
+                className="rounded-xl border border-violet-400/70 bg-violet-50 px-4 py-2.5 text-sm font-medium text-violet-950 transition hover:bg-violet-100 dark:border-violet-500/40 dark:bg-violet-500/10 dark:text-violet-100 dark:hover:bg-violet-500/20"
               >
-                知识库工作区
-              </a>
+                学习中心
+              </Link>
             </div>
           </div>
         </header>
@@ -4491,6 +4636,7 @@ export default function KnowledgePageClient() {
                   ["tree", "目录浏览"],
                   ["collections", "按集合"],
                   ["harvest", "对话收割"],
+                  ["experience", "经验库"],
                   ["search", "检索验证"],
                   ["graph", "知识图谱"],
                   ["ingest", "上传导入"],

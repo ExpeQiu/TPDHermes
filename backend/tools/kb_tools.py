@@ -19,6 +19,30 @@ from backend.services.project_kb import is_project_kb_collection
 logger = logging.getLogger(__name__)
 
 
+async def _record_kb_miss_if_empty(
+    result: dict[str, Any],
+    *,
+    query: str,
+    collection: str,
+    project_id: Optional[str],
+) -> None:
+    if int(result.get("count") or 0) > 0:
+        return
+    try:
+        from backend.db import async_session_maker
+        from backend.services.learning_service import record_kb_miss
+
+        async with async_session_maker() as db:
+            await record_kb_miss(
+                db,
+                query=query,
+                collection=collection,
+                project_id=project_id,
+            )
+    except Exception as exc:
+        logger.debug("kb_miss record skipped: %s", exc)
+
+
 def _metadata_published(meta: dict) -> bool:
     pub = (meta or {}).get("published")
     if isinstance(pub, bool):
@@ -270,6 +294,12 @@ async def kb_query(
     filtered["warning"] = merge_kb_warnings(filtered.get("warning"), resolve_warning)
     if resolved_name != str(collection_name or "").strip():
         filtered["collection_resolved"] = resolved_name
+    await _record_kb_miss_if_empty(
+        filtered,
+        query=query,
+        collection=resolved_name,
+        project_id=project_id,
+    )
     return filtered
 
 

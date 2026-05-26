@@ -6,15 +6,21 @@ import { useSearchParams } from "next/navigation";
 
 import { apiV1 } from "@/lib/api";
 import {
+  buildChatTaskContextPayload,
   buildToolsContext,
   ChatInit,
+  ChatMode,
   ChatTransportConfig,
   ContextBlock,
+  decodeProjectFileSelectValue,
+  encodeProjectFileSelectValue,
   fetchChatBootstrap,
   fetchOrchestrationPreview,
   fetchProjectContext,
+  fetchProjectFiles,
   formatProjectContextForTaskInput,
   orchestrationPreviewToBlocks,
+  ProjectFileListItem,
   ProjectRecord,
   type OrchestrationPreviewResponse,
   type ProjectContextResponse,
@@ -35,6 +41,9 @@ interface Message {
   toolsContext?: string;
   contextBlocks?: ContextBlock[];
   contextWarnings?: string[];
+  runId?: string;
+  outputId?: string;
+  feedbackLevel?: "full" | "partial" | "reject";
 }
 
 type OrchestrationPriorTurn = { role: "user" | "assistant"; content: string };
@@ -66,6 +75,12 @@ interface ChatSession {
   includeProjectContext?: boolean;
   includeKnowledgeContext?: boolean;
   includeSkillsContext?: boolean;
+  chatMode?: ChatMode;
+  includeFileContext?: boolean;
+  selectedFileId?: string;
+  rewriteTargetSection?: string;
+  rewriteSourceExcerpt?: string;
+  rewriteGoal?: string;
 }
 
 function chatSessionsStorageKey(scopeUserId: string): string {
@@ -304,11 +319,25 @@ type ChatTaskBoundaryModel = {
   transport: ChatTransportConfig | null;
   tasksExecuteUrl: string;
   chatApiBase: string;
+  chatMode: ChatMode;
+  setChatMode: (v: ChatMode) => void;
   includeProjectContext: boolean;
   setIncludeProjectContext: (v: boolean) => void;
   selectedProjectId: string;
   setSelectedProjectId: (v: string) => void;
   projects: ProjectRecord[];
+  includeFileContext: boolean;
+  setIncludeFileContext: (v: boolean) => void;
+  selectedFileId: string;
+  setSelectedFileId: (v: string) => void;
+  projectFiles: ProjectFileListItem[];
+  projectFilesLoading: boolean;
+  rewriteTargetSection: string;
+  setRewriteTargetSection: (v: string) => void;
+  rewriteSourceExcerpt: string;
+  setRewriteSourceExcerpt: (v: string) => void;
+  rewriteGoal: string;
+  setRewriteGoal: (v: string) => void;
   includeKnowledgeContext: boolean;
   setIncludeKnowledgeContext: (v: boolean) => void;
   includeSkillsContext: boolean;
@@ -336,11 +365,25 @@ function ChatTaskBoundaryPanel({
     transport,
     tasksExecuteUrl,
     chatApiBase,
+    chatMode,
+    setChatMode,
     includeProjectContext,
     setIncludeProjectContext,
     selectedProjectId,
     setSelectedProjectId,
     projects,
+    includeFileContext,
+    setIncludeFileContext,
+    selectedFileId,
+    setSelectedFileId,
+    projectFiles,
+    projectFilesLoading,
+    rewriteTargetSection,
+    setRewriteTargetSection,
+    rewriteSourceExcerpt,
+    setRewriteSourceExcerpt,
+    rewriteGoal,
+    setRewriteGoal,
     includeKnowledgeContext,
     setIncludeKnowledgeContext,
     includeSkillsContext,
@@ -355,9 +398,12 @@ function ChatTaskBoundaryPanel({
 
   const metricGrid = narrow
     ? "grid gap-3 grid-cols-1"
-    : "grid gap-3 md:grid-cols-2 xl:grid-cols-5";
-  const settingsGrid = narrow ? "grid gap-4 grid-cols-1" : "grid gap-4 xl:grid-cols-[0.95fr_1.05fr]";
+    : "grid gap-3 md:grid-cols-2 xl:grid-cols-4";
   const innerCols = narrow ? "grid gap-4 grid-cols-1" : "grid gap-4 md:grid-cols-2";
+  const fileSelectDisabled =
+    !includeProjectContext || !selectedProjectId || chatMode === "doc_optimize";
+  const outputFiles = projectFiles.filter((f) => f.kind === "output");
+  const attachmentFiles = projectFiles.filter((f) => f.kind === "attachment");
 
   return (
     <div className="rounded-3xl border border-slate-300 dark:border-slate-700 bg-white/80 dark:bg-slate-900/50 p-4 md:p-5">
@@ -379,6 +425,163 @@ function ChatTaskBoundaryPanel({
         </details>
       </div>
 
+      <div className="mt-4 grid gap-3 grid-cols-1">
+        <div className="rounded-2xl border border-slate-300 dark:border-slate-700 bg-slate-100/80 dark:bg-slate-950/60 p-3">
+          <p className="text-[11px] uppercase tracking-[0.16em] text-slate-500">场景选择</p>
+          <select
+            value={chatMode}
+            onChange={(e) => setChatMode(e.target.value as ChatMode)}
+            className="mt-2 w-full rounded-lg border border-slate-300 dark:border-slate-700 bg-slate-200 dark:bg-slate-800 px-3 py-2 text-sm text-slate-900 dark:text-white"
+          >
+            <option value="co_create">对话共创</option>
+            <option value="doc_optimize">文稿优化</option>
+          </select>
+          <p className="mt-2 text-xs leading-relaxed text-slate-500">
+            {chatMode === "co_create"
+              ? "不限定参照物，可自由对话与输出。"
+              : "须选择项目与输出物，对指定文稿做局部优化。"}
+          </p>
+        </div>
+
+        <div className="rounded-2xl border border-slate-300 dark:border-slate-700 bg-slate-100/80 dark:bg-slate-950/60 p-3">
+          <p className="text-xs uppercase tracking-[0.16em] text-slate-500">项目上下文（推荐）</p>
+          <div className="mt-3">
+            <div className="mb-2 flex items-center justify-between">
+              <label className="text-xs text-slate-400">携带项目</label>
+              <input
+                type="checkbox"
+                checked={includeProjectContext}
+                disabled={chatMode === "doc_optimize"}
+                onChange={(e) => setIncludeProjectContext(e.target.checked)}
+              />
+            </div>
+            <select
+              value={selectedProjectId}
+              onChange={(e) => setSelectedProjectId(e.target.value)}
+              className="w-full rounded-lg border border-slate-300 dark:border-slate-700 bg-slate-200 dark:bg-slate-800 px-3 py-2 text-sm text-slate-900 dark:text-white"
+            >
+              <option value="">不注入项目</option>
+              {projects.map((project) => (
+                <option key={project.id} value={project.id}>
+                  {project.name}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="mt-3 border-t border-slate-300/60 pt-3 dark:border-slate-700/60">
+            <div className="mb-2 flex items-center justify-between">
+              <label className="text-xs text-slate-400">携带具体文件</label>
+              <input
+                type="checkbox"
+                checked={includeFileContext || chatMode === "doc_optimize"}
+                disabled={fileSelectDisabled || chatMode === "doc_optimize"}
+                onChange={(e) => setIncludeFileContext(e.target.checked)}
+              />
+            </div>
+            <select
+              value={selectedFileId}
+              onChange={(e) => setSelectedFileId(e.target.value)}
+              disabled={!includeFileContext && chatMode !== "doc_optimize"}
+              className="w-full rounded-lg border border-slate-300 dark:border-slate-700 bg-slate-200 dark:bg-slate-800 px-3 py-2 text-sm text-slate-900 dark:text-white disabled:opacity-50"
+            >
+              <option value="">
+                {includeProjectContext && selectedProjectId
+                  ? "不选文件（基于项目背景）"
+                  : "请先选择项目"}
+              </option>
+              {projectFilesLoading ? (
+                <option value="" disabled>
+                  加载文件列表…
+                </option>
+              ) : null}
+              {chatMode === "doc_optimize" ? (
+                outputFiles.length === 0 ? (
+                  <option value="" disabled>
+                    暂无输出物
+                  </option>
+                ) : (
+                  outputFiles.map((file) => (
+                    <option
+                      key={encodeProjectFileSelectValue("output", file.id)}
+                      value={encodeProjectFileSelectValue("output", file.id)}
+                    >
+                      [输出] {file.title}
+                    </option>
+                  ))
+                )
+              ) : (
+                <>
+                  {outputFiles.length > 0 ? (
+                    <optgroup label="输出物">
+                      {outputFiles.map((file) => (
+                        <option
+                          key={encodeProjectFileSelectValue("output", file.id)}
+                          value={encodeProjectFileSelectValue("output", file.id)}
+                        >
+                          {file.title}
+                        </option>
+                      ))}
+                    </optgroup>
+                  ) : null}
+                  {attachmentFiles.length > 0 ? (
+                    <optgroup label="附件">
+                      {attachmentFiles.map((file) => (
+                        <option
+                          key={encodeProjectFileSelectValue("attachment", file.id)}
+                          value={encodeProjectFileSelectValue("attachment", file.id)}
+                        >
+                          {file.title}
+                        </option>
+                      ))}
+                    </optgroup>
+                  ) : null}
+                </>
+              )}
+            </select>
+            <p className="mt-2 text-xs text-slate-500">
+              {selectedFileId
+                ? "已选文件：对话将优先基于该文件上下文。"
+                : includeProjectContext && selectedProjectId
+                  ? "未选文件：默认基于项目背景信息对话。"
+                  : "选择项目后可指定输出物或附件。"}
+            </p>
+          </div>
+
+          {(chatMode === "doc_optimize" || (includeFileContext && selectedFileId)) && (
+            <details className="mt-3 border-t border-slate-300/60 pt-3 dark:border-slate-700/60">
+              <summary className="cursor-pointer text-xs font-medium text-slate-500">
+                局部改写约束
+                {chatMode === "doc_optimize" ? (
+                  <span className="ml-1 text-amber-300/90">（改写目标必填）</span>
+                ) : null}
+              </summary>
+              <div className="mt-3 space-y-2">
+                <input
+                  value={rewriteTargetSection}
+                  onChange={(e) => setRewriteTargetSection(e.target.value)}
+                  placeholder="目标章节/段落（可选）"
+                  className="w-full rounded-lg border border-slate-300 dark:border-slate-700 bg-slate-200 dark:bg-slate-800 px-3 py-2 text-xs text-slate-900 dark:text-white"
+                />
+                <textarea
+                  value={rewriteSourceExcerpt}
+                  onChange={(e) => setRewriteSourceExcerpt(e.target.value)}
+                  placeholder="原文片段（可选）"
+                  rows={2}
+                  className="w-full rounded-lg border border-slate-300 dark:border-slate-700 bg-slate-200 dark:bg-slate-800 px-3 py-2 text-xs text-slate-900 dark:text-white"
+                />
+                <input
+                  value={rewriteGoal}
+                  onChange={(e) => setRewriteGoal(e.target.value)}
+                  placeholder={chatMode === "doc_optimize" ? "改写目标（必填）" : "改写目标（可选）"}
+                  className="w-full rounded-lg border border-slate-300 dark:border-slate-700 bg-slate-200 dark:bg-slate-800 px-3 py-2 text-xs text-slate-900 dark:text-white"
+                />
+              </div>
+            </details>
+          )}
+        </div>
+      </div>
+
       <div className={`mt-4 ${metricGrid}`}>
         {boundaryCards.map((item) => (
           <BoundaryMetric key={item.label} label={item.label} value={item.value} hint={item.hint} />
@@ -396,37 +599,10 @@ function ChatTaskBoundaryPanel({
         </details>
       )}
 
-      <div className={`mt-4 ${settingsGrid}`}>
-        <div className="rounded-2xl border border-slate-300 dark:border-slate-700 bg-slate-100/80 dark:bg-slate-950/60 p-4">
-          <p className="text-xs uppercase tracking-[0.16em] text-slate-500">项目上下文（推荐）</p>
-          <div className="mt-4">
-            <div className="mb-2 flex items-center justify-between">
-              <label className="text-xs text-slate-400">携带项目</label>
-              <input
-                type="checkbox"
-                checked={includeProjectContext}
-                onChange={(e) => setIncludeProjectContext(e.target.checked)}
-              />
-            </div>
-            <select
-              value={selectedProjectId}
-              onChange={(e) => setSelectedProjectId(e.target.value)}
-              className="w-full rounded-lg border border-slate-300 dark:border-slate-700 bg-slate-200 dark:bg-slate-800 px-3 py-2 text-sm text-slate-900 dark:text-white"
-            >
-              <option value="">不注入项目</option>
-              {projects.map((project) => (
-                <option key={project.id} value={project.id}>
-                  {project.name}
-                </option>
-              ))}
-            </select>
-          </div>
-        </div>
-
-        <details
-          className="rounded-2xl border border-slate-300 dark:border-slate-700 bg-slate-100/80 dark:bg-slate-950/60 p-4"
-          {...(showAdvancedOrchestration ? { open: true } : {})}
-        >
+      <details
+        className="mt-4 rounded-2xl border border-slate-300 dark:border-slate-700 bg-slate-100/80 dark:bg-slate-950/60 p-4"
+        {...(showAdvancedOrchestration ? { open: true } : {})}
+      >
           <summary className="cursor-pointer list-none text-xs font-medium uppercase tracking-[0.16em] text-slate-500 [&::-webkit-details-marker]:hidden">
             高级 · 知识 / 技能覆盖
             {showAdvancedOrchestration ? (
@@ -488,7 +664,6 @@ function ChatTaskBoundaryPanel({
             </div>
           )}
         </details>
-      </div>
 
       <div className="mt-4 rounded-2xl border border-slate-300 dark:border-slate-700 bg-slate-100/80 dark:bg-slate-950/60 p-4">
         <div className="flex items-center justify-between gap-3">
@@ -555,6 +730,14 @@ function ChatPageInner() {
   const [includeProjectContext, setIncludeProjectContext] = useState(true);
   const [includeKnowledgeContext, setIncludeKnowledgeContext] = useState(showAdvancedOrchestration);
   const [includeSkillsContext, setIncludeSkillsContext] = useState(false);
+  const [chatMode, setChatMode] = useState<ChatMode>("co_create");
+  const [includeFileContext, setIncludeFileContext] = useState(false);
+  const [selectedFileId, setSelectedFileId] = useState("");
+  const [projectFiles, setProjectFiles] = useState<ProjectFileListItem[]>([]);
+  const [projectFilesLoading, setProjectFilesLoading] = useState(false);
+  const [rewriteTargetSection, setRewriteTargetSection] = useState("");
+  const [rewriteSourceExcerpt, setRewriteSourceExcerpt] = useState("");
+  const [rewriteGoal, setRewriteGoal] = useState("");
 
   const abortRef = useRef<AbortController | null>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -634,6 +817,42 @@ function ChatPageInner() {
     };
   }, [useOrchestration, includeProjectContext, selectedProjectId]);
 
+  useEffect(() => {
+    if (chatMode === "doc_optimize") {
+      setIncludeProjectContext(true);
+      setIncludeFileContext(true);
+      const decoded = decodeProjectFileSelectValue(selectedFileId);
+      if (decoded?.kind === "attachment") {
+        setSelectedFileId("");
+      }
+    }
+  }, [chatMode, selectedFileId]);
+
+  useEffect(() => {
+    if (!selectedProjectId) {
+      setProjectFiles([]);
+      return;
+    }
+    let cancelled = false;
+    setProjectFilesLoading(true);
+    fetchProjectFiles(selectedProjectId)
+      .then((files) => {
+        if (!cancelled) setProjectFiles(files);
+      })
+      .catch((err) => {
+        if (process.env.NODE_ENV === "development") {
+          console.warn("[chat-output-context] 项目文件列表加载失败", err);
+        }
+        if (!cancelled) setProjectFiles([]);
+      })
+      .finally(() => {
+        if (!cancelled) setProjectFilesLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedProjectId]);
+
   const activeSession = sessions.find((s) => s.id === activeId);
 
   const effectiveKbCollection = useMemo(() => {
@@ -690,6 +909,9 @@ function ChatPageInner() {
         includeProjectContext: false,
         includeKnowledgeContext: false,
         includeSkillsContext: false,
+        chatMode: "co_create",
+        includeFileContext: false,
+        selectedFileId: "",
       };
       saveSessions(scopeUserId, [first]);
       sessionsRef.current = [first];
@@ -851,6 +1073,12 @@ function ChatPageInner() {
     setIncludeProjectContext(activeSession.includeProjectContext ?? false);
     setIncludeKnowledgeContext(activeSession.includeKnowledgeContext ?? false);
     setIncludeSkillsContext(activeSession.includeSkillsContext ?? false);
+    setChatMode(activeSession.chatMode ?? "co_create");
+    setIncludeFileContext(activeSession.includeFileContext ?? false);
+    setSelectedFileId(activeSession.selectedFileId ?? "");
+    setRewriteTargetSection(activeSession.rewriteTargetSection ?? "");
+    setRewriteSourceExcerpt(activeSession.rewriteSourceExcerpt ?? "");
+    setRewriteGoal(activeSession.rewriteGoal ?? "");
     const timer = window.setTimeout(() => {
       sessionScopeHydratingRef.current = false;
     }, 0);
@@ -867,7 +1095,13 @@ function ChatPageInner() {
       (activeSession.selectedCollection ?? "") === selectedCollection &&
       (activeSession.includeProjectContext ?? false) === includeProjectContext &&
       (activeSession.includeKnowledgeContext ?? false) === includeKnowledgeContext &&
-      (activeSession.includeSkillsContext ?? false) === includeSkillsContext;
+      (activeSession.includeSkillsContext ?? false) === includeSkillsContext &&
+      (activeSession.chatMode ?? "co_create") === chatMode &&
+      (activeSession.includeFileContext ?? false) === includeFileContext &&
+      (activeSession.selectedFileId ?? "") === selectedFileId &&
+      (activeSession.rewriteTargetSection ?? "") === rewriteTargetSection &&
+      (activeSession.rewriteSourceExcerpt ?? "") === rewriteSourceExcerpt &&
+      (activeSession.rewriteGoal ?? "") === rewriteGoal;
     if (same) return;
     updateSession(activeSession.id, (session) => ({
       ...session,
@@ -876,13 +1110,25 @@ function ChatPageInner() {
       includeProjectContext,
       includeKnowledgeContext,
       includeSkillsContext,
+      chatMode,
+      includeFileContext,
+      selectedFileId,
+      rewriteTargetSection,
+      rewriteSourceExcerpt,
+      rewriteGoal,
     }));
   }, [
     activeSession,
+    chatMode,
+    includeFileContext,
     includeKnowledgeContext,
     includeProjectContext,
     includeSkillsContext,
+    rewriteGoal,
+    rewriteSourceExcerpt,
+    rewriteTargetSection,
     selectedCollection,
+    selectedFileId,
     selectedProjectId,
     updateSession,
   ]);
@@ -912,6 +1158,9 @@ function ChatPageInner() {
       includeProjectContext: false,
       includeKnowledgeContext: false,
       includeSkillsContext: false,
+      chatMode: "co_create",
+      includeFileContext: false,
+      selectedFileId: "",
     };
     const next = [session, ...sessionsRef.current];
     saveAndSet(next);
@@ -934,9 +1183,19 @@ function ChatPageInner() {
 
   const contextSummary = useMemo(() => {
     const parts: string[] = [];
+    parts.push(`场景: ${chatMode === "doc_optimize" ? "文稿优化" : "对话共创"}`);
     if (includeProjectContext && selectedProjectId) {
       const project = projects.find((item) => item.id === selectedProjectId);
       parts.push(`项目: ${project?.name ?? "已选"}`);
+    }
+    if (includeFileContext && selectedFileId) {
+      const decoded = decodeProjectFileSelectValue(selectedFileId);
+      const file = decoded
+        ? projectFiles.find((f) => f.id === decoded.id && f.kind === decoded.kind)
+        : null;
+      parts.push(`文件: ${file?.title ?? "已选"}`);
+    } else if (includeProjectContext && selectedProjectId) {
+      parts.push("文件: 项目背景");
     }
     if (includeKnowledgeContext && selectedCollection) {
       const kc = activeSession?.quickCreateOverrides?.knowledgeCollections;
@@ -953,11 +1212,15 @@ function ChatPageInner() {
   }, [
     activeSession?.quickCreateOverrides?.knowledgeCollections,
     activeSession?.quickCreateOverrides?.skillNames,
+    chatMode,
+    includeFileContext,
     includeKnowledgeContext,
     includeProjectContext,
     includeSkillsContext,
+    projectFiles,
     projects,
     selectedCollection,
+    selectedFileId,
     selectedProjectId,
     skills.length,
   ]);
@@ -1008,22 +1271,23 @@ function ChatPageInner() {
         : includeKnowledgeContext && selectedCollection
           ? 1
           : 0;
-    const scenarioName =
-      typeof scenario?.name === "string" && scenario.name
-        ? scenario.name
-        : scenarioFromUrl || "general";
+    const fileHint = (() => {
+      if (!includeProjectContext || !selectedProjectId) return undefined;
+      if (includeFileContext && selectedFileId) {
+        const decoded = decodeProjectFileSelectValue(selectedFileId);
+        const file = decoded
+          ? projectFiles.find((f) => f.id === decoded.id && f.kind === decoded.kind)
+          : null;
+        return file ? `${file.kind === "output" ? "输出" : "附件"} · ${file.title}` : "已选文件";
+      }
+      return "项目背景（未选文件）";
+    })();
 
     return [
       {
-        label: "当前场景",
-        value: scenarioName,
-        hint: useOrchestration ? "任务接口" : "聊天",
-      },
-      {
         label: "项目边界",
         value: includeProjectContext ? selectedProject?.name ?? "请选择项目" : "未启用",
-        hint:
-          includeProjectContext && !selectedProject?.name ? "在下方面板选择项目" : undefined,
+        hint: fileHint ?? (includeProjectContext && !selectedProject?.name ? "在上方选择项目" : undefined),
       },
       {
         label: "知识边界",
@@ -1042,12 +1306,15 @@ function ChatPageInner() {
     ];
   }, [
     activeSession?.quickCreateOverrides,
+    includeFileContext,
     includeKnowledgeContext,
     includeProjectContext,
     includeSkillsContext,
     orchestrationPreview?.payload,
+    projectFiles,
     scenarioFromUrl,
     selectedCollection,
+    selectedFileId,
     selectedProject?.name,
     skills.length,
     useOrchestration,
@@ -1129,10 +1396,36 @@ function ChatPageInner() {
             includeProjectContext && selectedProjectId && projectTaskContext
               ? formatProjectContextForTaskInput(projectTaskContext)
               : "";
+          const taskCtx = buildChatTaskContextPayload({
+            chatMode,
+            includeProjectContext,
+            includeFileContext: includeFileContext || chatMode === "doc_optimize",
+            selectedProjectId,
+            selectedFileValue: selectedFileId,
+            projectFiles,
+            projectContextExtra: ctxExtra,
+            localRewrite: {
+              targetSection: rewriteTargetSection,
+              sourceExcerpt: rewriteSourceExcerpt,
+              rewriteGoal,
+            },
+          });
+          if (taskCtx.error) {
+            throw new Error(taskCtx.error);
+          }
+          console.info("[chat-output-context] 发送任务", {
+            session_id: sessionId,
+            chat_mode: chatMode,
+            project_id: selectedProjectId || null,
+            include_file_context: includeFileContext || chatMode === "doc_optimize",
+            selected_file_id: selectedFileId || null,
+            source_output_id: taskCtx.sourceOutputId,
+          });
           const body: TaskExecuteBody = {
             entrypoint: "chat",
             project_id: includeProjectContext && selectedProjectId ? selectedProjectId : null,
             scenario_id: scenarioFromUrl || "general",
+            chat_mode: chatMode,
             user_message: text,
             stream: true,
             messages:
@@ -1140,8 +1433,20 @@ function ChatPageInner() {
             overrides: Object.keys(overrides).length > 0 ? overrides : undefined,
             user_id: scopeUserId,
           };
-          if (ctxExtra.trim()) {
-            body.task_input = { extra: ctxExtra };
+          if (taskCtx.sourceOutputId) {
+            body.source_output_id = taskCtx.sourceOutputId;
+          }
+          const extraParts: string[] = [];
+          if (taskCtx.taskInputExtra.trim()) extraParts.push(taskCtx.taskInputExtra.trim());
+          if (
+            !taskCtx.sourceOutputId &&
+            ctxExtra.trim() &&
+            !(includeFileContext && selectedFileId)
+          ) {
+            extraParts.push(ctxExtra.trim());
+          }
+          if (extraParts.length > 0) {
+            body.task_input = { extra: extraParts.join("\n\n") };
           }
           if (scenarioPresetInstructions) {
             body.scenario_preset_instructions = scenarioPresetInstructions;
@@ -1191,6 +1496,15 @@ function ChatPageInner() {
                       ? [...new Set([...(session.linkedOutputIds ?? []), meta.output_id])]
                       : session.linkedOutputIds,
                   linkedRunIds: [...new Set([...(session.linkedRunIds ?? []), meta.run_id!])],
+                  messages: session.messages.map((message) =>
+                    message.id === assistantId
+                      ? {
+                          ...message,
+                          runId: meta.run_id,
+                          outputId: meta.output_id ?? undefined,
+                        }
+                      : message,
+                  ),
                 }));
                 console.info(
                   `[chat] orchestration completed run_id=${meta.run_id} output_id=${meta.output_id ?? ""}`,
@@ -1227,6 +1541,15 @@ function ChatPageInner() {
                       ? [...new Set([...(session.linkedOutputIds ?? []), meta.output_id])]
                       : session.linkedOutputIds,
                   linkedRunIds: [...new Set([...(session.linkedRunIds ?? []), meta.run_id!])],
+                  messages: session.messages.map((message) =>
+                    message.id === assistantId
+                      ? {
+                          ...message,
+                          runId: meta.run_id,
+                          outputId: meta.output_id ?? undefined,
+                        }
+                      : message,
+                  ),
                 }));
                 console.info(`[chat] orchestration completed run_id=${meta.run_id}`);
               }
@@ -1362,14 +1685,21 @@ function ChatPageInner() {
     [
       chatApiBase,
       chatApiKey,
+      chatMode,
+      includeFileContext,
       includeKnowledgeContext,
       includeProjectContext,
       includeSkillsContext,
       orchestrationPreview,
+      projectFiles,
       projectTaskContext,
+      rewriteGoal,
+      rewriteSourceExcerpt,
+      rewriteTargetSection,
       scenarioFromUrl,
       scopeUserId,
       selectedCollection,
+      selectedFileId,
       selectedProjectId,
       showAdvancedOrchestration,
       skills,
@@ -1383,6 +1713,25 @@ function ChatPageInner() {
     const text = input.trim();
     const sessionId = activeIdRef.current;
     if (!text || !sessionId || streaming || preparingContext) return;
+
+    const ctxPreview = buildChatTaskContextPayload({
+      chatMode,
+      includeProjectContext,
+      includeFileContext: includeFileContext || chatMode === "doc_optimize",
+      selectedProjectId,
+      selectedFileValue: selectedFileId,
+      projectFiles,
+      projectContextExtra: "",
+      localRewrite: {
+        targetSection: rewriteTargetSection,
+        sourceExcerpt: rewriteSourceExcerpt,
+        rewriteGoal,
+      },
+    });
+    if (ctxPreview.error) {
+      setError(ctxPreview.error);
+      return;
+    }
 
     setError("");
     setPreparingContext(true);
@@ -1463,14 +1812,21 @@ function ChatPageInner() {
       priorSession: sessionAfterUser,
     });
   }, [
+    chatMode,
+    includeFileContext,
     includeKnowledgeContext,
     includeProjectContext,
     includeSkillsContext,
     input,
     orchestrationPreview,
     preparingContext,
+    projectFiles,
+    rewriteGoal,
+    rewriteSourceExcerpt,
+    rewriteTargetSection,
     runAssistantStream,
     selectedCollection,
+    selectedFileId,
     selectedProjectId,
     showAdvancedOrchestration,
     skills,
@@ -1550,6 +1906,13 @@ function ChatPageInner() {
     activeSession?.messages.map((m) => `${m.role}:${m.content}`).join("") ?? "",
   );
 
+  const selectedSourceOutputId = useMemo(() => {
+    if (!selectedFileId) return null;
+    const decoded = decodeProjectFileSelectValue(selectedFileId);
+    if (decoded?.kind === "output") return decoded.id;
+    return null;
+  }, [selectedFileId]);
+
   const boundaryModel: ChatTaskBoundaryModel = {
     activeSession,
     boundaryCards,
@@ -1558,11 +1921,25 @@ function ChatPageInner() {
     transport,
     tasksExecuteUrl,
     chatApiBase,
+    chatMode,
+    setChatMode,
     includeProjectContext,
     setIncludeProjectContext,
     selectedProjectId,
     setSelectedProjectId,
     projects,
+    includeFileContext,
+    setIncludeFileContext,
+    selectedFileId,
+    setSelectedFileId,
+    projectFiles,
+    projectFilesLoading,
+    rewriteTargetSection,
+    setRewriteTargetSection,
+    rewriteSourceExcerpt,
+    setRewriteSourceExcerpt,
+    rewriteGoal,
+    setRewriteGoal,
     includeKnowledgeContext,
     setIncludeKnowledgeContext,
     includeSkillsContext,
@@ -1740,8 +2117,13 @@ function ChatPageInner() {
                     collectionName={effectiveKbCollection}
                     projectId={selectedProjectId || projectFromUrl}
                     sessionId={activeId}
+                    runId={msg.runId}
+                    outputId={msg.outputId}
+                    scenarioId={scenarioFromUrl || "general"}
+                    sourceOutputId={selectedSourceOutputId}
                     onRegenerate={regenerateAssistantReply}
                     actionsDisabled={streaming || preparingContext}
+                    initialFeedbackLevel={msg.feedbackLevel}
                   />
                 ) : null}
               </div>

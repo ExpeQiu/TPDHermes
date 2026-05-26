@@ -33,3 +33,5 @@ class OutputAsset(Base):
     kb_chunk_count = Column(Integer)
     kb_ingested_at = Column(String)
     kb_ingest_error = Column(Text)
+    last_feedback_id = Column(String)
+    adoption_level = Column(String)

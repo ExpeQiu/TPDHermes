@@ -3,6 +3,39 @@ import { getApiHeaders } from "@/lib/api-headers";
 
 export type QuickCreateOutputPreset = "markdown" | "plain" | "structured";
 
+/** /chat 场景二分：共创自由对话 vs 文稿优化（须项目+输出物） */
+export type ChatMode = "co_create" | "doc_optimize";
+
+export type ProjectFileKind = "output" | "attachment";
+
+/** 项目文件列表项（附件 + 输出物统一展示） */
+export interface ProjectFileListItem {
+  id: string;
+  kind: ProjectFileKind;
+  title: string;
+  summary?: string | null;
+  created_at?: string | null;
+  status?: string | null;
+}
+
+/** 前端下拉 value：`output:{id}` | `attachment:{id}` */
+export function encodeProjectFileSelectValue(kind: ProjectFileKind, id: string): string {
+  return `${kind}:${id}`;
+}
+
+export function decodeProjectFileSelectValue(
+  value: string,
+): { kind: ProjectFileKind; id: string } | null {
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  const idx = trimmed.indexOf(":");
+  if (idx <= 0) return null;
+  const kind = trimmed.slice(0, idx) as ProjectFileKind;
+  const id = trimmed.slice(idx + 1);
+  if ((kind !== "output" && kind !== "attachment") || !id) return null;
+  return { kind, id };
+}
+
 /** 从 /create 带入、仅首条会话消费的编排覆盖（避免落盘 localStorage） */
 export interface QuickCreateFlowOverrides {
   knowledgeCollections?: string[];
@@ -220,11 +253,165 @@ export interface TaskInputPayload {
   extra?: string | null;
 }
 
+export interface LocalRewriteInput {
+  targetSection?: string;
+  sourceExcerpt?: string;
+  rewriteGoal?: string;
+}
+
+/** 文稿优化场景：结构化局部改写约束写入 task_input.extra */
+export function formatLocalRewriteExtra(input: LocalRewriteInput): string {
+  const lines: string[] = ["[局部改写约束]"];
+  const section = input.targetSection?.trim();
+  const excerpt = input.sourceExcerpt?.trim();
+  const goal = input.rewriteGoal?.trim();
+  if (section) lines.push(`目标章节/段落: ${section.slice(0, 400)}`);
+  if (excerpt) lines.push(`原文片段: ${excerpt.slice(0, 1200)}`);
+  if (goal) lines.push(`改写目标: ${goal.slice(0, 800)}`);
+  lines.push("请仅修改指定范围，保留未提及部分的原意与结构。");
+  return lines.join("\n");
+}
+
+export function formatAttachmentContextExtra(item: ProjectFileListItem): string {
+  return [
+    "[附件上下文]",
+    `attachment_id=${item.id}`,
+    `filename=${item.title}`,
+    "请按需 kb_query 检索附件片段，勿臆造未检索内容。",
+  ].join("\n");
+}
+
+export interface BuildChatTaskContextOptions {
+  chatMode: ChatMode;
+  includeProjectContext: boolean;
+  includeFileContext: boolean;
+  selectedProjectId: string;
+  selectedFileValue: string;
+  projectFiles: ProjectFileListItem[];
+  projectContextExtra: string;
+  localRewrite?: LocalRewriteInput;
+}
+
+export interface BuildChatTaskContextResult {
+  sourceOutputId: string | null;
+  taskInputExtra: string;
+  error: string | null;
+}
+
+export function buildChatTaskContextPayload(
+  options: BuildChatTaskContextOptions,
+): BuildChatTaskContextResult {
+  const parts: string[] = [];
+  const decoded =
+    options.includeFileContext && options.selectedFileValue
+      ? decodeProjectFileSelectValue(options.selectedFileValue)
+      : null;
+  const selectedFile = decoded
+    ? options.projectFiles.find((f) => f.id === decoded.id && f.kind === decoded.kind)
+    : null;
+
+  if (options.chatMode === "doc_optimize") {
+    if (!options.includeProjectContext || !options.selectedProjectId) {
+      return { sourceOutputId: null, taskInputExtra: "", error: "文稿优化须选择项目" };
+    }
+    if (!decoded || decoded.kind !== "output") {
+      return {
+        sourceOutputId: null,
+        taskInputExtra: "",
+        error: "文稿优化须选择项目输出物（不支持仅选附件）",
+      };
+    }
+    const goal = options.localRewrite?.rewriteGoal?.trim();
+    if (!goal) {
+      return { sourceOutputId: null, taskInputExtra: "", error: "文稿优化须填写改写目标" };
+    }
+    parts.push(formatLocalRewriteExtra(options.localRewrite ?? {}));
+    return { sourceOutputId: decoded.id, taskInputExtra: parts.join("\n\n"), error: null };
+  }
+
+  // co_create
+  if (
+    options.includeProjectContext &&
+    options.selectedProjectId &&
+    options.projectContextExtra.trim() &&
+    !decoded
+  ) {
+    parts.push(options.projectContextExtra.trim());
+  }
+  if (decoded?.kind === "output") {
+    if (options.localRewrite?.rewriteGoal?.trim()) {
+      parts.push(formatLocalRewriteExtra(options.localRewrite));
+    }
+    return { sourceOutputId: decoded.id, taskInputExtra: parts.join("\n\n"), error: null };
+  }
+  if (decoded?.kind === "attachment" && selectedFile) {
+    parts.push(formatAttachmentContextExtra(selectedFile));
+    if (options.localRewrite?.rewriteGoal?.trim()) {
+      parts.push(formatLocalRewriteExtra(options.localRewrite));
+    }
+    return { sourceOutputId: null, taskInputExtra: parts.join("\n\n"), error: null };
+  }
+  if (options.localRewrite?.rewriteGoal?.trim()) {
+    parts.push(formatLocalRewriteExtra(options.localRewrite));
+  }
+  return { sourceOutputId: null, taskInputExtra: parts.join("\n\n"), error: null };
+}
+
+interface ProjectOutputListRow {
+  id: string;
+  title?: string | null;
+  summary?: string | null;
+  created_at?: string | null;
+  status?: string | null;
+}
+
+interface ProjectAttachmentListRow {
+  id: string;
+  original_filename: string;
+  created_at?: string | null;
+  ingest_status?: string | null;
+}
+
+export async function fetchProjectFiles(projectId: string): Promise<ProjectFileListItem[]> {
+  const [outputsRes, attachmentsRes] = await Promise.allSettled([
+    apiGet<ProjectOutputListRow[]>(`/projects/${projectId}/outputs`),
+    apiGet<ProjectAttachmentListRow[]>(`/projects/${projectId}/attachments`),
+  ]);
+  const files: ProjectFileListItem[] = [];
+  if (outputsRes.status === "fulfilled") {
+    for (const row of outputsRes.value) {
+      files.push({
+        id: row.id,
+        kind: "output",
+        title: (row.title?.trim() || "未命名输出").slice(0, 120),
+        summary: row.summary,
+        created_at: row.created_at,
+        status: row.status,
+      });
+    }
+  }
+  if (attachmentsRes.status === "fulfilled") {
+    for (const row of attachmentsRes.value) {
+      files.push({
+        id: row.id,
+        kind: "attachment",
+        title: row.original_filename.slice(0, 120),
+        summary: row.ingest_status ? `索引: ${row.ingest_status}` : null,
+        created_at: row.created_at,
+      });
+    }
+  }
+  files.sort((a, b) => (b.created_at ?? "").localeCompare(a.created_at ?? ""));
+  return files;
+}
+
 export interface TaskExecuteBody {
   /** 标准入口：任务与编排请求均使用 project_id（旧版部分链接仍传 `project`，由前端读取后映射） */
   entrypoint: "chat" | "create" | "workshop" | "quick_create" | "project";
   project_id?: string | null;
   scenario_id?: string | null;
+  /** /chat 场景：co_create 自由共创，doc_optimize 文稿优化 */
+  chat_mode?: ChatMode | null;
   user_message: string;
   task_input?: TaskInputPayload | null;
   scenario_preset_instructions?: string | null;

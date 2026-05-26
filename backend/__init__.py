@@ -81,7 +81,11 @@ async def lifespan(app: FastAPI):
     else:
         logger.info("KB embedding warmup mode=background")
         asyncio.create_task(warmup_embed_model())
+    from backend.services.growth_scheduler import growth_scheduler
+
+    await growth_scheduler.start()
     yield
+    await growth_scheduler.stop()
     logger.info("Shutting down...")
 
 
@@ -150,6 +154,7 @@ from backend.routes.templates import router as templates_router
 from backend.routes.me import router as me_router
 from backend.routes.mcp import router as mcp_router
 from backend.routes.metrics import router as metrics_router
+from backend.routes.feedback import router as feedback_router, learning_router
 
 include_router_with_version(me_router)
 include_router_with_version(mcp_router, strip_prefix="/mcp")
@@ -168,6 +173,8 @@ include_router_with_version(templates_router, strip_prefix="/templates")
 include_router_with_version(feishu_router,   strip_prefix="/feishu")
 include_router_with_version(feishu_bot_router, strip_prefix="/feishu/bot")
 include_router_with_version(metrics_router, strip_prefix="/metrics")
+include_router_with_version(feedback_router, strip_prefix="/feedback")
+include_router_with_version(learning_router, strip_prefix="/learning")
 
 
 # ── 根路径 & 健康检查 ───────────────────────────────────────

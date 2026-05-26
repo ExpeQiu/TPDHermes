@@ -421,3 +421,39 @@ def test_project_output_approve_and_archive_roundtrip():
         ar = client.post(f"/api/v1/projects/{pid}/outputs/{out_id}/archive")
         assert ar.status_code == 200, ar.text
         assert ar.json().get("status") == "archived"
+
+
+def test_chat_doc_optimize_requires_source_output_id():
+    with TestClient(app) as client:
+        pr = client.post("/api/v1/projects/", json={"name": "chat文稿优化校验"}).json()
+        pid = pr["id"]
+        ex = client.post(
+            "/api/v1/tasks/execute",
+            json={
+                "entrypoint": "chat",
+                "project_id": pid,
+                "chat_mode": "doc_optimize",
+                "user_message": "请优化引言",
+                "stream": False,
+            },
+        )
+    assert ex.status_code == 400, ex.text
+    assert "来源输出" in ex.text or "source" in ex.text.lower()
+
+
+def test_chat_source_output_id_not_found():
+    with TestClient(app) as client:
+        pr = client.post("/api/v1/projects/", json={"name": "chat来源404"}).json()
+        pid = pr["id"]
+        ex = client.post(
+            "/api/v1/tasks/execute",
+            json={
+                "entrypoint": "chat",
+                "project_id": pid,
+                "chat_mode": "co_create",
+                "source_output_id": "nonexistent-output-id",
+                "user_message": "基于文档回答",
+                "stream": False,
+            },
+        )
+    assert ex.status_code == 404, ex.text

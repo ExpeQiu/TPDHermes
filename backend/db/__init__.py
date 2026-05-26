@@ -40,3 +40,8 @@ from backend.models.kb_ingest_job import KbIngestJob as _KbIngestJob  # noqa: E4
 from backend.models.kb_source_file import KbSourceFile as _KbSourceFile  # noqa: E402, F401
 from backend.models import kg_entities as _kg_entities  # noqa: E402, F401
 from backend.models.usage_event import UsageEvent as _UsageEvent  # noqa: E402, F401
+from backend.models.feedback_event import FeedbackEvent as _FeedbackEvent  # noqa: E402, F401
+from backend.models.learning_signal import LearningSignal as _LearningSignal  # noqa: E402, F401
+from backend.models.learning_report import LearningReport as _LearningReport  # noqa: E402, F401
+from backend.models.feedback_prompt import FeedbackPrompt as _FeedbackPrompt  # noqa: E402, F401
+from backend.models.experience_entry import ExperienceEntry as _ExperienceEntry  # noqa: E402, F401

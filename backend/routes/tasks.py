@@ -235,12 +235,19 @@ async def execute_task(req: Request, task_req: TaskExecuteRequest, db: AsyncSess
     effective_uid = effective_user_id_for_api(req, body_user_id=task_req.user_id)
     actor_role = (task_req.user_role or "").strip() or viewer_role(req)
     logger.info(
-        "tasks execute user_id=%s entrypoint=%s project_id=%s",
+        "[chat-output-context] tasks execute user_id=%s entrypoint=%s project_id=%s chat_mode=%s source_output_id=%s",
         effective_uid[:24],
         task_req.entrypoint,
         task_req.project_id,
+        task_req.chat_mode,
+        task_req.source_output_id,
     )
     eff_request = task_req
+    if eff_request.entrypoint == "chat" and eff_request.chat_mode == "doc_optimize":
+        if not (eff_request.source_output_id or "").strip():
+            raise HTTPException(status_code=400, detail="文稿优化场景必须指定来源输出文档")
+        if not (eff_request.project_id or "").strip():
+            raise HTTPException(status_code=400, detail="文稿优化场景必须指定项目")
     refine_full_source = os.getenv("WORKSHOP_REFINE_FULL_SOURCE", "").strip().lower() in (
         "1",
         "true",
@@ -248,7 +255,7 @@ async def execute_task(req: Request, task_req: TaskExecuteRequest, db: AsyncSess
         "on",
     )
     if (
-        eff_request.entrypoint == "workshop"
+        eff_request.entrypoint in ("workshop", "chat")
         and eff_request.source_output_id
         and (eff_request.project_id or "").strip()
     ):
@@ -263,7 +270,8 @@ async def execute_task(req: Request, task_req: TaskExecuteRequest, db: AsyncSess
         src_row = q.scalar_one_or_none()
         if not src_row:
             raise HTTPException(status_code=404, detail=f"来源输出不存在: {oid}")
-        if refine_full_source:
+        use_full_source = refine_full_source or eff_request.entrypoint == "chat"
+        if use_full_source:
             material = (src_row.content or "").strip()
             ti = eff_request.task_input
             if not material:
@@ -317,6 +325,8 @@ async def execute_task(req: Request, task_req: TaskExecuteRequest, db: AsyncSess
 
     if eff_request.source_output_id:
         snapshot = {**snapshot, "source_output_id": eff_request.source_output_id.strip()}
+    if eff_request.chat_mode:
+        snapshot = {**snapshot, "chat_mode": eff_request.chat_mode}
 
     user_text = payload.user_input.message
 

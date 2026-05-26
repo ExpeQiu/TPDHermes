@@ -185,6 +185,10 @@ class TaskExecuteRequest(BaseModel):
     user_role: str | None = Field(default=None, description="可选，默认取 X-User-Role")
     project_id: str | None = None
     scenario_id: str | None = "general"
+    chat_mode: Literal["co_create", "doc_optimize"] | None = Field(
+        default=None,
+        description="/chat 场景：co_create 自由共创，doc_optimize 文稿优化（须 source_output_id）",
+    )
     user_message: str = ""
     task_input: TaskInputPayload | None = None
     scenario_preset_instructions: str | None = Field(

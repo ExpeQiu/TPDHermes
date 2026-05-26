@@ -120,6 +120,14 @@ async def finalize_run(
 
     await db.commit()
     await db.refresh(res)
+    logger.info(
+        "run finalized run_id=%s status=%s duration_ms=%s output_id=%s validation_ok=%s",
+        run_id,
+        status,
+        duration_ms,
+        output_id,
+        validation_ok,
+    )
     return res, output_id
 
 

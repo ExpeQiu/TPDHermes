@@ -266,6 +266,143 @@ def run_sqlite_migrations(connection: Connection) -> None:
 
     _seed_builtin_scenarios(connection)
     _backfill_project_scenario_bindings(connection)
+    _ensure_growth_tables(connection)
+
+
+def _ensure_growth_tables(connection: Connection) -> None:
+    """反馈、学习信号、经验库相关表。"""
+    tables = connection.execute(
+        text("SELECT name FROM sqlite_master WHERE type='table'")
+    ).fetchall()
+    names = {str(r[0]) for r in tables}
+
+    if "feedback_events" not in names:
+        connection.execute(
+            text(
+                """
+                CREATE TABLE feedback_events (
+                    id TEXT PRIMARY KEY,
+                    user_id TEXT NOT NULL DEFAULT 'default',
+                    channel TEXT NOT NULL DEFAULT 'web',
+                    session_id TEXT,
+                    message_id TEXT,
+                    run_id TEXT,
+                    output_id TEXT,
+                    project_id TEXT,
+                    scenario_id TEXT,
+                    adoption_level TEXT NOT NULL,
+                    reaction_type TEXT,
+                    reason_text TEXT,
+                    source_excerpt TEXT,
+                    memory_line TEXT,
+                    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+                )
+                """
+            )
+        )
+        connection.execute(
+            text("CREATE INDEX IF NOT EXISTS idx_feedback_run ON feedback_events (run_id)")
+        )
+        connection.execute(
+            text("CREATE INDEX IF NOT EXISTS idx_feedback_session_msg ON feedback_events (session_id, message_id)")
+        )
+        logger.info("sqlite_migrate: created table feedback_events")
+
+    if "learning_signals" not in names:
+        connection.execute(
+            text(
+                """
+                CREATE TABLE learning_signals (
+                    id TEXT PRIMARY KEY,
+                    signal_type TEXT NOT NULL,
+                    entity_kind TEXT NOT NULL,
+                    entity_id TEXT,
+                    entity_label TEXT,
+                    count TEXT DEFAULT '1',
+                    status TEXT DEFAULT 'open',
+                    payload_json TEXT,
+                    user_id TEXT DEFAULT 'default',
+                    project_id TEXT,
+                    last_seen_at TEXT NOT NULL DEFAULT (datetime('now')),
+                    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+                )
+                """
+            )
+        )
+        logger.info("sqlite_migrate: created table learning_signals")
+
+    if "learning_reports" not in names:
+        connection.execute(
+            text(
+                """
+                CREATE TABLE learning_reports (
+                    id TEXT PRIMARY KEY,
+                    user_id TEXT DEFAULT 'default',
+                    week_start TEXT NOT NULL,
+                    summary_json TEXT NOT NULL,
+                    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+                )
+                """
+            )
+        )
+        logger.info("sqlite_migrate: created table learning_reports")
+
+    if "feedback_prompts" not in names:
+        connection.execute(
+            text(
+                """
+                CREATE TABLE feedback_prompts (
+                    id TEXT PRIMARY KEY,
+                    run_id TEXT NOT NULL,
+                    output_id TEXT,
+                    session_id TEXT,
+                    message_id TEXT,
+                    project_id TEXT,
+                    user_id TEXT DEFAULT 'default',
+                    prompt_status TEXT DEFAULT 'pending',
+                    prompted_at TEXT,
+                    answered_at TEXT,
+                    feedback_id TEXT,
+                    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+                )
+                """
+            )
+        )
+        logger.info("sqlite_migrate: created table feedback_prompts")
+
+    if "experience_entries" not in names:
+        connection.execute(
+            text(
+                """
+                CREATE TABLE experience_entries (
+                    id TEXT PRIMARY KEY,
+                    project_id TEXT,
+                    scenario_tags_json TEXT,
+                    run_id TEXT,
+                    output_id TEXT,
+                    feedback_id TEXT,
+                    content_summary TEXT,
+                    iteration_of TEXT,
+                    valid_until TEXT,
+                    published TEXT DEFAULT 'false',
+                    kb_doc_id TEXT,
+                    collection_name TEXT,
+                    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+                )
+                """
+            )
+        )
+        logger.info("sqlite_migrate: created table experience_entries")
+
+    if "outputs" in names:
+        _add_columns(
+            connection,
+            "outputs",
+            [
+                ("last_feedback_id", "TEXT"),
+                ("adoption_level", "TEXT"),
+            ],
+        )
 
 
 def _seed_builtin_scenarios(connection: Connection) -> None:
