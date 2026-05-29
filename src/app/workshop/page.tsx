@@ -946,7 +946,7 @@ function WorkshopPageInner() {
               ← 返回首页
             </Link>
           </div>
-          <div className="inline-flex items-center gap-2 rounded-full border border-blue-500/30 bg-blue-500/10 px-3 py-1 text-xs font-medium text-blue-200">
+          <div className="inline-flex items-center gap-2 rounded-full border border-blue-500/30 bg-blue-500/10 px-3 py-1 text-xs font-medium text-blue-700 dark:text-blue-200">
             <span className="h-2 w-2 rounded-full bg-blue-400" aria-hidden />
             场景输出
           </div>
@@ -1085,7 +1085,7 @@ function WorkshopPageInner() {
                           <p className="mt-1 line-clamp-2 text-xs text-slate-400">{scenario.summary}</p>
                           <div className="mt-2 flex flex-wrap gap-2">
                             {remote ? (
-                              <span className="rounded-full border border-emerald-700/50 bg-emerald-500/10 px-2 py-0.5 text-[10px] text-emerald-200">
+                              <span className="rounded-full border border-emerald-300 bg-emerald-50 px-2 py-0.5 text-[10px] text-emerald-800 dark:border-emerald-700/50 dark:bg-emerald-500/10 dark:text-emerald-200">
                                 {scenarioStatusLabel(remote.status)} · v{remote.version}
                               </span>
                             ) : null}
@@ -1095,7 +1095,7 @@ function WorkshopPageInner() {
                               </span>
                             ) : null}
                             {isQuick ? (
-                              <span className="rounded-full border border-violet-600/50 bg-violet-500/10 px-2 py-0.5 text-[10px] text-violet-200">
+                              <span className="rounded-full border border-violet-300 bg-violet-50 px-2 py-0.5 text-[10px] text-violet-800 dark:border-violet-600/50 dark:bg-violet-500/10 dark:text-violet-200">
                                 快捷场景
                                 {projectQuickScenarios?.defaultScenarioId === scenario.id
                                   ? " · 默认"
@@ -1103,11 +1103,11 @@ function WorkshopPageInner() {
                               </span>
                             ) : null}
                             {binding?.enabled === 1 ? (
-                              <span className="rounded-full border border-blue-600/50 bg-blue-500/10 px-2 py-0.5 text-[10px] text-blue-200">
+                              <span className="rounded-full border border-blue-300 bg-blue-50 px-2 py-0.5 text-[10px] text-blue-800 dark:border-blue-600/50 dark:bg-blue-500/10 dark:text-blue-200">
                                 已绑定{binding.is_default && !isQuick ? " · 默认" : ""}
                               </span>
                             ) : (
-                              <span className="rounded-full border border-amber-700/50 bg-amber-500/10 px-2 py-0.5 text-[10px] text-amber-200">
+                              <span className="rounded-full border border-amber-300 bg-amber-50 px-2 py-0.5 text-[10px] text-amber-800 dark:border-amber-700/50 dark:bg-amber-500/10 dark:text-amber-200">
                                 未绑定本项目
                               </span>
                             )}
@@ -1118,7 +1118,7 @@ function WorkshopPageInner() {
                   </div>
                 )}
                 {selectedProjectId && !loadingBound && workshopDisplayScenarios.length === 0 ? (
-                  <p className="text-xs text-amber-400/90">
+                  <p className="text-xs text-amber-700 dark:text-amber-400/90">
                     暂无已发布场景。请先在{" "}
                     <Link href="/create" className="underline">
                       场景编排
@@ -1134,7 +1134,7 @@ function WorkshopPageInner() {
                 !loadingBound &&
                 workshopDisplayScenarios.length > 0 &&
                 workshopScenarioOptions.length === 0 ? (
-                  <p className="text-xs text-amber-400/90">
+                  <p className="text-xs text-amber-700 dark:text-amber-400/90">
                     已有已发布场景，但均未绑定本项目。请在项目详情「设置快捷场景」中勾选并保存后再执行。
                   </p>
                 ) : null}
@@ -1251,7 +1251,7 @@ function WorkshopPageInner() {
                 <p className="mt-2 text-sm text-slate-500">加载来源输出全文…</p>
               ) : null}
               {mode === "refine" && sourceOutputId && sourceMaterialPreview ? (
-                <p className="mt-2 rounded-2xl border border-amber-700/35 bg-amber-950/25 px-3 py-2 text-xs text-amber-200/90">
+                <p className="mt-2 rounded-2xl border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:border-amber-700/35 dark:bg-amber-950/25 dark:text-amber-200/90">
                   优化来源输出 ID：<span className="font-mono">{sourceOutputId}</span>
                   ，已作为本轮的来源输出与来源素材参与编排。
                 </p>
@@ -1401,7 +1401,7 @@ function WorkshopPageInner() {
                     type="button"
                     onClick={() => void handleSaveAsNewVersion()}
                     disabled={versionSaveStatus === "saving"}
-                    className="rounded-lg border border-amber-500/50 bg-amber-500/10 px-3 py-1.5 text-sm font-medium text-amber-100 transition hover:bg-amber-500/20 disabled:opacity-50"
+                    className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-1.5 text-sm font-medium text-amber-900 transition hover:bg-amber-100 disabled:opacity-50 dark:border-amber-500/50 dark:bg-amber-500/10 dark:text-amber-100 dark:hover:bg-amber-500/20"
                   >
                     {versionSaveStatus === "saving" ? "保存中…" : "保存为源输出的新版本"}
                   </button>

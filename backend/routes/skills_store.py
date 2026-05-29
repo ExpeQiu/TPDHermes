@@ -38,7 +38,7 @@ from backend.services.skill_package import (
     write_package_file,
 )
 from backend.services.resource_visibility import skill_installation_visible
-from backend.services.user_identity import get_effective_user_id
+from backend.services.user_identity import get_effective_user_id, is_global_admin_user
 
 
 router = APIRouter(prefix="/skills", tags=["skills"])
@@ -67,6 +67,10 @@ class SkillConfigRequest(BaseModel):
 
 class SkillEnableRequest(BaseModel):
     enabled: bool
+
+
+class SkillPublishGlobalRequest(BaseModel):
+    publish: bool = True
 
 
 class SkillPackageFileWriteRequest(BaseModel):
@@ -480,6 +484,40 @@ async def toggle_skill(name: str, data: SkillEnableRequest, db: AsyncSession = D
         return skill
     except SkillNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e))
+
+
+@router.patch("/{name}/publish-global", response_model=SkillResponse)
+async def publish_skill_global(
+    name: str,
+    data: SkillPublishGlobalRequest,
+    db: AsyncSession = Depends(get_db),
+    effective_uid: str = Depends(get_effective_user_id),
+):
+    """仅管理员可将个人技能发布为全员可见（owner_id 置空）。"""
+    if not (is_global_admin_user(effective_uid) or effective_uid == "default"):
+        raise HTTPException(status_code=403, detail="仅管理员可执行发布全员")
+    if data.publish is not True:
+        raise HTTPException(status_code=400, detail="当前仅支持发布全员")
+    svc = SkillLifecycleService(db, get_loader())
+    skill = await svc.get_skill(name)
+    if not skill:
+        raise HTTPException(status_code=404, detail=f"Skill '{name}' not found")
+    owner = str(skill.get("owner_id") or "").strip()
+    if not owner:
+        return skill
+    db_skill = await svc._get_db_skill(name)
+    if not db_skill:
+        raise HTTPException(status_code=404, detail=f"Skill '{name}' not found")
+    db_skill.owner_id = ""
+    await db.commit()
+    await db.refresh(db_skill)
+    logger.info(
+        "skills_publish_global ok admin=%s skill=%s owner_from=%s",
+        effective_uid[:24],
+        name,
+        owner[:24],
+    )
+    return svc._skill_to_dict(db_skill)
 
 
 @router.patch("/{name}/config", response_model=SkillResponse)

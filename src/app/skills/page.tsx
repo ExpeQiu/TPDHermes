@@ -8,6 +8,7 @@ import { SkillPackageLayoutTags } from "@/components/skills/SkillPackageLayoutTa
 import { SkillsScopePanel } from "@/components/skills/SkillsScopePanel";
 import { skillLabel, skillScopeLabel } from "@/lib/ui-labels";
 import { trackUsage } from "@/lib/usage-tracker";
+import { useEffectiveUserScopeId } from "@/lib/use-effective-user-scope-id";
 
 interface Skill {
     id: string;
@@ -53,6 +54,7 @@ function MetricCard({
 }
 
 export default function SkillsPage() {
+  const scopeUserId = useEffectiveUserScopeId();
   const [skills, setSkills] = useState<Skill[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -162,6 +164,33 @@ export default function SkillsPage() {
     }
   };
 
+  const handlePublishGlobal = async (skill: Skill) => {
+    const owner = (skill.owner_id || "").trim();
+    if (!owner) {
+      showMsg(`「${skill.name}」已经是公共技能`);
+      return;
+    }
+    if (!confirm(`确认将「${skill.name}」发布为全员可见吗？`)) return;
+    trackUsage({
+      eventName: "skills_publish_global_click",
+      feature: "skills",
+      action: "publish_global_click",
+      properties: { skill_name: skill.name, owner_from: owner },
+    });
+    try {
+      const res = await apiFetch(`${SKILLS_BASE}${skill.name}/publish-global`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ publish: true }),
+      });
+      await readJson(res);
+      await fetchSkills();
+      showMsg(`「${skill.name}」已发布全员`);
+    } catch (e: unknown) {
+      showMsg(`发布失败: ${e instanceof Error ? e.message : ""}`);
+    }
+  };
+
   const fetchPackageLayout = useCallback(async (name: string) => {
     setPackageLoading(true);
     setPackageLayout(null);
@@ -217,6 +246,7 @@ export default function SkillsPage() {
 
   const installedCount = skills.filter((s) => s.enabled).length;
   const disabledCount = skills.length - installedCount;
+  const isDefaultAdmin = scopeUserId === "default";
 
   return (
     <main className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-slate-100 p-4 text-slate-900 sm:p-6 md:p-8 dark:from-slate-950 dark:via-slate-900 dark:to-slate-950 dark:text-white">
@@ -412,6 +442,14 @@ export default function SkillsPage() {
                   >
                     {selectedSkill.enabled ? "禁用" : "启用"}
                   </button>
+                  {isDefaultAdmin && (selectedSkill.owner_id || "").trim() ? (
+                    <button
+                      onClick={() => handlePublishGlobal(selectedSkill)}
+                      className="px-4 py-2 bg-emerald-600/20 border border-emerald-600/40 hover:bg-emerald-600/30 text-emerald-300 rounded-lg text-sm font-medium transition"
+                    >
+                      发布全员
+                    </button>
+                  ) : null}
                   <button
                     onClick={() => handleUninstall(selectedSkill.name)}
                     className="px-4 py-2 bg-red-600/20 border border-red-600/40 hover:bg-red-600/30 text-red-400 rounded-lg text-sm font-medium transition"

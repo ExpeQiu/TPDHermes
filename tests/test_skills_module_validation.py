@@ -182,3 +182,43 @@ def test_skills_upload_update_toggle_config_and_cleanup():
             assert detail.status_code == 404, detail.text
     finally:
         _cleanup_uploaded_skill(name)
+
+
+def test_skills_publish_global_admin_only_and_visible_to_others():
+    name = f"pubskill_{uuid.uuid4().hex[:8]}"
+    zip_bytes = _build_skill_zip(name)
+    _cleanup_uploaded_skill(name)
+
+    try:
+        with TestClient(app) as client:
+            uploaded = client.post(
+                "/api/v1/skills/upload",
+                files={"file": (f"{name}.zip", zip_bytes, "application/zip")},
+                headers={"X-User-ID": "user_owner_publish"},
+            )
+            assert uploaded.status_code == 200, uploaded.text
+            assert uploaded.json().get("owner_id") == "user_owner_publish"
+
+            forbidden = client.patch(
+                f"/api/v1/skills/{name}/publish-global",
+                json={"publish": True},
+                headers={"X-User-ID": "user_not_admin"},
+            )
+            assert forbidden.status_code == 403, forbidden.text
+
+            published = client.patch(
+                f"/api/v1/skills/{name}/publish-global",
+                json={"publish": True},
+                headers={"X-User-ID": "default"},
+            )
+            assert published.status_code == 200, published.text
+            assert published.json().get("owner_id") == ""
+
+            visible = client.get("/api/v1/skills/", headers={"X-User-ID": "user_random_viewer"})
+            assert visible.status_code == 200, visible.text
+            names = {item["name"] for item in visible.json()}
+            assert name in names
+    finally:
+        with TestClient(app) as client:
+            client.delete(f"/api/v1/skills/{name}", headers={"X-User-ID": "default"})
+        _cleanup_uploaded_skill(name)

@@ -16,7 +16,9 @@ from typing import Any, AsyncGenerator, Dict
 from fastapi import APIRouter, Depends
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
+from sqlalchemy.ext.asyncio import AsyncSession
 
+from backend.db import get_db
 from backend.services.skill_loader import (
     SkillLoader,
     SkillNotFoundError,
@@ -24,6 +26,7 @@ from backend.services.skill_loader import (
     get_loader,
 )
 from backend.services.user_identity import get_effective_user_id
+from backend.services.workshop_skill_access import visible_workshop_skill_names
 
 router = APIRouter(prefix="/ws", tags=["workshop"])
 logger = logging.getLogger("tpdx.hermes.workshop")
@@ -161,14 +164,36 @@ async def generate_stream(
 # ─── Skill 发现端点（辅助） ────────────────────────────────────────────────────
 
 @router.get("/skills", response_model=None)
-async def list_skills(loader: SkillLoader = Depends(_loader_dep)):
-    return {"skills": loader.discover()}
+async def list_skills(
+    loader: SkillLoader = Depends(_loader_dep),
+    db: AsyncSession = Depends(get_db),
+    effective_uid: str = Depends(get_effective_user_id),
+):
+    visible = await visible_workshop_skill_names(
+        db,
+        effective_uid,
+        enabled_only=True,
+        require_loadable=True,
+    )
+    names = [n for n in loader.discover() if n in visible]
+    return {"skills": names}
 
 
 @router.get("/skills/metadata", response_model=None)
-async def list_skills_metadata(loader: SkillLoader = Depends(_loader_dep)):
+async def list_skills_metadata(
+    loader: SkillLoader = Depends(_loader_dep),
+    db: AsyncSession = Depends(get_db),
+    effective_uid: str = Depends(get_effective_user_id),
+):
     """技能元数据与输出模版选项，供场景编排页绑定 skill 后选择模版。"""
-    return {"skills": loader.list_skill_metadata()}
+    visible = await visible_workshop_skill_names(
+        db,
+        effective_uid,
+        enabled_only=True,
+        require_loadable=True,
+    )
+    rows = [item for item in loader.list_skill_metadata() if str(item.get("name") or "") in visible]
+    return {"skills": rows}
 
 
 @router.post("/generate-from-kb", response_model=None)

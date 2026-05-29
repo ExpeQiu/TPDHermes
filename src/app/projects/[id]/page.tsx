@@ -173,15 +173,15 @@ function kbIngestStatusLabel(status: string | null | undefined): string {
 function kbIngestBadgeClass(status: string | null | undefined): string {
   const s = (status || "pending").toLowerCase();
   if (s === "ingested") {
-    return "rounded border border-emerald-600/40 bg-emerald-500/10 px-2 py-0.5 text-xs text-emerald-300";
+    return "rounded border border-emerald-300 bg-emerald-50 px-2 py-0.5 text-xs text-emerald-800 dark:border-emerald-600/40 dark:bg-emerald-500/10 dark:text-emerald-300";
   }
   if (s === "failed") {
-    return "rounded border border-red-700/50 bg-red-950/30 px-2 py-0.5 text-xs text-red-300";
+    return "rounded border border-red-300 bg-red-50 px-2 py-0.5 text-xs text-red-800 dark:border-red-700/50 dark:bg-red-950/30 dark:text-red-300";
   }
   if (s === "extracting" || s === "pending") {
-    return "rounded border border-amber-600/40 bg-amber-500/10 px-2 py-0.5 text-xs text-amber-200";
+    return "rounded border border-amber-300 bg-amber-50 px-2 py-0.5 text-xs text-amber-800 dark:border-amber-600/40 dark:bg-amber-500/10 dark:text-amber-200";
   }
-  return "rounded bg-slate-700/60 px-2 py-0.5 text-xs text-slate-400";
+  return "rounded bg-slate-200 px-2 py-0.5 text-xs text-slate-700 dark:bg-slate-700/60 dark:text-slate-400";
 }
 
 interface ApiAttachmentRow {
@@ -239,15 +239,15 @@ function constraintsToEditString(constraints: unknown): string {
 function outputStatusBadgeClass(status: string): string {
   const k = status.toLowerCase();
   if (k === "approved") {
-    return "rounded border border-emerald-600/50 bg-emerald-500/15 px-2 py-0.5 text-xs font-medium text-emerald-300";
+    return "rounded border border-emerald-300 bg-emerald-50 px-2 py-0.5 text-xs font-medium text-emerald-800 dark:border-emerald-600/50 dark:bg-emerald-500/15 dark:text-emerald-300";
   }
   if (k === "archived") {
-    return "rounded border border-amber-600/40 bg-amber-500/10 px-2 py-0.5 text-xs font-medium text-amber-200/90";
+    return "rounded border border-amber-300 bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-800 dark:border-amber-600/40 dark:bg-amber-500/10 dark:text-amber-200/90";
   }
   if (k === "completed") {
-    return "rounded border border-blue-600/40 bg-blue-500/10 px-2 py-0.5 text-xs font-medium text-blue-200/90";
+    return "rounded border border-blue-300 bg-blue-50 px-2 py-0.5 text-xs font-medium text-blue-800 dark:border-blue-600/40 dark:bg-blue-500/10 dark:text-blue-200/90";
   }
-  return "rounded bg-slate-700/60 px-2 py-0.5 text-xs text-slate-400";
+  return "rounded bg-slate-200 px-2 py-0.5 text-xs text-slate-700 dark:bg-slate-700/60 dark:text-slate-400";
 }
 
 function formatDate(value: string | null | undefined) {
@@ -737,7 +737,7 @@ export default function ProjectDetailPage() {
         )}
 
         {error && (
-          <div className="bg-red-900/30 border border-red-700 rounded-lg p-4 text-red-300">
+          <div className="bg-red-50 border border-red-300 rounded-lg p-4 text-red-800 dark:bg-red-900/30 dark:border-red-700 dark:text-red-300">
             加载失败: {error}
           </div>
         )}
@@ -914,7 +914,7 @@ export default function ProjectDetailPage() {
                   {boundLoading && publishedScenarios.length === 0 ? (
                     <p className="mt-4 text-sm text-slate-500">加载场景列表…</p>
                   ) : publishedScenarios.length === 0 ? (
-                    <p className="mt-4 text-sm text-amber-400/90">
+                    <p className="mt-4 text-sm text-amber-700 dark:text-amber-400/90">
                       暂无已发布场景，请先在场景编排中发布后再设置快捷场景。
                     </p>
                   ) : (
@@ -950,7 +950,7 @@ export default function ProjectDetailPage() {
                               onClick={() => setQuickDefaultScenario(s.id)}
                               className={`shrink-0 rounded-lg px-2.5 py-1 text-xs transition ${
                                 isDefault
-                                  ? "border border-blue-500/50 bg-blue-500/15 text-blue-200"
+                                  ? "border border-blue-300 bg-blue-50 text-blue-800 dark:border-blue-500/50 dark:bg-blue-500/15 dark:text-blue-200"
                                   : "border border-slate-300 dark:border-slate-600 text-slate-400 hover:bg-slate-200 dark:bg-slate-800 disabled:opacity-40"
                               }`}
                             >
@@ -1004,7 +1004,7 @@ export default function ProjectDetailPage() {
                           type="button"
                           onClick={handlePickAttachment}
                           disabled={attachmentUploading}
-                          className="rounded-xl border border-blue-500/40 bg-blue-500/10 px-4 py-2 text-sm font-medium text-blue-200 transition hover:border-blue-400 hover:bg-blue-500/20 disabled:opacity-50"
+                          className="rounded-xl border border-blue-300 bg-blue-50 px-4 py-2 text-sm font-medium text-blue-800 transition hover:border-blue-400 hover:bg-blue-100 disabled:opacity-50 dark:border-blue-500/40 dark:bg-blue-500/10 dark:text-blue-200 dark:hover:bg-blue-500/20"
                         >
                           {attachmentUploading ? "上传中…" : "上传附件"}
                         </button>
@@ -1051,7 +1051,7 @@ export default function ProjectDetailPage() {
                                 <button
                                   type="button"
                                   onClick={() => void handleReingestAttachment(a.id)}
-                                  className="rounded-lg border border-amber-700/50 px-2.5 py-1 text-xs text-amber-200 transition hover:bg-amber-950/30"
+                                  className="rounded-lg border border-amber-300 bg-amber-50 px-2.5 py-1 text-xs text-amber-900 transition hover:bg-amber-100 dark:border-amber-700/50 dark:bg-transparent dark:text-amber-200 dark:hover:bg-amber-950/30"
                                 >
                                   重试入库
                                 </button>
@@ -1067,7 +1067,7 @@ export default function ProjectDetailPage() {
                               <button
                                 type="button"
                                 onClick={() => void handleDeleteAttachment(a.id)}
-                                className="rounded-lg border border-red-900/50 px-2.5 py-1 text-xs text-red-300 transition hover:bg-red-950/40"
+                                className="rounded-lg border border-red-300 bg-red-50 px-2.5 py-1 text-xs text-red-900 transition hover:bg-red-100 dark:border-red-900/50 dark:bg-transparent dark:text-red-300 dark:hover:bg-red-950/40"
                               >
                                 删除
                               </button>
@@ -1090,7 +1090,7 @@ export default function ProjectDetailPage() {
                               {formatDate(latestOutput.created_at)}
                             </p>
                           </div>
-                          <span className="rounded-full bg-blue-500/10 px-2.5 py-1 text-xs text-blue-300">
+                          <span className="rounded-full bg-blue-50 px-2.5 py-1 text-xs text-blue-800 dark:bg-blue-500/10 dark:text-blue-300">
                             {latestOutput.word_count.toLocaleString()} 字
                           </span>
                         </div>
@@ -1243,7 +1243,7 @@ export default function ProjectDetailPage() {
                             <>
                               <Link
                                 href={outputActionLinks.chat}
-                                className="flex-1 min-w-[8rem] px-4 py-2 rounded-lg border border-blue-500/50 bg-blue-500/10 text-sm font-medium text-center text-blue-200 transition hover:bg-blue-500/20"
+                                className="flex-1 min-w-[8rem] px-4 py-2 rounded-lg border border-blue-300 bg-blue-50 text-sm font-medium text-center text-blue-900 transition hover:bg-blue-100 dark:border-blue-500/50 dark:bg-blue-500/10 dark:text-blue-200 dark:hover:bg-blue-500/20"
                               >
                                 对话优化
                               </Link>
@@ -1263,7 +1263,7 @@ export default function ProjectDetailPage() {
                               selectedOutput.status === "approved" ||
                               selectedOutput.status === "archived"
                             }
-                            className="px-4 py-2 rounded-lg text-sm font-medium border border-emerald-600/50 bg-emerald-500/15 text-emerald-100 hover:bg-emerald-500/25 transition disabled:opacity-40 disabled:cursor-not-allowed"
+                            className="px-4 py-2 rounded-lg text-sm font-medium border border-emerald-300 bg-emerald-50 text-emerald-900 hover:bg-emerald-100 transition disabled:opacity-40 disabled:cursor-not-allowed dark:border-emerald-600/50 dark:bg-emerald-500/15 dark:text-emerald-100 dark:hover:bg-emerald-500/25"
                           >
                             采纳
                           </button>
@@ -1271,7 +1271,7 @@ export default function ProjectDetailPage() {
                             type="button"
                             onClick={() => void handleArchiveProjectOutput()}
                             disabled={outputGovernBusy || selectedOutput.status === "archived"}
-                            className="px-4 py-2 rounded-lg text-sm font-medium border border-amber-600/50 bg-amber-500/15 text-amber-100 hover:bg-amber-500/25 transition disabled:opacity-40 disabled:cursor-not-allowed"
+                            className="px-4 py-2 rounded-lg text-sm font-medium border border-amber-300 bg-amber-50 text-amber-900 hover:bg-amber-100 transition disabled:opacity-40 disabled:cursor-not-allowed dark:border-amber-600/50 dark:bg-amber-500/15 dark:text-amber-100 dark:hover:bg-amber-500/25"
                           >
                             归档
                           </button>
@@ -1309,14 +1309,14 @@ export default function ProjectDetailPage() {
                         <span className="rounded bg-slate-300 dark:bg-slate-700 px-2 py-0.5 text-slate-800 dark:text-slate-200">
                           {entrypointLabel(r.entrypoint)}
                         </span>
-                        <span className="rounded bg-blue-900/40 px-2 py-0.5 text-blue-200">
+                        <span className="rounded bg-blue-50 px-2 py-0.5 text-blue-800 dark:bg-blue-900/40 dark:text-blue-200">
                           {runStatusLabel(r.status)}
                         </span>
                         {r.duration_ms != null && (
                           <span className="text-slate-500">耗时 {r.duration_ms} 毫秒</span>
                         )}
                         {r.execution_mode && (
-                          <span className="rounded bg-violet-900/30 px-2 py-0.5 text-violet-200">
+                          <span className="rounded bg-violet-50 px-2 py-0.5 text-violet-800 dark:bg-violet-900/30 dark:text-violet-200">
                             {r.execution_mode === "agent" ? "Agent" : "直连"}
                             {r.tool_capture_hit ? " · 工具产出" : ""}
                           </span>
@@ -1358,7 +1358,7 @@ export default function ProjectDetailPage() {
                     </div>
                     <div className="space-y-4 overflow-y-auto px-4 py-4 sm:px-5">
                       {editError ? (
-                        <p className="rounded-lg border border-red-800/50 bg-red-950/30 px-3 py-2 text-sm text-red-300">
+                        <p className="rounded-lg border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-800 dark:border-red-800/50 dark:bg-red-950/30 dark:text-red-300">
                           {editError}
                         </p>
                       ) : null}

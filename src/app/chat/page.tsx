@@ -678,7 +678,7 @@ function ChatTaskBoundaryPanel({
             contextSummary.map((item) => (
               <span
                 key={item}
-                className="rounded-full border border-blue-700/40 bg-blue-900/30 px-2 py-1 text-blue-300"
+                className="rounded-full border border-blue-300 bg-blue-50 px-2 py-1 text-blue-800 dark:border-blue-700/40 dark:bg-blue-900/30 dark:text-blue-300"
               >
                 {item}
               </span>
@@ -701,7 +701,7 @@ function ChatTaskBoundaryPanel({
       )}
 
       {bootstrapWarnings.length > 0 && (
-        <div className="mt-4 rounded-xl border border-amber-700/40 bg-amber-950/30 px-3 py-2 text-xs text-amber-300">
+        <div className="mt-4 rounded-xl border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-700/40 dark:bg-amber-950/30 dark:text-amber-300">
           {bootstrapWarnings.join("；")}
         </div>
       )}
@@ -2081,7 +2081,7 @@ function ChatPageInner() {
                 )}
 
                 {msg.contextWarnings && msg.contextWarnings.length > 0 && (
-                  <div className="mb-2 rounded-xl border border-amber-700/40 bg-amber-950/20 px-3 py-2 text-xs text-amber-300">
+                  <div className="mb-2 rounded-xl border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-700/40 dark:bg-amber-950/20 dark:text-amber-300">
                     {msg.contextWarnings.join("；")}
                   </div>
                 )}
@@ -2091,7 +2091,7 @@ function ChatPageInner() {
                     msg.role === "user"
                       ? "whitespace-pre-wrap text-sm leading-relaxed bg-blue-600 text-white rounded-tr-sm"
                       : msg.role === "system"
-                        ? "bg-orange-900/50 text-orange-100 rounded-tl-sm border border-orange-700/30"
+                        ? "rounded-tl-sm border border-orange-300 bg-orange-50 text-orange-900 dark:border-orange-700/30 dark:bg-orange-900/50 dark:text-orange-100"
                         : "bg-slate-300 dark:bg-slate-700 text-slate-800 dark:text-slate-200 rounded-tl-sm"
                   }`}
                 >
@@ -2136,7 +2136,7 @@ function ChatPageInner() {
               <div className="flex-shrink-0 w-8 h-8 rounded-full bg-red-600 flex items-center justify-center text-sm font-medium">
                 !
               </div>
-              <div className="max-w-[75%] rounded-2xl rounded-tl-sm bg-red-900/40 border border-red-700/50 px-4 py-2.5 text-sm text-red-300">
+              <div className="max-w-[75%] rounded-2xl rounded-tl-sm border border-red-300 bg-red-50 px-4 py-2.5 text-sm text-red-800 dark:border-red-700/50 dark:bg-red-900/40 dark:text-red-300">
                 ❌ {error}
               </div>
             </div>

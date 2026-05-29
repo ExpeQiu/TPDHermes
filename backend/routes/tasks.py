@@ -35,7 +35,6 @@ from backend.services.project_kb import output_doc_id, project_kb_collection
 from backend.services.project_kb_ingest import schedule_ingest_output
 from backend.services.project_access import require_project_for_user
 from backend.services.run_log_service import create_run, finalize_run, mark_run_failed
-from backend.services.skill_loader import get_loader
 from backend.services.template_service import extract_required_sections, get_template_by_id, validate_markdown_sections
 from backend.services.workshop_task_runner import (
     _parse_workshop_context,
@@ -47,6 +46,7 @@ from backend.services.workshop_execution import (
     workshop_agent_fallback_direct,
     workshop_execution_mode,
 )
+from backend.services.workshop_skill_access import visible_workshop_skill_names
 from backend.services.workshop_tool_capture import load_workshop_tool_capture
 from backend.services.user_identity import effective_user_id_for_api, viewer_role
 
@@ -116,7 +116,13 @@ def _format_upstream_error(status_code: int, detail: bytes) -> dict[str, Any]:
     }
 
 
-async def _validate_task_request(db: AsyncSession, request: TaskExecuteRequest, payload: OrchestrationPayload) -> None:
+async def _validate_task_request(
+    db: AsyncSession,
+    request: TaskExecuteRequest,
+    payload: OrchestrationPayload,
+    *,
+    effective_uid: str,
+) -> None:
     if request.entrypoint == "workshop":
         allowed = payload.skills.allowed
         if not allowed:
@@ -124,11 +130,18 @@ async def _validate_task_request(db: AsyncSession, request: TaskExecuteRequest, 
                 status_code=400,
                 detail="工坊入口需要有效的技能白名单：请在场景编排中配置 skills_policy.allowed，或在请求中提供 overrides.skills.allowed。",
             )
-        loader = get_loader()
-        names = set(loader.discover())
+        names = await visible_workshop_skill_names(
+            db,
+            effective_uid,
+            enabled_only=True,
+            require_loadable=True,
+        )
         for name in allowed:
             if name not in names:
-                raise HTTPException(status_code=400, detail=f"技能不在可用列表: {name}")
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"技能不可用或不可见: {name}",
+                )
 
     if payload.output.must_follow_template and payload.output.template_id:
         tpl = await get_template_by_id(db, payload.output.template_id)
@@ -337,7 +350,7 @@ async def execute_task(req: Request, task_req: TaskExecuteRequest, db: AsyncSess
             tpl_sections = extract_required_sections(tpl)
             payload = _merge_required_sections(payload, tpl_sections)
 
-    await _validate_task_request(db, eff_request, payload)
+    await _validate_task_request(db, eff_request, payload, effective_uid=effective_uid)
 
     run_id = str(uuid.uuid4())
     await create_run(

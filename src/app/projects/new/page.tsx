@@ -64,7 +64,7 @@ export default function NewProjectPage() {
   };
 
   const inputCls =
-    "w-full bg-slate-800 border border-slate-600 rounded-lg px-4 py-2.5 text-white placeholder-slate-500 focus:outline-none focus:border-blue-500 transition";
+    "w-full rounded-lg border border-slate-300 bg-white px-4 py-2.5 text-slate-900 placeholder-slate-500 focus:outline-none focus:border-blue-500 transition dark:border-slate-600 dark:bg-slate-800 dark:text-white dark:placeholder-slate-500";
 
   return (
     <main className="min-h-screen bg-gradient-to-br from-slate-100 to-slate-200 p-4 text-slate-900 sm:p-6 md:p-8 dark:from-slate-900 dark:to-slate-800 dark:text-white">
@@ -73,7 +73,7 @@ export default function NewProjectPage() {
           <h1 className="text-3xl font-bold mb-6">新建项目</h1>
 
         {submitError && (
-          <div className="bg-red-900/30 border border-red-700 rounded-lg p-4 text-red-300 mb-4">
+          <div className="mb-4 rounded-lg border border-red-300 bg-red-50 p-4 text-red-800 dark:border-red-700 dark:bg-red-900/30 dark:text-red-300">
             提交失败: {submitError}
           </div>
         )}

@@ -11,23 +11,40 @@ import json
 import re
 from typing import Any
 
+from backend.db import async_session_maker
 from backend.services.skill_loader import get_loader, SkillNotFoundError, SkillLoadError
+from backend.services.workshop_skill_access import (
+    visible_workshop_skill_names,
+    workshop_skill_accessible,
+    workshop_viewer_user_id_from_context,
+)
 from backend.tools.kb_tools import kb_query
 
 
-def workshop_list_skills() -> dict:
+async def workshop_list_skills(user_id: str | None = None) -> dict:
     """
     List all available Skills installed in the workshop.
 
     Returns:
         {"skills": [str, ...], "count": int}
     """
+    uid = (user_id or "").strip()
     loader = get_loader()
-    skills = loader.discover()
+    if uid:
+        async with async_session_maker() as db:
+            visible = await visible_workshop_skill_names(
+                db,
+                uid,
+                enabled_only=True,
+                require_loadable=True,
+            )
+        skills = [name for name in loader.discover() if name in visible]
+    else:
+        skills = loader.discover()
     return {"skills": sorted(skills), "count": len(skills)}
 
 
-def workshop_get_skill_info(skill_name: str) -> dict:
+async def workshop_get_skill_info(skill_name: str, user_id: str | None = None) -> dict:
     """
     Get detailed information about a specific Skill.
 
@@ -42,6 +59,7 @@ def workshop_get_skill_info(skill_name: str) -> dict:
             "path": str
         }
     """
+    uid = (user_id or "").strip()
     loader = get_loader()
     skill_path = loader.skills_root / skill_name
 
@@ -51,6 +69,19 @@ def workshop_get_skill_info(skill_name: str) -> dict:
         "path": str(skill_path),
         "description": None,
     }
+
+    if uid:
+        async with async_session_maker() as db:
+            if not await workshop_skill_accessible(
+                db,
+                viewer_user_id=uid,
+                skill_name=skill_name,
+                enabled_only=True,
+            ):
+                info["exists"] = False
+                info["path"] = ""
+                info["error"] = "Skill not visible to current user"
+                return info
 
     if not info["exists"]:
         return info
@@ -230,6 +261,22 @@ async def workshop_generate(skill_name: str, context: dict) -> dict:
         }
     """
     loader = get_loader()
+    async with async_session_maker() as db:
+        viewer_uid = await workshop_viewer_user_id_from_context(db, context)
+        if viewer_uid:
+            allowed = await workshop_skill_accessible(
+                db,
+                viewer_user_id=viewer_uid,
+                skill_name=skill_name,
+                enabled_only=True,
+            )
+            if not allowed:
+                return {
+                    "success": False,
+                    "content": None,
+                    "error": f"Skill '{skill_name}' not accessible for current user",
+                    "skill": skill_name,
+                }
 
     try:
         skill = loader.load(skill_name)

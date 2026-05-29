@@ -58,7 +58,7 @@ export default function ProjectsPage() {
     <main className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-slate-100 p-4 text-slate-900 sm:p-6 md:p-8 dark:from-slate-950 dark:via-slate-900 dark:to-slate-950 dark:text-white">
       <div className={CONTENT_MAX_CLASS}>
         <header className="mb-6 lg:mb-8">
-          <div className="inline-flex items-center gap-2 rounded-full border border-blue-500/30 bg-blue-500/10 px-3 py-1 text-xs font-medium text-blue-200">
+          <div className="inline-flex items-center gap-2 rounded-full border border-blue-500/30 bg-blue-500/10 px-3 py-1 text-xs font-medium text-blue-700 dark:text-blue-200">
             <span className="h-2 w-2 rounded-full bg-blue-400" aria-hidden />
             项目入口页
           </div>
@@ -127,7 +127,7 @@ export default function ProjectsPage() {
           {loading && <p className="py-12 text-center text-slate-400">加载中...</p>}
 
           {error && (
-            <div className="mt-6 rounded-lg border border-red-700 bg-red-900/30 p-4 text-red-300">
+            <div className="mt-6 rounded-lg border border-red-300 bg-red-50 p-4 text-red-800 dark:border-red-700 dark:bg-red-900/30 dark:text-red-300">
               加载失败: {error}
             </div>
           )}
@@ -145,7 +145,7 @@ export default function ProjectsPage() {
           {!loading && !error && projects.length > 0 && (
             <div className="mt-6 grid grid-cols-1 gap-4 xl:grid-cols-2">
               {opError ? (
-                <div className="col-span-full rounded-lg border border-amber-700/80 bg-amber-900/20 px-4 py-3 text-sm text-amber-100">
+                <div className="col-span-full rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-700/80 dark:bg-amber-900/20 dark:text-amber-100">
                   {opError}
                 </div>
               ) : null}
@@ -208,7 +208,7 @@ export default function ProjectsPage() {
                       <button
                         type="button"
                         disabled={deletingId === project.id}
-                        className="pointer-events-auto relative z-20 rounded-xl border border-red-900/60 bg-red-950/40 px-4 py-2 text-center text-sm text-red-200 transition hover:border-red-700 hover:bg-red-950/70 disabled:cursor-not-allowed disabled:opacity-50"
+                        className="pointer-events-auto relative z-20 rounded-xl border border-red-300 bg-red-100 px-4 py-2 text-center text-sm text-red-900 transition hover:border-red-400 hover:bg-red-200 disabled:cursor-not-allowed disabled:opacity-50 dark:border-red-900/60 dark:bg-red-950/40 dark:text-red-200 dark:hover:border-red-700 dark:hover:bg-red-950/70"
                         onClick={async (e) => {
                           e.preventDefault();
                           e.stopPropagation();

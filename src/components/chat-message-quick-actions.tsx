@@ -303,10 +303,10 @@ export function ChatMessageQuickActions({
   if (!trimmed) return null;
 
   const btnClass =
-    "rounded-md border border-slate-600/80 bg-slate-800/80 px-2 py-1 text-[11px] text-slate-300 transition hover:border-slate-500 hover:bg-slate-700 hover:text-white disabled:cursor-not-allowed disabled:opacity-40";
+    "rounded-md border border-slate-300 bg-slate-100 px-2 py-1 text-[11px] text-slate-800 transition hover:border-slate-400 hover:bg-slate-200 dark:border-slate-600/80 dark:bg-slate-800/80 dark:text-slate-300 dark:hover:border-slate-500 dark:hover:bg-slate-700 dark:hover:text-white disabled:cursor-not-allowed disabled:opacity-40";
   const feedbackActiveClass = (level: AdoptionLevel) =>
     feedbackLevel === level
-      ? "border-emerald-500/80 bg-emerald-900/40 text-emerald-200"
+      ? "border-emerald-300 bg-emerald-50 text-emerald-900 dark:border-emerald-500/80 dark:bg-emerald-900/40 dark:text-emerald-200"
       : "";
 
   return (
@@ -327,7 +327,7 @@ export function ChatMessageQuickActions({
           </button>
           <button
             type="button"
-            className={`${btnClass} ${feedbackLevel === "reject" ? "border-red-500/80 bg-red-900/40 text-red-200" : ""}`}
+            className={`${btnClass} ${feedbackLevel === "reject" ? "border-red-300 bg-red-50 text-red-900 dark:border-red-500/80 dark:bg-red-900/40 dark:text-red-200" : ""}`}
             disabled={actionsDisabled || feedbackState === "busy"}
             title="不采纳此回复"
             onClick={() => void submitFeedback("thumbs_down")}

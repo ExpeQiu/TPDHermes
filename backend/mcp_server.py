@@ -115,20 +115,20 @@ async def kb_add_entry(
     title="Workshop List Skills",
     description="List all Skills available in the workshop (skills/ directory).",
 )
-def workshop_list_skills() -> dict:
+async def workshop_list_skills(user_id: str | None = None) -> dict:
     """List all available Skills."""
     from backend.tools.workshop_tools import workshop_list_skills as _list
-    return _list()
+    return await _list(user_id=user_id)
 
 
 @mcp.tool(
     title="Workshop Get Skill Info",
     description="Get detailed information about a specific Skill.",
 )
-def workshop_get_skill_info(skill_name: str) -> dict:
+async def workshop_get_skill_info(skill_name: str, user_id: str | None = None) -> dict:
     """Get skill details."""
     from backend.tools.workshop_tools import workshop_get_skill_info as _info
-    return _info(skill_name)
+    return await _info(skill_name, user_id=user_id)
 
 
 @mcp.tool(
