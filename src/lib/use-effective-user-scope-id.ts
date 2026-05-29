@@ -10,24 +10,26 @@ import {
 
 /** 与 API 头一致的有效用户 ID；随 localStorage / 匿名推导 / 焦点同步（多标签） */
 export function useEffectiveUserScopeId(): string {
-  const [epoch, setEpoch] = useState(0);
+  const [userId, setUserId] = useState("");
 
   useEffect(() => {
-    const bump = () => setEpoch((e) => e + 1);
-    window.addEventListener("focus", bump);
+    const sync = () => setUserId(getEffectiveUserIdSync());
+    sync();
+    window.addEventListener("focus", sync);
     const onStorage = (event: StorageEvent) => {
-      if (event.key === USER_ID_STORAGE_KEY) bump();
+      if (event.key === USER_ID_STORAGE_KEY) sync();
     };
     window.addEventListener("storage", onStorage);
     if (!hasStoredUserId()) {
-      void ensureDerivedUserId().then(bump).catch(() => bump());
+      void ensureDerivedUserId()
+        .then(() => sync())
+        .catch(() => sync());
     }
     return () => {
-      window.removeEventListener("focus", bump);
+      window.removeEventListener("focus", sync);
       window.removeEventListener("storage", onStorage);
     };
   }, []);
 
-  void epoch;
-  return getEffectiveUserIdSync();
+  return userId;
 }

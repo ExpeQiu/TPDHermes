@@ -3,15 +3,16 @@
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { useState } from 'react'
+import { useIsDefaultAdmin } from '@/lib/admin-access'
 import { useThemeStore, useUserStore } from '@/lib/store'
 
 const navLinks = [
   { href: '/', label: '首页', emoji: '🏠' },
   { href: '/projects', label: '项目中心', emoji: '📁' },
-  { href: '/create', label: '场景编排', emoji: '⚡' },
+  { href: '/create', label: '场景编排', emoji: '⚡', adminOnly: true },
   { href: '/chat', label: '编排协作', emoji: '💬' },
   { href: '/workshop', label: '结果工坊', emoji: '🛠️' },
-  { href: '/knowledge', label: '知识库', emoji: '📚' },
+  { href: '/knowledge', label: '知识库', emoji: '📚', adminOnly: true },
   { href: '/skills', label: '技能工坊', emoji: '📦' },
 ]
 
@@ -20,7 +21,9 @@ export function Layout({ children }: { children: React.ReactNode }) {
   const theme = useThemeStore((s) => s.theme)
   const toggleTheme = useThemeStore((s) => s.toggleTheme)
   const user = useUserStore((s) => ({ username: s.username, isLoggedIn: s.isLoggedIn }))
+  const { isAdmin } = useIsDefaultAdmin()
   const [mobileOpen, setMobileOpen] = useState(false)
+  const visibleNavLinks = navLinks.filter((link) => !link.adminOnly || isAdmin)
 
   return (
     <div className="min-h-screen bg-white dark:bg-slate-950 text-slate-900 dark:text-slate-100 flex">
@@ -39,7 +42,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
 
         {/* Nav */}
         <nav className="flex-1 overflow-y-auto py-3 px-3 space-y-0.5">
-          {navLinks.map((link) => {
+          {visibleNavLinks.map((link) => {
             const active = pathname === link.href
             return (
               <Link
@@ -99,7 +102,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
           </div>
         </div>
         <nav className="flex-1 py-3 px-3 space-y-0.5">
-          {navLinks.map((link) => {
+          {visibleNavLinks.map((link) => {
             const active = pathname === link.href
             return (
               <Link

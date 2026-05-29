@@ -3,6 +3,7 @@
 import { Suspense, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
+import AdminOnlyPageGuard from "@/components/admin-only-page-guard";
 import { apiGet, apiFetch, apiDelete, readJson } from "@/lib/api";
 import { CONTENT_MAX_CLASS } from "@/lib/content-shell";
 import { SCENARIOS, type Scenario } from "@/lib/scenario-presets";
@@ -108,15 +109,17 @@ const DEFAULT_SCENARIO_ID = SCENARIOS[0]?.id ?? "general";
 
 export default function CreatePage() {
   return (
-    <Suspense
-      fallback={
-        <div className="flex min-h-screen items-center justify-center text-sm text-slate-500 dark:bg-slate-950 dark:text-slate-400">
-          加载场景编排...
-        </div>
-      }
-    >
-      <CreatePageInner />
-    </Suspense>
+    <AdminOnlyPageGuard pageTitle="create">
+      <Suspense
+        fallback={
+          <div className="flex min-h-screen items-center justify-center text-sm text-slate-500 dark:bg-slate-950 dark:text-slate-400">
+            加载场景编排...
+          </div>
+        }
+      >
+        <CreatePageInner />
+      </Suspense>
+    </AdminOnlyPageGuard>
   );
 }
 

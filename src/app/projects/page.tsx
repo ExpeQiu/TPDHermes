@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { apiDelete, apiGet } from "@/lib/api";
+import { useIsDefaultAdmin } from "@/lib/admin-access";
 import { CONTENT_MAX_CLASS } from "@/lib/content-shell";
 import { projectStatusLabel } from "@/lib/ui-labels";
 
@@ -36,6 +37,7 @@ function formatDate(value: string | null | undefined) {
 }
 
 export default function ProjectsPage() {
+  const { isAdmin } = useIsDefaultAdmin();
   const [projects, setProjects] = useState<Project[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -105,13 +107,15 @@ export default function ProjectsPage() {
                   accent="from-amber-600 to-orange-600"
                   compact
                 />
-                <ActionCard
-                  href="/create"
-                  title="场景编排"
-                  desc=""
-                  accent="from-sky-600 to-blue-500"
-                  compact
-                />
+                {isAdmin ? (
+                  <ActionCard
+                    href="/create"
+                    title="场景编排"
+                    desc=""
+                    accent="from-sky-600 to-blue-500"
+                    compact
+                  />
+                ) : null}
               </div>
             </div>
           </aside>

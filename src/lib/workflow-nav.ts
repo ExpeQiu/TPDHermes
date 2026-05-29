@@ -3,6 +3,7 @@ export type WorkflowNavItem = {
   label: string;
   shortLabel: string;
   description: string;
+  adminOnly?: boolean;
 };
 
 export const WORKFLOW_NAV_ITEMS: WorkflowNavItem[] = [
@@ -35,12 +36,14 @@ export const WORKFLOW_NAV_ITEMS: WorkflowNavItem[] = [
     label: "场景编排",
     shortLabel: "场景编排",
     description: "定义任务边界、知识范围和期望输出。",
+    adminOnly: true,
   },
   {
     href: "/knowledge",
     label: "知识库",
     shortLabel: "知识库",
     description: "配置知识范围并验证检索效果。",
+    adminOnly: true,
   },
   {
     href: "/skills",

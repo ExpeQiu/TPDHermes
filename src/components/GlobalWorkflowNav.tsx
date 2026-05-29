@@ -3,10 +3,13 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { GLOBAL_NAV_INNER_CLASS } from "@/lib/content-shell";
+import { useIsDefaultAdmin } from "@/lib/admin-access";
 import { WORKFLOW_NAV_ITEMS } from "@/lib/workflow-nav";
 
 export default function GlobalWorkflowNav() {
   const pathname = usePathname();
+  const { isAdmin } = useIsDefaultAdmin();
+  const navItems = WORKFLOW_NAV_ITEMS.filter((item) => !item.adminOnly || isAdmin);
 
   return (
     <header className="z-40 shrink-0 border-b border-slate-200 bg-white/85 backdrop-blur-md dark:border-slate-800 dark:bg-slate-950/85">
@@ -31,7 +34,7 @@ export default function GlobalWorkflowNav() {
             className="flex items-center gap-2 overflow-x-auto pb-1 lg:justify-end"
             aria-label="全站工作流导航"
           >
-            {WORKFLOW_NAV_ITEMS.map((item) => {
+            {navItems.map((item) => {
               const active = item.href === "/" ? pathname === "/" : pathname.startsWith(item.href);
               return (
                 <Link

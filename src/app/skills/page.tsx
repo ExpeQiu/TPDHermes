@@ -99,7 +99,7 @@ export default function SkillsPage() {
 
   useEffect(() => {
     trackUsage({
-      eventName: "skills_page_view",
+      eventName: "skills_view",
       feature: "skills",
       action: "view",
     });
