@@ -104,6 +104,8 @@ class SkillResponse(BaseModel):
     version_history: List[Dict[str, Any]]
     installed_at: str
     updated_at: str
+    config_source: Optional[str] = None
+    config_keys_count: Optional[int] = None
 
 
 # ─── Marketplace catalog（静态原型数据）────────────────────────────────────────

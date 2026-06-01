@@ -1,0 +1,7 @@
+{
+  "name": "Config Skill Display",
+  "description": "from skill.json",
+  "icon": "🧪",
+  "tags": ["验证", "上传"],
+  "template": "template.md"
+}

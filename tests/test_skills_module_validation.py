@@ -79,6 +79,62 @@ description: markdown skill upload test
         _cleanup_uploaded_skill(name)
 
 
+def test_skills_upload_auto_derives_config_from_package_files():
+    name = f"cfgskill_{uuid.uuid4().hex[:8]}"
+    skill_md = f"""---
+name: {name}
+description: derive config test
+config_market_category: 文档类
+---
+
+# Config Skill
+"""
+    skill_json = """{
+  "name": "Config Skill Display",
+  "description": "from skill.json",
+  "icon": "🧪",
+  "tags": ["验证", "上传"],
+  "template": "template.md"
+}"""
+    config_json = """{
+  "market_icon": "🚀",
+  "market_rating": 4.9,
+  "custom_key": "from_config_json"
+}"""
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr(f"{name}/SKILL.md", skill_md)
+        zf.writestr(f"{name}/skill.json", skill_json)
+        zf.writestr(f"{name}/config.json", config_json)
+        zf.writestr(f"{name}/template.md", "# tpl\n")
+    zip_bytes = buf.getvalue()
+    _cleanup_uploaded_skill(name)
+
+    try:
+        with TestClient(app) as client:
+            uploaded = client.post(
+                "/api/v1/skills/upload",
+                files={"file": (f"{name}.zip", zip_bytes, "application/zip")},
+            )
+            assert uploaded.status_code == 200, uploaded.text
+            body = uploaded.json()
+            cfg = body["config"]
+            assert cfg["market_icon"] == "🚀"
+            assert cfg["market_rating"] == 4.9
+            assert cfg["market_category"] == "文档类"
+            assert cfg["market_tags"] == ["验证", "上传"]
+            assert cfg["template"] == "template.md"
+            assert cfg["custom_key"] == "from_config_json"
+            assert cfg["display_name"] == "Config Skill Display"
+            assert body["config_source"] == "config.json+skill.json+SKILL.md.frontmatter"
+            assert body["config_keys_count"] >= 6
+
+            deleted = client.delete(f"/api/v1/skills/{name}")
+            assert deleted.status_code == 200, deleted.text
+    finally:
+        _cleanup_uploaded_skill(name)
+
+
 def test_skills_upload_replace_existing_upload_skill():
     """已安装的上传技能可被同用户或其他用户重新上传覆盖。"""
     name = f"mdskill_{uuid.uuid4().hex[:8]}"
@@ -143,6 +199,9 @@ def test_skills_upload_update_toggle_config_and_cleanup():
             assert uploaded_body["name"] == name
             assert uploaded_body["scope"] == "personal"
             assert uploaded_body["enabled"] is True
+            assert uploaded_body["config"] == {}
+            assert uploaded_body["config_source"] == "none"
+            assert uploaded_body["config_keys_count"] == 0
 
             disabled = client.patch(
                 f"/api/v1/skills/{name}/enable",

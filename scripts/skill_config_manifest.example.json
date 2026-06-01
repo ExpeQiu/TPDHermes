@@ -1,0 +1,12 @@
+[
+  {
+    "name": "skill_a",
+    "description": "示例技能A",
+    "config_file": "./tmp/skill-configs/skill_a.config.json"
+  },
+  {
+    "name": "skill_b",
+    "description": "示例技能B",
+    "config_file": "./tmp/skill-configs/skill_b.config.json"
+  }
+]

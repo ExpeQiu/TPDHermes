@@ -14,6 +14,7 @@ from __future__ import annotations
 import logging
 import re
 from pathlib import Path
+import json
 from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger("tpdx.hermes.skill_package")
@@ -281,8 +282,39 @@ def _skill_class_name(skill_name: str) -> str:
     return f"{base}Skill"
 
 
-def parse_skill_md_frontmatter(root: Path) -> Dict[str, str]:
-    """读取 SKILL.md YAML frontmatter 中的 name / description。"""
+def _parse_frontmatter_scalar(raw: str) -> Any:
+    text = (raw or "").strip()
+    if text == "":
+        return ""
+    if text[0] in ("'", '"') and text[-1:] == text[0]:
+        return text[1:-1]
+    low = text.lower()
+    if low == "true":
+        return True
+    if low == "false":
+        return False
+    if low in ("null", "none"):
+        return None
+    if (text.startswith("[") and text.endswith("]")) or (text.startswith("{") and text.endswith("}")):
+        try:
+            return json.loads(text)
+        except json.JSONDecodeError:
+            return text
+    if re.match(r"^-?\d+$", text):
+        try:
+            return int(text)
+        except ValueError:
+            return text
+    if re.match(r"^-?\d+\.\d+$", text):
+        try:
+            return float(text)
+        except ValueError:
+            return text
+    return text
+
+
+def parse_skill_md_frontmatter(root: Path) -> Dict[str, Any]:
+    """读取 SKILL.md YAML frontmatter 中的键值（单行 key: value）。"""
     skill_md = root / "SKILL.md"
     if not skill_md.is_file():
         return {}
@@ -293,12 +325,115 @@ def parse_skill_md_frontmatter(root: Path) -> Dict[str, str]:
     match = re.match(r"^---\n([\s\S]*?)\n---", raw)
     if not match:
         return {}
-    out: Dict[str, str] = {}
+    out: Dict[str, Any] = {}
     for line in match.group(1).splitlines():
-        m = re.match(r"^(name|description):\s*(.+)\s*$", line.strip())
-        if m:
-            out[m.group(1)] = m.group(2).strip().strip("\"'")
+        raw = line.strip()
+        if not raw or raw.startswith("#") or ":" not in raw:
+            continue
+        key_raw, value_raw = raw.split(":", 1)
+        key = key_raw.strip()
+        if not key:
+            continue
+        out[key] = _parse_frontmatter_scalar(value_raw.strip())
     return out
+
+
+def _load_json_object(path: Path) -> Dict[str, Any]:
+    if not path.is_file():
+        return {}
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    return raw if isinstance(raw, dict) else {}
+
+
+def derive_upload_config_with_meta(root: Path) -> tuple[Dict[str, Any], Dict[str, Any]]:
+    """
+    从技能包目录推导可入库 config：
+    优先读取 config.json，再补充 skill.json 与 SKILL.md frontmatter。
+    """
+    merged: Dict[str, Any] = {}
+    source_parts: list[str] = []
+    empty_reason = "no_config_payload_files"
+
+    config_json = _load_json_object(root / "config.json")
+    if config_json:
+        merged.update(config_json)
+        source_parts.append("config.json")
+        empty_reason = ""
+
+    skill_json = _load_json_object(root / "skill.json")
+    if skill_json:
+        if "skill.json" not in source_parts:
+            source_parts.append("skill.json")
+        # 透传常见键（若 config.json 已有同名键，以 config.json 为准）
+        for key in ("template", "templates", "market_icon", "market_category", "market_tags", "market_rating"):
+            if key in skill_json and key not in merged:
+                merged[key] = skill_json[key]
+
+        # 兼容常见别名（skill.json 常写 icon/category/tags/rating）
+        alias_map = {
+            "icon": "market_icon",
+            "category": "market_category",
+            "tags": "market_tags",
+            "rating": "market_rating",
+        }
+        for src_key, dst_key in alias_map.items():
+            if dst_key in merged:
+                continue
+            if src_key in skill_json:
+                merged[dst_key] = skill_json[src_key]
+
+        if "name" in skill_json and "display_name" not in merged:
+            merged["display_name"] = skill_json["name"]
+        if "description" in skill_json and "description" not in merged:
+            merged["description"] = skill_json["description"]
+        empty_reason = ""
+
+    frontmatter = parse_skill_md_frontmatter(root)
+    if frontmatter:
+        if "SKILL.md.frontmatter" not in source_parts:
+            source_parts.append("SKILL.md.frontmatter")
+        for key in ("market_icon", "market_category", "market_tags", "market_rating", "template", "templates"):
+            if key in frontmatter and key not in merged:
+                merged[key] = frontmatter[key]
+        for key, value in frontmatter.items():
+            if not key.startswith("config_"):
+                continue
+            plain_key = key[len("config_"):].strip()
+            if plain_key and plain_key not in merged:
+                merged[plain_key] = value
+        empty_reason = ""
+
+    # 归一化 tags/rating，避免后续展示层类型异常
+    tags = merged.get("market_tags")
+    if isinstance(tags, str):
+        merged["market_tags"] = [x.strip() for x in tags.split(",") if x.strip()]
+    elif tags is not None and not isinstance(tags, list):
+        merged["market_tags"] = [str(tags)]
+
+    rating = merged.get("market_rating")
+    if rating is not None and not isinstance(rating, (int, float)):
+        try:
+            merged["market_rating"] = float(rating)
+        except (TypeError, ValueError):
+            merged.pop("market_rating", None)
+
+    if not merged and source_parts:
+        empty_reason = "config_files_present_but_no_supported_keys"
+    if merged:
+        empty_reason = ""
+    meta = {
+        "config_source": "+".join(source_parts) if source_parts else "none",
+        "empty_reason": empty_reason,
+    }
+    return merged, meta
+
+
+def derive_upload_config(root: Path) -> Dict[str, Any]:
+    config, _ = derive_upload_config_with_meta(root)
+    return config
 
 
 def ensure_python_stub(root: Path, skill_name: str) -> bool:

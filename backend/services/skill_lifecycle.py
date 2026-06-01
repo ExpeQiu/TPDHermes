@@ -26,7 +26,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.models.skill import Skill
 from backend.services.skill_loader import SkillLoader, SkillNotFoundError, SkillLoadError
-from backend.services.skill_package import ensure_python_stub, parse_skill_md_frontmatter
+from backend.services.skill_package import (
+    derive_upload_config_with_meta,
+    ensure_python_stub,
+    parse_skill_md_frontmatter,
+)
 from backend.services.skill_version import SkillVersionService, bump_version
 from backend.services.user_identity import is_global_admin_user
 from backend.services.resource_visibility import skill_dict_visibility_fields
@@ -292,6 +296,12 @@ class SkillLifecycleService:
                 safe_extract_zip(zf, extract_root)
             pack_root, inferred = resolve_zip_package_root(extract_root)
             frontmatter = parse_skill_md_frontmatter(pack_root)
+            config_meta: Dict[str, Any]
+            if config is None:
+                parsed_config, config_meta = derive_upload_config_with_meta(pack_root)
+            else:
+                parsed_config = config
+                config_meta = {"config_source": "request_payload", "empty_reason": ""}
             if inferred:
                 if trimmed and trimmed != inferred:
                     raise ValueError(
@@ -300,7 +310,7 @@ class SkillLifecycleService:
                 skill_name = inferred
             else:
                 if not trimmed:
-                    fm_name = (frontmatter.get("name") or "").strip()
+                    fm_name = str(frontmatter.get("name") or "").strip()
                     if fm_name:
                         assert_valid_skill_directory_name(fm_name)
                         skill_name = fm_name
@@ -309,22 +319,42 @@ class SkillLifecycleService:
                 else:
                     assert_valid_skill_directory_name(trimmed)
                     skill_name = trimmed
-            fm_name = (frontmatter.get("name") or "").strip()
+            fm_name = str(frontmatter.get("name") or "").strip()
             if fm_name and fm_name != skill_name:
                 raise ValueError(
                     f"SKILL.md frontmatter 中 name 为「{fm_name}」，与技能目录名「{skill_name}」不一致"
                 )
             desc = description
             if not desc.strip():
-                desc = (frontmatter.get("description") or "").strip()
-            return await self.install_from_uploaded_package(
+                desc = str(frontmatter.get("description") or "").strip()
+            logger.info(
+                "skill_upload config resolved name=%s from_config_arg=%s parsed_keys=%s config_source=%s has_config_json=%s has_skill_json=%s has_skill_md=%s",
+                skill_name,
+                config is not None,
+                len(parsed_config or {}),
+                config_meta.get("config_source", "none"),
+                (pack_root / "config.json").is_file(),
+                (pack_root / "skill.json").is_file(),
+                (pack_root / "SKILL.md").is_file(),
+            )
+            if not parsed_config:
+                logger.warning(
+                    "skill_upload config empty name=%s reason=%s source=%s",
+                    skill_name,
+                    config_meta.get("empty_reason") or "unknown",
+                    config_meta.get("config_source") or "none",
+                )
+            out = await self.install_from_uploaded_package(
                 pack_root,
                 skill_name,
                 description=desc,
-                config=config,
+                config=parsed_config,
                 source="upload",
                 owner_id=owner_id,
             )
+            out["config_source"] = str(config_meta.get("config_source") or "none")
+            out["config_keys_count"] = len(parsed_config or {})
+            return out
 
     async def install(
         self,
