@@ -4,6 +4,7 @@
 import {
   FEISHU_SESSION_STORAGE_KEY,
   USER_ID_STORAGE_KEY,
+  ensureDerivedUserId,
   getEffectiveUserIdSync,
   loadFeishuSessionFromStorage,
   normalizeUserId,
@@ -48,4 +49,16 @@ export function mergeApiHeaders(init?: RequestInit): RequestInit {
     if (!h.has(k)) h.set(k, v);
   }
   return { ...init, headers: h };
+}
+
+/** 异步确保匿名用户已完成派生 ID，再合并请求头。 */
+export async function mergeApiHeadersAsync(init?: RequestInit): Promise<RequestInit> {
+  if (typeof window !== "undefined" && !getEffectiveUserIdSync()) {
+    try {
+      await ensureDerivedUserId();
+    } catch {
+      // 派生失败时保留现状，后端可回退到 IP+UA 推导。
+    }
+  }
+  return mergeApiHeaders(init);
 }

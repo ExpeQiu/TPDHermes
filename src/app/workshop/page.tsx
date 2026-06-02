@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { apiGet, apiFetch, readJson } from "@/lib/api";
 import { useEffectiveUserScopeId } from "@/lib/use-effective-user-scope-id";
+import { ensureDerivedUserId, getEffectiveUserIdSync } from "@/lib/user-id";
 import type { ProjectRecord, TaskExecuteBody, TaskInputPayload } from "@/lib/chat-context";
 import { CONTENT_MAX_CLASS } from "@/lib/content-shell";
 import {
@@ -684,7 +685,7 @@ function WorkshopPageInner() {
     [output, outputArtifactFormat, taskTitleCustom, derivedTaskTitle],
   );
 
-  const handleSubmit = useCallback(() => {
+  const handleSubmit = useCallback(async () => {
     if (!selectedProjectId) {
       alert("请先选择项目；场景输出需在项目上下文中执行。");
       return;
@@ -713,6 +714,14 @@ function WorkshopPageInner() {
     if (!skillForRun) {
       alert("请选择本场景允许范围内的一项技能");
       return;
+    }
+    let resolvedUserId = scopeUserId || getEffectiveUserIdSync();
+    if (!resolvedUserId) {
+      try {
+        resolvedUserId = await ensureDerivedUserId();
+      } catch {
+        resolvedUserId = "";
+      }
     }
 
     setOutput("");
@@ -752,7 +761,7 @@ function WorkshopPageInner() {
       user_message: JSON.stringify({ skill: skillForRun, ...buildContext() }),
       task_input: taskInput,
       stream: true,
-      user_id: scopeUserId,
+      user_id: resolvedUserId || undefined,
       source_output_id: mode === "refine" && sourceOutputId ? sourceOutputId : null,
       overrides: {
         skills: {

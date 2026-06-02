@@ -1,4 +1,4 @@
-import { mergeApiHeaders } from "./api-headers";
+import { mergeApiHeadersAsync } from "./api-headers";
 
 /** 后端 API v1 前缀（与 FastAPI `backend/__init__.py` 一致） */
 export const API_V1 = "/api/v1";
@@ -46,14 +46,14 @@ export async function readJson<T>(res: Response): Promise<T> {
 }
 
 export async function apiGet<T>(path: string): Promise<T> {
-  const res = await fetch(apiV1(path), mergeApiHeaders());
+  const res = await fetch(apiV1(path), await mergeApiHeadersAsync());
   return readJson<T>(res);
 }
 
 export async function apiPost<T>(path: string, body: unknown): Promise<T> {
   const res = await fetch(
     apiV1(path),
-    mergeApiHeaders({
+    await mergeApiHeadersAsync({
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
@@ -65,7 +65,7 @@ export async function apiPost<T>(path: string, body: unknown): Promise<T> {
 export async function apiPatch<T>(path: string, body: unknown): Promise<T> {
   const res = await fetch(
     apiV1(path),
-    mergeApiHeaders({
+    await mergeApiHeadersAsync({
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
@@ -75,7 +75,7 @@ export async function apiPatch<T>(path: string, body: unknown): Promise<T> {
 }
 
 export async function apiDelete<T = unknown>(path: string): Promise<T> {
-  const res = await fetch(apiV1(path), mergeApiHeaders({ method: "DELETE" }));
+  const res = await fetch(apiV1(path), await mergeApiHeadersAsync({ method: "DELETE" }));
   return readJson<T>(res);
 }
 
@@ -83,7 +83,7 @@ export async function apiFetch(
   path: string,
   init?: RequestInit,
 ): Promise<Response> {
-  return fetch(apiV1(path), mergeApiHeaders(init));
+  return fetch(apiV1(path), await mergeApiHeadersAsync(init));
 }
 
 /** 根路径 `/health` 返回 `{ code, data, ... }` 时使用 */

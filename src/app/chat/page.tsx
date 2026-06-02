@@ -29,6 +29,7 @@ import {
 } from "@/lib/chat-context";
 import { getApiHeaders } from "@/lib/api-headers";
 import { useEffectiveUserScopeId } from "@/lib/use-effective-user-scope-id";
+import { ensureDerivedUserId, getEffectiveUserIdSync } from "@/lib/user-id";
 import { CONTENT_MAX_CLASS } from "@/lib/content-shell";
 import { chatTransportLabel, kbCollectionLabel } from "@/lib/ui-labels";
 import { ChatMarkdownBody } from "@/components/chat-markdown-body";
@@ -1344,10 +1345,21 @@ function ChatPageInner() {
       let fullContent = "";
 
       try {
+        let resolvedUserId = scopeUserId || getEffectiveUserIdSync();
+        if (!resolvedUserId) {
+          try {
+            resolvedUserId = await ensureDerivedUserId();
+          } catch {
+            resolvedUserId = "";
+          }
+        }
         const headers: Record<string, string> = {
           "Content-Type": "application/json",
           ...getApiHeaders(),
         };
+        if (resolvedUserId) {
+          headers["X-User-ID"] = resolvedUserId;
+        }
         if (chatApiKey) headers.Authorization = `Bearer ${chatApiKey}`;
 
         if (useOrchestration) {
@@ -1431,7 +1443,7 @@ function ChatPageInner() {
             messages:
               orchestrationPriorMessages.length > 0 ? orchestrationPriorMessages : undefined,
             overrides: Object.keys(overrides).length > 0 ? overrides : undefined,
-            user_id: scopeUserId,
+            user_id: resolvedUserId || undefined,
           };
           if (taskCtx.sourceOutputId) {
             body.source_output_id = taskCtx.sourceOutputId;
