@@ -87,6 +87,7 @@ services:
     volumes:
       - tphermes-data:/app/data
       - tphermes-hf-cache:/app/.cache/huggingface
+      - ./skills:/app/skills
       - ./deploy/hermes-agent/config.yaml:/app/hermes-agent/config.yaml
     networks:
       - tphermes-net
@@ -131,6 +132,7 @@ services:
     volumes:
       - tphermes-data:/app/data
       - tphermes-hf-cache:/app/.cache/huggingface
+      - ./skills:/app/skills
     networks:
       - tphermes-net
 

@@ -56,6 +56,7 @@ services:
       - "8000"
     volumes:
       - tphermes-data:/app/data
+      - ./skills:/app/skills
     networks:
       - tphermes-net
 
