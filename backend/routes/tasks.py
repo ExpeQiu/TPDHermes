@@ -171,7 +171,7 @@ def _response_meta(
     }
     if execution_mode:
         meta["execution_mode"] = execution_mode
-    if payload.entrypoint == "workshop":
+    if payload.entrypoint == "workshop" or used_skills:
         meta["tool_capture_hit"] = tool_capture_hit
     return meta
 
@@ -241,6 +241,61 @@ async def _resolve_workshop_agent_output(
             len(sse_fallback),
         )
     raise HTTPException(status_code=424, detail=detail)
+
+
+def _chat_force_skill_mode(payload: OrchestrationPayload) -> bool:
+    """
+    chat 入口仅在“显式单技能白名单”时强制要求命中 tool 调用。
+    """
+    if payload.entrypoint != "chat":
+        return False
+    if payload.skills.allow_agent_free_choice:
+        return False
+    if payload.skills.mode not in ("allowed_list", "manual_only"):
+        return False
+    allowed = [s for s in payload.skills.allowed if s]
+    return len(allowed) == 1
+
+
+async def _resolve_chat_skill_output(
+    *,
+    run_id: str,
+    payload: OrchestrationPayload,
+    sse_fallback: str,
+    user_text: str,
+    task_input: TaskInputPayload | None,
+) -> tuple[str, bool, str, list[str] | None]:
+    """
+    chat 入口：
+    1) 若 agent 已调用 workshop tool，优先采用 tool capture 正文；
+    2) 若显式单技能白名单但未命中 tool，则直连技能兜底，确保“可调用”语义成立；
+    3) 其他情况保持 agent 原文。
+    """
+    allowed = [s for s in payload.skills.allowed if s]
+    async with async_session_maker() as db:
+        capture = await load_workshop_tool_capture(db, run_id)
+    captured_text = primary_text_from_capture(capture)
+    if captured_text.strip():
+        used = allowed[:1] if allowed else None
+        return captured_text, True, "agent_tool", used
+
+    if _chat_force_skill_mode(payload):
+        skill_name = allowed[0]
+        logger.warning(
+            "chat forced skill capture miss run_id=%s fallback=direct skill=%s",
+            run_id,
+            skill_name,
+        )
+        try:
+            direct_text = await _run_workshop_direct_text(skill_name, user_text, task_input)
+        except RuntimeError as exc:
+            raise HTTPException(
+                status_code=424,
+                detail=f"Chat 未命中技能工具且直连降级失败: {exc}",
+            ) from exc
+        return direct_text, False, "direct_skill_fallback", [skill_name]
+
+    return sse_fallback, False, "agent_text", None
 
 
 @router.post("/execute")
@@ -509,6 +564,140 @@ async def execute_task(req: Request, task_req: TaskExecuteRequest, db: AsyncSess
             },
         )
 
+    # chat 入口：显式单技能白名单时直接执行技能，避免 agent 未调 tool 或超时。
+    if payload.entrypoint == "chat" and _chat_force_skill_mode(payload):
+        forced_skill = payload.skills.allowed[0]
+        logger.info(
+            "chat forced skill direct run_id=%s skill=%s project_id=%s",
+            run_id,
+            forced_skill,
+            eff_request.project_id,
+        )
+        if not eff_request.stream:
+            t0 = time.perf_counter()
+            try:
+                text = await _run_workshop_direct_text(
+                    forced_skill,
+                    user_text,
+                    eff_request.task_input,
+                )
+            except RuntimeError as exc:
+                await mark_run_failed(db, run_id, str(exc))
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
+            duration_ms = int((time.perf_counter() - t0) * 1000)
+            validation = validate_markdown_sections(
+                text,
+                payload.output.required_sections,
+                must_have_headings=_must_have_headings(payload),
+            )
+            status = "draft" if payload.output.must_follow_template and not validation.get("ok") else "completed"
+            async with async_session_maker() as db2:
+                _, output_id = await finalize_run(
+                    db2,
+                    run_id=run_id,
+                    assistant_content=text,
+                    status=status,
+                    response_metadata=_response_meta(
+                        payload,
+                        used_skills=[forced_skill],
+                        execution_mode="direct_skill_forced",
+                        tool_capture_hit=False,
+                    ),
+                    validation=validation,
+                    error_message=None,
+                    duration_ms=duration_ms,
+                    project_id=payload.project.id,
+                    scenario_id=payload.scenario.id,
+                    template_id=payload.output.template_id,
+                    save_output=payload.execution.save_output,
+                    output_title=payload.scenario.name,
+                    output_owner_id=effective_uid,
+                )
+            return JSONResponse(
+                content={
+                    "run_id": run_id,
+                    "output_id": output_id,
+                    "validation": validation,
+                    "content": text,
+                    "execution_mode": "direct_skill_forced",
+                    "tool_capture_hit": False,
+                    "used_skills": [forced_skill],
+                }
+            )
+
+        async def chat_forced_skill_stream() -> AsyncGenerator[str, None]:
+            t0 = time.perf_counter()
+            try:
+                text = await _run_workshop_direct_text(
+                    forced_skill,
+                    user_text,
+                    eff_request.task_input,
+                )
+            except RuntimeError as exc:
+                async with async_session_maker() as s:
+                    await mark_run_failed(s, run_id, str(exc))
+                yield "data: " + json.dumps({"error": {"message": str(exc)}}, ensure_ascii=False) + "\n\n"
+                return
+
+            for line in text.splitlines(keepends=True):
+                yield sse_openai_delta(line)
+
+            duration_ms = int((time.perf_counter() - t0) * 1000)
+            validation = validate_markdown_sections(
+                text,
+                payload.output.required_sections,
+                must_have_headings=_must_have_headings(payload),
+            )
+            status = "draft" if payload.output.must_follow_template and not validation.get("ok") else "completed"
+            output_id: str | None = None
+            try:
+                async with async_session_maker() as db2:
+                    _, output_id = await finalize_run(
+                        db2,
+                        run_id=run_id,
+                        assistant_content=text,
+                        status=status,
+                        response_metadata=_response_meta(
+                            payload,
+                            used_skills=[forced_skill],
+                            execution_mode="direct_skill_forced",
+                            tool_capture_hit=False,
+                        ),
+                        validation=validation,
+                        error_message=None,
+                        duration_ms=duration_ms,
+                        project_id=payload.project.id,
+                        scenario_id=payload.scenario.id,
+                        template_id=payload.output.template_id,
+                        save_output=payload.execution.save_output,
+                        output_title=payload.scenario.name,
+                        output_owner_id=effective_uid,
+                    )
+            except Exception as exc:
+                logger.exception("finalize_run failed run_id=%s err=%s", run_id, exc)
+
+            meta = {
+                "tphermes_task": {
+                    "run_id": run_id,
+                    "output_id": output_id,
+                    "validation": validation,
+                    "execution_mode": "direct_skill_forced",
+                    "tool_capture_hit": False,
+                    "used_skills": [forced_skill],
+                }
+            }
+            yield "data: " + json.dumps(meta, ensure_ascii=False) + "\n\n"
+
+        return StreamingResponse(
+            chat_forced_skill_stream(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "X-Accel-Buffering": "no",
+            },
+        )
+
     messages = _trim_chat_messages(merge_chat_messages(eff_request.messages, user_text))
     upstream_body = build_chat_completion_body(
         payload,
@@ -566,6 +755,18 @@ async def execute_task(req: Request, task_req: TaskExecuteRequest, db: AsyncSess
                 await mark_run_failed(db, run_id, str(exc.detail))
                 raise
             used_skills = [workshop_skill]
+        elif payload.entrypoint == "chat":
+            try:
+                text, capture_hit, exec_mode, used_skills = await _resolve_chat_skill_output(
+                    run_id=run_id,
+                    payload=payload,
+                    sse_fallback=text,
+                    user_text=user_text,
+                    task_input=eff_request.task_input,
+                )
+            except HTTPException as exc:
+                await mark_run_failed(db, run_id, str(exc.detail))
+                raise
 
         validation = validate_markdown_sections(
             text,
@@ -586,7 +787,7 @@ async def execute_task(req: Request, task_req: TaskExecuteRequest, db: AsyncSess
                 response_metadata=_response_meta(
                     payload,
                     used_skills=used_skills,
-                    execution_mode=exec_mode if is_workshop else None,
+                    execution_mode=exec_mode if (is_workshop or used_skills or capture_hit) else None,
                     tool_capture_hit=capture_hit,
                 ),
                 validation=validation,
@@ -611,6 +812,10 @@ async def execute_task(req: Request, task_req: TaskExecuteRequest, db: AsyncSess
             body["tool_capture_hit"] = capture_hit
             if used_skills:
                 body["used_skills"] = used_skills
+        elif used_skills or capture_hit:
+            body["execution_mode"] = exec_mode
+            body["tool_capture_hit"] = capture_hit
+            body["used_skills"] = used_skills or []
         return JSONResponse(content=body)
 
     async def event_stream() -> AsyncGenerator[str, None]:
@@ -695,6 +900,23 @@ async def execute_task(req: Request, task_req: TaskExecuteRequest, db: AsyncSess
             if finalize_text.strip() and finalize_text != full_text:
                 for line in finalize_text.splitlines(keepends=True):
                     yield sse_openai_delta(line)
+        elif payload.entrypoint == "chat":
+            try:
+                finalize_text, capture_hit, exec_mode, used_skills = await _resolve_chat_skill_output(
+                    run_id=run_id,
+                    payload=payload,
+                    sse_fallback=full_text,
+                    user_text=user_text,
+                    task_input=eff_request.task_input,
+                )
+            except HTTPException as exc:
+                async with async_session_maker() as s:
+                    await mark_run_failed(s, run_id, str(exc.detail))
+                yield "data: " + json.dumps({"error": {"message": exc.detail}}, ensure_ascii=False) + "\n\n"
+                return
+            if finalize_text.strip() and finalize_text != full_text:
+                for line in finalize_text.splitlines(keepends=True):
+                    yield sse_openai_delta(line)
 
         validation = validate_markdown_sections(
             finalize_text,
@@ -716,7 +938,7 @@ async def execute_task(req: Request, task_req: TaskExecuteRequest, db: AsyncSess
                     response_metadata=_response_meta(
                         payload,
                         used_skills=used_skills,
-                        execution_mode=exec_mode if is_workshop else None,
+                        execution_mode=exec_mode if (is_workshop or used_skills or capture_hit) else None,
                         tool_capture_hit=capture_hit,
                     ),
                     validation=validation,
@@ -742,6 +964,12 @@ async def execute_task(req: Request, task_req: TaskExecuteRequest, db: AsyncSess
         if is_workshop:
             meta["tphermes_task"]["execution_mode"] = exec_mode
             meta["tphermes_task"]["tool_capture_hit"] = capture_hit
+            if used_skills:
+                meta["tphermes_task"]["used_skills"] = used_skills
+        elif used_skills or capture_hit:
+            meta["tphermes_task"]["execution_mode"] = exec_mode
+            meta["tphermes_task"]["tool_capture_hit"] = capture_hit
+            meta["tphermes_task"]["used_skills"] = used_skills or []
         yield "data: " + json.dumps(meta, ensure_ascii=False) + "\n\n"
 
     return StreamingResponse(
