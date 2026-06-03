@@ -93,6 +93,7 @@ class ChatWordTermRow(BaseModel):
     text: str
     count: int
     weight: float = 0.0
+    sample: str = ""
 
 
 class UsageOverviewResponse(BaseModel):
@@ -306,6 +307,7 @@ async def get_feature_usage_overview(
                 text=str(row.get("text") or ""),
                 count=int(row.get("count") or 0),
                 weight=float(row.get("weight") or 0),
+                sample=str(row.get("sample") or ""),
             )
             for row in wordcloud_metrics.get("terms") or []
         ],

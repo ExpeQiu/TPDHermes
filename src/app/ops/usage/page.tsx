@@ -52,6 +52,7 @@ type ChatWordTermRow = {
   text: string;
   count: number;
   weight: number;
+  sample?: string;
 };
 
 type UsageOverviewResponse = {
@@ -298,7 +299,7 @@ export default function FeatureUsagePage() {
             <section className="rounded-2xl border border-slate-300 dark:border-slate-700 bg-slate-200/60 dark:bg-slate-800/60 p-4">
               <h2 className="text-lg font-semibold">新对话热词（Top 30）</h2>
               <p className="mt-1 text-xs text-slate-500">
-                来自对话共创首条消息（无历史 messages）；仅管理员手动刷新时计算，不影响聊天速度。分词：
+                来自对话共创首条用户提问（已剔除代码块、JSON、预览与纯英文噪音）；分词：
                 {data.chat_wordcloud_mode} · 样本 {data.new_conversation_count} 条
               </p>
               {data.chat_wordcloud_terms.length > 0 ? (
@@ -307,7 +308,11 @@ export default function FeatureUsagePage() {
                     {data.chat_wordcloud_terms.map((term) => (
                       <span
                         key={term.text}
-                        title={`${term.text} · ${term.count} 次`}
+                        title={
+                          term.sample
+                            ? `${term.text} · ${term.count} 次\n${term.sample}`
+                            : `${term.text} · ${term.count} 次`
+                        }
                         className="cursor-default font-medium text-blue-700 transition hover:text-blue-500 dark:text-blue-300 dark:hover:text-blue-200"
                         style={{
                           fontSize: wordCloudFontSize(term.weight),
@@ -325,6 +330,7 @@ export default function FeatureUsagePage() {
                           <th className="py-2 pr-3">#</th>
                           <th className="py-2 pr-3">词语</th>
                           <th className="py-2 pr-3">频次</th>
+                          <th className="py-2 pr-3">原文摘要</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -336,6 +342,9 @@ export default function FeatureUsagePage() {
                             <td className="py-2 pr-3 text-slate-500">{idx + 1}</td>
                             <td className="py-2 pr-3">{term.text}</td>
                             <td className="py-2 pr-3">{term.count}</td>
+                            <td className="max-w-md py-2 pr-3 text-xs text-slate-500">
+                              {term.sample || "—"}
+                            </td>
                           </tr>
                         ))}
                       </tbody>
