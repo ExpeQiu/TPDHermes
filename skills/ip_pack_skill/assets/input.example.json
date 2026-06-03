@@ -1,0 +1,102 @@
+{
+  "title": "技术品牌（IP）包装流程-技术IP包装全案策划",
+  "goals": {
+    "tech_ip_name": "示例智能安全IP",
+    "core_positioning": "面向家庭用户的可信智能安全技术品牌资产",
+    "short_term_result": "完成技术IP命名、核心叙事、基础物料和首轮传播验证。",
+    "mid_term_result": "形成车型联动传播节奏，完成技术展具、视频和门店体验落地。",
+    "long_term_result": "沉淀为可持续复用的技术品牌资产，并支撑多车型技术认知。"
+  },
+  "background_insight": {
+    "industry_trend": "智能电动汽车技术传播从参数竞争转向场景价值和可信体验竞争。",
+    "market_competition": "竞品围绕智能驾驶、安全、座舱和补能生态持续打造技术标签。"
+  },
+  "target_user_insight": {
+    "target_user_profile": "关注家庭安全、智能体验和长期使用可靠性的主流新能源用户。",
+    "user_core_needs": "希望技术真实可感知、可信赖，并能降低出行焦虑。",
+    "cognitive_barrier": "技术概念复杂，用户难以判断差异和真实价值。"
+  },
+  "competitor_ips": [
+    {
+      "ip": "竞品智能技术IP",
+      "positioning": "智能驾驶领先",
+      "communication_strategy": "通过发布会、用户案例和媒体评测持续强化声量。",
+      "learnable_point": "把技术能力转化为用户场景证据。"
+    }
+  ],
+  "resource_assessment": {
+    "technology_advantage": "具备整车工程、安全验证、智能座舱和辅助驾驶协同能力。",
+    "brand_assets": "已有可靠、安全、家庭出行等品牌认知基础。",
+    "channel_resources": "具备官网、社交媒体、门店体验、试驾和用户运营渠道。"
+  },
+  "product_architecture": {
+    "core_layer": "智能安全算法、整车安全架构、数据闭环能力。",
+    "support_layer": "传感器、车身结构、电池安全、座舱交互。",
+    "application_layer": "主动安全、辅助驾驶、场景提醒、家庭出行守护。"
+  },
+  "highlight_scenarios": [
+    {
+      "scenario": "家庭长途出行",
+      "technology_support": "辅助驾驶、主动安全、座舱舒适系统",
+      "user_value": "降低驾驶疲劳并提升全家出行安全感",
+      "communication_angle": "可信智能守护每一次家庭出行"
+    }
+  ],
+  "model_lock_steps": [
+    {
+      "stage": "预热",
+      "time": "上市前90天",
+      "model_node": "车型核心卖点释放",
+      "ip_action": "发布技术IP核心概念",
+      "brand_action": "社交内容预热与媒体沟通"
+    },
+    {
+      "stage": "发布",
+      "time": "上市节点",
+      "model_node": "车型正式发布",
+      "ip_action": "技术IP场景化亮相",
+      "brand_action": "发布会、官网专题、门店物料同步"
+    }
+  ],
+  "ip_strategy": {
+    "core_narrative": "从用户安全焦虑出发，用技术证据证明可信智能体验。",
+    "differentiated_positioning": "不做单纯参数炫技，突出家庭场景中的安全、舒适和可靠。",
+    "maintenance_strategy": "通过季度内容、用户案例、OTA节点和体验活动持续更新技术资产。"
+  },
+  "project_roles": [
+    {
+      "role": "技术团队",
+      "responsibility": "提供技术事实、参数边界和验证证据",
+      "deliverable": "技术说明、验证材料、专家口径"
+    },
+    {
+      "role": "品牌团队",
+      "responsibility": "完成IP命名、叙事和传播节奏规划",
+      "deliverable": "传播主张、内容策略、视觉物料"
+    }
+  ],
+  "resource_list": {
+    "tech_display": "门店技术展具、互动演示屏",
+    "tech_certification": "第三方测试或认证资料待补充",
+    "tech_video": "技术解释视频、场景短片",
+    "offline_event": "门店体验、试驾活动、技术沙龙",
+    "other_materials": "销售话术、FAQ、海报、官网专题"
+  },
+  "budget_items": [
+    {
+      "category": "内容制作",
+      "budget": "待补充",
+      "note": "包含视频、图文、官网专题等"
+    },
+    {
+      "category": "线下体验",
+      "budget": "待补充",
+      "note": "包含展具、活动搭建、试驾体验等"
+    }
+  ],
+  "control_mechanism": {
+    "milestone_check": "按预热、发布、深化、长效四阶段进行节点复盘。",
+    "quality_gate": "所有技术表达需经过技术、法务、品牌三方确认。",
+    "risk_plan": "针对参数争议、体验落差和竞品对比建立标准回应口径。"
+  }
+}

@@ -28,6 +28,15 @@ import {
   type TaskExecuteBody,
 } from "@/lib/chat-context";
 import { getApiHeaders } from "@/lib/api-headers";
+import {
+  bulkUpsertChatSessions,
+  createChatSessionOnServer,
+  deleteChatSessionOnServer,
+  fetchChatSessionsFull,
+  inferSessionKind,
+  migrateLocalChatSessions,
+  sessionKindLabel,
+} from "@/lib/chat-sessions-api";
 import { useEffectiveUserScopeId } from "@/lib/use-effective-user-scope-id";
 import { ensureDerivedUserId, getEffectiveUserIdSync } from "@/lib/user-id";
 import { CONTENT_MAX_CLASS } from "@/lib/content-shell";
@@ -104,6 +113,44 @@ function loadSessions(scopeUserId: string): ChatSession[] {
 function saveSessions(scopeUserId: string, sessions: ChatSession[]) {
   if (typeof window === "undefined") return;
   localStorage.setItem(chatSessionsStorageKey(scopeUserId), JSON.stringify(sessions));
+}
+
+function sessionToServerPayload(session: ChatSession): Record<string, unknown> {
+  return {
+    ...session,
+    sessionKind: inferSessionKind(session as unknown as Record<string, unknown>),
+  };
+}
+
+function serverSessionToClient(raw: Record<string, unknown>): ChatSession {
+  const messages = Array.isArray(raw.messages) ? (raw.messages as Message[]) : [];
+  return {
+    id: String(raw.id || ""),
+    title: String(raw.title || "新对话"),
+    messages,
+    createdAt: typeof raw.createdAt === "number" ? raw.createdAt : Date.now(),
+    linkedOutputIds: Array.isArray(raw.linkedOutputIds) ? (raw.linkedOutputIds as string[]) : [],
+    linkedRunIds: Array.isArray(raw.linkedRunIds) ? (raw.linkedRunIds as string[]) : [],
+    scenarioPresetInstructions:
+      typeof raw.scenarioPresetInstructions === "string" ? raw.scenarioPresetInstructions : undefined,
+    scenarioOpeningHint: typeof raw.scenarioOpeningHint === "string" ? raw.scenarioOpeningHint : undefined,
+    taskEntrySummary: typeof raw.taskEntrySummary === "string" ? raw.taskEntrySummary : undefined,
+    quickCreateOverrides:
+      raw.quickCreateOverrides && typeof raw.quickCreateOverrides === "object"
+        ? (raw.quickCreateOverrides as QuickCreateFlowOverrides)
+        : undefined,
+    selectedProjectId: typeof raw.selectedProjectId === "string" ? raw.selectedProjectId : "",
+    selectedCollection: typeof raw.selectedCollection === "string" ? raw.selectedCollection : "",
+    includeProjectContext: Boolean(raw.includeProjectContext),
+    includeKnowledgeContext: Boolean(raw.includeKnowledgeContext),
+    includeSkillsContext: Boolean(raw.includeSkillsContext),
+    chatMode: raw.chatMode === "doc_optimize" ? "doc_optimize" : "co_create",
+    includeFileContext: Boolean(raw.includeFileContext),
+    selectedFileId: typeof raw.selectedFileId === "string" ? raw.selectedFileId : "",
+    rewriteTargetSection: typeof raw.rewriteTargetSection === "string" ? raw.rewriteTargetSection : undefined,
+    rewriteSourceExcerpt: typeof raw.rewriteSourceExcerpt === "string" ? raw.rewriteSourceExcerpt : undefined,
+    rewriteGoal: typeof raw.rewriteGoal === "string" ? raw.rewriteGoal : undefined,
+  };
 }
 
 const CHAT_INIT_KEY = "tphermes-chat-init";
@@ -718,6 +765,8 @@ function ChatPageInner() {
   const [preparingContext, setPreparingContext] = useState(false);
   const [error, setError] = useState("");
   const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [sessionsLoading, setSessionsLoading] = useState(true);
+  const [sessionsSyncError, setSessionsSyncError] = useState("");
   const [projects, setProjects] = useState<ProjectRecord[]>([]);
   const [collections, setCollections] = useState<string[]>([]);
   const [skills, setSkills] = useState<string[]>([]);
@@ -746,6 +795,7 @@ function ChatPageInner() {
   const chatDeepLinkAppliedRef = useRef(false);
   const activeIdRef = useRef<string | null>(null);
   const sessionScopeHydratingRef = useRef(false);
+  const sessionsSyncTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const chatApiBase =
     process.env.NEXT_PUBLIC_CHAT_API_URL ??
@@ -868,6 +918,17 @@ function ChatPageInner() {
       sessionsRef.current = updated;
       setSessions(updated);
       saveSessions(scopeUserId, updated);
+      if (!scopeUserId) return;
+      if (sessionsSyncTimerRef.current) clearTimeout(sessionsSyncTimerRef.current);
+      sessionsSyncTimerRef.current = setTimeout(() => {
+        bulkUpsertChatSessions(updated.map((session) => sessionToServerPayload(session)))
+          .then(() => setSessionsSyncError(""))
+          .catch((err) => {
+            const msg = err instanceof Error ? err.message : String(err);
+            setSessionsSyncError(msg);
+            console.warn("[chat] 服务端会话同步失败", err);
+          });
+      }, 800);
     },
     [scopeUserId],
   );
@@ -892,37 +953,77 @@ function ChatPageInner() {
   }, [activeId]);
 
   useEffect(() => {
-    const raw = loadSessions(scopeUserId);
-    const saved = normalizeSessionsPlaceholders(raw);
-    if (saved.some((s, i) => s.title !== raw[i]?.title)) {
-      saveSessions(scopeUserId, saved);
-      console.info("[chat] 已根据首条用户消息回填历史会话主题");
-    }
-    const active = localStorage.getItem(chatActiveStorageKey(scopeUserId));
-    if (saved.length === 0) {
-      const first: ChatSession = {
-        id: uuid(),
-        title: "新对话",
-        messages: [],
-        createdAt: Date.now(),
-        selectedProjectId: "",
-        selectedCollection: "",
-        includeProjectContext: false,
-        includeKnowledgeContext: false,
-        includeSkillsContext: false,
-        chatMode: "co_create",
-        includeFileContext: false,
-        selectedFileId: "",
+    if (!scopeUserId) return;
+    let cancelled = false;
+    setSessionsLoading(true);
+    setSessionsSyncError("");
+
+    const bootstrapSessions = async () => {
+      const initFromSessions = (saved: ChatSession[]) => {
+        const normalized = normalizeSessionsPlaceholders(saved);
+        if (normalized.some((s, i) => s.title !== saved[i]?.title)) {
+          saveSessions(scopeUserId, normalized);
+          console.info("[chat] 已根据首条用户消息回填历史会话主题");
+        }
+        const active = localStorage.getItem(chatActiveStorageKey(scopeUserId));
+        if (normalized.length === 0) {
+          const first: ChatSession = {
+            id: uuid(),
+            title: "新对话",
+            messages: [],
+            createdAt: Date.now(),
+            selectedProjectId: "",
+            selectedCollection: "",
+            includeProjectContext: false,
+            includeKnowledgeContext: false,
+            includeSkillsContext: false,
+            chatMode: "co_create",
+            includeFileContext: false,
+            selectedFileId: "",
+          };
+          saveSessions(scopeUserId, [first]);
+          sessionsRef.current = [first];
+          setSessions([first]);
+          setActiveId(first.id);
+          void createChatSessionOnServer(sessionToServerPayload(first)).catch((err) => {
+            console.warn("[chat] 创建默认会话失败", err);
+          });
+        } else {
+          sessionsRef.current = normalized;
+          setSessions(normalized);
+          setActiveId(active && normalized.find((s) => s.id === active) ? active : normalized[0].id);
+        }
       };
-      saveSessions(scopeUserId, [first]);
-      sessionsRef.current = [first];
-      setSessions([first]);
-      setActiveId(first.id);
-    } else {
-      sessionsRef.current = saved;
-      setSessions(saved);
-      setActiveId(active && saved.find((s) => s.id === active) ? active : saved[0].id);
-    }
+
+      try {
+        let serverItems = await fetchChatSessionsFull();
+        const localRaw = loadSessions(scopeUserId);
+        if (serverItems.length === 0 && localRaw.length > 0) {
+          const migrated = await migrateLocalChatSessions(localRaw.map((s) => sessionToServerPayload(s)));
+          console.info("[chat] 已将本机会话迁移至服务端", migrated);
+          serverItems = await fetchChatSessionsFull();
+        }
+        if (cancelled) return;
+        if (serverItems.length > 0) {
+          initFromSessions(serverItems.map((item) => serverSessionToClient(item)));
+          return;
+        }
+        initFromSessions(localRaw);
+      } catch (err) {
+        console.warn("[chat] 拉取服务端会话失败，回退 localStorage", err);
+        if (cancelled) return;
+        const raw = loadSessions(scopeUserId);
+        initFromSessions(raw);
+        setSessionsSyncError(err instanceof Error ? err.message : "会话同步失败");
+      } finally {
+        if (!cancelled) setSessionsLoading(false);
+      }
+    };
+
+    void bootstrapSessions();
+    return () => {
+      cancelled = true;
+    };
   }, [scopeUserId]);
 
   useEffect(() => {
@@ -1170,6 +1271,9 @@ function ChatPageInner() {
   };
 
   const deleteSession = (id: string) => {
+    void deleteChatSessionOnServer(id).catch((err) => {
+      console.warn("[chat] 删除服务端会话失败", err);
+    });
     const next = sessionsRef.current.filter((s) => s.id !== id);
     if (next.length === 0) {
       createSession();
@@ -1972,7 +2076,10 @@ function ChatPageInner() {
         } flex h-full min-h-0 shrink-0 flex-col overflow-hidden border-r border-slate-300 bg-slate-200 transition-all dark:border-slate-700 dark:bg-slate-800`}
       >
         <div className="flex shrink-0 items-center justify-between border-b border-slate-300 p-4 dark:border-slate-700">
-          <span className="text-sm font-semibold text-slate-700 dark:text-slate-300">历史对话</span>
+          <div>
+            <span className="text-sm font-semibold text-slate-700 dark:text-slate-300">历史记录</span>
+            <p className="mt-0.5 text-[10px] text-slate-500">对话与场景生产 · 云端同步</p>
+          </div>
           <button
             onClick={createSession}
             className="text-xs bg-blue-600 hover:bg-blue-500 text-white px-3 py-1.5 rounded-lg transition"
@@ -1981,8 +2088,19 @@ function ChatPageInner() {
           </button>
         </div>
 
+        {sessionsLoading ? (
+          <p className="px-4 py-6 text-xs text-slate-500">加载历史记录…</p>
+        ) : null}
+        {sessionsSyncError ? (
+          <p className="mx-4 mt-2 rounded-lg border border-amber-400/40 bg-amber-50 px-2 py-1.5 text-[10px] text-amber-800 dark:bg-amber-950/30 dark:text-amber-300">
+            同步异常：{sessionsSyncError.slice(0, 80)}
+          </p>
+        ) : null}
+
         <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
-          {sessions.map((session) => (
+          {sessions.map((session) => {
+            const kind = inferSessionKind(session as unknown as Record<string, unknown>);
+            return (
             <div
               key={session.id}
               onClick={() => selectSession(session.id)}
@@ -1992,8 +2110,11 @@ function ChatPageInner() {
                   : "text-slate-400 hover:bg-slate-300/40 dark:bg-slate-700/40 hover:text-slate-900 dark:hover:text-white"
               }`}
             >
-              <span className="text-xs">💬</span>
-              <span className="text-sm flex-1 truncate">{titleFromSession(session)}</span>
+              <span className="text-xs">{kind === "scenario" ? "📋" : "💬"}</span>
+              <div className="min-w-0 flex-1">
+                <span className="block truncate text-sm">{titleFromSession(session)}</span>
+                <span className="text-[10px] text-slate-500">{sessionKindLabel(kind)}</span>
+              </div>
               <button
                 onClick={(e) => {
                   e.stopPropagation();
@@ -2004,7 +2125,8 @@ function ChatPageInner() {
                 ✕
               </button>
             </div>
-          ))}
+            );
+          })}
         </div>
       </aside>
 

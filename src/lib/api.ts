@@ -62,6 +62,18 @@ export async function apiPost<T>(path: string, body: unknown): Promise<T> {
   return readJson<T>(res);
 }
 
+export async function apiPut<T>(path: string, body: unknown): Promise<T> {
+  const res = await fetch(
+    apiV1(path),
+    await mergeApiHeadersAsync({
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }),
+  );
+  return readJson<T>(res);
+}
+
 export async function apiPatch<T>(path: string, body: unknown): Promise<T> {
   const res = await fetch(
     apiV1(path),

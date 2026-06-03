@@ -45,3 +45,6 @@ from backend.models.learning_signal import LearningSignal as _LearningSignal  # 
 from backend.models.learning_report import LearningReport as _LearningReport  # noqa: E402, F401
 from backend.models.feedback_prompt import FeedbackPrompt as _FeedbackPrompt  # noqa: E402, F401
 from backend.models.experience_entry import ExperienceEntry as _ExperienceEntry  # noqa: E402, F401
+from backend.models.chat_session import ChatSessionRecord as _ChatSessionRecord  # noqa: E402, F401
+from backend.models.chat_session import ChatMessageRecord as _ChatMessageRecord  # noqa: E402, F401
+from backend.models.user_preference import UserPreference as _UserPreference  # noqa: E402, F401

@@ -15,6 +15,14 @@ import {
   loadUserIdFromStorage,
   normalizeUserId,
 } from "@/lib/user-id";
+import {
+  adoptServerUnifiedUserIdIfNeeded,
+  fetchServerIdentity,
+  generateUnifiedUserId,
+  saveUnifiedUserIdLocally,
+  syncUnifiedUserIdToServer,
+  type UserIdentityState,
+} from "@/lib/user-identity-sync";
 import { CONTENT_MAX_CLASS } from "@/lib/content-shell";
 import McpManagementPanel from "@/components/settings/McpManagementPanel";
 import { useThemeStore } from "@/lib/store";
@@ -34,7 +42,7 @@ const SETTINGS_TABS: { id: SettingsTab; label: string; description: string }[] =
     id: "identity",
     label: "用户与身份",
     description:
-      "未保存时默认按本机 IP + 浏览器标识生成 auto_* 匿名 ID；保存后与 X-User-ID 对齐，飞书登录可改为 feishu:...。",
+      "统一 User ID 用于跨 PC 同步对话与场景记录；飞书登录自动绑定 feishu:*，也可生成或填写自定义 ID。",
   },
   {
     id: "mcp",
@@ -79,6 +87,8 @@ function SettingsPageContent() {
   const [userId, setUserId] = useState("");
   const [role, setRole] = useState("");
   const [me, setMe] = useState<MeResponse | null>(null);
+  const [identity, setIdentity] = useState<UserIdentityState | null>(null);
+  const [saving, setSaving] = useState(false);
   const [err, setErr] = useState("");
   const theme = useThemeStore((s) => s.theme);
   const setTheme = useThemeStore((s) => s.setTheme);
@@ -98,28 +108,53 @@ function SettingsPageContent() {
   }, []);
 
   useEffect(() => {
-    const stored = loadUserIdFromStorage().trim();
-    if (stored) {
-      setUserId(stored);
-    } else {
-      void fetchDerivedUserId()
-        .then((id) => setUserId(id))
-        .catch(() => setUserId(getEffectiveUserIdSync()));
-    }
+    void adoptServerUnifiedUserIdIfNeeded().then((adopted) => {
+      const stored = (adopted || loadUserIdFromStorage()).trim();
+      if (stored) {
+        setUserId(stored);
+      } else {
+        void fetchDerivedUserId()
+          .then((id) => setUserId(id))
+          .catch(() => setUserId(getEffectiveUserIdSync()));
+      }
+    });
     if (typeof window !== "undefined") {
       setRole(window.localStorage.getItem(USER_ROLE_STORAGE_KEY)?.trim() || "tenant_admin");
     }
     refreshMe();
+    void fetchServerIdentity()
+      .then(setIdentity)
+      .catch(() => setIdentity(null));
   }, [refreshMe]);
 
   const save = async () => {
     if (typeof window === "undefined") return;
-    const raw = userId.trim();
-    const u = raw ? normalizeUserId(raw) : await ensureDerivedUserId();
-    window.localStorage.setItem(USER_ID_STORAGE_KEY, u);
-    window.localStorage.setItem(USER_ROLE_STORAGE_KEY, (role || "tenant_admin").trim() || "tenant_admin");
-    setUserId(u);
-    refreshMe();
+    setSaving(true);
+    setErr("");
+    try {
+      const raw = userId.trim();
+      const u = raw ? normalizeUserId(raw) : await ensureDerivedUserId();
+      saveUnifiedUserIdLocally(u);
+      window.localStorage.setItem(USER_ROLE_STORAGE_KEY, (role || "tenant_admin").trim() || "tenant_admin");
+      setUserId(u);
+      const synced = await syncUnifiedUserIdToServer(u);
+      setIdentity(synced);
+      await refreshMe();
+    } catch (e: unknown) {
+      setErr(e instanceof Error ? e.message : "保存失败");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleGenerateUserId = async () => {
+    setErr("");
+    try {
+      const generated = await generateUnifiedUserId();
+      setUserId(generated);
+    } catch (e: unknown) {
+      setErr(e instanceof Error ? e.message : "生成失败");
+    }
   };
 
   const currentTab = SETTINGS_TABS.find((tab) => tab.id === activeTab) ?? SETTINGS_TABS[0];
@@ -228,14 +263,35 @@ function SettingsPageContent() {
                 </div>
               )}
 
+              {identity && (
+                <div className="rounded-lg border border-blue-200 bg-blue-50 p-3 text-xs text-blue-900 dark:border-blue-900/40 dark:bg-blue-950/30 dark:text-blue-200">
+                  <p>
+                    云端统一 ID：<span className="font-medium">{identity.unified_user_id}</span>
+                    （{identity.source === "feishu" ? "飞书" : identity.source === "custom" ? "自定义" : "匿名"}）
+                  </p>
+                  <p className="mt-1 text-blue-800/80 dark:text-blue-300/80">
+                    在其他 PC 填写相同 ID 并保存，即可同步对话与场景历史记录。
+                  </p>
+                </div>
+              )}
+
               <label className="block text-sm">
-                <span className="text-slate-500 dark:text-slate-400">本地 User ID</span>
-                <input
-                  className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
-                  value={userId}
-                  onChange={(e) => setUserId(e.target.value)}
-                  placeholder="auto_…（由 IP+UA 生成）或自定义"
-                />
+                <span className="text-slate-500 dark:text-slate-400">统一 User ID</span>
+                <div className="mt-1 flex gap-2">
+                  <input
+                    className="min-w-0 flex-1 rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+                    value={userId}
+                    onChange={(e) => setUserId(e.target.value)}
+                    placeholder="user_… 或 feishu:…"
+                  />
+                  <button
+                    type="button"
+                    onClick={handleGenerateUserId}
+                    className="shrink-0 rounded-lg border border-slate-300 px-3 py-2 text-xs text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
+                  >
+                    生成
+                  </button>
+                </div>
               </label>
               <label className="block text-sm">
                 <span className="text-slate-500 dark:text-slate-400">X-User-Role（可选）</span>
@@ -247,17 +303,18 @@ function SettingsPageContent() {
                 />
               </label>
               <p className="text-xs text-slate-500">
-                未点击保存前，匿名 ID 仅在本会话内存缓存；保存后写入本机{" "}
-                <code>{USER_ID_STORAGE_KEY}</code>。飞书会话键 <code>{FEISHU_SESSION_STORAGE_KEY}</code>
+                保存后写入本机 <code>{USER_ID_STORAGE_KEY}</code> 并同步至服务端；历史对话按此 ID 隔离。
+                飞书会话键 <code>{FEISHU_SESSION_STORAGE_KEY}</code>
                 ，当前{loadFeishuSessionFromStorage() ? "已设置" : "未设置"}。
               </p>
               {err && <p className="text-sm text-red-500 dark:text-red-400">{err}</p>}
               <button
                 type="button"
                 onClick={save}
-                className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-500"
+                disabled={saving}
+                className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-500 disabled:opacity-60"
               >
-                保存到本机
+                {saving ? "保存中…" : "保存并同步"}
               </button>
             </div>
           )}

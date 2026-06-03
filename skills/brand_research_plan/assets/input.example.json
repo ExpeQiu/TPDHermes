@@ -1,0 +1,122 @@
+{
+  "title": "技术品牌调研流程-技术品牌调研计划",
+  "background": {
+    "industry_trend": "智能电动汽车技术传播从参数竞争转向用户体验、可信证据和品牌资产竞争。",
+    "strategy_need": "需要通过系统调研验证技术品牌定位、命名和传播方向。",
+    "research_trigger": "重点技术IP进入包装和传播阶段，需要为后续策略制定提供用户与市场依据。"
+  },
+  "purpose": {
+    "core_questions": [
+      "用户如何理解当前技术品牌和技术卖点？",
+      "哪些技术价值最能驱动认知、好感和购买意愿？",
+      "技术品牌命名和传播表达应如何优化？"
+    ],
+    "quantitative_goal": "形成用户认知、偏好、购买影响和命名接受度等量化指标。",
+    "strategy_output_expectation": "输出技术品牌定位建议、命名方向、传播信息和触点策略。"
+  },
+  "research_methods": [
+    {
+      "method": "定量：线上问卷",
+      "scenario": "验证用户认知、偏好和命名接受度",
+      "sample_size": "待补充",
+      "cycle": "1-2周"
+    },
+    {
+      "method": "定性：深度访谈",
+      "scenario": "挖掘用户语言、技术理解门槛和真实需求",
+      "sample_size": "待补充",
+      "cycle": "1-2周"
+    },
+    {
+      "method": "大数据：社交舆情",
+      "scenario": "扫描行业技术传播热点和竞品声量",
+      "sample_size": "待补充",
+      "cycle": "持续监测"
+    }
+  ],
+  "research_contents": [
+    "技术品牌认知与理解路径",
+    "技术卖点用户价值排序",
+    "命名方向、核心信息和传播触点测试"
+  ],
+  "sample_plan": {
+    "target_users": [
+      "已购车主",
+      "潜客",
+      "其他：行业关注用户"
+    ],
+    "segments": "覆盖家庭用户、智能科技敏感用户、新能源潜客和竞品关注用户。"
+  },
+  "region_coverage": [
+    {
+      "region": "一线/新一线",
+      "city": "待补充",
+      "sample_size": "待补充"
+    },
+    {
+      "region": "二线及重点区域",
+      "city": "待补充",
+      "sample_size": "待补充"
+    }
+  ],
+  "respondent_requirements": {
+    "entry_criteria": "符合目标车型或技术品牌关注人群，具备真实购车或用车经验。",
+    "exclusion_criteria": "排除汽车行业从业者、调研行业从业者及无效答题样本。",
+    "quota_requirements": "按城市级别、用户类型、年龄、性别和车辆拥有状态设置配额。"
+  },
+  "supplier_requirements": {
+    "qualification": {
+      "business_scope": "具备市场调研、数据分析或品牌咨询相关经营范围。",
+      "experience_years": "待补充",
+      "project_cases": "需提供汽车、新能源或技术品牌相关项目案例。"
+    },
+    "team": {
+      "project_leader": "具备汽车或品牌研究经验的项目负责人。",
+      "supervisor_qualification": "具备访问质量控制和样本管理经验。",
+      "interviewer_requirements": "熟悉汽车消费场景，能执行标准化访问流程。"
+    }
+  },
+  "execution_plan": [
+    {
+      "stage": "方案设计",
+      "time": "第1周",
+      "milestone": "完成研究框架、样本方案和执行计划"
+    },
+    {
+      "stage": "问卷/大纲开发",
+      "time": "第2周",
+      "milestone": "完成问卷、访谈大纲和测试"
+    },
+    {
+      "stage": "实地执行",
+      "time": "第3-4周",
+      "milestone": "完成样本采集和质量检查"
+    },
+    {
+      "stage": "报告撰写",
+      "time": "第5周",
+      "milestone": "提交调研报告和策略建议"
+    }
+  ],
+  "budget_scale": {
+    "total_range": "待补充",
+    "budget_ceiling": "待补充"
+  },
+  "budget_allocation": [
+    {
+      "item": "问卷与样本执行",
+      "ratio": "待补充",
+      "note": "包含样本招募、问卷投放和数据清洗"
+    },
+    {
+      "item": "定性访谈",
+      "ratio": "待补充",
+      "note": "包含访谈招募、执行、录音整理和分析"
+    },
+    {
+      "item": "报告与策略输出",
+      "ratio": "待补充",
+      "note": "包含数据分析、报告撰写和汇报"
+    }
+  ]
+}

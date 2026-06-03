@@ -1,0 +1,100 @@
+{
+  "title": "IP技术展具制作流程-IP技术展具使用说明书",
+  "basic_info": {
+    "display_id": "智能安全技术IP互动展具-001",
+    "display_type": "移动展具",
+    "core_function": "展示技术原理、场景价值和互动体验",
+    "applicable_scenario": "门店、车展、发布会、技术体验区",
+    "accessories": "主展具、控制器、电源线、运输箱、说明牌、备用固定件"
+  },
+  "technical_params": {
+    "size": "待补充",
+    "weight": "待补充",
+    "power_requirement": "220V 市电，具体功率待补充",
+    "setup_requirement": "平整地面、稳定电源、预留操作和观看空间"
+  },
+  "fire_safety": {
+    "flame_retardant_level": "待补充",
+    "forbidden_materials": "严禁使用易燃、易碎、未经确认的替代材料",
+    "extinguisher_requirement": "按场地方要求配置灭火器，位置清晰可见"
+  },
+  "height_limit": {
+    "max_height": "待补充",
+    "floor_height_requirement": "需满足场地限高和安全通行要求"
+  },
+  "load_limit": {
+    "max_load": "待补充",
+    "point_load_limit": "不得在非承重结构上放置额外重物"
+  },
+  "electrical_safety": {
+    "power_limit": "待补充",
+    "grounding_requirement": "所有用电设备需可靠接地",
+    "waterproof_level": "室内使用，避免液体接触电气部件"
+  },
+  "transport_notes": [
+    {
+      "stage": "物流车要求",
+      "requirement": "车厢干燥、平整，运输中避免剧烈震动",
+      "responsible_party": "物流方"
+    },
+    {
+      "stage": "人工搬运规范",
+      "requirement": "至少两人协同搬运，禁止拖拽屏幕和透明件",
+      "responsible_party": "搭建方"
+    },
+    {
+      "stage": "包装方式",
+      "requirement": "使用原包装、防震材料和固定绑带",
+      "responsible_party": "保管方"
+    }
+  ],
+  "assembly": {
+    "pre_check": "包装完好、配件齐全、工具到位",
+    "floor_treatment": "确认地面平整、干燥、无障碍物",
+    "main_setup_order": "底座固定-主体安装-屏幕/灯光接入-外观检查",
+    "electrical_wiring": "按标识接线，确认无裸露线缆和松动接口",
+    "debug_test": "逐项测试电源、屏幕、灯光、互动按钮和内容播放",
+    "exhibit_display": "按展示顺序摆放说明牌和互动指引",
+    "acceptance": "确认结构稳定、功能正常、外观无破损"
+  },
+  "dismantle": {
+    "power_off_confirm": "关闭主电源并拔除外接电源线",
+    "dismantle_order": "先拆附件和电气件，再拆主体和底座",
+    "packing_storage": "按原包装分区存放并标注易损部位",
+    "exit_handover": "清点附件、记录状态并完成交接签字"
+  },
+  "usage_rules": {
+    "daily_start": "检查外观和电源后开机，确认内容播放正常",
+    "daily_usage": "按标准讲解流程操作，禁止非授权人员拆改",
+    "daily_shutdown": "关闭播放内容、断电、清洁表面并覆盖防尘"
+  },
+  "fixture_methods": [
+    {
+      "exhibit": "主展具",
+      "fixture_method": "底座固定或防滑垫定位",
+      "tool_requirement": "内六角、螺丝刀、防滑垫"
+    }
+  ],
+  "storage": {
+    "temperature_humidity": "常温干燥环境，避免高温高湿",
+    "stacking_rule": "不得重压屏幕、透明件和互动模块",
+    "protection_requirement": "防尘、防潮、防撞，长期存放需定期通电检查"
+  },
+  "care": {
+    "cleaning_frequency": "每日闭展后清洁一次",
+    "cleaning_method": "使用软布擦拭，禁止使用腐蚀性清洁剂",
+    "wear_part_check": "检查线缆、接口、按钮、灯光和固定件"
+  },
+  "troubleshooting": [
+    {
+      "fault_type": "无法开机",
+      "handling_method": "检查电源线、插座、开关和保险装置",
+      "emergency_contact": "待补充"
+    },
+    {
+      "fault_type": "屏幕无画面",
+      "handling_method": "检查信号线、播放设备和屏幕输入源",
+      "emergency_contact": "待补充"
+    }
+  ]
+}

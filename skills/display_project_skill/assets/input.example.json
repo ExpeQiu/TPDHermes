@@ -1,0 +1,93 @@
+{
+  "title": "IP技术展具制作流程-IP技术展具制作立项书",
+  "exhibition": {
+    "name": "示例智能汽车技术展",
+    "organizer": "待补充",
+    "positioning": "面向用户、媒体和渠道伙伴的技术体验展示",
+    "time": "待补充",
+    "location": "待补充"
+  },
+  "value": {
+    "strategic_value": "支撑技术品牌资产落地，强化技术规划与用户体验的连接。",
+    "brand_value": "通过可视化展具提升技术可信度和品牌专业感。",
+    "business_value": "为门店体验、试驾转化和销售讲解提供标准化工具。"
+  },
+  "expected_gains": {
+    "short_term": "完成展具制作立项和预算审批。",
+    "mid_term": "支撑重点活动和门店技术体验落地。",
+    "long_term": "沉淀可复用展具资产和销售讲解体系。"
+  },
+  "strategy_alignment": {
+    "group_strategy": "聚焦智能化、安全和用户体验升级。",
+    "tech_integration_strategy": "将技术尖点转化为用户可感知、可互动、可传播的展示内容。"
+  },
+  "display_positioning": {
+    "display_goal": "让用户快速理解技术原理、体验收益和品牌差异化。",
+    "target_audience": "潜在用户、媒体、渠道伙伴、内部销售团队。",
+    "differentiation": "以场景互动替代单向参数讲解，形成更强记忆点。"
+  },
+  "highlight_plan": [
+    {
+      "highlight": "智能安全可视化",
+      "technology_support": "主动安全、辅助驾驶、传感器融合",
+      "display_method": "模型、屏幕动画和交互按钮联动"
+    },
+    {
+      "highlight": "家庭场景体验",
+      "technology_support": "座舱交互、舒适空间、安全提醒",
+      "display_method": "场景短片和互动讲解"
+    }
+  ],
+  "display_logic": "以用户痛点为入口，依次展示技术识别、技术判断、技术执行和用户收益，形成从原理到价值的完整叙事。",
+  "zone_style": {
+    "area": "待补充",
+    "style_tone": "科技、可信、简洁、亲和",
+    "color_rule": "遵循品牌视觉规范，突出核心交互区域"
+  },
+  "layout": {
+    "entrance": "用户痛点与技术主张引入",
+    "core_area": "技术结构和核心亮点展示",
+    "interactive_area": "场景互动演示",
+    "exit": "品牌总结与销售转化承接"
+  },
+  "technical_highlights": [
+    {
+      "highlight": "动态技术路径",
+      "description": "用灯光或动画呈现感知、决策、执行流程",
+      "material_spec": "灯带、控制模块、展示屏"
+    },
+    {
+      "highlight": "可移动模块结构",
+      "description": "支持巡展、门店和活动场景复用",
+      "material_spec": "轻量化结构件、防震包装"
+    }
+  ],
+  "interaction_design": {
+    "interaction_form": "触控屏、按钮、灯光和模型联动",
+    "interaction_flow": "选择场景-触发演示-查看技术响应-输出用户价值",
+    "technical_support": "稳定电源、内容播放系统、结构安全检查"
+  },
+  "budget_details": [
+    {
+      "category": "设计",
+      "item": "方案设计与结构设计",
+      "unit_price": "待补充",
+      "quantity": "1",
+      "total_price": "待补充"
+    },
+    {
+      "category": "制作",
+      "item": "硬件、结构件与互动系统",
+      "unit_price": "待补充",
+      "quantity": "1",
+      "total_price": "待补充"
+    }
+  ],
+  "total_budget": {
+    "design_fee": "待补充",
+    "production_fee": "待补充",
+    "transport_fee": "待补充",
+    "maintenance_fee": "待补充",
+    "total": "待补充"
+  }
+}

@@ -1,0 +1,135 @@
+{
+  "title": "技术推广活动执行（运营）流程-技术推广活动策划方案",
+  "exhibition_info": {
+    "organizer": "待补充",
+    "intro": "面向行业、媒体、用户和渠道伙伴的综合技术展示活动。",
+    "official_theme": "待补充",
+    "theme_interpretation": "围绕智能化、安全和用户体验升级展开技术传播。",
+    "time": "待补充",
+    "address": "待补充",
+    "booth_area": "待补充"
+  },
+  "exhibition_values": [
+    "技术展示",
+    "行业交流",
+    "销售平台",
+    "品牌传播"
+  ],
+  "strategy": {
+    "enterprise_alignment": "对齐企业智能化、技术品牌和用户体验升级战略。",
+    "tech_display_value": "集中呈现技术IP、车型搭载和真实场景体验。",
+    "business_conversion_value": "通过门店线索、试驾邀约和媒体传播承接业务转化。",
+    "industry_trend_forecast": "智能化、场景体验和可信技术证据将成为展会关注重点。",
+    "competitor_dynamics": "竞品预计围绕智能驾驶、座舱、安全和补能生态展开展示。",
+    "hot_topic_forecast": "技术IP、用户体验、智能安全、可持续出行。"
+  },
+  "strategic_goals": {
+    "brand_image_goal": "强化技术领先、可信和用户友好的品牌形象。",
+    "tech_communication_goal": "让目标用户理解技术IP核心价值和车型承接。",
+    "business_conversion_goal": "提升现场线索收集、试驾邀约和渠道转化承接。"
+  },
+  "quantitative_goals": [
+    {
+      "metric": "现场到访",
+      "target_value": "待补充",
+      "measurement_method": "展台计数、签到、扫码数据"
+    },
+    {
+      "metric": "媒体曝光",
+      "target_value": "待补充",
+      "measurement_method": "媒体监测、社媒数据"
+    },
+    {
+      "metric": "线索留资",
+      "target_value": "待补充",
+      "measurement_method": "CRM、二维码、活动报名"
+    }
+  ],
+  "communication_plan": {
+    "coverage_goal": "覆盖目标用户、媒体、行业伙伴和渠道人员。",
+    "interaction_goal": "提升现场互动、社交讨论和技术内容分享。",
+    "topic_goal": "形成围绕技术IP和重点车型的传播话题。",
+    "compliance_requirement": "所有技术表述需经技术、法务、品牌审核。",
+    "competitor_comparison_rule": "避免不实或攻击性对比，聚焦我方差异化价值。",
+    "sensitive_topic_handling": "建立统一FAQ和现场升级处理机制。"
+  },
+  "booth_info": {
+    "location": "待补充",
+    "area": "待补充",
+    "design_theme": "科技、可信、开放、可体验"
+  },
+  "booth_zones": [
+    {
+      "zone": "技术IP展示区",
+      "function": "展示技术主张和核心证据",
+      "core_content": "技术IP、认证结果、核心卖点"
+    },
+    {
+      "zone": "互动体验区",
+      "function": "让用户体验技术价值",
+      "core_content": "展具互动、场景演示、销售讲解"
+    },
+    {
+      "zone": "车型展示区",
+      "function": "承接车型卖点和转化",
+      "core_content": "重点车型、搭载技术、试驾邀约"
+    }
+  ],
+  "tech_highlights": [
+    "智能安全技术可视化展示",
+    "技术IP与车型场景绑定",
+    "门店和活动可复用的互动体验"
+  ],
+  "timeline": [
+    {
+      "time_node": "展前T-60",
+      "content": "方案确认和项目启动",
+      "owner": "项目组",
+      "completion_standard": "完成策划方案和预算确认"
+    },
+    {
+      "time_node": "展前T-30",
+      "content": "物料、展具、传播内容开发",
+      "owner": "品牌/技术/供应商",
+      "completion_standard": "完成初稿和审核"
+    },
+    {
+      "time_node": "展前T-7",
+      "content": "彩排和现场检查",
+      "owner": "执行团队",
+      "completion_standard": "完成流程演练和风险排查"
+    }
+  ],
+  "spokespersons": [
+    {
+      "person": "待补充",
+      "position": "技术负责人",
+      "responsible_part": "技术讲解",
+      "speech_content": "技术IP价值、车型搭载和用户收益"
+    }
+  ],
+  "schedule": {
+    "media_day": "媒体沟通、技术讲解、专访安排待补充",
+    "public_day": "用户互动、门店承接、销售转化安排待补充"
+  },
+  "task_assignments": [
+    {
+      "department": "品牌团队",
+      "responsibility": "整体策划和传播统筹",
+      "core_task": "主题、内容、媒体和视觉物料",
+      "deliverable": "策划方案、传播物料、媒体稿"
+    },
+    {
+      "department": "技术团队",
+      "responsibility": "技术事实和现场讲解支持",
+      "core_task": "技术内容审核、专家支持",
+      "deliverable": "技术说明、FAQ、讲解口径"
+    }
+  ],
+  "key_collaboration_nodes": {
+    "kickoff_meeting": "展前T-60完成项目启动会",
+    "material_review": "展前T-30完成核心物料审核",
+    "pre_show_rehearsal": "展前T-7完成彩排",
+    "onsite_execution": "展期按日复盘并快速处理问题"
+  }
+}

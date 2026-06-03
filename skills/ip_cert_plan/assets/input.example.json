@@ -1,0 +1,106 @@
+{
+  "title": "IP技术认证流程-IP技术认证策划方案",
+  "background_value": {
+    "tech_ip_background": "技术IP进入对外传播和用户信任建立阶段，需要通过第三方认证增强可信度。",
+    "certification_necessity": "行业技术表达趋于同质化，权威认证可帮助用户理解技术边界和实际价值。",
+    "brand_endorsement": "形成可用于发布会、官网、门店和销售话术的权威背书。",
+    "user_trust": "降低用户对技术概念和技术效果的理解成本。",
+    "competitor_differentiation": "通过标准化测试和公开证据建立差异化表达。"
+  },
+  "certification_purpose": {
+    "core_purpose": "验证技术IP核心卖点，并形成可传播的第三方认证结果。",
+    "expected_result": "获得认证报告、测试结论、可公开传播的认证素材。",
+    "application_scenarios": "发布会、传播稿、门店物料、销售话术、官网专题、媒体沟通。"
+  },
+  "test_subjects": [
+    {
+      "subject": "主动安全响应测试",
+      "tech_selling_point": "智能安全守护",
+      "test_method": "封闭场地模拟典型风险场景",
+      "evaluation_standard": "待第三方机构确认"
+    },
+    {
+      "subject": "座舱交互体验测试",
+      "tech_selling_point": "智能座舱易用性",
+      "test_method": "任务完成率、响应时间、用户评价",
+      "evaluation_standard": "待第三方机构确认"
+    }
+  ],
+  "test_rules": [
+    {
+      "subject": "主动安全响应测试",
+      "test_method": "多轮场景测试并记录响应结果",
+      "value_requirement": "测试条件和取值口径需统一",
+      "pass_standard": "待补充"
+    }
+  ],
+  "test_schedule": {
+    "test_time": "待补充",
+    "test_location": "待补充",
+    "site_requirement": "封闭、安全、满足测试设备布置和车辆运行要求",
+    "support_staff": "技术团队、测试机构、车辆保障、拍摄团队"
+  },
+  "video_resources": [
+    {
+      "video_type": "认证过程记录视频",
+      "content_requirement": "记录测试流程、关键画面和专家解读",
+      "production_cycle": "待补充",
+      "owner": "视频团队"
+    },
+    {
+      "video_type": "认证结果传播视频",
+      "content_requirement": "突出测试结论、用户价值和权威背书",
+      "production_cycle": "待补充",
+      "owner": "品牌团队"
+    }
+  ],
+  "communication_resources": [
+    {
+      "channel": "官网专题",
+      "content_format": "认证结果页、技术解读图文",
+      "communication_time": "认证完成后",
+      "owner": "数字营销团队"
+    },
+    {
+      "channel": "社交媒体",
+      "content_format": "短视频、海报、问答内容",
+      "communication_time": "传播周期内",
+      "owner": "传播团队"
+    }
+  ],
+  "communication_rights": {
+    "result_usage_scope": "品牌传播、销售物料、官网专题、门店展示，具体范围以认证协议为准。",
+    "media_release_rights": "认证结果可用于媒体沟通，发布前需完成合规审核。",
+    "official_communication_rights": "可使用认证机构授权标识和报告摘要，具体权益待确认。"
+  },
+  "quotation_items": [
+    {
+      "category": "知识产权费用",
+      "detail": "认证名称、标识或授权使用",
+      "unit_price": "待补充",
+      "quantity": "1",
+      "total_price": "待补充"
+    },
+    {
+      "category": "试验费",
+      "detail": "测试设计、执行和数据分析",
+      "unit_price": "待补充",
+      "quantity": "1",
+      "total_price": "待补充"
+    },
+    {
+      "category": "报告制作费",
+      "detail": "认证报告和传播版摘要制作",
+      "unit_price": "待补充",
+      "quantity": "1",
+      "total_price": "待补充"
+    },
+    {
+      "category": "合计",
+      "detail": "总报价",
+      "unit_price": "待补充",
+      "quantity": "待补充",
+      "total_price": "待补充"
+    }
+  ]
+}

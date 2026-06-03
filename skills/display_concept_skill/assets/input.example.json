@@ -1,0 +1,65 @@
+{
+  "title": "IP技术展具制作流程-IP技术展具概念策划书",
+  "basic_info": {
+    "display_name": "智能安全技术IP互动展具",
+    "display_type": "互动式技术展示装置",
+    "venue": "品牌门店、车展展台、技术体验区",
+    "duration": "长期巡展，单场展示周期待补充"
+  },
+  "concept_summary": "以可视化结构、互动演示和场景化讲解呈现技术IP的核心价值，让用户在短时间内理解技术原理、体验收益和品牌差异化。",
+  "show_dimensions": [
+    "技术原理可视化",
+    "用户场景体验化",
+    "品牌价值证据化"
+  ],
+  "benchmark_cases": [
+    {
+      "case": "竞品智能驾驶互动展台",
+      "highlight": "通过屏幕和模型联动展示传感器识别路径",
+      "learnable_point": "将复杂技术转化为用户可理解的动态演示"
+    }
+  ],
+  "highlight_features": [
+    "核心技术结构可视化，降低用户理解门槛",
+    "场景化互动演示，强化用户真实感知",
+    "可移动、可复用，支持门店和活动多场景部署"
+  ],
+  "principle_description": "展具通过结构模型、灯光路径、屏幕动画或交互按钮，将技术从感知、判断到执行的流程进行可视化呈现，帮助用户理解技术如何解决具体出行痛点。",
+  "detail_points": [
+    {
+      "part": "核心结构区",
+      "show_point": "展示技术架构和关键部件关系",
+      "material_requirement": "透明结构件、灯带、说明铭牌"
+    },
+    {
+      "part": "互动演示区",
+      "show_point": "触发典型场景并展示技术响应",
+      "material_requirement": "触控屏、按钮、动态内容素材"
+    }
+  ],
+  "diagram_note": "建议包含技术核心层、交互展示层、用户场景层三层结构示意。",
+  "maintenance": {
+    "maintenance_requirement": "定期检查电源、屏幕、灯光和结构件，保持表面清洁。",
+    "transport_rule": "运输前固定活动部件，使用防震包装，避免屏幕和透明件受压。",
+    "storage_condition": "存放于干燥、防尘、避免阳光直射的室内环境。"
+  },
+  "budget_items": [
+    {
+      "item": "结构设计与打样",
+      "amount": "待补充",
+      "note": "包含外观、结构、交互方案设计"
+    },
+    {
+      "item": "硬件与制作",
+      "amount": "待补充",
+      "note": "包含屏幕、灯光、结构件和控制模块"
+    }
+  ],
+  "production_cycle": {
+    "concept_planning": "1-2周",
+    "design_drawing": "2-3周",
+    "prototype": "3-5周",
+    "acceptance": "1周",
+    "total_cycle": "约7-11周，视复杂度调整"
+  }
+}

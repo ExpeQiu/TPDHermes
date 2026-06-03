@@ -1,0 +1,63 @@
+{
+  "title": "技术推广-车型项目管理流程-技术规划与技术品牌互锁地图",
+  "technology_nodes": [
+    {
+      "time_node": "2026 Q1",
+      "milestone": "智能座舱体验冻结",
+      "model": "示例车型A",
+      "brand_binding": "形成座舱舒适体验传播主张"
+    },
+    {
+      "time_node": "2026 Q2",
+      "milestone": "辅助驾驶功能验证",
+      "model": "示例车型B",
+      "brand_binding": "支撑智能安全技术IP表达"
+    }
+  ],
+  "model_timeline": [
+    {
+      "model": "示例车型A",
+      "launch_time": "2026 Q2",
+      "technology": "智能座舱、舒适空间",
+      "brand_focus": "家庭舒适与高频体验"
+    },
+    {
+      "model": "示例车型B",
+      "launch_time": "2026 Q3",
+      "technology": "辅助驾驶、主动安全",
+      "brand_focus": "可信智能与安全守护"
+    }
+  ],
+  "brand_actions": [
+    {
+      "action": "技术主题发布",
+      "linked_tech_node": "智能座舱体验冻结",
+      "target_touchpoint": "发布会、官网、社交媒体"
+    },
+    {
+      "action": "门店体验升级",
+      "linked_tech_node": "辅助驾驶功能验证",
+      "target_touchpoint": "门店、试驾、用户案例"
+    }
+  ],
+  "user_touchpoints": [
+    {
+      "touchpoint": "发布会",
+      "tech_message": "技术规划与车型节奏同步落地",
+      "brand_tone": "专业、可信、前瞻",
+      "channel": "线上直播、媒体传播"
+    },
+    {
+      "touchpoint": "门店试驾",
+      "tech_message": "把技术亮点转化为用户可感知体验",
+      "brand_tone": "真实、易懂、可体验",
+      "channel": "门店、试驾路线、销售话术"
+    }
+  ],
+  "checklist": [
+    "技术节点与车型节奏已对齐",
+    "品牌传播节点与工程节点已匹配",
+    "用户触点覆盖完整",
+    "各部门已确认协同责任"
+  ]
+}

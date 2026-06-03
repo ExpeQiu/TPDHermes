@@ -1,0 +1,77 @@
+{
+  "title": "技术推广视频制作流程-技术推广视频策划/创意/导演脚本",
+  "project_info": {
+    "project_name": "智能安全技术IP推广视频",
+    "video_type": "宣传片",
+    "duration": "90秒",
+    "resolution": "4K",
+    "frame_rate": "25fps",
+    "bitrate": "待补充",
+    "core_theme": "可信智能，让技术价值真实可感知",
+    "core_appeal": "通过场景化影像表达技术IP如何守护用户出行"
+  },
+  "creative": {
+    "main_line": "从用户出行焦虑切入，展示技术识别、判断和守护的全过程。",
+    "highlight": "用现实场景与技术可视化叠加，降低技术理解门槛。",
+    "tone": "科技、可信、温暖、克制",
+    "cg_story": "以数据流和车辆感知世界构建技术视角，展示技术如何提前识别风险并作出响应。",
+    "live_story": "围绕家庭长途、城市通勤、夜间泊车等真实场景展开，情绪从不确定到安心。"
+  },
+  "storyboards": [
+    {
+      "shot_no": "01",
+      "visual": "清晨城市道路，车辆驶出小区，家庭成员准备出发。",
+      "duration": "6秒",
+      "sound": "轻柔音乐起",
+      "line": "每一次出发，都承载着安心的期待。",
+      "shot_type": "跟拍",
+      "scene_size": "全景",
+      "note": "建立真实生活场景"
+    },
+    {
+      "shot_no": "02",
+      "visual": "CG叠加显示车辆感知周围行人、车辆和道路环境。",
+      "duration": "8秒",
+      "sound": "科技音效",
+      "line": "智能感知，提前看见风险。",
+      "shot_type": "CG合成",
+      "scene_size": "中景",
+      "note": "突出技术可视化"
+    },
+    {
+      "shot_no": "03",
+      "visual": "前方突发情况，车辆辅助提醒并平稳避让。",
+      "duration": "8秒",
+      "sound": "提示音、音乐增强",
+      "line": "关键时刻，技术守护每一位乘员。",
+      "shot_type": "运动镜头",
+      "scene_size": "近景",
+      "note": "体现用户价值"
+    }
+  ],
+  "technical_requirements": [
+    {
+      "item": "CG技术可视化",
+      "requirement": "需表现感知、判断、执行路径",
+      "owner": "后期团队"
+    },
+    {
+      "item": "实拍安全场景",
+      "requirement": "需在安全可控场地拍摄，不做危险驾驶",
+      "owner": "制片团队"
+    }
+  ],
+  "collaboration_notes": {
+    "preparation": "确认技术边界、车型拍摄权限、场地和安全方案。",
+    "production_coordination": "技术团队审核技术呈现，导演组控制情绪节奏和画面表达。",
+    "post_delivery": "提交粗剪、精剪、调色、字幕和多渠道版本。"
+  },
+  "revision_notes": [
+    {
+      "version": "V1.0",
+      "date": "待补充",
+      "change": "初版导演脚本",
+      "approver": "待补充"
+    }
+  ]
+}

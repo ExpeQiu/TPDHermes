@@ -264,6 +264,52 @@ def run_sqlite_migrations(connection: Connection) -> None:
         )
         logger.info("sqlite_migrate: created table user_preferences")
 
+    if "chat_sessions" not in names:
+        connection.execute(
+            text(
+                """
+                CREATE TABLE chat_sessions (
+                    id TEXT PRIMARY KEY,
+                    user_id TEXT NOT NULL DEFAULT 'default',
+                    title TEXT NOT NULL DEFAULT '新对话',
+                    session_kind TEXT NOT NULL DEFAULT 'chat',
+                    context_json TEXT,
+                    linked_output_ids_json TEXT,
+                    linked_run_ids_json TEXT,
+                    created_at_ms INTEGER NOT NULL,
+                    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+                    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+                )
+                """
+            )
+        )
+        logger.info("sqlite_migrate: created table chat_sessions")
+
+    if "chat_messages" not in names:
+        connection.execute(
+            text(
+                """
+                CREATE TABLE chat_messages (
+                    id TEXT PRIMARY KEY,
+                    session_id TEXT NOT NULL REFERENCES chat_sessions(id) ON DELETE CASCADE,
+                    role TEXT NOT NULL,
+                    content TEXT NOT NULL DEFAULT '',
+                    metadata_json TEXT,
+                    sort_index INTEGER NOT NULL DEFAULT 0,
+                    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+                )
+                """
+            )
+        )
+        logger.info("sqlite_migrate: created table chat_messages")
+
+    connection.execute(
+        text("CREATE INDEX IF NOT EXISTS idx_chat_sessions_user_updated ON chat_sessions (user_id, updated_at)")
+    )
+    connection.execute(
+        text("CREATE INDEX IF NOT EXISTS idx_chat_messages_session_sort ON chat_messages (session_id, sort_index)")
+    )
+
     _seed_builtin_scenarios(connection)
     _backfill_project_scenario_bindings(connection)
     _ensure_growth_tables(connection)

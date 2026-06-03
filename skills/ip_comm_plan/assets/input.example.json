@@ -1,0 +1,164 @@
+{
+  "title": "技术IP生态运营（传播）流程-技术IP传播策划方案",
+  "project_background": {
+    "industry_trend": "智能电动汽车技术传播从参数竞争转向场景体验、可信证据和品牌资产竞争。",
+    "market_competition": "竞品围绕智能驾驶、安全、座舱、补能等方向持续打造技术IP声量。",
+    "start_reason": "重点技术IP进入发布与规模化传播阶段，需要形成完整传播策划方案。"
+  },
+  "core_goal": {
+    "one_sentence": "让目标用户理解并记住技术IP的核心价值。",
+    "description": "通过分阶段传播和多触点内容，让技术IP从概念认知转化为用户可感知价值。",
+    "smart_check": [
+      "Specific（具体）：聚焦技术IP核心价值和重点人群",
+      "Measurable（可衡量）：设置曝光、互动、线索和内容转化指标",
+      "Achievable（可实现）：基于现有渠道和内容资源执行",
+      "Relevant（相关性）：服务技术品牌和车型传播目标",
+      "Time-bound（有时限）：围绕核心传播周期推进"
+    ]
+  },
+  "key_message": "可信智能，让技术价值真实可感知。",
+  "budget_cycle": {
+    "total_budget_range": "待补充",
+    "core_cycle": "预热期、爆发期、延续期共计约6-8周"
+  },
+  "communication_goals": [
+    {
+      "dimension": "总曝光量",
+      "metric": "待补充",
+      "note": "覆盖社媒、媒体、官网、线下活动等总触达"
+    },
+    {
+      "dimension": "社交互动量",
+      "metric": "待补充",
+      "note": "包含点赞、评论、转发、收藏等"
+    },
+    {
+      "dimension": "线索留资",
+      "metric": "待补充",
+      "note": "承接官网、门店、活动和试驾转化"
+    }
+  ],
+  "strategy": {
+    "overall_path": "先建立技术IP概念，再用场景内容形成理解，最后通过体验和案例增强信任。",
+    "message_line": "用户痛点-技术方案-场景证据-品牌价值"
+  },
+  "audience_segments": [
+    {
+      "audience": "潜在购车用户",
+      "core_need": "理解技术是否真实有用",
+      "channel": "短视频、社交媒体、门店",
+      "message_angle": "技术如何解决真实出行痛点"
+    },
+    {
+      "audience": "媒体/KOL",
+      "core_need": "获得清晰技术亮点和评测角度",
+      "channel": "媒体沟通会、试驾、资料包",
+      "message_angle": "技术证据与行业差异化"
+    }
+  ],
+  "content_plan": [
+    {
+      "content_type": "核心概念视频",
+      "core_content": "解释技术IP名称、主张和用户价值",
+      "target_audience": "潜在用户、媒体",
+      "channel": "社交媒体、官网、发布会"
+    },
+    {
+      "content_type": "场景短内容",
+      "core_content": "围绕家庭长途、城市通勤、智能泊车等场景拆解技术价值",
+      "target_audience": "潜在用户",
+      "channel": "短视频、图文、门店屏"
+    }
+  ],
+  "channel_plan": [
+    {
+      "channel": "社交媒体",
+      "content_format": "短视频、海报、话题互动",
+      "matched_content": "核心概念、场景价值、用户问答",
+      "execution_point": "统一话题标签和视觉风格"
+    },
+    {
+      "channel": "门店",
+      "content_format": "展具、话术、体验流程",
+      "matched_content": "技术演示和销售讲解",
+      "execution_point": "确保一线人员理解并能复述核心信息"
+    }
+  ],
+  "roadmap": [
+    {
+      "stage": "预热期",
+      "time": "第1-2周",
+      "stage_goal": "制造认知悬念并释放核心概念",
+      "core_action": "话题预热、概念海报、KOL种草"
+    },
+    {
+      "stage": "爆发期",
+      "time": "第3-4周",
+      "stage_goal": "集中发布技术IP核心信息",
+      "core_action": "发布会、核心视频、媒体解读"
+    },
+    {
+      "stage": "延续期",
+      "time": "第5-8周",
+      "stage_goal": "持续验证技术价值并承接转化",
+      "core_action": "用户案例、门店体验、FAQ内容"
+    }
+  ],
+  "stage_details": {
+    "warmup": {
+      "period": "第1-2周",
+      "goal": "建立期待和初步认知",
+      "format": "预热视频、倒计时海报、话题互动",
+      "key_content": "技术IP即将发布，聚焦用户痛点"
+    },
+    "burst": {
+      "period": "第3-4周",
+      "goal": "完成核心信息集中释放",
+      "format": "发布会、主视频、媒体稿、官网专题",
+      "key_content": "技术主张、核心证据、车型关联"
+    },
+    "sustain": {
+      "period": "第5-8周",
+      "goal": "强化理解和转化承接",
+      "format": "场景内容、用户案例、门店体验",
+      "key_content": "真实场景价值和使用证据"
+    }
+  },
+  "budget_items": [
+    {
+      "category": "内容制作费",
+      "detail": "主视频、短视频、海报、官网专题",
+      "amount": "待补充",
+      "ratio": "待补充"
+    },
+    {
+      "category": "媒体合作费",
+      "detail": "媒体解读、KOL合作、传播资源",
+      "amount": "待补充",
+      "ratio": "待补充"
+    },
+    {
+      "category": "线下活动费",
+      "detail": "门店体验、发布活动、技术展具",
+      "amount": "待补充",
+      "ratio": "待补充"
+    }
+  ],
+  "evaluation_metrics": [
+    {
+      "metric": "曝光量",
+      "expected_value": "待补充",
+      "measurement_method": "平台后台、媒体监测、投放数据"
+    },
+    {
+      "metric": "互动率",
+      "expected_value": "待补充",
+      "measurement_method": "社交平台互动数据"
+    },
+    {
+      "metric": "到达率",
+      "expected_value": "待补充",
+      "measurement_method": "内容分发与触达数据"
+    }
+  ]
+}

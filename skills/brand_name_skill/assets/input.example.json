@@ -1,0 +1,71 @@
+{
+  "title": "技术品牌策略制定流程-技术品牌策略/命名报告",
+  "brand_insight": {
+    "industry_trend": "智能电动汽车技术传播从参数导向转向场景价值、可信体验和持续进化。",
+    "market_competition": "竞品围绕智能驾驶、座舱、安全、补能等方向持续打造技术标签。",
+    "user_cognition": "用户关注技术是否真实有用、是否安全可靠、是否易于理解。",
+    "core_highlight": "以可信智能、安全守护和家庭场景体验为核心亮点。",
+    "market_position": "占位可信、可感知、可持续进化的智能出行技术品牌。",
+    "target_interpretation": "建立清晰技术品牌认知，并支撑重点车型传播。",
+    "task_positioning": "完成策略方向、核心信息和传播节奏的统一。",
+    "differentiation_opportunity": "从用户场景和信任证据切入，避开单纯参数竞赛。"
+  },
+  "brand_strategy": {
+    "core_strategy": "以用户痛点为起点，以技术证据为支撑，以场景收益为表达结果。",
+    "differentiated_positioning": "可信智能技术伙伴。",
+    "support_points": "技术验证、车型搭载、用户案例、渠道体验和持续OTA。"
+  },
+  "strategy_goals": [
+    {
+      "dimension": "认知",
+      "goal": "建立统一技术品牌心智",
+      "metric": "品牌认知调研、内容触达、搜索声量"
+    },
+    {
+      "dimension": "转化",
+      "goal": "支撑重点车型卖点表达",
+      "metric": "门店讲解采用率、试驾转化、线索反馈"
+    }
+  ],
+  "core_message_house": {
+    "top_message": "可信智能，让每一次出行更安心。"
+  },
+  "support_messages": [
+    {
+      "content": "以整车级技术能力支撑安全和可靠体验。",
+      "evidence": "技术验证材料、车型搭载信息待补充。"
+    },
+    {
+      "content": "以高频家庭场景表达用户可感知价值。",
+      "evidence": "用户案例、试驾反馈待补充。"
+    },
+    {
+      "content": "以持续OTA和生态协同体现长期进化能力。",
+      "evidence": "OTA规划和功能清单待补充。"
+    }
+  ],
+  "key_stages": [
+    {
+      "stage": "策略统一",
+      "time_node": "第1阶段",
+      "stage_goal": "明确命名方向和核心信息",
+      "key_message": "可信智能技术品牌",
+      "key_action": "完成策略报告、命名筛选和内部共识"
+    },
+    {
+      "stage": "节点发布",
+      "time_node": "第2阶段",
+      "stage_goal": "与重点车型传播绑定",
+      "key_message": "技术支撑车型核心卖点",
+      "key_action": "发布会、官网专题、门店话术同步"
+    }
+  ],
+  "model_launch_bindings": [
+    {
+      "model": "示例车型A",
+      "release_time": "待补充",
+      "brand_action": "技术品牌核心信息同步发布",
+      "communication_focus": "安全、智能、舒适体验"
+    }
+  ]
+}

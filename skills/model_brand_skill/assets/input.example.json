@@ -1,0 +1,63 @@
+{
+  "title": "技术推广-车型项目管理流程-技术品牌赋能车型策略方案",
+  "tech_ip_source": {
+    "definition": "围绕智能、安全、舒适、生态等核心能力沉淀可持续传播的技术品牌资产。",
+    "brand_value_rule": "坚持用户可感知、车型可承接、传播可持续、证据可验证。"
+  },
+  "model_info": {
+    "model_name": "示例车型",
+    "model_positioning": "面向家庭用户的智能电动 SUV",
+    "product_power_mix": "智能座舱、辅助驾驶、舒适空间、安全车身、补能效率。"
+  },
+  "tech_ip_focus": [
+    {
+      "ip": "智能安全IP",
+      "empower_direction": "安全与信任",
+      "focus_note": "突出主动安全、辅助驾驶和全场景守护体验。"
+    },
+    {
+      "ip": "舒适座舱IP",
+      "empower_direction": "家庭舒适体验",
+      "focus_note": "突出空间、交互、健康舒适和长途出行体验。"
+    }
+  ],
+  "ip_linkage": {
+    "overall_empower_direction": "以智能安全建立信任，以舒适座舱形成体验差异，以补能生态强化长期使用价值。",
+    "ip_relationship": "智能安全作为底层信任支撑，舒适座舱承接高频体验，补能生态补足全周期用车便利。"
+  },
+  "core_strategy": {
+    "core_concept": "打造可信、舒适、持续进化的家庭智能出行技术体验。",
+    "ip_hierarchy": "底层技术能力-场景化体验IP-车型传播主张。",
+    "synergy_logic": "各技术IP围绕家庭出行场景协同表达，共同支撑车型核心卖点。"
+  },
+  "supporting_info": [
+    {
+      "dimension": "安全",
+      "info": "主动安全辅助、车身安全和电池安全形成组合支撑。",
+      "evidence": "待补充"
+    },
+    {
+      "dimension": "智能",
+      "info": "座舱交互与驾驶辅助覆盖高频出行场景。",
+      "evidence": "待补充"
+    }
+  ],
+  "highlights": [
+    "用智能安全降低家庭出行焦虑。",
+    "用舒适座舱提升长途与日常通勤体验。",
+    "用补能生态增强全周期使用便利。"
+  ],
+  "key_issue_responses": {
+    "config_inversion_issue": "部分配置与高低配车型的技术权益关系可能引发用户疑问。",
+    "config_inversion_response": "用场景权益而非单点配置解释差异，强调不同版本服务不同用户需求。",
+    "naming_issue": "技术IP是否需要在该车型上单独命名。",
+    "naming_response": "优先沿用主品牌技术IP体系，在车型传播中增加场景化副标题，避免命名资产分散。"
+  },
+  "sensitive_issues": [
+    {
+      "issue": "技术名称过多导致用户理解成本升高。",
+      "risk_level": "中",
+      "response": "建立主IP统领、场景标签辅助的表达层级。"
+    }
+  ]
+}

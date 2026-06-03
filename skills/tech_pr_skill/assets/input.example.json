@@ -1,0 +1,71 @@
+{
+  "main_title": "吉利发布可信智能技术平台，重新定义用户出行安全体验",
+  "subtitle": "以场景化智能和持续进化能力，开启技术品牌新阶段",
+  "city": "杭州",
+  "date": "2026/05/22",
+  "company_name": "吉利",
+  "tech_brand_name": "可信智能技术平台",
+  "domain": "智能化与安全",
+  "core_user_value": "更安全、更高效、更安心",
+  "product_type": "出行",
+  "lead": {
+    "core_idea": "以用户真实场景为中心的可信智能",
+    "innovation_1": "多源感知系统",
+    "innovation_2": "场景化智能决策",
+    "innovation_3": "持续进化服务体系",
+    "performance_breakthrough": "安全识别、响应效率与体验一致性的综合提升",
+    "subsystem": "智能安全子系统",
+    "metric_improvement": "关键风险识别能力提升待补充",
+    "metric_reduction": "用户理解成本和体验不确定性降低待补充"
+  },
+  "problem_and_idea": {
+    "industry_challenge": "用户对智能化技术的安全焦虑、体验同质化和价值感知不足",
+    "architecture_layers": "感知层、决策层、交互层和服务层",
+    "technical_principle": "技术始终服务于人的真实出行需求"
+  },
+  "tech_features": [
+    {
+      "level": "智能安全",
+      "tech_name": "多源感知融合技术",
+      "effect": "对道路环境和潜在风险进行更稳定识别",
+      "scenario": "城市通勤、复杂路口和夜间出行",
+      "user_benefit": "提前获得安全提醒与辅助支持",
+      "pain_point": "风险识别不及时、用户安全感不足"
+    },
+    {
+      "level": "座舱交互",
+      "tech_name": "场景化智能交互系统",
+      "effect": "让车辆更理解用户意图和出行场景",
+      "scenario": "家庭长途、日常通勤和停车休憩",
+      "user_benefit": "获得更自然、更高效的交互体验",
+      "pain_point": "功能复杂、学习成本高"
+    },
+    {
+      "level": "持续进化",
+      "tech_name": "OTA与数据闭环能力",
+      "effect": "支持功能和体验持续优化",
+      "scenario": "车辆全生命周期使用",
+      "user_benefit": "让车辆随使用不断成长",
+      "pain_point": "技术发布后体验停滞"
+    }
+  ],
+  "leader_quote": {
+    "position": "技术负责人",
+    "name": "待补充",
+    "future_trend": "智能出行的长期演进",
+    "core_value": "更安全、更高效、更安心的用户体验"
+  },
+  "strategy_plan": {
+    "company_strategy": "科技转型与用户体验升级",
+    "future_years": "待补充",
+    "planned_models": "待补充",
+    "future_vision": "智能出行体验持续进化",
+    "ecosystem_vision": "开放、协同、可持续的智能出行生态"
+  },
+  "company_profile": "吉利持续聚焦智能化、电动化和用户体验升级，致力于为用户创造更安全、更愉悦的出行体验。",
+  "media_contact": {
+    "name": "待补充",
+    "email": "待补充",
+    "phone": "待补充"
+  }
+}

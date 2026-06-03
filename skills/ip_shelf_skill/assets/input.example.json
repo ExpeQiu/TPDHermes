@@ -1,0 +1,108 @@
+{
+  "title": "技术品牌（IP）包装流程-技术IP包装货架文档",
+  "target_user": {
+    "user_group": "关注智能、安全与舒适体验的家庭新能源用户",
+    "use_scenario": "日常通勤、家庭长途、城市泊车和门店体验",
+    "core_appeal": "希望技术真实可感知、可信赖，并能降低出行焦虑"
+  },
+  "need_matches": [
+    {
+      "user_need": "安全可信",
+      "matched_tech": "主动安全、辅助驾驶、电池安全",
+      "differentiation": "用整车级安全体系形成可验证安全感"
+    },
+    {
+      "user_need": "舒适易用",
+      "matched_tech": "智能座舱、语音交互、舒适空间",
+      "differentiation": "将技术体验转化为高频家庭场景价值"
+    }
+  ],
+  "industry_scan": {
+    "stage": "成长期",
+    "influence_assessment": "行业对智能化、安全和场景体验的传播投入持续增强，技术IP正成为品牌差异化资产。"
+  },
+  "comparison": [
+    {
+      "dimension": "安全表达",
+      "ours": "整车级安全与场景化守护",
+      "competitor_a": "强调主动安全参数",
+      "competitor_b": "强调辅助驾驶体验",
+      "competitor_c": "强调电池安全背书"
+    },
+    {
+      "dimension": "体验承接",
+      "ours": "门店、试驾、内容联动",
+      "competitor_a": "发布会声量",
+      "competitor_b": "用户案例",
+      "competitor_c": "媒体评测"
+    }
+  ],
+  "slogan": "可信智能，守护全程",
+  "vision": {
+    "technology_vision": "让复杂技术转化为用户可感知、可验证、可持续进化的出行体验。",
+    "brand_vision": "沉淀可信智能的技术品牌资产。",
+    "user_vision": "让用户在每一次出行中感受到安全、舒适和安心。"
+  },
+  "positioning": {
+    "description": "面向家庭用户的可信智能安全技术IP。",
+    "support_points": "整车安全架构、智能辅助能力、场景化体验证据、持续OTA进化。"
+  },
+  "user_value": {
+    "functional_value": "提升安全、效率和舒适体验。",
+    "emotional_value": "降低技术理解门槛和使用焦虑。",
+    "symbolic_value": "体现品牌技术可靠、专业和持续进化。"
+  },
+  "tech_outline": [
+    {
+      "name": "主动安全感知",
+      "principle": "通过多源传感器识别风险并提供预警或辅助控制。",
+      "metric": "待补充"
+    },
+    {
+      "name": "智能座舱交互",
+      "principle": "通过语音、屏幕和场景服务提升车内交互效率。",
+      "metric": "待补充"
+    },
+    {
+      "name": "电池安全管理",
+      "principle": "通过监测、预警和热管理保障电池安全。",
+      "metric": "待补充"
+    }
+  ],
+  "model_matches": [
+    {
+      "model": "示例车型A",
+      "status": "已搭载",
+      "scenario": "家庭长途与日常通勤"
+    },
+    {
+      "model": "示例车型B",
+      "status": "规划搭载",
+      "scenario": "城市通勤与智能泊车"
+    }
+  ],
+  "better_points": [
+    {
+      "tech_point": "场景化安全体验",
+      "advantage": "将安全能力与家庭出行场景绑定",
+      "metric": "待补充",
+      "evidence": "技术验证材料、用户案例、媒体评测"
+    }
+  ],
+  "unique_points": [
+    {
+      "tech_point": "家庭场景技术表达体系",
+      "exclusive_advantage": "把智能、安全、舒适统一为可复用IP表达",
+      "barrier": "需要技术、产品、品牌和渠道协同沉淀",
+      "launch_time": "待补充"
+    }
+  ],
+  "scenario_info": [
+    {
+      "scenario": "家庭长途",
+      "pain_point": "驾驶疲劳、安全焦虑和车内舒适不足",
+      "solution": "辅助驾驶、主动安全和舒适座舱协同支撑",
+      "promotion_angle": "长途更安心，全家更舒适"
+    }
+  ]
+}

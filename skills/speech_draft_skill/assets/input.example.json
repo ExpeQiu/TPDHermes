@@ -1,0 +1,72 @@
+{
+  "title": "技术推广内容制作流程-领导讲稿",
+  "opening": {
+    "greeting": "各位嘉宾、各位媒体朋友、各位用户朋友，大家好。欢迎来到今天的技术发布现场。",
+    "technology_trend": "汽车产业正在从单点技术竞争，进入智能化、场景化和生态化协同的新阶段。",
+    "market_change": "用户对汽车的期待不再只停留在参数本身，而是更加关注真实体验、安全信任和长期价值。",
+    "user_need_evolution": "用户希望技术更易懂、更可靠，并能在每一次出行中带来可感知的改变。",
+    "core_announcement": "今天，我们正式发布全新的技术品牌体系。",
+    "tech_name": "示例智能安全技术品牌",
+    "value_proposition": "让可信智能成为每一次出行的安心底座。"
+  },
+  "pain_points": {
+    "safety_anxiety": "复杂路况下对风险识别和安全保障的担忧。",
+    "range_anxiety": "长途出行中的续航和补能不确定性。",
+    "homogenization": "同质化配置下，用户难以判断技术差异和真实价值。",
+    "other": "技术概念复杂，用户理解门槛较高。"
+  },
+  "vision": {
+    "solution_to_pain": "通过可感知、可验证、可持续进化的技术体系，把复杂技术转化为真实场景中的安心体验。",
+    "core_idea": "以用户为中心，用技术解决真实出行问题。"
+  },
+  "technology": {
+    "system_name": "可信智能技术体系"
+  },
+  "pillars": [
+    {
+      "name": "智能安全感知",
+      "principle": "通过多源传感器和算法识别道路环境与潜在风险。",
+      "data": "待补充",
+      "user_value": "帮助用户提前发现风险，提升出行安全感。"
+    },
+    {
+      "name": "场景化智能决策",
+      "principle": "结合车辆状态、道路环境和用户场景进行综合判断。",
+      "data": "待补充",
+      "user_value": "让技术响应更自然、更稳定、更符合真实驾驶需求。"
+    },
+    {
+      "name": "持续进化服务",
+      "principle": "通过软件升级和数据闭环持续优化体验。",
+      "data": "待补充",
+      "user_value": "让车辆在使用过程中持续成长。"
+    }
+  ],
+  "scenario_values": [
+    {
+      "scenario": "家庭长途出行",
+      "tech_enablement": "智能安全感知与辅助驾驶协同",
+      "experience_improvement": "降低驾驶疲劳，提升全家安全感"
+    },
+    {
+      "scenario": "城市高频通勤",
+      "tech_enablement": "场景化智能决策与座舱交互",
+      "experience_improvement": "让日常通勤更高效、更轻松"
+    }
+  ],
+  "promise": {
+    "technology_reliability": "所有技术表达均以真实测试、工程验证和量产体验为基础。",
+    "safety_standard": "坚持高标准安全验证，相关指标待补充。",
+    "upgrade_commitment": "后续将通过持续迭代和服务升级，不断完善用户体验。"
+  },
+  "closing": {
+    "summary": "这项技术的发布，不只是一次功能升级，更是品牌技术价值与用户真实需求的进一步连接。",
+    "partners_ecosystem": "我们将与产业伙伴、技术伙伴和用户持续共创。",
+    "open_commitment": "我们将保持开放合作，让更多优秀能力进入用户体验。",
+    "ecosystem_vision": "共同构建更安全、更智能、更可持续的出行生态。",
+    "call_to_action": "让我们一起见证技术真正走进用户生活。",
+    "next_preview": "接下来，我们将通过技术演示和场景体验进一步呈现这套体系。",
+    "thanks_to": "感谢各位嘉宾、媒体朋友、合作伙伴和用户朋友。",
+    "ending": "谢谢大家。"
+  }
+}

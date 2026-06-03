@@ -30,6 +30,8 @@ class Skill(ABC):
 
     # 模板内容（由 SkillLoader 自动注入）
     template_content: str | None = None
+    # 技能包目录（由 SkillLoader 自动注入）
+    skill_path: Path | None = None
 
     @property
     @abstractmethod
@@ -236,6 +238,7 @@ class SkillLoader:
         # 从模块中提取 Skill 子类
         skill_cls = self._find_skill_class(module, name)
         instance = skill_cls()
+        instance.skill_path = skill_path
 
         # 自动加载 skill.json 并注入模板内容
         meta_path = skill_path / "skill.json"
