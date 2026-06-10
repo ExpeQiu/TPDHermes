@@ -8,6 +8,19 @@ export interface CitationSource {
   chunkIndex?: number;
   chunkCount?: number;
   distance?: number;
+  /** kb=知识库，web=互联网检索 */
+  sourceKind?: "kb" | "web";
+  url?: string;
+}
+
+export function isWebCitationSource(source: Pick<CitationSource, "sourceKind" | "collection">): boolean {
+  return source.sourceKind === "web" || source.collection === "互联网";
+}
+
+export function citationSourceLabel(source: Pick<CitationSource, "sourceKind" | "collection">): string {
+  if (isWebCitationSource(source)) return "互联网";
+  const name = collectionShortName(source.collection);
+  return name || "知识库";
 }
 
 export interface TpHermesStreamMeta {
@@ -43,6 +56,20 @@ function mapSourceRow(raw: Record<string, unknown>): CitationSource | null {
     chunkIndex: typeof raw.chunk_index === "number" ? raw.chunk_index : undefined,
     chunkCount: typeof raw.chunk_count === "number" ? raw.chunk_count : undefined,
     distance: typeof raw.distance === "number" ? raw.distance : undefined,
+    sourceKind:
+      raw.source_kind === "web" || raw.sourceKind === "web"
+        ? "web"
+        : raw.source_kind === "kb" || raw.sourceKind === "kb"
+          ? "kb"
+          : raw.collection === "互联网"
+            ? "web"
+            : "kb",
+    url:
+      typeof raw.url === "string"
+        ? raw.url
+        : typeof raw.source_url === "string"
+          ? raw.source_url
+          : undefined,
   };
 }
 

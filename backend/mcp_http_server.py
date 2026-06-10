@@ -9,6 +9,10 @@ from __future__ import annotations
 
 import os
 
+from backend.env_local import load_project_env
+
+load_project_env()
+
 from backend.mcp_server import mcp
 
 

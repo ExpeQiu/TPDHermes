@@ -4,7 +4,6 @@ import { Suspense, useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { apiGet } from "@/lib/api";
-import { USER_ROLE_STORAGE_KEY } from "@/lib/rbac";
 import {
   FEISHU_SESSION_STORAGE_KEY,
   USER_ID_STORAGE_KEY,
@@ -23,15 +22,11 @@ import {
   syncUnifiedUserIdToServer,
   type UserIdentityState,
 } from "@/lib/user-identity-sync";
-import {
-  PLATFORM_ROLE_OPTIONS,
-  fetchUserAccess,
-  syncPlatformRoleToServer,
-  type PlatformRole,
-  type UserAccessState,
-} from "@/lib/rbac";
+import { fetchUserAccess, type UserAccessState } from "@/lib/rbac";
+import { isSystemAdminRole } from "@/lib/user-admin";
 import { CONTENT_MAX_CLASS } from "@/lib/content-shell";
 import McpManagementPanel from "@/components/settings/McpManagementPanel";
+import UserGroupManagementPanel from "@/components/settings/UserGroupManagementPanel";
 import { useThemeStore } from "@/lib/store";
 
 interface MeResponse {
@@ -94,7 +89,6 @@ function SettingsPageContent() {
   const activeTab = parseTab(searchParams.get("tab"));
 
   const [userId, setUserId] = useState("");
-  const [role, setRole] = useState<PlatformRole>("tenant_admin");
   const [access, setAccess] = useState<UserAccessState | null>(null);
   const [me, setMe] = useState<MeResponse | null>(null);
   const [identity, setIdentity] = useState<UserIdentityState | null>(null);
@@ -129,23 +123,15 @@ function SettingsPageContent() {
       }
     });
     void fetchUserAccess()
-      .then((a) => {
-        setAccess(a);
-        setRole(a.platform_role);
-      })
-      .catch(() => {
-        if (typeof window !== "undefined") {
-          const cached = window.localStorage.getItem(USER_ROLE_STORAGE_KEY)?.trim();
-          if (cached === "tenant_admin" || cached === "tenant_editor" || cached === "tenant_viewer" || cached === "platform_admin") {
-            setRole(cached);
-          }
-        }
-      });
+      .then(setAccess)
+      .catch(() => setAccess(null));
     refreshMe();
     void fetchServerIdentity()
       .then(setIdentity)
       .catch(() => setIdentity(null));
   }, [refreshMe]);
+
+  const canManageUserGroups = Boolean(access && isSystemAdminRole(access.platform_role));
 
   const save = async () => {
     if (typeof window === "undefined") return;
@@ -155,14 +141,11 @@ function SettingsPageContent() {
       const raw = userId.trim();
       const u = raw ? normalizeUserId(raw) : await ensureDerivedUserId();
       saveUnifiedUserIdLocally(u);
-      const platformRole = (role || "tenant_admin") as PlatformRole;
-      window.localStorage.setItem(USER_ROLE_STORAGE_KEY, platformRole);
       setUserId(u);
       const synced = await syncUnifiedUserIdToServer(u);
       setIdentity(synced);
-      const nextAccess = await syncPlatformRoleToServer(platformRole);
+      const nextAccess = await fetchUserAccess();
       setAccess(nextAccess);
-      setRole(nextAccess.platform_role);
       await refreshMe();
     } catch (e: unknown) {
       setErr(e instanceof Error ? e.message : "保存失败");
@@ -266,7 +249,8 @@ function SettingsPageContent() {
           )}
 
           {activeTab === "identity" && (
-            <div className="mt-4 max-w-lg space-y-4 rounded-2xl border border-slate-200 bg-white/80 p-6 dark:border-slate-800 dark:bg-slate-900/50">
+            <>
+              <div className="mt-4 max-w-lg space-y-4 rounded-2xl border border-slate-200 bg-white/80 p-6 dark:border-slate-800 dark:bg-slate-900/50">
               {me && (
                 <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm dark:border-slate-800 dark:bg-slate-900/80">
                   <p>
@@ -317,27 +301,6 @@ function SettingsPageContent() {
                   </button>
                 </div>
               </label>
-              <label className="block text-sm">
-                <span className="text-slate-500 dark:text-slate-400">平台 Role（功能入口权限）</span>
-                <select
-                  className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
-                  value={role}
-                  onChange={(e) => setRole(e.target.value as PlatformRole)}
-                >
-                  {PLATFORM_ROLE_OPTIONS.filter(
-                    (opt) => opt.value !== "platform_admin" || access?.is_global_admin || me?.is_global_admin,
-                  ).map((opt) => (
-                    <option key={opt.value} value={opt.value}>
-                      {opt.label} — {opt.hint}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              {access && (
-                <p className="text-xs text-slate-500">
-                  已开放功能入口：{access.features.join(" · ")}
-                </p>
-              )}
               <p className="text-xs text-slate-500">
                 保存后写入本机 <code>{USER_ID_STORAGE_KEY}</code> 并同步至服务端；历史对话按此 ID 隔离。
                 飞书会话键 <code>{FEISHU_SESSION_STORAGE_KEY}</code>
@@ -352,7 +315,14 @@ function SettingsPageContent() {
               >
                 {saving ? "保存中…" : "保存并同步"}
               </button>
-            </div>
+              </div>
+
+              {canManageUserGroups && (
+                <div className="mt-8">
+                  <UserGroupManagementPanel enabled={canManageUserGroups} />
+                </div>
+              )}
+            </>
           )}
 
           {activeTab === "mcp" && (

@@ -15,6 +15,9 @@ from backend.models.orchestration_run import OrchestrationRun
 
 logger = logging.getLogger("tpdx.hermes")
 
+WEB_SOURCE_LABEL = "互联网"
+WEB_TOOL_NAMES = frozenset({"tavily_search", "tavily_extract"})
+
 _CITATION_REF_RE = re.compile(r"\[\^(\d+)\]")
 _EXCERPT_MAX = 200
 
@@ -77,7 +80,62 @@ def _source_from_row(
         "chunk_count": chunk_count if isinstance(chunk_count, int) else None,
         "distance": float(distance) if isinstance(distance, (int, float)) else None,
         "tool": tool,
+        "source_kind": "kb",
     }
+
+
+def _web_chunk_id(url: str) -> str:
+    import hashlib
+
+    u = (url or "").strip()
+    if not u:
+        return ""
+    if len(u) <= 240:
+        return f"web:{u}"
+    digest = hashlib.sha256(u.encode()).hexdigest()[:16]
+    return f"web:{digest}"
+
+
+def _web_source_from_row(row: dict[str, Any], *, tool: str) -> dict[str, Any] | None:
+    url = str(row.get("url") or "").strip()
+    if not url:
+        return None
+    title = str(row.get("title") or "").strip() or url
+    content = str(row.get("content") or row.get("description") or row.get("raw_content") or "")
+    return {
+        "chunk_id": _web_chunk_id(url),
+        "doc_id": None,
+        "title": title[:120],
+        "collection": WEB_SOURCE_LABEL,
+        "excerpt": _trim_excerpt(content),
+        "chunk_index": row.get("position") if isinstance(row.get("position"), int) else None,
+        "chunk_count": None,
+        "distance": row.get("score") if isinstance(row.get("score"), (int, float)) else None,
+        "tool": tool,
+        "source_kind": "web",
+        "url": url,
+    }
+
+
+def extract_sources_from_tavily_payload(
+    payload: dict[str, Any],
+    *,
+    tool: str,
+) -> list[dict[str, Any]]:
+    rows = payload.get("results") if isinstance(payload.get("results"), list) else []
+    out: list[dict[str, Any]] = []
+    for idx, row in enumerate(rows):
+        if not isinstance(row, dict):
+            continue
+        if not row.get("url") and row.get("content"):
+            continue
+        nr = dict(row)
+        if "position" not in nr:
+            nr["position"] = idx + 1
+        src = _web_source_from_row(nr, tool=tool)
+        if src:
+            out.append(src)
+    return out
 
 
 def extract_sources_from_kb_query_payload(
@@ -154,6 +212,8 @@ async def append_kb_sources(
         new_items = extract_sources_from_kb_get_entry_payload(
             payload, collection_name=collection_name
         )
+    elif tool_name in WEB_TOOL_NAMES:
+        new_items = extract_sources_from_tavily_payload(payload, tool=tool_name)
     else:
         new_items = extract_sources_from_kb_query_payload(
             payload, collection_name=collection_name
@@ -393,6 +453,8 @@ def build_sources_payload_from_capture(
                 "chunk_index": s.get("chunk_index"),
                 "chunk_count": s.get("chunk_count"),
                 "distance": s.get("distance"),
+                "source_kind": s.get("source_kind") or "kb",
+                "url": s.get("url"),
             }
         )
     sources.sort(key=lambda x: int(x.get("ref") or 0))
@@ -438,3 +500,51 @@ def annotate_results_with_capture(
             nr["ref"] = by_chunk[cid]
         annotated.append(nr)
     return annotated
+
+
+def annotate_web_results_with_capture(
+    results: list[dict[str, Any]],
+    capture: dict[str, Any] | None,
+) -> list[dict[str, Any]]:
+    if not results:
+        return results
+    by_url: dict[str, int] = {}
+    for s in (capture or {}).get("sources") or []:
+        if not isinstance(s, dict) or s.get("source_kind") != "web":
+            continue
+        url = str(s.get("url") or "")
+        cid = str(s.get("chunk_id") or "")
+        ref = s.get("ref")
+        if url and isinstance(ref, int):
+            by_url[url] = ref
+        if cid and isinstance(ref, int):
+            by_url[cid] = ref
+
+    annotated: list[dict[str, Any]] = []
+    for row in results:
+        nr = dict(row)
+        url = str(nr.get("url") or "").strip()
+        cid = _web_chunk_id(url) if url else ""
+        ref = by_url.get(url) or by_url.get(cid)
+        if isinstance(ref, int):
+            nr["ref"] = ref
+        annotated.append(nr)
+    return annotated
+
+
+async def save_web_sources_for_run(
+    *,
+    run_id: str | None,
+    project_id: str | None,
+    tool_name: str,
+    payload: dict[str, Any],
+    entrypoint: str = "chat",
+) -> dict[str, Any]:
+    return await save_kb_sources_for_run(
+        run_id=run_id,
+        project_id=project_id,
+        tool_name=tool_name,
+        payload=payload,
+        collection_name=WEB_SOURCE_LABEL,
+        entrypoint=entrypoint,
+    )

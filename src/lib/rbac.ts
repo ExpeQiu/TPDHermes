@@ -1,7 +1,7 @@
 /** 平台 Role 与功能入口权限（与 /me/access 对齐） */
 import { apiGet, apiPut } from "./api";
 
-export type PlatformRole = "platform_admin" | "tenant_admin" | "tenant_editor" | "tenant_viewer";
+export type PlatformRole = "platform_admin" | "tenant_admin" | "tenant_editor" | "tenant_partner";
 export type FeatureKey =
   | "create"
   | "knowledge"
@@ -61,9 +61,21 @@ export async function syncPlatformRoleToServer(platformRole: PlatformRole): Prom
 }
 
 export const PLATFORM_ROLE_OPTIONS: { value: PlatformRole; label: string; hint: string }[] = [
-  { value: "tenant_admin", label: "租户管理员", hint: "场景编排、知识库、技能与项目管理" },
-  { value: "tenant_editor", label: "编辑者", hint: "项目协作、对话与工坊，不含编排/知识库" },
-  { value: "tenant_viewer", label: "只读成员", hint: "只读访问项目与对话入口" },
+  {
+    value: "tenant_admin",
+    label: "系统管理员",
+    hint: "首页、项目中心，对话创作，场景输出，场景编排、知识库、技能工坊，运维，设置",
+  },
+  {
+    value: "tenant_editor",
+    label: "项目管理员",
+    hint: "首页，项目中心，对话创作，场景输出，场景编排，知识库，技能工坊，设置",
+  },
+  {
+    value: "tenant_partner",
+    label: "项目成员",
+    hint: "首页，项目中心，对话创作，场景输出，设置",
+  },
   { value: "platform_admin", label: "平台管理员", hint: "全部功能（需全局管理员身份）" },
 ];
 

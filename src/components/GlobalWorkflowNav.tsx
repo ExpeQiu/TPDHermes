@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { GLOBAL_NAV_INNER_CLASS } from "@/lib/content-shell";
@@ -9,12 +10,25 @@ import type { FeatureKey } from "@/lib/rbac";
 
 export default function GlobalWorkflowNav() {
   const pathname = usePathname();
-  const { canAccess } = useUserAccess();
-  const navItems = WORKFLOW_NAV_ITEMS.filter((item) => {
-    if (item.requiredFeature) return canAccess(item.requiredFeature);
-    if (item.adminOnly) return canAccess("create" as FeatureKey) || canAccess("knowledge" as FeatureKey);
-    return true;
-  });
+  const { canAccess, ready } = useUserAccess();
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  const navItems = useMemo(() => {
+    const filterByAccess = (item: (typeof WORKFLOW_NAV_ITEMS)[number]) => {
+      if (item.requiredFeature) return canAccess(item.requiredFeature);
+      if (item.adminOnly) return canAccess("create" as FeatureKey) || canAccess("knowledge" as FeatureKey);
+      return true;
+    };
+    // 避免 SSR 与客户端 localStorage 权限缓存不一致导致 hydration 报错
+    if (!mounted || !ready) {
+      return WORKFLOW_NAV_ITEMS.filter((item) => !item.requiredFeature && !item.adminOnly);
+    }
+    return WORKFLOW_NAV_ITEMS.filter(filterByAccess);
+  }, [mounted, ready, canAccess]);
 
   return (
     <header className="z-40 shrink-0 border-b border-slate-200 bg-white/85 backdrop-blur-md dark:border-slate-800 dark:bg-slate-950/85">

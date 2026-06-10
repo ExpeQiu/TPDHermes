@@ -14,12 +14,13 @@ from backend.services.user_preference_service import PREF_KEY_PLATFORM_ROLE, get
 
 logger = logging.getLogger("tpdx.hermes.rbac")
 
-PlatformRole = Literal["platform_admin", "tenant_admin", "tenant_editor", "tenant_viewer"]
+PlatformRole = Literal["platform_admin", "tenant_admin", "tenant_editor", "tenant_partner"]
 ProjectRole = Literal["owner", "editor", "viewer"]
 
 PLATFORM_ROLES: frozenset[str] = frozenset(
-    {"platform_admin", "tenant_admin", "tenant_editor", "tenant_viewer"}
+    {"platform_admin", "tenant_admin", "tenant_editor", "tenant_partner"}
 )
+ROLE_ALIASES: dict[str, str] = {"tenant_viewer": "tenant_partner"}
 PROJECT_ROLES: frozenset[str] = frozenset({"owner", "editor", "viewer"})
 PROJECT_ROLE_RANK: dict[str, int] = {"viewer": 1, "editor": 2, "owner": 3}
 
@@ -29,9 +30,13 @@ FEATURE_KEYS: frozenset[str] = frozenset(
 
 FEATURES_BY_PLATFORM_ROLE: dict[str, frozenset[str]] = {
     "platform_admin": frozenset(FEATURE_KEYS),
-    "tenant_admin": frozenset({"create", "knowledge", "skills", "projects", "chat", "workshop", "settings"}),
-    "tenant_editor": frozenset({"skills", "projects", "chat", "workshop", "settings"}),
-    "tenant_viewer": frozenset({"projects", "chat", "workshop", "settings"}),
+    "tenant_admin": frozenset(
+        {"create", "knowledge", "skills", "projects", "chat", "workshop", "ops", "settings"}
+    ),
+    "tenant_editor": frozenset(
+        {"create", "knowledge", "skills", "projects", "chat", "workshop", "settings"}
+    ),
+    "tenant_partner": frozenset({"projects", "chat", "workshop", "settings"}),
 }
 
 PROJECT_PERMS_BY_ROLE: dict[str, frozenset[str]] = {
@@ -42,9 +47,9 @@ PROJECT_PERMS_BY_ROLE: dict[str, frozenset[str]] = {
 
 PLATFORM_ROLE_LABELS: dict[str, str] = {
     "platform_admin": "平台管理员",
-    "tenant_admin": "租户管理员",
-    "tenant_editor": "编辑者",
-    "tenant_viewer": "只读成员",
+    "tenant_admin": "系统管理员",
+    "tenant_editor": "项目管理员",
+    "tenant_partner": "项目成员",
 }
 
 PROJECT_ROLE_LABELS: dict[str, str] = {
@@ -62,6 +67,9 @@ def normalize_platform_role(value: str | None) -> str | None:
         return None
     if s in PLATFORM_ROLES:
         return s
+    aliased = ROLE_ALIASES.get(s)
+    if aliased and aliased in PLATFORM_ROLES:
+        return aliased
     return None
 
 
@@ -110,12 +118,12 @@ async def resolve_platform_role(
 
 
 def feature_allowed(platform_role: str, feature: str) -> bool:
-    feats = FEATURES_BY_PLATFORM_ROLE.get(platform_role, FEATURES_BY_PLATFORM_ROLE["tenant_viewer"])
+    feats = FEATURES_BY_PLATFORM_ROLE.get(platform_role, FEATURES_BY_PLATFORM_ROLE["tenant_partner"])
     return feature in feats
 
 
 def list_features(platform_role: str) -> list[str]:
-    feats = FEATURES_BY_PLATFORM_ROLE.get(platform_role, FEATURES_BY_PLATFORM_ROLE["tenant_viewer"])
+    feats = FEATURES_BY_PLATFORM_ROLE.get(platform_role, FEATURES_BY_PLATFORM_ROLE["tenant_partner"])
     return sorted(feats)
 
 
@@ -146,13 +154,40 @@ def require_feature(feature: str):
     return _dep
 
 
+SYSTEM_ADMIN_ROLES: frozenset[str] = frozenset({"tenant_admin", "platform_admin"})
+
+
 def assert_assignable_platform_role(user_id: str, role: str) -> str:
     """用户自助设置 Role 时禁止自行提升为 platform_admin。"""
+    return _assert_assignable_platform_role(user_id, role, self_service=True)
+
+
+def assert_admin_assignable_platform_role(actor_user_id: str, role: str) -> str:
+    """系统管理员为他人分配 Role。"""
+    return _assert_assignable_platform_role(actor_user_id, role, self_service=False)
+
+
+def _assert_assignable_platform_role(user_id: str, role: str, *, self_service: bool) -> str:
     normalized = normalize_platform_role(role)
     if not normalized:
         raise HTTPException(status_code=400, detail=f"无效的平台 Role: {role}")
     if normalized == "platform_admin" and not (
         is_global_admin_user(user_id) or is_default_platform_admin_user(user_id)
     ):
-        raise HTTPException(status_code=403, detail="platform_admin 仅可由全局管理员分配")
+        detail = "platform_admin 仅可由全局管理员分配"
+        if self_service:
+            detail = "platform_admin 仅可由全局管理员分配"
+        raise HTTPException(status_code=403, detail=detail)
     return normalized
+
+
+def require_system_admin():
+    """仅系统管理员（tenant_admin / platform_admin）可访问。"""
+
+    async def _dep(role: str = Depends(get_platform_role)) -> str:
+        if role not in SYSTEM_ADMIN_ROLES:
+            logger.warning("system_admin denied role=%s", role)
+            raise HTTPException(status_code=403, detail="仅系统管理员可操作")
+        return role
+
+    return _dep

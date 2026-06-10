@@ -225,8 +225,55 @@ async def project_get(id: str, user_id: str = "") -> dict:
     return await _get(id, user_id=user_id)
 
 
-# Optional external MCP mounts
-mount_tavily_remote_mcp(mcp)
+# Optional external MCP mounts — 本地 Tavily 工具优先（带来源捕获），无 API Key 时回退远程代理
+import os
+
+if os.getenv("TAVILY_API_KEY", "").strip():
+
+    @mcp.tool(
+        title="Tavily Search",
+        description=(
+            "Search the web via Tavily. When invoked from TPDHermes chat/workshop agent, "
+            "tphermes_run_id is required (from orchestration execution.run_id) for citation tracking. "
+            "Cite web facts with [^N] using ref from results."
+        ),
+    )
+    async def tavily_search(
+        query: str,
+        max_results: int = 5,
+        tphermes_run_id: str | None = None,
+        project_id: str | None = None,
+    ) -> dict:
+        from backend.tools.tavily_tools import tavily_search as _search
+
+        return await _search(
+            query,
+            max_results=max_results,
+            tphermes_run_id=tphermes_run_id,
+            project_id=project_id,
+        )
+
+    @mcp.tool(
+        title="Tavily Extract",
+        description=(
+            "Extract web page content via Tavily. Pass tphermes_run_id when called from "
+            "TPDHermes agent for citation tracking; cite with [^N] from results."
+        ),
+    )
+    async def tavily_extract(
+        urls: list[str],
+        tphermes_run_id: str | None = None,
+        project_id: str | None = None,
+    ) -> dict:
+        from backend.tools.tavily_tools import tavily_extract as _extract
+
+        return await _extract(
+            urls,
+            tphermes_run_id=tphermes_run_id,
+            project_id=project_id,
+        )
+else:
+    mount_tavily_remote_mcp(mcp)
 
 
 # ─── Run ─────────────────────────────────────────────────────────────────────

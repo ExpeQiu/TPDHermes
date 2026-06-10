@@ -76,8 +76,10 @@ def _build_orchestration_guidance(payload: OrchestrationPayload) -> str:
         lines.extend(
             [
                 f"当前编排 run_id={run_id}。调用 kb_query 或 kb_get_entry 时必须传入 tphermes_run_id={run_id}。",
-                "引用知识库事实时，必须在对应句末添加 [^N] 标记（N 为 kb_query/kb_get_entry 返回结果中的 ref 字段，从 1 开始）；"
-                "涉及多条 KB 事实时每个要点都须标注。",
+                f"调用 tavily_search 或 tavily_extract 联网检索时也必须传入 tphermes_run_id={run_id}；"
+                "互联网来源在引用表中统一标识为「互联网」。",
+                "引用知识库或互联网事实时，必须在对应句末添加 [^N] 标记（N 为工具返回结果中的 ref 字段，从 1 开始）；"
+                "涉及多条事实时每个要点都须标注。",
                 "无检索依据的内容不得添加 [^N]；同一 chunk 复用同一 ref；不要自行编写来源脚注正文。",
             ]
         )

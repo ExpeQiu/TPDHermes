@@ -334,6 +334,34 @@ function sessionProjectIdentifier(session: ChatSession, projects: ProjectRecord[
   return project?.name?.trim() || "无关联";
 }
 
+function DocOptimizeSessionIcon({ className = "h-4 w-4" }: { className?: string }) {
+  return (
+    <svg
+      className={`${className} shrink-0 text-emerald-700 opacity-90 dark:text-emerald-300`}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.5"
+      aria-hidden
+    >
+      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+      <path d="M14 2v6h6M8 13h2M8 17h6M8 9h8" />
+    </svg>
+  );
+}
+
+function sessionListIcon(session: ChatSession) {
+  const mode = session.chatMode ?? "co_create";
+  if (mode === "doc_optimize") {
+    return <DocOptimizeSessionIcon />;
+  }
+  const kind = inferSessionKind(session as unknown as Record<string, unknown>);
+  if (kind === "scenario") {
+    return <span className="text-xs">📋</span>;
+  }
+  return <span className="text-xs">💬</span>;
+}
+
 function normalizeSessionsPlaceholders(sessions: ChatSession[]): ChatSession[] {
   return sessions.map((session) => {
     if (!isPlaceholderSessionTitle(session.title)) return session;
@@ -2103,9 +2131,7 @@ function ChatPageInner() {
         ) : null}
 
         <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
-          {sessions.map((session) => {
-            const kind = inferSessionKind(session as unknown as Record<string, unknown>);
-            return (
+          {sessions.map((session) => (
             <div
               key={session.id}
               onClick={() => selectSession(session.id)}
@@ -2115,7 +2141,7 @@ function ChatPageInner() {
                   : "text-slate-400 hover:bg-slate-300/40 dark:bg-slate-700/40 hover:text-slate-900 dark:hover:text-white"
               }`}
             >
-              <span className="text-xs">{kind === "scenario" ? "📋" : "💬"}</span>
+              {sessionListIcon(session)}
               <div className="min-w-0 flex-1">
                 <span className="block truncate text-sm">{titleFromSession(session)}</span>
                 <span className="block truncate text-[10px] text-slate-500">
@@ -2132,8 +2158,7 @@ function ChatPageInner() {
                 ✕
               </button>
             </div>
-            );
-          })}
+          ))}
         </div>
       </aside>
 

@@ -7,6 +7,7 @@ from backend.services.kb_source_capture import (
     build_sources_payload_from_capture,
     extract_citation_refs_from_text,
     extract_sources_from_kb_query_payload,
+    extract_sources_from_tavily_payload,
 )
 
 
@@ -94,6 +95,49 @@ def test_build_sources_payload_unresolved_refs():
 def test_extract_citation_refs_from_text():
     refs = extract_citation_refs_from_text("A[^1] B[^2] C[^1]")
     assert refs == [1, 2]
+
+
+def test_extract_sources_from_tavily_search():
+    payload = {
+        "results": [
+            {
+                "title": "示例新闻",
+                "url": "https://example.com/news",
+                "content": "网页摘要内容",
+                "score": 0.9,
+            }
+        ]
+    }
+    items = extract_sources_from_tavily_payload(payload, tool="tavily_search")
+    assert len(items) == 1
+    assert items[0]["source_kind"] == "web"
+    assert items[0]["collection"] == "互联网"
+    assert items[0]["url"] == "https://example.com/news"
+    assert items[0]["chunk_id"].startswith("web:")
+
+
+def test_merge_kb_and_web_refs():
+    existing = {
+        "sources": [
+            {
+                "ref": 1,
+                "chunk_id": "doc_a_chunk_0001",
+                "collection": "project.kb",
+                "source_kind": "kb",
+                "title": "KB",
+                "excerpt": "x",
+                "query_order": 1,
+            }
+        ]
+    }
+    web_items = extract_sources_from_tavily_payload(
+        {"results": [{"title": "Web", "url": "https://a.com", "content": "hello"}]},
+        tool="tavily_search",
+    )
+    merged = _merge_sources(existing, web_items)
+    assert len(merged["sources"]) == 2
+    assert merged["sources"][1]["ref"] == 2
+    assert merged["sources"][1]["collection"] == "互联网"
 
 
 def test_annotate_results_with_capture():

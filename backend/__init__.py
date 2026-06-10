@@ -13,6 +13,10 @@ import os
 import logging
 from contextlib import asynccontextmanager
 
+from backend.env_local import load_project_env
+
+load_project_env()
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.exceptions import RequestValidationError
