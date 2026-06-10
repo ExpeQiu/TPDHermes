@@ -1,0 +1,331 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1680 1320" role="img" aria-labelledby="title desc">
+  <title id="title">TPDHermes Knowledge Base Dataflow</title>
+  <desc id="desc">展示知识来源、统一导入、Embedding、Chroma 主库、kb_cache 镜像、前端浏览和检索降级链路。</desc>
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#f8fbff"/>
+      <stop offset="100%" stop-color="#edf3fb"/>
+    </linearGradient>
+    <linearGradient id="hero" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#2563eb"/>
+      <stop offset="100%" stop-color="#0f766e"/>
+    </linearGradient>
+    <linearGradient id="layerBlue" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#dbeafe"/>
+      <stop offset="100%" stop-color="#bfdbfe"/>
+    </linearGradient>
+    <linearGradient id="layerPurple" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#ede9fe"/>
+      <stop offset="100%" stop-color="#ddd6fe"/>
+    </linearGradient>
+    <linearGradient id="layerGreen" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#dcfce7"/>
+      <stop offset="100%" stop-color="#bbf7d0"/>
+    </linearGradient>
+    <linearGradient id="layerAmber" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#fef3c7"/>
+      <stop offset="100%" stop-color="#fde68a"/>
+    </linearGradient>
+    <filter id="shadow" x="-10%" y="-10%" width="120%" height="120%">
+      <feDropShadow dx="0" dy="8" stdDeviation="10" flood-color="#0f172a" flood-opacity="0.12"/>
+    </filter>
+    <filter id="softShadow" x="-10%" y="-10%" width="120%" height="120%">
+      <feDropShadow dx="0" dy="4" stdDeviation="6" flood-color="#1e293b" flood-opacity="0.08"/>
+    </filter>
+    <marker id="arrowBlue" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#2563eb"/>
+    </marker>
+    <marker id="arrowGreen" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#059669"/>
+    </marker>
+    <marker id="arrowPurple" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#7c3aed"/>
+    </marker>
+    <marker id="arrowSlate" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#64748b"/>
+    </marker>
+    <style>
+      text {
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      }
+      .title { font-size: 34px; font-weight: 700; fill: #ffffff; }
+      .subtitle { font-size: 16px; fill: rgba(255,255,255,0.88); }
+      .section-title { font-size: 20px; font-weight: 700; fill: #0f172a; }
+      .section-desc { font-size: 14px; fill: #475569; }
+      .card-title { font-size: 17px; font-weight: 700; fill: #0f172a; }
+      .body { font-size: 14px; fill: #334155; }
+      .small { font-size: 13px; fill: #475569; }
+      .chip { font-size: 13px; font-weight: 600; fill: #1e293b; }
+      .metric { font-size: 14px; fill: #1e293b; }
+      .panel { fill: #ffffff; stroke: #dbe3ef; stroke-width: 1.5; rx: 26; }
+      .card { fill: #ffffff; stroke: #d7e1ee; stroke-width: 1.3; rx: 18; }
+      .label { fill: #ffffff; stroke: #dbe3ef; stroke-width: 1; rx: 12; }
+      .dash { fill: none; stroke: #94a3b8; stroke-width: 2.4; stroke-dasharray: 8 8; }
+    </style>
+  </defs>
+
+  <rect width="1680" height="1320" fill="url(#bg)"/>
+
+  <g transform="translate(56,40)">
+    <rect width="1568" height="122" rx="28" fill="url(#hero)" filter="url(#shadow)"/>
+    <text x="48" y="52" class="title">TPDHermes KB Dataflow</text>
+    <text x="48" y="86" class="subtitle">从多源知识进入统一 ingestion 管线，完成切块、向量化、Chroma 主库存储、kb_cache 镜像同步，以及查询代理与只读降级。</text>
+
+    <g transform="translate(1188,28)">
+      <rect width="102" height="28" rx="14" fill="#dbeafe" opacity="0.95"/>
+      <text x="51" y="19" text-anchor="middle" class="chip">统一入口</text>
+    </g>
+    <g transform="translate(1302,28)">
+      <rect width="118" height="28" rx="14" fill="#ede9fe" opacity="0.95"/>
+      <text x="59" y="19" text-anchor="middle" class="chip">统一 metadata</text>
+    </g>
+    <g transform="translate(1432,28)">
+      <rect width="104" height="28" rx="14" fill="#dcfce7" opacity="0.95"/>
+      <text x="52" y="19" text-anchor="middle" class="chip">主库检索</text>
+    </g>
+    <g transform="translate(1226,66)">
+      <rect width="136" height="28" rx="14" fill="#fef3c7" opacity="0.95"/>
+      <text x="68" y="19" text-anchor="middle" class="chip">缓存镜像与降级</text>
+    </g>
+    <g transform="translate(1374,66)">
+      <rect width="162" height="28" rx="14" fill="#ecfeff" opacity="0.95"/>
+      <text x="81" y="19" text-anchor="middle" class="chip">项目知识持续沉淀</text>
+    </g>
+  </g>
+
+  <g transform="translate(56,186)">
+    <rect width="1568" height="1090" rx="30" class="panel" filter="url(#softShadow)"/>
+    <text x="34" y="42" class="section-title">Knowledge Build And Query Flow</text>
+    <text x="34" y="68" class="section-desc">结构按“来源层 -> 导入处理层 -> 主存储层 -> 镜像展示层 -> 查询代理层 -> 项目沉淀与治理”展开。</text>
+
+    <g transform="translate(36,98)">
+      <rect width="1496" height="132" rx="24" fill="url(#layerBlue)" stroke="#93c5fd" stroke-width="1.5" filter="url(#softShadow)"/>
+      <text x="22" y="34" class="card-title">A. 知识来源层</text>
+      <text x="22" y="58" class="body">支持离线文档导入、上传文件、对话收割、项目附件与项目输出等多种来源，最终统一走 ingestion 核心。</text>
+
+      <g transform="translate(18,76)">
+        <rect width="216" height="40" rx="14" fill="#ffffff" stroke="#bfdbfe"/>
+        <text x="108" y="26" text-anchor="middle" class="chip">Manifest / Markdown / TXT</text>
+      </g>
+      <g transform="translate(252,76)">
+        <rect width="182" height="40" rx="14" fill="#ffffff" stroke="#bfdbfe"/>
+        <text x="91" y="26" text-anchor="middle" class="chip">/api/v1/kb/upload</text>
+      </g>
+      <g transform="translate(452,76)">
+        <rect width="188" height="40" rx="14" fill="#ffffff" stroke="#bfdbfe"/>
+        <text x="94" y="26" text-anchor="middle" class="chip">Conversation Harvest</text>
+      </g>
+      <g transform="translate(658,76)">
+        <rect width="188" height="40" rx="14" fill="#ffffff" stroke="#bfdbfe"/>
+        <text x="94" y="26" text-anchor="middle" class="chip">ProjectAttachment</text>
+      </g>
+      <g transform="translate(864,76)">
+        <rect width="176" height="40" rx="14" fill="#ffffff" stroke="#bfdbfe"/>
+        <text x="88" y="26" text-anchor="middle" class="chip">OutputAsset</text>
+      </g>
+      <g transform="translate(1058,76)">
+        <rect width="206" height="40" rx="14" fill="#ffffff" stroke="#bfdbfe"/>
+        <text x="103" y="26" text-anchor="middle" class="chip">scripts/kb_ingest.py</text>
+      </g>
+      <g transform="translate(1282,76)">
+        <rect width="194" height="40" rx="14" fill="#ffffff" stroke="#bfdbfe"/>
+        <text x="97" y="26" text-anchor="middle" class="chip">/api/v1/kb/ingest</text>
+      </g>
+    </g>
+
+    <g transform="translate(36,252)">
+      <rect width="1496" height="244" rx="24" fill="url(#layerPurple)" stroke="#c4b5fd" stroke-width="1.5" filter="url(#softShadow)"/>
+      <text x="22" y="34" class="card-title">B. 统一导入处理层</text>
+      <text x="22" y="58" class="body">入库入口会构造成统一 manifest，随后由 `run_kb_ingestion()` 执行读取、切块、metadata 合并、校验、embedding 和 upsert。</text>
+
+      <g transform="translate(18,84)">
+        <rect width="226" height="118" class="card" filter="url(#softShadow)"/>
+        <text x="113" y="28" text-anchor="middle" class="chip">Manifest Builder</text>
+        <text x="113" y="52" text-anchor="middle" class="small">build_manifest_from_uploads</text>
+        <text x="113" y="70" text-anchor="middle" class="small">build_manifest_from_harvest</text>
+        <text x="113" y="88" text-anchor="middle" class="small">统一 defaults / documents 结构</text>
+      </g>
+      <g transform="translate(264,84)">
+        <rect width="226" height="118" class="card" filter="url(#softShadow)"/>
+        <text x="113" y="28" text-anchor="middle" class="chip">Document Read / Extract</text>
+        <text x="113" y="52" text-anchor="middle" class="small">读取文件或先抽取 Markdown</text>
+        <text x="113" y="70" text-anchor="middle" class="small">TXT / MD 直接读</text>
+        <text x="113" y="88" text-anchor="middle" class="small">附件走 extract_to_markdown</text>
+      </g>
+      <g transform="translate(510,84)">
+        <rect width="226" height="118" class="card" filter="url(#softShadow)"/>
+        <text x="113" y="28" text-anchor="middle" class="chip">Chunk + Metadata</text>
+        <text x="113" y="52" text-anchor="middle" class="small">按标题 / 长度切 chunk</text>
+        <text x="113" y="70" text-anchor="middle" class="small">生成 doc_id / chunk_id / checksum</text>
+        <text x="113" y="88" text-anchor="middle" class="small">校验 title/domain/folder_path 等</text>
+      </g>
+      <g transform="translate(756,84)">
+        <rect width="226" height="118" class="card" filter="url(#softShadow)"/>
+        <text x="113" y="28" text-anchor="middle" class="chip">Embedding</text>
+        <text x="113" y="52" text-anchor="middle" class="small">默认 BAAI/bge-small-zh-v1.5</text>
+        <text x="113" y="70" text-anchor="middle" class="small">extract_searchable_text</text>
+        <text x="113" y="88" text-anchor="middle" class="small">KB_EMBED_ON_UPSERT 控制</text>
+      </g>
+      <g transform="translate(1002,84)">
+        <rect width="226" height="118" class="card" filter="url(#softShadow)"/>
+        <text x="113" y="28" text-anchor="middle" class="chip">Chroma Upsert</text>
+        <text x="113" y="52" text-anchor="middle" class="small">ensure_collection + upsert</text>
+        <text x="113" y="70" text-anchor="middle" class="small">metadata JSON sanitize</text>
+        <text x="113" y="88" text-anchor="middle" class="small">同步删除 stale chunks</text>
+      </g>
+      <g transform="translate(1248,84)">
+        <rect width="230" height="118" class="card" filter="url(#softShadow)"/>
+        <text x="115" y="28" text-anchor="middle" class="chip">Job / Publish / Reembed</text>
+        <text x="115" y="52" text-anchor="middle" class="small">kb_ingest_jobs 状态落库</text>
+        <text x="115" y="70" text-anchor="middle" class="small">发布 published 与重算 embeddings</text>
+        <text x="115" y="88" text-anchor="middle" class="small">支持更新 / 删除 / 重嵌入</text>
+      </g>
+
+      <path d="M 244 143 L 264 143" fill="none" stroke="#7c3aed" stroke-width="4" marker-end="url(#arrowPurple)"/>
+      <path d="M 490 143 L 510 143" fill="none" stroke="#7c3aed" stroke-width="4" marker-end="url(#arrowPurple)"/>
+      <path d="M 736 143 L 756 143" fill="none" stroke="#7c3aed" stroke-width="4" marker-end="url(#arrowPurple)"/>
+      <path d="M 982 143 L 1002 143" fill="none" stroke="#7c3aed" stroke-width="4" marker-end="url(#arrowPurple)"/>
+      <path d="M 1228 143 L 1248 143" fill="none" stroke="#7c3aed" stroke-width="4" marker-end="url(#arrowPurple)"/>
+    </g>
+
+    <g transform="translate(36,518)">
+      <rect width="1496" height="160" rx="24" fill="url(#layerGreen)" stroke="#86efac" stroke-width="1.5" filter="url(#softShadow)"/>
+      <text x="22" y="34" class="card-title">C. 主存储与镜像层</text>
+      <text x="22" y="58" class="body">Chroma 是知识主库，`kb_cache` 是本地镜像与降级读取层；目录树浏览不直接读 Chroma，而是主要消费 `kb_cache`。</text>
+
+      <g transform="translate(38,84)">
+        <rect width="286" height="54" rx="16" fill="#ffffff" stroke="#bbf7d0"/>
+        <text x="143" y="22" text-anchor="middle" class="chip">Chroma Collections</text>
+        <text x="143" y="40" text-anchor="middle" class="small">public / internal / project.{id}.kb</text>
+      </g>
+      <g transform="translate(372,84)">
+        <rect width="246" height="54" rx="16" fill="#ffffff" stroke="#bbf7d0"/>
+        <text x="123" y="22" text-anchor="middle" class="chip">/api/v1/kb/cache/sync</text>
+        <text x="123" y="40" text-anchor="middle" class="small">全量同步 metadata 与 documents</text>
+      </g>
+      <g transform="translate(666,84)">
+        <rect width="248" height="54" rx="16" fill="#ffffff" stroke="#bbf7d0"/>
+        <text x="124" y="22" text-anchor="middle" class="chip">SQLite `kb_cache`</text>
+        <text x="124" y="40" text-anchor="middle" class="small">本地镜像 / 增量 upsert / 降级读</text>
+      </g>
+      <g transform="translate(962,84)">
+        <rect width="242" height="54" rx="16" fill="#ffffff" stroke="#bbf7d0"/>
+        <text x="121" y="22" text-anchor="middle" class="chip">build_browse_tree</text>
+        <text x="121" y="40" text-anchor="middle" class="small">按 domain + folder_path 聚合</text>
+      </g>
+      <g transform="translate(1252,84)">
+        <rect width="208" height="54" rx="16" fill="#ffffff" stroke="#bbf7d0"/>
+        <text x="104" y="22" text-anchor="middle" class="chip">/knowledge 页面</text>
+        <text x="104" y="40" text-anchor="middle" class="small">目录树 / 详情 / 缓存读取</text>
+      </g>
+
+      <path d="M 324 111 L 372 111" fill="none" stroke="#059669" stroke-width="4" marker-end="url(#arrowGreen)"/>
+      <path d="M 618 111 L 666 111" fill="none" stroke="#059669" stroke-width="4" marker-end="url(#arrowGreen)"/>
+      <path d="M 914 111 L 962 111" fill="none" stroke="#059669" stroke-width="4" marker-end="url(#arrowGreen)"/>
+      <path d="M 1204 111 L 1252 111" fill="none" stroke="#059669" stroke-width="4" marker-end="url(#arrowGreen)"/>
+    </g>
+
+    <g transform="translate(36,700)">
+      <rect width="1496" height="186" rx="24" fill="url(#layerAmber)" stroke="#facc15" stroke-width="1.5" filter="url(#softShadow)"/>
+      <text x="22" y="34" class="card-title">D. 查询代理与降级层</text>
+      <text x="22" y="58" class="body">查询统一经 `kb_proxy_service` 代理；优先语义检索，失败后依次尝试本地向量重排、关键词 contains，最终才回退到 `kb_cache` 只读模式。</text>
+
+      <g transform="translate(18,84)">
+        <rect width="206" height="68" class="card" filter="url(#softShadow)"/>
+        <text x="103" y="24" text-anchor="middle" class="chip">/api/v1/kb/query</text>
+        <text x="103" y="46" text-anchor="middle" class="small">collection query / query-all</text>
+      </g>
+      <g transform="translate(246,84)">
+        <rect width="220" height="68" class="card" filter="url(#softShadow)"/>
+        <text x="110" y="24" text-anchor="middle" class="chip">kb_proxy_service</text>
+        <text x="110" y="46" text-anchor="middle" class="small">统一健康探测与代理入口</text>
+      </g>
+      <g transform="translate(488,84)">
+        <rect width="224" height="68" class="card" filter="url(#softShadow)"/>
+        <text x="112" y="24" text-anchor="middle" class="chip">Chroma semantic query</text>
+        <text x="112" y="46" text-anchor="middle" class="small">query_embeddings / query_texts</text>
+      </g>
+      <g transform="translate(734,84)">
+        <rect width="228" height="68" class="card" filter="url(#softShadow)"/>
+        <text x="114" y="24" text-anchor="middle" class="chip">Local embed rerank</text>
+        <text x="114" y="46" text-anchor="middle" class="small">全量取文档后本地 cosine 排序</text>
+      </g>
+      <g transform="translate(984,84)">
+        <rect width="220" height="68" class="card" filter="url(#softShadow)"/>
+        <text x="110" y="24" text-anchor="middle" class="chip">Contains fallback</text>
+        <text x="110" y="46" text-anchor="middle" class="small">where_document contains</text>
+      </g>
+      <g transform="translate(1226,84)">
+        <rect width="252" height="68" class="card" filter="url(#softShadow)"/>
+        <text x="126" y="24" text-anchor="middle" class="chip">Readonly cache mode</text>
+        <text x="126" y="46" text-anchor="middle" class="small">外部 KB 不可用时直接读取 kb_cache</text>
+      </g>
+
+      <path d="M 224 118 L 246 118" fill="none" stroke="#64748b" stroke-width="4" marker-end="url(#arrowSlate)"/>
+      <path d="M 466 118 L 488 118" fill="none" stroke="#64748b" stroke-width="4" marker-end="url(#arrowSlate)"/>
+      <path d="M 712 118 L 734 118" fill="none" stroke="#64748b" stroke-width="4" marker-end="url(#arrowSlate)"/>
+      <path d="M 962 118 L 984 118" fill="none" stroke="#64748b" stroke-width="4" marker-end="url(#arrowSlate)"/>
+      <path d="M 1204 118 L 1226 118" fill="none" stroke="#64748b" stroke-width="4" marker-end="url(#arrowSlate)"/>
+    </g>
+
+    <g transform="translate(36,908)">
+      <rect width="1496" height="172" rx="24" class="panel"/>
+      <text x="24" y="34" class="card-title">E. 项目级知识沉淀与治理</text>
+      <text x="24" y="56" class="small">将项目资产、治理操作和元数据约束拆成两行展示，避免底部标签互相挤压。</text>
+
+      <g transform="translate(20,72)">
+        <rect width="452" height="40" rx="14" fill="#eff6ff"/>
+        <text x="226" y="16" text-anchor="middle" class="metric">
+          <tspan x="226" dy="0">附件 / 输出自动沉淀到</tspan>
+          <tspan x="226" dy="14">project.{project_id}.kb</tspan>
+        </text>
+      </g>
+      <g transform="translate(522,72)">
+        <rect width="452" height="40" rx="14" fill="#f0fdf4"/>
+        <text x="226" y="16" text-anchor="middle" class="metric">
+          <tspan x="226" dy="0">项目配置自动注入</tspan>
+          <tspan x="226" dy="14">project collection 供 RAG 使用</tspan>
+        </text>
+      </g>
+      <g transform="translate(1024,72)">
+        <rect width="452" height="40" rx="14" fill="#fff7ed"/>
+        <text x="226" y="16" text-anchor="middle" class="metric">
+          <tspan x="226" dy="0">支持 manual entry / update / delete</tspan>
+          <tspan x="226" dy="14">publish / reembed 等治理动作</tspan>
+        </text>
+      </g>
+      <g transform="translate(20,122)">
+        <rect width="702" height="40" rx="14" fill="#faf5ff"/>
+        <text x="351" y="16" text-anchor="middle" class="metric">
+          <tspan x="351" dy="0">metadata 决定目录树位置、发布状态、来源追踪</tspan>
+          <tspan x="351" dy="14">以及后续治理策略</tspan>
+        </text>
+      </g>
+      <g transform="translate(774,122)">
+        <rect width="702" height="40" rx="14" fill="#fefce8"/>
+        <text x="351" y="16" text-anchor="middle" class="metric">
+          <tspan x="351" dy="0">设计原则：主库存储、缓存展示、代理查询</tspan>
+          <tspan x="351" dy="14">以及上游故障时可读降级</tspan>
+        </text>
+      </g>
+    </g>
+
+    <path d="M 784 496 L 784 518" fill="none" stroke="#7c3aed" stroke-width="4" marker-end="url(#arrowPurple)"/>
+    <g transform="translate(712,498)">
+      <rect width="144" height="28" class="label"/>
+      <text x="72" y="18" text-anchor="middle" class="chip">主库存储后触发 sync</text>
+    </g>
+
+    <path d="M 784 678 L 784 700" fill="none" stroke="#059669" stroke-width="4" marker-end="url(#arrowGreen)"/>
+    <g transform="translate(714,680)">
+      <rect width="140" height="28" class="label"/>
+      <text x="70" y="18" text-anchor="middle" class="chip">展示与查询分离</text>
+    </g>
+
+    <path d="M 1332 796 C 1402 796, 1456 652, 1340 598" class="dash" marker-end="url(#arrowSlate)"/>
+    <g transform="translate(1330,626)">
+      <rect width="144" height="28" class="label"/>
+      <text x="72" y="18" text-anchor="middle" class="chip">故障时回读缓存</text>
+    </g>
+  </g>
+</svg>

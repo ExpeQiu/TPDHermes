@@ -18,7 +18,13 @@ export interface ProjectFileListItem {
   status?: string | null;
 }
 
-/** 前端下拉 value：`output:{id}` | `attachment:{id}` */
+/** 前端下拉 value：`output:{id}` | `attachment:{id}` | `__all__`（全部输出物与附件） */
+export const ALL_PROJECT_FILES_SELECT_VALUE = "__all__";
+
+export function isAllProjectFilesSelection(value: string): boolean {
+  return value.trim() === ALL_PROJECT_FILES_SELECT_VALUE;
+}
+
 export function encodeProjectFileSelectValue(kind: ProjectFileKind, id: string): string {
   return `${kind}:${id}`;
 }
@@ -272,6 +278,27 @@ export function formatLocalRewriteExtra(input: LocalRewriteInput): string {
   return lines.join("\n");
 }
 
+/** 文稿优化：标明待优化输出与全文注入方式（非 kb 上下文） */
+export function formatDocOptimizeTaskExtra(
+  output: ProjectFileListItem,
+  input: LocalRewriteInput,
+): string {
+  const parts = [
+    "[文稿优化]",
+    `待优化输出: output_id=${output.id} title=${output.title}`,
+    "服务端已将上述输出的完整正文写入 task_input.source_material；请基于全文做局部优化，勿将其仅作参考上下文或依赖 kb 检索。",
+  ];
+  const section = input.targetSection?.trim();
+  const excerpt = input.sourceExcerpt?.trim();
+  const goal = input.rewriteGoal?.trim();
+  if (section || excerpt || goal) {
+    parts.push(formatLocalRewriteExtra(input));
+  } else {
+    parts.push("改写要求见本轮用户消息；请仅修改用户指明范围，保留其余部分原意与结构。");
+  }
+  return parts.join("\n\n");
+}
+
 export function formatAttachmentContextExtra(item: ProjectFileListItem): string {
   return [
     "[附件上下文]",
@@ -279,6 +306,29 @@ export function formatAttachmentContextExtra(item: ProjectFileListItem): string 
     `filename=${item.title}`,
     "请按需 kb_query 检索附件片段，勿臆造未检索内容。",
   ].join("\n");
+}
+
+export function formatAllProjectFilesExtra(files: ProjectFileListItem[]): string {
+  const outputs = files.filter((f) => f.kind === "output");
+  const attachments = files.filter((f) => f.kind === "attachment");
+  if (outputs.length === 0 && attachments.length === 0) {
+    return "";
+  }
+  const lines: string[] = ["[项目文件上下文]"];
+  if (outputs.length > 0) {
+    lines.push("输出物：");
+    for (const item of outputs) {
+      lines.push(`- output_id=${item.id} title=${item.title}`);
+    }
+  }
+  if (attachments.length > 0) {
+    lines.push("附件：");
+    for (const item of attachments) {
+      lines.push(`- attachment_id=${item.id} filename=${item.title}`);
+    }
+  }
+  lines.push("请按需 kb_query 检索上述输出物与附件，勿臆造未检索内容。");
+  return lines.join("\n");
 }
 
 export interface BuildChatTaskContextOptions {
@@ -302,10 +352,9 @@ export function buildChatTaskContextPayload(
   options: BuildChatTaskContextOptions,
 ): BuildChatTaskContextResult {
   const parts: string[] = [];
-  const decoded =
-    options.includeFileContext && options.selectedFileValue
-      ? decodeProjectFileSelectValue(options.selectedFileValue)
-      : null;
+  const decoded = options.selectedFileValue
+    ? decodeProjectFileSelectValue(options.selectedFileValue)
+    : null;
   const selectedFile = decoded
     ? options.projectFiles.find((f) => f.id === decoded.id && f.kind === decoded.kind)
     : null;
@@ -314,37 +363,56 @@ export function buildChatTaskContextPayload(
     if (!options.includeProjectContext || !options.selectedProjectId) {
       return { sourceOutputId: null, taskInputExtra: "", error: "文稿优化须选择项目" };
     }
+    if (isAllProjectFilesSelection(options.selectedFileValue)) {
+      return {
+        sourceOutputId: null,
+        taskInputExtra: "",
+        error: "文稿优化须指定单篇输出物，不支持「全部文件」",
+      };
+    }
     if (!decoded || decoded.kind !== "output") {
       return {
         sourceOutputId: null,
         taskInputExtra: "",
-        error: "文稿优化须选择项目输出物（不支持仅选附件）",
+        error: "文稿优化须选择待优化的项目输出物",
       };
     }
-    const goal = options.localRewrite?.rewriteGoal?.trim();
-    if (!goal) {
-      return { sourceOutputId: null, taskInputExtra: "", error: "文稿优化须填写改写目标" };
+    if (!selectedFile) {
+      return {
+        sourceOutputId: null,
+        taskInputExtra: "",
+        error: "所选输出物不存在或已失效，请重新选择",
+      };
     }
-    parts.push(formatLocalRewriteExtra(options.localRewrite ?? {}));
+    parts.push(formatDocOptimizeTaskExtra(selectedFile, options.localRewrite ?? {}));
     return { sourceOutputId: decoded.id, taskInputExtra: parts.join("\n\n"), error: null };
   }
 
   // co_create
+  const allProjectFiles =
+    options.includeFileContext &&
+    isAllProjectFilesSelection(options.selectedFileValue) &&
+    options.projectFiles.length > 0;
+
   if (
     options.includeProjectContext &&
     options.selectedProjectId &&
     options.projectContextExtra.trim() &&
-    !decoded
+    (!options.includeFileContext || !decoded)
   ) {
     parts.push(options.projectContextExtra.trim());
   }
-  if (decoded?.kind === "output") {
+  if (allProjectFiles) {
+    const block = formatAllProjectFilesExtra(options.projectFiles);
+    if (block) parts.push(block);
+  }
+  if (options.includeFileContext && decoded?.kind === "output") {
     if (options.localRewrite?.rewriteGoal?.trim()) {
       parts.push(formatLocalRewriteExtra(options.localRewrite));
     }
     return { sourceOutputId: decoded.id, taskInputExtra: parts.join("\n\n"), error: null };
   }
-  if (decoded?.kind === "attachment" && selectedFile) {
+  if (options.includeFileContext && decoded?.kind === "attachment" && selectedFile) {
     parts.push(formatAttachmentContextExtra(selectedFile));
     if (options.localRewrite?.rewriteGoal?.trim()) {
       parts.push(formatLocalRewriteExtra(options.localRewrite));
@@ -355,6 +423,39 @@ export function buildChatTaskContextPayload(
     parts.push(formatLocalRewriteExtra(options.localRewrite));
   }
   return { sourceOutputId: null, taskInputExtra: parts.join("\n\n"), error: null };
+}
+
+/** 文稿优化：检查项目与输出物是否已绑定，供侧栏与发送前提醒 */
+export function getDocOptimizeBindingStatus(options: {
+  selectedProjectId: string;
+  selectedFileValue: string;
+  projectFiles: ProjectFileListItem[];
+  projectFilesLoading?: boolean;
+}): { ready: boolean; issues: string[] } {
+  const issues: string[] = [];
+  const pid = options.selectedProjectId.trim();
+  if (!pid) {
+    issues.push("请选择项目");
+    return { ready: false, issues };
+  }
+  if (options.projectFilesLoading) {
+    issues.push("正在加载输出物列表…");
+    return { ready: false, issues };
+  }
+  const outputs = options.projectFiles.filter((f) => f.kind === "output");
+  if (outputs.length === 0) {
+    issues.push("该项目暂无输出物，请先在项目中创建文稿");
+  }
+  const decoded = decodeProjectFileSelectValue(options.selectedFileValue);
+  if (!decoded || decoded.kind !== "output") {
+    issues.push("请选择待优化输出物");
+  } else {
+    const file = options.projectFiles.find((f) => f.id === decoded.id && f.kind === "output");
+    if (!file) {
+      issues.push("所选输出物不存在或已失效，请重新选择");
+    }
+  }
+  return { ready: issues.length === 0, issues };
 }
 
 interface ProjectOutputListRow {
@@ -485,6 +586,22 @@ export function formatProjectContextForTaskInput(ctx: ProjectContextResponse): s
   if (bg) lines.push(`背景: ${bg.slice(0, 800)}`);
   const aud = ctx.audience?.trim();
   if (aud) lines.push(`受众: ${aud.slice(0, 400)}`);
+  if (ctx.recent_outputs?.length) {
+    lines.push("近期输出物：");
+    for (const item of ctx.recent_outputs.slice(0, 12)) {
+      const title = (item.title?.trim() || "未命名输出").slice(0, 120);
+      const summary = item.summary?.trim();
+      lines.push(
+        `- output_id=${item.id} title=${title}${summary ? ` summary=${summary.slice(0, 160)}` : ""}`,
+      );
+    }
+  }
+  if (ctx.attachments?.length) {
+    lines.push("项目附件：");
+    for (const item of ctx.attachments.slice(0, 32)) {
+      lines.push(`- attachment_id=${item.id} filename=${item.original_filename.slice(0, 120)}`);
+    }
+  }
   const stats = ctx.kb_stats;
   if (stats?.collection) {
     lines.push(

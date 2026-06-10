@@ -252,14 +252,14 @@ export default function SkillsPage() {
     <main className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-slate-100 p-4 text-slate-900 sm:p-6 md:p-8 dark:from-slate-950 dark:via-slate-900 dark:to-slate-950 dark:text-white">
       <div className={CONTENT_MAX_CLASS}>
         <div className="mb-8">
-          <div className="mb-3 flex items-center gap-3">
+          <div className="mb-3 flex items-center justify-between gap-4">
             <Link href="/" className="text-sm text-slate-400 transition hover:text-slate-900 dark:hover:text-white">
               ← 返回首页
             </Link>
-          </div>
-          <div className="inline-flex items-center gap-2 rounded-full border border-amber-500/30 bg-amber-500/10 px-3 py-1 text-xs font-medium text-amber-200">
-            <span className="h-2 w-2 rounded-full bg-amber-400" aria-hidden />
-            技能策略入口
+            <div className="inline-flex items-center gap-2 rounded-full border border-amber-500/30 bg-amber-500/10 px-3 py-1 text-xs font-medium text-amber-200">
+              <span className="h-2 w-2 rounded-full bg-amber-400" aria-hidden />
+              技能策略入口
+            </div>
           </div>
           <div className="mt-4 flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
             <div>

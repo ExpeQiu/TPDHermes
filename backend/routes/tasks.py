@@ -48,6 +48,7 @@ from backend.services.workshop_execution import (
 )
 from backend.services.workshop_skill_access import visible_workshop_skill_names
 from backend.services.workshop_tool_capture import load_workshop_tool_capture
+from backend.services.kb_source_capture import build_sources_for_sse, build_sources_payload_from_capture, load_kb_sources, prefetch_kb_sources_for_run
 from backend.services.user_identity import effective_user_id_for_api, viewer_role
 
 logger = logging.getLogger("tpdx.hermes")
@@ -162,6 +163,7 @@ def _response_meta(
     used_skills: list[str] | None = None,
     execution_mode: str | None = None,
     tool_capture_hit: bool = False,
+    citations_meta: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     meta: dict[str, Any] = {
         "used_skills": used_skills or [],
@@ -173,6 +175,9 @@ def _response_meta(
         meta["execution_mode"] = execution_mode
     if payload.entrypoint == "workshop" or used_skills:
         meta["tool_capture_hit"] = tool_capture_hit
+    if citations_meta:
+        meta["citations_count"] = citations_meta.get("citations_count", 0)
+        meta["unresolved_refs"] = citations_meta.get("unresolved_refs") or []
     return meta
 
 
@@ -338,12 +343,22 @@ async def execute_task(req: Request, task_req: TaskExecuteRequest, db: AsyncSess
         src_row = q.scalar_one_or_none()
         if not src_row:
             raise HTTPException(status_code=404, detail=f"来源输出不存在: {oid}")
-        use_full_source = refine_full_source or eff_request.entrypoint == "chat"
+        use_full_source = (
+            refine_full_source
+            or eff_request.entrypoint == "chat"
+            or eff_request.chat_mode == "doc_optimize"
+        )
         if use_full_source:
             material = (src_row.content or "").strip()
             ti = eff_request.task_input
             if not material:
                 raise HTTPException(status_code=400, detail="来源输出正文为空，无法优化")
+            logger.info(
+                "[chat-output-context] 注入完整正文 source_output_id=%s chars=%s chat_mode=%s",
+                oid,
+                len(material),
+                eff_request.chat_mode,
+            )
             if ti is None:
                 eff_request = eff_request.model_copy(
                     update={"task_input": TaskInputPayload(source_material=material)}
@@ -819,6 +834,15 @@ async def execute_task(req: Request, task_req: TaskExecuteRequest, db: AsyncSess
         return JSONResponse(content=body)
 
     async def event_stream() -> AsyncGenerator[str, None]:
+        kb_cols = [c for c in payload.knowledge.collections if c]
+        if user_text.strip():
+            await prefetch_kb_sources_for_run(
+                run_id=run_id,
+                project_id=eff_request.project_id,
+                collections=kb_cols,
+                query_text=user_text,
+            )
+
         target_url, api_key = _chat_target_required()
         headers = {"Content-Type": "application/json"}
         if api_key:
@@ -923,9 +947,25 @@ async def execute_task(req: Request, task_req: TaskExecuteRequest, db: AsyncSess
             payload.output.required_sections,
             must_have_headings=_must_have_headings(payload),
         )
+        sources_payload = await build_sources_for_sse(run_id, finalize_text)
+        if sources_payload.get("unresolved_refs"):
+            validation = {
+                **validation,
+                "citations_ok": False,
+                "unresolved_refs": sources_payload.get("unresolved_refs") or [],
+            }
+        elif sources_payload.get("sources"):
+            validation = {**validation, "citations_ok": True}
+
         status = "completed"
         if payload.output.must_follow_template and not validation.get("ok"):
             status = "draft"
+
+        citations_json_str = (
+            json.dumps(sources_payload, ensure_ascii=False)
+            if sources_payload.get("sources")
+            else None
+        )
 
         output_id: str | None = None
         try:
@@ -940,6 +980,7 @@ async def execute_task(req: Request, task_req: TaskExecuteRequest, db: AsyncSess
                         used_skills=used_skills,
                         execution_mode=exec_mode if (is_workshop or used_skills or capture_hit) else None,
                         tool_capture_hit=capture_hit,
+                        citations_meta=sources_payload,
                     ),
                     validation=validation,
                     error_message=None,
@@ -950,6 +991,7 @@ async def execute_task(req: Request, task_req: TaskExecuteRequest, db: AsyncSess
                     save_output=payload.execution.save_output,
                     output_title=payload.scenario.name,
                     output_owner_id=effective_uid,
+                    citations_json=citations_json_str,
                 )
         except Exception as exc:
             logger.exception("finalize_run failed run_id=%s err=%s", run_id, exc)
@@ -959,7 +1001,8 @@ async def execute_task(req: Request, task_req: TaskExecuteRequest, db: AsyncSess
                 "run_id": run_id,
                 "output_id": output_id,
                 "validation": validation,
-            }
+            },
+            "tphermes_sources": sources_payload,
         }
         if is_workshop:
             meta["tphermes_task"]["execution_mode"] = exec_mode
@@ -996,6 +1039,7 @@ class RunDetailResponse(BaseModel):
     error_message: str | None
     duration_ms: int | None
     created_at: str | None
+    kb_sources: dict[str, Any] | None = None
 
 
 @runs_router.get("/{run_id}", response_model=RunDetailResponse)
@@ -1013,6 +1057,9 @@ async def get_run(run_id: str, db: AsyncSession = Depends(get_db)):
         except json.JSONDecodeError:
             return None
 
+    capture = await load_kb_sources(db, run_id)
+    kb_sources = build_sources_payload_from_capture(capture, row.assistant_content or "")
+
     return RunDetailResponse(
         id=row.id,
         project_id=row.project_id,
@@ -1026,4 +1073,5 @@ async def get_run(run_id: str, db: AsyncSession = Depends(get_db)):
         error_message=row.error_message,
         duration_ms=row.duration_ms,
         created_at=row.created_at,
+        kb_sources=kb_sources if kb_sources.get("sources") else None,
     )

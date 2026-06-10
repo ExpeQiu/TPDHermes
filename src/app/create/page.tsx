@@ -143,8 +143,6 @@ function CreatePageInner() {
   const [selectedKbKeys, setSelectedKbKeys] = useState<string[]>([]);
   const [selectedSkillTemplate, setSelectedSkillTemplate] = useState("");
 
-  const [previewText, setPreviewText] = useState("");
-  const [previewBusy, setPreviewBusy] = useState(false);
   const [saveBusy, setSaveBusy] = useState(false);
   const [publishBusy, setPublishBusy] = useState(false);
   const [saveMessage, setSaveMessage] = useState("");
@@ -396,28 +394,6 @@ function CreatePageInner() {
     );
   }
 
-  async function runServerPreview() {
-    if (!selectedScenarioId) return;
-    setPreviewBusy(true);
-    try {
-      const res = await apiFetch(`/scenarios/${selectedScenarioId}/preview`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          project_id: null,
-          user_message: "（编排预览）",
-        }),
-      });
-      const data = await readJson<unknown>(res);
-      setPreviewText(JSON.stringify(data, null, 2));
-      console.info("[create] 编排预览", { scenario_id: selectedScenarioId });
-    } catch (e) {
-      setPreviewText(e instanceof Error ? e.message : "预览失败");
-    } finally {
-      setPreviewBusy(false);
-    }
-  }
-
   function openAddScenarioModal() {
     setAddError("");
     setNewScenarioName("");
@@ -640,12 +616,14 @@ function CreatePageInner() {
     <main className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-slate-100 p-4 text-slate-900 sm:p-6 md:p-8 dark:from-slate-950 dark:via-slate-900 dark:to-slate-950 dark:text-white">
       <div className={CONTENT_MAX_CLASS}>
         <header className="mb-8">
-          <Link href="/" className="text-sm text-slate-400 transition hover:text-slate-900 dark:hover:text-white">
-            ← 返回首页
-          </Link>
-          <div className={`mt-3 inline-flex items-center gap-2 px-3 py-1 text-xs ${pillBlue}`}>
-            <span className="h-2 w-2 rounded-full bg-blue-400" aria-hidden />
-            场景编排
+          <div className="flex items-center justify-between gap-4">
+            <Link href="/" className="text-sm text-slate-400 transition hover:text-slate-900 dark:hover:text-white">
+              ← 返回首页
+            </Link>
+            <div className={`inline-flex items-center gap-2 px-3 py-1 text-xs ${pillBlue}`}>
+              <span className="h-2 w-2 rounded-full bg-blue-400" aria-hidden />
+              场景编排
+            </div>
           </div>
           <h1 className="mt-4 text-3xl font-bold sm:text-4xl">场景编排</h1>
           <p className="mt-2 max-w-2xl text-sm text-slate-400">
@@ -980,20 +958,6 @@ function CreatePageInner() {
                   ) : null}
                 </div>
               </div>
-
-              <button
-                type="button"
-                onClick={runServerPreview}
-                disabled={previewBusy}
-                className="w-full rounded-2xl border border-slate-300 dark:border-slate-600 bg-slate-200/40 dark:bg-slate-800/40 py-3 text-sm hover:bg-slate-800 disabled:opacity-50"
-              >
-                {previewBusy ? "生成中…" : "编排预览"}
-              </button>
-              {previewText ? (
-                <pre className="max-h-48 overflow-auto rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-100 dark:bg-slate-950/80 p-3 text-xs text-slate-700 dark:text-slate-300">
-                  {previewText}
-                </pre>
-              ) : null}
 
               <button
                 type="button"

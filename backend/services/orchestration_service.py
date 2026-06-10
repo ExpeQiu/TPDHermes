@@ -531,7 +531,11 @@ async def assemble_payload(
         merged_cols = merge_project_kb_collections(knowledge.collections, project_row.id)
         knowledge = knowledge.model_copy(update={"collections": merged_cols})
 
-    execution = OrchestrationExecution(stream=request.stream, trace=True, save_output=True, save_run_log=True)
+    # 对话场景改为用户手动「存入项目」，不在编排完成时自动落 outputs
+    save_output = entrypoint != "chat"
+    execution = OrchestrationExecution(
+        stream=request.stream, trace=True, save_output=save_output, save_run_log=True
+    )
 
     payload = OrchestrationPayload(
         request_id=request_id,

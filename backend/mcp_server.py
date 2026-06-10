@@ -32,7 +32,9 @@ mcp = FastMCP(
     title="KB Query",
     description=(
         "Query the knowledge base for documents matching a text query. "
-        "Searches the specified ChromaDB collection by semantic similarity."
+        "Searches the specified ChromaDB collection by semantic similarity. "
+        "When invoked from TPDHermes chat/workshop agent, tphermes_run_id is required "
+        "(from orchestration execution.run_id) for citation tracking."
     ),
 )
 async def kb_query(
@@ -40,10 +42,11 @@ async def kb_query(
     collection_name: str,
     limit: int = 10,
     project_id: str | None = None,
+    tphermes_run_id: str | None = None,
 ) -> dict:
     """Query the knowledge base."""
     from backend.tools.kb_tools import kb_query as _kb_query
-    return await _kb_query(query, collection_name, limit, project_id)
+    return await _kb_query(query, collection_name, limit, project_id, tphermes_run_id)
 
 
 @mcp.tool(
@@ -64,10 +67,11 @@ async def kb_get_entry(
     collection_name: str,
     entry_id: str,
     project_id: str,
+    tphermes_run_id: str | None = None,
 ) -> dict:
     """Get a specific KB entry."""
     from backend.tools.kb_tools import kb_get_entry as _kb_get
-    return await _kb_get(collection_name, entry_id, project_id)
+    return await _kb_get(collection_name, entry_id, project_id, tphermes_run_id)
 
 
 @mcp.tool(

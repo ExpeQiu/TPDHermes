@@ -19,6 +19,76 @@ from backend.services.project_kb import is_project_kb_collection
 logger = logging.getLogger(__name__)
 
 
+async def _apply_kb_source_capture(
+    result: dict[str, Any],
+    *,
+    tphermes_run_id: str | None,
+    project_id: str | None,
+    collection_name: str,
+    tool_name: str = "kb_query",
+) -> dict[str, Any]:
+    if not tphermes_run_id and not project_id:
+        return result
+    from backend.services.kb_source_capture import (
+        annotate_results_with_capture,
+        save_kb_sources_for_run,
+    )
+
+    resolved_collection = (
+        str(result.get("collection_resolved") or collection_name or "").strip()
+    )
+    capture = await save_kb_sources_for_run(
+        run_id=tphermes_run_id,
+        project_id=project_id,
+        tool_name=tool_name,
+        payload=result,
+        collection_name=resolved_collection,
+    )
+    rows = list(result.get("results") or [])
+    if not rows:
+        return result
+    out = dict(result)
+    out["results"] = annotate_results_with_capture(rows, capture)
+    return out
+
+
+async def _apply_kb_get_entry_capture(
+    entry: dict[str, Any],
+    *,
+    tphermes_run_id: str | None,
+    project_id: str | None,
+    collection_name: str,
+) -> dict[str, Any]:
+    if not entry or (not tphermes_run_id and not project_id):
+        return entry
+    from backend.services.kb_source_capture import save_kb_sources_for_run
+
+    capture = await save_kb_sources_for_run(
+        run_id=tphermes_run_id,
+        project_id=project_id,
+        tool_name="kb_get_entry",
+        payload=entry,
+        collection_name=collection_name,
+    )
+    if not capture:
+        return entry
+    by_chunk = {
+        str(s.get("chunk_id")): s.get("ref")
+        for s in capture.get("sources") or []
+        if isinstance(s, dict) and s.get("chunk_id")
+    }
+    cid = str(entry.get("id") or "")
+    meta = entry.get("metadata") if isinstance(entry.get("metadata"), dict) else {}
+    if not cid and meta:
+        cid = str(meta.get("id") or meta.get("chunk_id") or "")
+    ref = by_chunk.get(cid)
+    if isinstance(ref, int):
+        out = dict(entry)
+        out["ref"] = ref
+        return out
+    return entry
+
+
 async def _record_kb_miss_if_empty(
     result: dict[str, Any],
     *,
@@ -68,6 +138,7 @@ async def kb_query(
     collection_name: str,
     limit: int = 10,
     project_id: Optional[str] = None,
+    tphermes_run_id: Optional[str] = None,
 ) -> dict:
     """
     Query the knowledge base.
@@ -282,14 +353,19 @@ async def kb_query(
                 filtered.get("warning"),
                 "semantic_miss_switched_to_cross_collection_lexical",
             )
-            return {
-                "results": lexical_rows[:limit],
-                "source": cross.get("source", filtered.get("source", "chroma")),
-                "count": min(len(lexical_rows), limit),
-                "warning": merge_kb_warnings(merged_warning, resolve_warning),
-                "collection_resolved": resolved_name,
-                "fallback_scope": "__all__",
-            }
+            return await _apply_kb_source_capture(
+                {
+                    "results": lexical_rows[:limit],
+                    "source": cross.get("source", filtered.get("source", "chroma")),
+                    "count": min(len(lexical_rows), limit),
+                    "warning": merge_kb_warnings(merged_warning, resolve_warning),
+                    "collection_resolved": resolved_name,
+                    "fallback_scope": "__all__",
+                },
+                tphermes_run_id=tphermes_run_id,
+                project_id=project_id,
+                collection_name=resolved_name,
+            )
 
     filtered["warning"] = merge_kb_warnings(filtered.get("warning"), resolve_warning)
     if resolved_name != str(collection_name or "").strip():
@@ -300,7 +376,12 @@ async def kb_query(
         collection=resolved_name,
         project_id=project_id,
     )
-    return filtered
+    return await _apply_kb_source_capture(
+        filtered,
+        tphermes_run_id=tphermes_run_id,
+        project_id=project_id,
+        collection_name=resolved_name,
+    )
 
 
 async def kb_list_collections(project_id: Optional[str] = None) -> dict:
@@ -324,6 +405,7 @@ async def kb_get_entry(
     collection_name: str,
     entry_id: str,
     project_id: str,
+    tphermes_run_id: Optional[str] = None,
 ) -> dict:
     """
     Retrieve a specific knowledge base entry by ID.
@@ -344,7 +426,12 @@ async def kb_get_entry(
     )
     for entry in entries:
         if entry.get("id") == entry_id:
-            return entry
+            return await _apply_kb_get_entry_capture(
+                entry,
+                tphermes_run_id=tphermes_run_id,
+                project_id=project_id,
+                collection_name=collection_name,
+            )
     return {}
 
 

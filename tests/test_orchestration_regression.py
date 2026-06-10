@@ -441,6 +441,76 @@ def test_chat_doc_optimize_requires_source_output_id():
     assert "来源输出" in ex.text or "source" in ex.text.lower()
 
 
+def test_chat_doc_optimize_injects_full_source_material():
+    """文稿优化须将来源输出全文写入 task_input.source_material，而非 kb 上下文提示。"""
+    import asyncio
+
+    from backend.db import async_session_maker
+    from backend.models.orchestration_run import OrchestrationRun
+
+    async def _load_request_json(run_id: str) -> dict:
+        async with async_session_maker() as db:
+            row = await db.get(OrchestrationRun, run_id)
+            assert row and row.request_json
+            return json.loads(row.request_json)
+
+    with TestClient(app) as client:
+        pr = client.post("/api/v1/projects/", json={"name": "chat文稿优化全文"}).json()
+        pid = pr["id"]
+        client.post(
+            f"/api/v1/projects/{pid}/scenarios",
+            json={"scenario_id": "general", "scenario_version": "1.0.0", "is_default": True},
+        )
+        iname = "hello_skill"
+        client.delete(f"/api/v1/skills/{iname}")
+        assert client.post(
+            "/api/v1/skills/",
+            json={"name": iname, "description": "t", "source": "local"},
+        ).status_code == 200
+        ex1 = client.post(
+            "/api/v1/tasks/execute",
+            json={
+                "entrypoint": "workshop",
+                "project_id": pid,
+                "scenario_id": "general",
+                "user_message": json.dumps({"name": "DocOptimizeUser", "title": "待优化稿"}),
+                "stream": False,
+                "overrides": {"skills": {"allowed": [iname]}},
+            },
+        )
+        assert ex1.status_code == 200, ex1.text
+        out_id = ex1.json().get("output_id")
+        assert out_id
+        detail = client.get(f"/api/v1/projects/{pid}/outputs/{out_id}")
+        assert detail.status_code == 200, detail.text
+        full_body = (detail.json().get("content") or "").strip()
+        assert full_body
+
+        ex2 = client.post(
+            "/api/v1/tasks/execute",
+            json={
+                "entrypoint": "chat",
+                "project_id": pid,
+                "chat_mode": "doc_optimize",
+                "source_output_id": out_id,
+                "user_message": "请优化第二段",
+                "task_input": {
+                    "extra": "[文稿优化]\n待优化输出: output_id="
+                    + out_id
+                    + "\n改写目标: 更简洁",
+                },
+                "stream": False,
+            },
+        )
+        assert ex2.status_code == 200, ex2.text
+        run_id = ex2.json().get("run_id")
+        assert run_id
+        req = asyncio.run(_load_request_json(run_id))
+    sm = (req.get("task_input") or {}).get("source_material") or ""
+    assert full_body in sm or sm == full_body
+    assert "kb_query" not in sm.lower()
+
+
 def test_chat_source_output_id_not_found():
     with TestClient(app) as client:
         pr = client.post("/api/v1/projects/", json={"name": "chat来源404"}).json()
@@ -457,3 +527,79 @@ def test_chat_source_output_id_not_found():
             },
         )
     assert ex.status_code == 404, ex.text
+
+
+def test_chat_assemble_payload_disables_auto_save_output():
+    import asyncio
+
+    from backend.db import async_session_maker
+    from backend.schemas.orchestration import TaskExecuteRequest
+    from backend.services.orchestration_service import assemble_payload
+
+    async def _run():
+        async with async_session_maker() as db:
+            payload, _ = await assemble_payload(
+                db,
+                TaskExecuteRequest(
+                    entrypoint="chat",
+                    project_id=None,
+                    user_message="hi",
+                    stream=False,
+                ),
+                effective_user_id="test-user",
+                actor_role="tenant_admin",
+            )
+        return payload.execution.save_output
+
+    assert asyncio.run(_run()) is False
+
+
+def test_chat_manual_deposit_from_chat():
+    import asyncio
+
+    from backend.db import async_session_maker
+    from backend.services.run_log_service import create_run
+
+    async def _create_run(project_id: str) -> str:
+        run_id = str(uuid.uuid4())
+        async with async_session_maker() as db:
+            await create_run(
+                db,
+                run_id=run_id,
+                project_id=project_id,
+                scenario_id="general",
+                entrypoint="chat",
+                user_id="test-user",
+                request_json=json.dumps({"user_message": "写一句 Slogan"}, ensure_ascii=False),
+                snapshot_json="{}",
+            )
+        return run_id
+
+    with TestClient(app) as client:
+        pr = client.post("/api/v1/projects/", json={"name": "chat手动存入"}).json()
+        pid = pr["id"]
+        run_id = asyncio.run(_create_run(pid))
+        content = "Hermes 让知识流动起来。"
+
+        dep = client.post(
+            f"/api/v1/projects/{pid}/outputs/deposit-from-chat",
+            json={
+                "content": content,
+                "title": "对话摘录",
+                "run_id": run_id,
+                "message_id": "msg-test-1",
+            },
+        )
+        assert dep.status_code == 200, dep.text
+        out_id = dep.json().get("id")
+        assert out_id
+        assert dep.json().get("entrypoint") == "chat"
+        assert dep.json().get("content") == content
+
+        lst = client.get(f"/api/v1/projects/{pid}/outputs")
+        assert lst.status_code == 200
+        rows = lst.json()
+        assert any(o["id"] == out_id for o in rows)
+        matched = next(o for o in rows if o["id"] == out_id)
+        assert matched.get("entrypoint") == "chat"
+        assert matched.get("user_message") == "写一句 Slogan"

@@ -23,6 +23,7 @@ import {
 } from "@/lib/ui-labels";
 import { trackUsage } from "@/lib/usage-tracker";
 import ProjectMembersPanel from "@/components/projects/ProjectMembersPanel";
+import { ProjectOutputContentBody } from "@/components/project-output-content";
 
 interface Project {
   id: string;
@@ -63,6 +64,7 @@ interface ApiOutputRow {
   kb_ingest_status?: string | null;
   kb_doc_id?: string | null;
   kb_chunk_count?: number | null;
+  user_message?: string | null;
 }
 
 interface ApiRunRow {
@@ -89,6 +91,7 @@ interface ApiOutputDetail {
   created_at: string | null;
   updated_at: string | null;
   content_format: string;
+  user_message?: string | null;
 }
 
 interface ProjectOutput {
@@ -105,6 +108,8 @@ interface ProjectOutput {
   entrypoint?: string | null;
   status: string;
   kb_ingest_status?: string | null;
+  content_format?: string | null;
+  user_message?: string | null;
 }
 
 function buildOutputChatRefineLink(
@@ -149,7 +154,7 @@ function mapApiOutput(o: ApiOutputRow): ProjectOutput {
   return {
     id: o.id,
     skill_name: "编排输出",
-    skill_icon: "📋",
+    skill_icon: (o.entrypoint || "").toLowerCase() === "chat" ? "💬" : "📄",
     title: o.title ?? "输出物",
     content: body,
     created_at: o.created_at ?? "",
@@ -160,7 +165,213 @@ function mapApiOutput(o: ApiOutputRow): ProjectOutput {
     entrypoint: o.entrypoint ?? null,
     status: o.status || "draft",
     kb_ingest_status: o.kb_ingest_status ?? null,
+    user_message: o.user_message ?? null,
   };
+}
+
+function outputDisplayTitle(output: ProjectOutput): string {
+  if (outputDepositGroup(output) === "chat") {
+    const question = (output.user_message || "").trim();
+    if (question) {
+      return question.length > 100 ? `${question.slice(0, 100)}…` : question;
+    }
+    return output.title?.trim() || "对话输出";
+  }
+  return output.title?.trim() || "输出物";
+}
+
+type OutputDepositGroup = "chat" | "file";
+
+function outputDepositGroup(output: Pick<ProjectOutput, "entrypoint">): OutputDepositGroup {
+  return (output.entrypoint || "").toLowerCase() === "chat" ? "chat" : "file";
+}
+
+const OUTPUT_DEPOSIT_GROUPS: {
+  key: OutputDepositGroup;
+  title: string;
+  description: string;
+  icon: string;
+}[] = [
+  {
+    key: "chat",
+    title: "对话类",
+    description: "来自对话创作的沉淀结果",
+    icon: "💬",
+  },
+  {
+    key: "file",
+    title: "文件类",
+    description: "来自场景输出与工坊的正式交付物",
+    icon: "📄",
+  },
+];
+
+function ProjectOutputCard({
+  output,
+  selected,
+  onSelect,
+}: {
+  output: ProjectOutput;
+  selected: boolean;
+  onSelect: () => void;
+}) {
+  return (
+    <div
+      onClick={onSelect}
+      className={`cursor-pointer rounded-xl border bg-slate-200/60 p-4 transition hover:border-slate-300 dark:bg-slate-800/60 dark:hover:border-slate-600 ${
+        selected ? "border-blue-500" : "border-slate-300 dark:border-slate-700"
+      }`}
+    >
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex min-w-0 items-start gap-3">
+          <span className="shrink-0 text-2xl">{output.skill_icon}</span>
+          <div className="min-w-0">
+            <div className="mb-1 flex flex-wrap items-center gap-2">
+              <h3 className="truncate text-sm font-medium sm:text-base" title={outputDisplayTitle(output)}>
+                {outputDisplayTitle(output)}
+              </h3>
+              <span className="shrink-0 text-xs text-slate-500">{formatDate(output.created_at)}</span>
+            </div>
+            <div className="flex flex-wrap gap-1.5">
+              <span className={outputStatusBadgeClass(output.status)}>
+                {output.status === "approved" ? "✓ " : ""}
+                {outputStatusLabel(output.status)}
+              </span>
+              <span className={kbIngestBadgeClass(output.kb_ingest_status)}>
+                KB {kbIngestStatusLabel(output.kb_ingest_status)}
+              </span>
+              {output.tags
+                .filter((tag) => tag !== outputStatusLabel(output.status))
+                .map((tag) => (
+                  <span
+                    key={tag}
+                    className="rounded bg-slate-300/60 px-2 py-0.5 text-xs text-slate-400 dark:bg-slate-700/60"
+                  >
+                    {tag}
+                  </span>
+                ))}
+              <span className="text-xs text-slate-500">{output.word_count.toLocaleString()} 字</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ProjectOutputDetailPanel({
+  output,
+  outputFullContent,
+  outputDetailLoading,
+  copied,
+  outputActionLinks,
+  outputGovernBusy,
+  onCopy,
+  onClose,
+  onApprove,
+  onArchive,
+}: {
+  output: ProjectOutput;
+  outputFullContent: string | null;
+  outputDetailLoading: boolean;
+  copied: boolean;
+  outputActionLinks: { chat: string; workshop: string } | null;
+  outputGovernBusy: boolean;
+  onCopy: () => void;
+  onClose: () => void;
+  onApprove: () => void;
+  onArchive: () => void;
+}) {
+  const displayContent = outputFullContent ?? output.content;
+  return (
+    <div className="flex min-h-[320px] flex-col overflow-hidden rounded-2xl border border-slate-300 bg-slate-200/80 dark:border-slate-700 dark:bg-slate-800/80 lg:max-h-[calc(100vh-8rem)]">
+      <div className="flex items-start justify-between gap-3 border-b border-slate-300 p-4 dark:border-slate-700">
+        <div className="flex min-w-0 items-start gap-3">
+          <span className="text-2xl shrink-0">{output.skill_icon}</span>
+          <div className="min-w-0">
+            <h2 className="truncate text-sm font-semibold sm:text-base" title={outputDisplayTitle(output)}>
+              {outputDisplayTitle(output)}
+            </h2>
+            <div className="mt-1 flex flex-wrap items-center gap-2">
+              <p className="text-xs text-slate-500">
+                {output.skill_name} · {formatDate(output.created_at)}
+              </p>
+              <span className={outputStatusBadgeClass(output.status)}>
+                {output.status === "approved" ? "✓ " : ""}
+                {outputStatusLabel(output.status)}
+              </span>
+            </div>
+          </div>
+        </div>
+        <div className="flex shrink-0 items-center gap-2">
+          <button
+            type="button"
+            onClick={onCopy}
+            className={`rounded-lg border px-3 py-1.5 text-xs font-medium transition ${
+              copied
+                ? "border-green-500/50 bg-green-500/10 text-green-400"
+                : "border-slate-300 bg-slate-300/60 text-slate-700 hover:bg-slate-700 dark:border-slate-600 dark:bg-slate-700/60 dark:text-slate-300"
+            }`}
+          >
+            {copied ? "✓ 已复制" : "复制全文"}
+          </button>
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-lg bg-slate-300 px-3 py-1.5 text-sm transition hover:bg-slate-600 dark:bg-slate-700"
+            aria-label="关闭详情"
+          >
+            ✕
+          </button>
+        </div>
+      </div>
+      <div className="flex-1 overflow-y-auto p-4">
+        <ProjectOutputContentBody
+          content={displayContent}
+          contentFormat={output.content_format}
+          loading={outputDetailLoading}
+        />
+      </div>
+      <div className="border-t border-slate-300 p-4 dark:border-slate-700">
+        <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
+          {outputActionLinks ? (
+            <>
+              <Link
+                href={outputActionLinks.chat}
+                className="min-w-[8rem] flex-1 rounded-lg border border-blue-300 bg-blue-50 px-4 py-2 text-center text-sm font-medium text-blue-900 transition hover:bg-blue-100 dark:border-blue-500/50 dark:bg-blue-500/10 dark:text-blue-200 dark:hover:bg-blue-500/20"
+              >
+                对话优化
+              </Link>
+              <Link
+                href={outputActionLinks.workshop}
+                className="min-w-[8rem] flex-1 rounded-lg bg-blue-600 px-4 py-2 text-center text-sm font-medium transition hover:bg-blue-500"
+              >
+                二次创作
+              </Link>
+            </>
+          ) : null}
+          <button
+            type="button"
+            onClick={onApprove}
+            disabled={
+              outputGovernBusy || output.status === "approved" || output.status === "archived"
+            }
+            className="rounded-lg border border-emerald-300 bg-emerald-50 px-4 py-2 text-sm font-medium text-emerald-900 transition hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-40 dark:border-emerald-600/50 dark:bg-emerald-500/15 dark:text-emerald-100 dark:hover:bg-emerald-500/25"
+          >
+            采纳
+          </button>
+          <button
+            type="button"
+            onClick={onArchive}
+            disabled={outputGovernBusy || output.status === "archived"}
+            className="rounded-lg border border-amber-300 bg-amber-50 px-4 py-2 text-sm font-medium text-amber-900 transition hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-40 dark:border-amber-600/50 dark:bg-amber-500/15 dark:text-amber-100 dark:hover:bg-amber-500/25"
+          >
+            归档
+          </button>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 function kbIngestStatusLabel(status: string | null | undefined): string {
@@ -265,6 +476,26 @@ function formatDate(value: string | null | undefined) {
   });
 }
 
+function sanitizeAttachmentBaseName(name: string): string {
+  const trimmed = name.trim() || "项目说明";
+  return trimmed.replace(/[\\/:*?"<>|]/g, "_").slice(0, 120);
+}
+
+function buildPasteTextAttachmentFilename(projectName: string): string {
+  const now = new Date();
+  const date = [
+    now.getFullYear(),
+    String(now.getMonth() + 1).padStart(2, "0"),
+    String(now.getDate()).padStart(2, "0"),
+  ].join("");
+  const time = [
+    String(now.getHours()).padStart(2, "0"),
+    String(now.getMinutes()).padStart(2, "0"),
+    String(now.getSeconds()).padStart(2, "0"),
+  ].join("");
+  return `${sanitizeAttachmentBaseName(projectName)}_${date}_${time}.md`;
+}
+
 export default function ProjectDetailPage() {
   const { id } = useParams();
   const [project, setProject] = useState<Project | null>(null);
@@ -272,7 +503,7 @@ export default function ProjectDetailPage() {
   const [runs, setRuns] = useState<ApiRunRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<"info" | "outputs" | "runs" | "feedback">("info");
+  const [activeTab, setActiveTab] = useState<"info" | "outputs" | "runs" | "members" | "feedback">("info");
   const [selectedOutput, setSelectedOutput] = useState<ProjectOutput | null>(null);
   const [copied, setCopied] = useState(false);
   const [outputFullContent, setOutputFullContent] = useState<string | null>(null);
@@ -280,6 +511,9 @@ export default function ProjectDetailPage() {
   const [attachments, setAttachments] = useState<ApiAttachmentRow[]>([]);
   const [attachmentUploading, setAttachmentUploading] = useState(false);
   const [attachmentError, setAttachmentError] = useState<string | null>(null);
+  const [pasteTextOpen, setPasteTextOpen] = useState(false);
+  const [pasteTextContent, setPasteTextContent] = useState("");
+  const [pasteTextSaving, setPasteTextSaving] = useState(false);
   const [outputGovernBusy, setOutputGovernBusy] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [editOpen, setEditOpen] = useState(false);
@@ -498,6 +732,8 @@ export default function ProjectDetailPage() {
                 run_id: d.run_id ?? prev.run_id,
                 scenario_id: d.scenario_id ?? prev.scenario_id,
                 entrypoint: d.entrypoint ?? prev.entrypoint,
+                content_format: d.content_format ?? prev.content_format,
+                user_message: d.user_message ?? prev.user_message,
               }
             : prev,
         );
@@ -571,6 +807,18 @@ export default function ProjectDetailPage() {
     }
   };
 
+  const uploadAttachmentFile = async (file: File) => {
+    if (!id) return;
+    const fd = new FormData();
+    fd.append("file", file);
+    const res = await apiFetch(`/projects/${String(id)}/attachments`, {
+      method: "POST",
+      body: fd,
+    });
+    await readJson<ApiAttachmentRow>(res);
+    await refreshAttachments();
+  };
+
   const handlePickAttachment = () => {
     trackUsage({
       eventName: "project_attachment_pick_click",
@@ -595,18 +843,59 @@ export default function ProjectDetailPage() {
     });
     setAttachmentUploading(true);
     setAttachmentError(null);
-    const fd = new FormData();
-    fd.append("file", file);
     try {
-      const res = await apiFetch(`/projects/${String(id)}/attachments`, {
-        method: "POST",
-        body: fd,
-      });
-      await readJson<ApiAttachmentRow>(res);
-      await refreshAttachments();
+      await uploadAttachmentFile(file);
     } catch (err) {
       setAttachmentError(err instanceof Error ? err.message : "上传失败");
     } finally {
+      setAttachmentUploading(false);
+    }
+  };
+
+  const openPasteTextModal = () => {
+    trackUsage({
+      eventName: "project_attachment_paste_open",
+      feature: "projects_attachments",
+      action: "paste_open",
+      projectId: id ? String(id) : undefined,
+    });
+    setAttachmentError(null);
+    setPasteTextContent("");
+    setPasteTextOpen(true);
+  };
+
+  const handleSavePasteText = async () => {
+    if (!id || !project) return;
+    const text = pasteTextContent.trim();
+    if (!text) {
+      setAttachmentError("请输入说明文字");
+      return;
+    }
+    const filename = buildPasteTextAttachmentFilename(project.name);
+    trackUsage({
+      eventName: "project_attachment_paste_save",
+      feature: "projects_attachments",
+      action: "paste_save",
+      projectId: String(id),
+      properties: { file_name: filename, size: text.length },
+    });
+    setPasteTextSaving(true);
+    setAttachmentUploading(true);
+    setAttachmentError(null);
+    try {
+      const file = new File([text], filename, { type: "text/markdown" });
+      await uploadAttachmentFile(file);
+      console.info("[project] 粘贴说明已保存为附件", {
+        project_id: id,
+        filename,
+        size: text.length,
+      });
+      setPasteTextOpen(false);
+      setPasteTextContent("");
+    } catch (err) {
+      setAttachmentError(err instanceof Error ? err.message : "保存失败");
+    } finally {
+      setPasteTextSaving(false);
       setAttachmentUploading(false);
     }
   };
@@ -639,9 +928,6 @@ export default function ProjectDetailPage() {
       setAttachmentError(err instanceof Error ? err.message : "重新入库失败");
     }
   };
-
-  const attachmentDownloadUrl = (attachmentId: string) =>
-    apiV1(`/projects/${String(id)}/attachments/${attachmentId}/download`);
 
   const openEditProject = () => {
     if (!project) return;
@@ -701,8 +987,30 @@ export default function ProjectDetailPage() {
     "w-full rounded-lg border border-slate-300 bg-white/90 px-3 py-2 text-sm text-slate-900 placeholder-slate-400 focus:border-blue-500 focus:outline-none dark:border-slate-600 dark:bg-slate-900/80 dark:text-white dark:placeholder-slate-500";
 
   const totalWords = outputs.reduce((sum, o) => sum + o.word_count, 0);
-  const latestOutput = outputs[0];
+  const outputsByDepositGroup = useMemo(() => {
+    const grouped: Record<OutputDepositGroup, ProjectOutput[]> = { chat: [], file: [] };
+    for (const output of outputs) {
+      grouped[outputDepositGroup(output)].push(output);
+    }
+    return grouped;
+  }, [outputs]);
+  const recentOutputs = useMemo(() => outputs.slice(0, 5), [outputs]);
   const latestRun = runs[0];
+
+  const openOutputFromQuickAccess = useCallback(
+    (output: ProjectOutput) => {
+      trackUsage({
+        eventName: "project_output_quick_access",
+        feature: "projects_outputs",
+        action: "open_from_console",
+        projectId: id ? String(id) : undefined,
+        properties: { output_id: output.id, deposit_group: outputDepositGroup(output) },
+      });
+      setActiveTab("outputs");
+      setSelectedOutput(output);
+    },
+    [id],
+  );
   const outputActionLinks = useMemo(() => {
     if (!id || !selectedOutput) return null;
     const projectId = String(id);
@@ -772,11 +1080,10 @@ export default function ProjectDetailPage() {
               />
             </div>
 
-            <ProjectMembersPanel projectId={project.id} myRole={project.my_role} />
-
             <div className="mb-6 flex gap-1 overflow-x-auto border-b border-slate-300 dark:border-slate-700">
               {[
                 { key: "info", label: "控制台" },
+                { key: "members", label: "项目成员" },
                 { key: "outputs", label: "输出沉淀", badge: outputs.length },
                 { key: "runs", label: "执行记录", badge: runs.length },
                 { key: "feedback", label: "用户反馈" },
@@ -862,25 +1169,14 @@ export default function ProjectDetailPage() {
                     <h2 className="mt-2 text-xl font-semibold text-slate-900 dark:text-white">工作流入口</h2>
                     <div className="mt-5 space-y-3">
                       <ActionLink
-                        href={`/chat?project_id=${id}`}
+                        href={`/chat?project_id=${id}&new_chat=1`}
                         title="进入对话创作"
                         desc=""
                       />
-                      <div className="grid grid-cols-3 gap-3">
-                        <button
-                          type="button"
-                          onClick={() => setQuickScenarioOpen((open) => !open)}
-                          className={`col-span-1 rounded-2xl border bg-white/90 dark:bg-slate-900/60 p-4 text-left transition hover:border-slate-300 dark:border-slate-600 hover:bg-slate-200 dark:hover:bg-slate-900 ${
-                            quickScenarioOpen
-                              ? "border-blue-500/50 bg-slate-900"
-                              : "border-slate-300 dark:border-slate-700"
-                          }`}
-                        >
-                          <p className="text-sm font-medium text-slate-900 dark:text-white">设置快捷场景</p>
-                        </button>
+                      <div className="grid grid-cols-6 gap-3">
                         <Link
                           href={workshopEntryHref}
-                          className="col-span-2 block rounded-2xl border border-slate-300 dark:border-slate-700 bg-white/90 dark:bg-slate-900/60 p-4 transition hover:border-slate-300 dark:border-slate-600 hover:bg-slate-200 dark:hover:bg-slate-900"
+                          className="col-span-5 block rounded-2xl border border-slate-300 dark:border-slate-700 bg-white/90 dark:bg-slate-900/60 p-4 transition hover:border-slate-300 dark:border-slate-600 hover:bg-slate-200 dark:hover:bg-slate-900"
                         >
                           <p className="text-sm font-medium text-slate-900 dark:text-white">进入场景输出</p>
                           {quickDraft.scenarioIds.length > 0 ? (
@@ -893,6 +1189,17 @@ export default function ProjectDetailPage() {
                             </p>
                           ) : null}
                         </Link>
+                        <button
+                          type="button"
+                          onClick={() => setQuickScenarioOpen((open) => !open)}
+                          className={`col-span-1 rounded-2xl border p-4 text-left transition ${
+                            quickScenarioOpen
+                              ? "border-blue-400 bg-blue-700 text-white dark:border-blue-400 dark:bg-blue-700"
+                              : "border-blue-600 bg-blue-600 text-white hover:border-blue-500 hover:bg-blue-500 dark:border-blue-500 dark:bg-blue-600 dark:hover:bg-blue-500"
+                          }`}
+                        >
+                          <p className="text-sm font-medium text-white">默认场景</p>
+                        </button>
                       </div>
                     </div>
                   </div>
@@ -997,13 +1304,21 @@ export default function ProjectDetailPage() {
                           上传需求说明、素材等，供编排与协作时参考。
                         </p>
                       </div>
-                      <div className="flex shrink-0 flex-col items-stretch gap-2 sm:items-end">
+                      <div className="flex shrink-0 flex-wrap items-stretch justify-end gap-2">
                         <input
                           ref={fileInputRef}
                           type="file"
                           className="hidden"
                           onChange={handleAttachmentFileChange}
                         />
+                        <button
+                          type="button"
+                          onClick={openPasteTextModal}
+                          disabled={attachmentUploading}
+                          className="rounded-xl border border-slate-300 bg-white/90 px-4 py-2 text-sm font-medium text-slate-800 transition hover:border-slate-400 hover:bg-slate-100 disabled:opacity-50 dark:border-slate-600 dark:bg-slate-900/60 dark:text-slate-200 dark:hover:bg-slate-800"
+                        >
+                          粘贴说明文字
+                        </button>
                         <button
                           type="button"
                           onClick={handlePickAttachment}
@@ -1060,14 +1375,6 @@ export default function ProjectDetailPage() {
                                   重试入库
                                 </button>
                               ) : null}
-                              <a
-                                href={attachmentDownloadUrl(a.id)}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="rounded-lg border border-slate-300 dark:border-slate-600 px-2.5 py-1 text-xs text-slate-800 dark:text-slate-200 transition hover:bg-slate-300 dark:bg-slate-700"
-                              >
-                                下载
-                              </a>
                               <button
                                 type="button"
                                 onClick={() => void handleDeleteAttachment(a.id)}
@@ -1083,31 +1390,39 @@ export default function ProjectDetailPage() {
                   </div>
 
                   <div className="rounded-3xl border border-slate-300 dark:border-slate-700 bg-slate-200 dark:bg-slate-800/50 p-5 sm:p-6">
-                    <p className="text-xs uppercase tracking-[0.2em] text-slate-500">最新输出</p>
-                    <h2 className="mt-2 text-xl font-semibold text-slate-900 dark:text-white">最近输出沉淀</h2>
-                    {latestOutput ? (
-                      <div className="mt-4 rounded-2xl border border-slate-300 dark:border-slate-700 bg-white/90 dark:bg-slate-900/60 p-4">
-                        <div className="flex items-start justify-between gap-3">
-                          <div>
-                            <p className="text-base font-medium text-slate-900 dark:text-white">{latestOutput.title}</p>
-                            <p className="mt-1 text-xs text-slate-500">
-                              {formatDate(latestOutput.created_at)}
-                            </p>
-                          </div>
-                          <span className="rounded-full bg-blue-50 px-2.5 py-1 text-xs text-blue-800 dark:bg-blue-500/10 dark:text-blue-300">
-                            {latestOutput.word_count.toLocaleString()} 字
-                          </span>
-                        </div>
-                        <p className="mt-3 line-clamp-4 text-sm leading-relaxed text-slate-400">
-                          {latestOutput.content}
-                        </p>
+                    <div className="flex flex-wrap items-start justify-between gap-2">
+                      <div>
+                        <p className="text-xs uppercase tracking-[0.2em] text-slate-500">最新输出</p>
+                        <h2 className="mt-2 text-xl font-semibold text-slate-900 dark:text-white">最近输出沉淀</h2>
+                        <p className="mt-1 text-xs text-slate-500">点击条目可在「输出沉淀」中查看全文</p>
                       </div>
-                    ) : (
+                      {outputs.length > 0 ? (
+                        <button
+                          type="button"
+                          onClick={() => setActiveTab("outputs")}
+                          className="shrink-0 text-xs font-medium text-blue-600 transition hover:text-blue-500 dark:text-blue-400 dark:hover:text-blue-300"
+                        >
+                          查看全部 {outputs.length} 条 →
+                        </button>
+                      ) : null}
+                    </div>
+                    {recentOutputs.length === 0 ? (
                       <EmptyState
                         icon="📝"
                         title="暂无输出物"
                         description="从编排、对话或工坊生成后将显示在此。"
                       />
+                    ) : (
+                      <div className="mt-4 max-h-72 space-y-2 overflow-y-auto pr-1">
+                        {recentOutputs.map((output) => (
+                          <ProjectOutputCard
+                            key={output.id}
+                            output={output}
+                            selected={false}
+                            onSelect={() => openOutputFromQuickAccess(output)}
+                          />
+                        ))}
+                      </div>
                     )}
                   </div>
                 </div>
@@ -1118,11 +1433,15 @@ export default function ProjectDetailPage() {
               <div className="space-y-4">
                 <div className="grid gap-3 md:grid-cols-3">
                   <MetricCard label="总输出数" value={String(outputs.length)} hint="已回收结果" />
-                  <MetricCard label="累计字数" value={totalWords.toLocaleString()} hint="内容资产规模" />
                   <MetricCard
-                    label="项目状态"
-                    value={project.status === "active" ? "进行中" : statusLabels[project.status] ?? project.status}
-                    hint="当前项目阶段"
+                    label="对话类"
+                    value={String(outputsByDepositGroup.chat.length)}
+                    hint="对话创作沉淀"
+                  />
+                  <MetricCard
+                    label="文件类"
+                    value={String(outputsByDepositGroup.file.length)}
+                    hint="场景输出交付物"
                   />
                 </div>
 
@@ -1136,152 +1455,78 @@ export default function ProjectDetailPage() {
                     </Link>
                   </div>
                 ) : (
-                  <div className="space-y-3">
-                    {outputs.map((output) => (
-                      <div
-                        key={output.id}
-                        onClick={() => {
-                          trackUsage({
-                            eventName: "project_output_open",
-                            feature: "projects_outputs",
-                            action: "open_output",
-                            projectId: id ? String(id) : undefined,
-                            properties: { output_id: output.id },
-                          });
-                          setSelectedOutput(output);
-                        }}
-                        className={`cursor-pointer rounded-xl border bg-slate-200/60 dark:bg-slate-800/60 p-4 transition hover:border-slate-300 dark:border-slate-600 ${
-                          selectedOutput?.id === output.id ? "border-blue-500" : "border-slate-300 dark:border-slate-700"
-                        }`}
-                      >
-                        <div className="flex items-start justify-between gap-3">
-                          <div className="flex items-start gap-3 min-w-0">
-                            <span className="text-2xl shrink-0">{output.skill_icon}</span>
-                            <div className="min-w-0">
-                              <div className="flex flex-wrap items-center gap-2 mb-1">
-                                <h3 className="font-medium text-sm sm:text-base truncate">{output.title}</h3>
-                                <span className="shrink-0 text-xs text-slate-500">
-                                  {formatDate(output.created_at)}
-                                </span>
+                  <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,2fr)]">
+                    <div className="min-w-0 space-y-6">
+                      {OUTPUT_DEPOSIT_GROUPS.map((group) => {
+                        const items = outputsByDepositGroup[group.key];
+                        return (
+                          <section key={group.key} className="space-y-3">
+                            <div className="flex flex-wrap items-end justify-between gap-2">
+                              <div>
+                                <h3 className="flex items-center gap-2 text-base font-semibold text-slate-900 dark:text-white">
+                                  <span>{group.icon}</span>
+                                  {group.title}
+                                  <span className="rounded-full bg-slate-200 px-2 py-0.5 text-xs font-normal text-slate-600 dark:bg-slate-700 dark:text-slate-300">
+                                    {items.length}
+                                  </span>
+                                </h3>
+                                <p className="mt-1 text-xs text-slate-500">{group.description}</p>
                               </div>
-                              <div className="flex flex-wrap gap-1.5 mb-2">
-                                <span className={outputStatusBadgeClass(output.status)}>
-                                  {output.status === "approved" ? "✓ " : ""}
-                                  {outputStatusLabel(output.status)}
-                                </span>
-                                <span className={kbIngestBadgeClass(output.kb_ingest_status)}>
-                                  KB {kbIngestStatusLabel(output.kb_ingest_status)}
-                                </span>
-                                {output.tags
-                                  .filter((tag) => tag !== outputStatusLabel(output.status))
-                                  .map((tag) => (
-                                    <span
-                                      key={tag}
-                                      className="rounded bg-slate-300/60 dark:bg-slate-700/60 px-2 py-0.5 text-xs text-slate-400"
-                                    >
-                                      {tag}
-                                    </span>
-                                  ))}
-                                <span className="text-xs text-slate-500">{output.word_count.toLocaleString()} 字</span>
+                            </div>
+                            {items.length === 0 ? (
+                              <div className="rounded-xl border border-dashed border-slate-300 px-4 py-8 text-center text-sm text-slate-500 dark:border-slate-700">
+                                {group.key === "chat" ? "暂无对话类输出" : "暂无文件类输出"}
                               </div>
-                              <p className="text-slate-400 text-xs line-clamp-2 leading-relaxed">
-                                {output.content.slice(0, 120)}…
-                              </p>
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-
-                {/* Output Detail Modal */}
-                {selectedOutput && (
-                  <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-                    <div className="bg-slate-200 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-2xl w-full max-w-2xl max-h-[85vh] overflow-hidden flex flex-col">
-                      <div className="flex items-center justify-between p-4 sm:p-5 border-b border-slate-300 dark:border-slate-700">
-                        <div className="flex items-center gap-3 min-w-0">
-                          <span className="text-2xl">{selectedOutput.skill_icon}</span>
-                          <div className="min-w-0">
-                            <h2 className="font-semibold text-sm sm:text-base truncate">{selectedOutput.title}</h2>
-                            <div className="mt-1 flex flex-wrap items-center gap-2">
-                              <p className="text-xs text-slate-500">
-                                {selectedOutput.skill_name} · {formatDate(selectedOutput.created_at)}
-                              </p>
-                              <span className={outputStatusBadgeClass(selectedOutput.status)}>
-                                {selectedOutput.status === "approved" ? "✓ " : ""}
-                                {outputStatusLabel(selectedOutput.status)}
-                              </span>
-                            </div>
-                          </div>
-                        </div>
-                        <div className="flex items-center gap-2 shrink-0 ml-3">
-                          <button
-                            onClick={() => handleCopy(outputFullContent ?? selectedOutput.content)}
-                            className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition ${
-                              copied
-                                ? "border-green-500/50 bg-green-500/10 text-green-400"
-                                : "border-slate-300 dark:border-slate-600 bg-slate-300/60 dark:bg-slate-700/60 text-slate-700 dark:text-slate-300 hover:bg-slate-700"
-                            }`}
-                          >
-                            {copied ? "✓ 已复制" : "复制全文"}
-                          </button>
-                          <button
-                            onClick={() => setSelectedOutput(null)}
-                            className="px-3 py-1.5 bg-slate-300 dark:bg-slate-700 hover:bg-slate-600 rounded-lg text-sm transition"
-                          >
-                            ✕
-                          </button>
-                        </div>
-                      </div>
-                      <div className="flex-1 overflow-y-auto p-4 sm:p-5">
-                        <pre className="whitespace-pre-wrap text-slate-800 dark:text-slate-200 text-sm leading-relaxed font-mono">
-                          {outputDetailLoading
-                            ? "正在加载全文…"
-                            : outputFullContent ?? selectedOutput.content}
-                        </pre>
-                      </div>
-                      <div className="border-t border-slate-300 dark:border-slate-700 p-4">
-                        <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
-                          {outputActionLinks ? (
-                            <>
-                              <Link
-                                href={outputActionLinks.chat}
-                                className="flex-1 min-w-[8rem] px-4 py-2 rounded-lg border border-blue-300 bg-blue-50 text-sm font-medium text-center text-blue-900 transition hover:bg-blue-100 dark:border-blue-500/50 dark:bg-blue-500/10 dark:text-blue-200 dark:hover:bg-blue-500/20"
-                              >
-                                对话优化
-                              </Link>
-                              <Link
-                                href={outputActionLinks.workshop}
-                                className="flex-1 min-w-[8rem] px-4 py-2 bg-blue-600 hover:bg-blue-500 rounded-lg text-sm font-medium text-center transition"
-                              >
-                                二次创作
-                              </Link>
-                            </>
-                          ) : null}
-                          <button
-                            type="button"
-                            onClick={() => void handleApproveProjectOutput()}
-                            disabled={
-                              outputGovernBusy ||
-                              selectedOutput.status === "approved" ||
-                              selectedOutput.status === "archived"
-                            }
-                            className="px-4 py-2 rounded-lg text-sm font-medium border border-emerald-300 bg-emerald-50 text-emerald-900 hover:bg-emerald-100 transition disabled:opacity-40 disabled:cursor-not-allowed dark:border-emerald-600/50 dark:bg-emerald-500/15 dark:text-emerald-100 dark:hover:bg-emerald-500/25"
-                          >
-                            采纳
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => void handleArchiveProjectOutput()}
-                            disabled={outputGovernBusy || selectedOutput.status === "archived"}
-                            className="px-4 py-2 rounded-lg text-sm font-medium border border-amber-300 bg-amber-50 text-amber-900 hover:bg-amber-100 transition disabled:opacity-40 disabled:cursor-not-allowed dark:border-amber-600/50 dark:bg-amber-500/15 dark:text-amber-100 dark:hover:bg-amber-500/25"
-                          >
-                            归档
-                          </button>
-                        </div>
-                      </div>
+                            ) : (
+                              <div className="space-y-3">
+                                {items.map((output) => (
+                                  <ProjectOutputCard
+                                    key={output.id}
+                                    output={output}
+                                    selected={selectedOutput?.id === output.id}
+                                    onSelect={() => {
+                                      trackUsage({
+                                        eventName: "project_output_open",
+                                        feature: "projects_outputs",
+                                        action: "open_output",
+                                        projectId: id ? String(id) : undefined,
+                                        properties: { output_id: output.id, deposit_group: group.key },
+                                      });
+                                      setSelectedOutput(output);
+                                    }}
+                                  />
+                                ))}
+                              </div>
+                            )}
+                          </section>
+                        );
+                      })}
                     </div>
+
+                    <aside className="min-w-0 lg:sticky lg:top-4 lg:self-start">
+                      {selectedOutput ? (
+                        <ProjectOutputDetailPanel
+                          output={selectedOutput}
+                          outputFullContent={outputFullContent}
+                          outputDetailLoading={outputDetailLoading}
+                          copied={copied}
+                          outputActionLinks={outputActionLinks}
+                          outputGovernBusy={outputGovernBusy}
+                          onCopy={() => handleCopy(outputFullContent ?? selectedOutput.content)}
+                          onClose={() => setSelectedOutput(null)}
+                          onApprove={() => void handleApproveProjectOutput()}
+                          onArchive={() => void handleArchiveProjectOutput()}
+                        />
+                      ) : (
+                        <div className="flex min-h-[320px] flex-col items-center justify-center rounded-2xl border border-dashed border-slate-300 bg-slate-100/50 p-6 text-center dark:border-slate-700 dark:bg-slate-900/30">
+                          <p className="text-3xl">📄</p>
+                          <p className="mt-3 text-sm font-medium text-slate-700 dark:text-slate-300">
+                            选择一条输出查看详情
+                          </p>
+                          <p className="mt-1 text-xs text-slate-500">点击左侧列表中的输出物，全文与操作将显示于此</p>
+                        </div>
+                      )}
+                    </aside>
                   </div>
                 )}
               </div>
@@ -1332,11 +1577,71 @@ export default function ProjectDetailPage() {
               </div>
             )}
 
+            {activeTab === "members" && (
+              <ProjectMembersPanel projectId={project.id} myRole={project.my_role} embedded />
+            )}
+
             {activeTab === "feedback" && (
               <Feedback
                 skillId={`project-${id}`}
                 skillName={project.name}
               />
+            )}
+
+            {pasteTextOpen && (
+              <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
+                <div
+                  role="dialog"
+                  aria-modal="true"
+                  aria-labelledby="paste-text-title"
+                  className="flex max-h-[90vh] w-full max-w-lg flex-col overflow-hidden rounded-2xl border border-slate-300 dark:border-slate-700 bg-slate-200 dark:bg-slate-800 shadow-xl"
+                >
+                  <div className="flex items-center justify-between border-b border-slate-300 dark:border-slate-700 px-4 py-3 sm:px-5">
+                    <h2 id="paste-text-title" className="text-lg font-semibold text-slate-900 dark:text-white">
+                      粘贴说明文字
+                    </h2>
+                    <button
+                      type="button"
+                      onClick={() => setPasteTextOpen(false)}
+                      disabled={pasteTextSaving}
+                      className="rounded-lg px-2 py-1 text-slate-400 transition hover:bg-slate-300 dark:bg-slate-700 hover:text-slate-900 dark:hover:text-white disabled:opacity-50"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                  <div className="space-y-3 overflow-y-auto px-4 py-4 sm:px-5">
+                    <p className="text-xs text-slate-500">
+                      粘贴需求说明、背景材料等文字，保存后以 Markdown 附件入库（命名：项目名_时间戳.md）
+                    </p>
+                    <textarea
+                      value={pasteTextContent}
+                      onChange={(e) => setPasteTextContent(e.target.value)}
+                      rows={12}
+                      placeholder="在此粘贴说明文字…"
+                      className={`${editInputCls} resize-y min-h-[12rem]`}
+                      autoFocus
+                    />
+                  </div>
+                  <div className="flex gap-3 border-t border-slate-300 dark:border-slate-700 px-4 py-3 sm:px-5">
+                    <button
+                      type="button"
+                      onClick={() => void handleSavePasteText()}
+                      disabled={pasteTextSaving || !pasteTextContent.trim()}
+                      className="flex-1 rounded-lg bg-blue-600 py-2 text-sm font-medium text-white transition hover:bg-blue-500 disabled:opacity-50"
+                    >
+                      {pasteTextSaving ? "保存中…" : "保存为附件"}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setPasteTextOpen(false)}
+                      disabled={pasteTextSaving}
+                      className="rounded-lg border border-slate-300 dark:border-slate-600 px-4 py-2 text-sm text-slate-700 dark:text-slate-300 transition hover:bg-slate-300 dark:bg-slate-700 disabled:opacity-50"
+                    >
+                      取消
+                    </button>
+                  </div>
+                </div>
+              </div>
             )}
 
             {editOpen && (

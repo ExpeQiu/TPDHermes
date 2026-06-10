@@ -37,6 +37,7 @@ from backend.services.project_kb_ingest import (
     ingest_project_attachment,
     remove_attachment_from_kb,
 )
+from backend.services.user_directory_service import list_registered_users
 from backend.services.user_identity import get_effective_user_id, viewer_role
 from backend.data.builtin_scenarios import BUILTIN_SCENARIOS, BUILTIN_VERSION
 
@@ -140,6 +141,14 @@ class ProjectMemberResponse(BaseModel):
     role: str
     created_at: str
     updated_at: str
+
+
+class RegisteredUserResponse(BaseModel):
+    user_id: str
+    display_name: str
+    avatar_initial: str
+    platform_role: str | None = None
+    platform_role_label: str | None = None
 
 
 def _project_to_response(project: Project, *, my_role: str | None = None) -> ProjectResponse:
@@ -421,6 +430,7 @@ class OutputListItem(BaseModel):
     kb_ingest_status: str | None = None
     kb_doc_id: str | None = None
     kb_chunk_count: int | None = None
+    user_message: str | None = None
 
 
 class OutputDetailResponse(BaseModel):
@@ -437,6 +447,7 @@ class OutputDetailResponse(BaseModel):
     updated_at: str | None
     content_format: str
     content: str
+    user_message: str | None = None
 
 
 async def _entrypoint_map_for_runs(
@@ -450,6 +461,42 @@ async def _entrypoint_map_for_runs(
         )
     )
     return {row[0]: row[1] for row in q.all() if row[0] and row[1]}
+
+
+def _user_message_from_request_json(raw: str | None) -> str | None:
+    if not raw:
+        return None
+    try:
+        data = json.loads(raw)
+        if not isinstance(data, dict):
+            return None
+        msg = str(data.get("user_message") or "").strip()
+        return msg or None
+    except json.JSONDecodeError:
+        return None
+
+
+async def _run_meta_for_outputs(
+    db: AsyncSession, run_ids: list[str]
+) -> dict[str, dict[str, str | None]]:
+    if not run_ids:
+        return {}
+    q = await db.execute(
+        select(
+            OrchestrationRun.id,
+            OrchestrationRun.entrypoint,
+            OrchestrationRun.request_json,
+        ).where(OrchestrationRun.id.in_(run_ids))
+    )
+    out: dict[str, dict[str, str | None]] = {}
+    for run_id, entrypoint, request_json in q.all():
+        if not run_id:
+            continue
+        out[str(run_id)] = {
+            "entrypoint": str(entrypoint or "").strip() or None,
+            "user_message": _user_message_from_request_json(request_json),
+        }
+    return out
 
 
 @router.get("/{project_id}/outputs", response_model=list[OutputListItem])
@@ -473,10 +520,11 @@ async def list_project_outputs(
     q = await db.execute(query)
     rows = q.scalars().all()
     run_ids = [o.run_id for o in rows if o.run_id]
-    entry_by_run = await _entrypoint_map_for_runs(db, run_ids)
+    run_meta = await _run_meta_for_outputs(db, run_ids)
     out: list[OutputListItem] = []
     for o in rows:
         preview = (o.content or "")[:200]
+        meta = run_meta.get(o.run_id or "", {})
         out.append(
             OutputListItem(
                 id=o.id,
@@ -485,13 +533,14 @@ async def list_project_outputs(
                 template_id=o.template_id,
                 run_id=o.run_id,
                 scenario_id=getattr(o, "scenario_id", None),
-                entrypoint=entry_by_run.get(o.run_id) if o.run_id else None,
+                entrypoint=meta.get("entrypoint") if o.run_id else None,
                 status=o.status,
                 created_at=o.created_at,
                 content_preview=preview,
                 kb_ingest_status=getattr(o, "kb_ingest_status", None),
                 kb_doc_id=getattr(o, "kb_doc_id", None),
                 kb_chunk_count=getattr(o, "kb_chunk_count", None),
+                user_message=meta.get("user_message") if o.run_id else None,
             )
         )
     return out
@@ -515,9 +564,11 @@ async def get_project_output_detail(
     if not row:
         raise HTTPException(status_code=404, detail="Output not found")
     entrypoint: str | None = None
+    user_message: str | None = None
     if row.run_id:
-        entry_by_run = await _entrypoint_map_for_runs(db, [row.run_id])
-        entrypoint = entry_by_run.get(row.run_id)
+        meta = (await _run_meta_for_outputs(db, [row.run_id])).get(row.run_id, {})
+        entrypoint = meta.get("entrypoint")
+        user_message = meta.get("user_message")
     return OutputDetailResponse(
         id=row.id,
         project_id=row.project_id,
@@ -532,6 +583,7 @@ async def get_project_output_detail(
         updated_at=row.updated_at,
         content_format=row.content_format or "markdown",
         content=row.content or "",
+        user_message=user_message,
     )
 
 
@@ -1034,6 +1086,132 @@ class OutputVersionCreate(BaseModel):
     scenario_id: str | None = None
 
 
+class ChatOutputDepositRequest(BaseModel):
+    content: str
+    title: str | None = None
+    run_id: str | None = None
+    scenario_id: str | None = None
+    session_id: str | None = None
+    message_id: str | None = None
+
+
+@router.post("/{project_id}/outputs/deposit-from-chat", response_model=OutputDetailResponse)
+async def deposit_chat_output(
+    project_id: str,
+    body: ChatOutputDepositRequest,
+    db: AsyncSession = Depends(get_db),
+    effective_uid: str = Depends(get_effective_user_id),
+):
+    """用户确认后将对话助手正文写入项目输出（对话类）。"""
+    await require_project_for_user(db, project_id, effective_uid, min_perm="write")
+    content = (body.content or "").strip()
+    if not content:
+        raise HTTPException(status_code=400, detail="正文不能为空")
+
+    run_id = (body.run_id or "").strip() or None
+    scenario_id = (body.scenario_id or "").strip() or None
+    title = (body.title or "").strip() or "对话输出"
+    run: OrchestrationRun | None = None
+
+    if run_id:
+        run = await db.get(OrchestrationRun, run_id)
+        if not run:
+            raise HTTPException(status_code=404, detail="编排 run 不存在")
+        if run.project_id and str(run.project_id) != project_id:
+            raise HTTPException(status_code=400, detail="run 与项目不匹配")
+        if not scenario_id:
+            scenario_id = run.scenario_id
+
+    now = datetime.now().isoformat()
+    row: OutputAsset
+
+    if run_id:
+        q = await db.execute(
+            select(OutputAsset).where(
+                OutputAsset.project_id == project_id,
+                OutputAsset.run_id == run_id,
+            )
+        )
+        existing = q.scalar_one_or_none()
+        if existing:
+            existing.content = content
+            existing.summary = content[:280]
+            existing.title = title
+            existing.updated_at = now
+            existing.status = "draft"
+            await db.commit()
+            await db.refresh(existing)
+            schedule_ingest_output(existing.id)
+            logger.info(
+                "[chat-output-deposit] updated output_id=%s run_id=%s project_id=%s message_id=%s",
+                existing.id,
+                run_id,
+                project_id,
+                body.message_id,
+            )
+            meta = (await _run_meta_for_outputs(db, [run_id])).get(run_id, {})
+            return OutputDetailResponse(
+                id=existing.id,
+                project_id=existing.project_id,
+                title=existing.title,
+                summary=existing.summary,
+                template_id=existing.template_id,
+                run_id=existing.run_id,
+                scenario_id=getattr(existing, "scenario_id", None),
+                entrypoint=meta.get("entrypoint"),
+                status=existing.status,
+                created_at=existing.created_at,
+                updated_at=existing.updated_at,
+                content_format=existing.content_format or "markdown",
+                content=existing.content or "",
+                user_message=meta.get("user_message"),
+            )
+
+    row = OutputAsset(
+        id=str(uuid.uuid4()),
+        project_id=project_id,
+        scenario_id=scenario_id,
+        run_id=run_id,
+        title=title,
+        summary=content[:280],
+        content=content,
+        content_format="markdown",
+        status="draft",
+        owner_id=effective_uid or "default",
+        created_at=now,
+        updated_at=now,
+    )
+    db.add(row)
+    await db.commit()
+    await db.refresh(row)
+    schedule_ingest_output(row.id)
+    logger.info(
+        "[chat-output-deposit] created output_id=%s run_id=%s project_id=%s message_id=%s session_id=%s",
+        row.id,
+        run_id,
+        project_id,
+        body.message_id,
+        body.session_id,
+    )
+    meta = (await _run_meta_for_outputs(db, [run_id])).get(run_id or "", {}) if run_id else {}
+    return OutputDetailResponse(
+        id=row.id,
+        project_id=row.project_id,
+        title=row.title,
+        summary=row.summary,
+        template_id=row.template_id,
+        run_id=row.run_id,
+        scenario_id=getattr(row, "scenario_id", None),
+        entrypoint=meta.get("entrypoint") if run_id else "chat",
+        status=row.status,
+        created_at=row.created_at,
+        updated_at=row.updated_at,
+        content_format=row.content_format or "markdown",
+        content=row.content or "",
+        user_message=meta.get("user_message") if run_id else None,
+    )
+
+
 @router.post("/{project_id}/outputs/{output_id}/versions", response_model=OutputDetailResponse)
 async def create_output_version(
     project_id: str,
@@ -1192,6 +1370,17 @@ async def list_project_members_api(
         )
         for row in rows
     ]
+
+
+@router.get("/{project_id}/registered-users", response_model=list[RegisteredUserResponse])
+async def list_registered_users_api(
+    project_id: str,
+    db: AsyncSession = Depends(get_db),
+    effective_uid: str = Depends(get_effective_user_id),
+):
+    await require_project_for_user(db, project_id, effective_uid, min_perm="manage_members")
+    rows = await list_registered_users(db)
+    return [RegisteredUserResponse(**row) for row in rows]
 
 
 @router.post("/{project_id}/members", response_model=ProjectMemberResponse)

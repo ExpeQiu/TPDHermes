@@ -138,6 +138,7 @@ def run_sqlite_migrations(connection: Connection) -> None:
                 ("scenario_id", "TEXT"),
                 ("user_id", "TEXT NOT NULL DEFAULT 'default'"),
                 ("tool_capture_json", "TEXT"),
+                ("kb_source_capture_json", "TEXT"),
             ],
         )
 

@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { apiDelete, apiGet } from "@/lib/api";
+import { apiGet, apiPut } from "@/lib/api";
 import { useUserAccess } from "@/lib/admin-access";
 import { CONTENT_MAX_CLASS } from "@/lib/content-shell";
 import { projectRoleBadgeClass, projectRoleLabel } from "@/lib/rbac";
@@ -44,7 +44,7 @@ export default function ProjectsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [opError, setOpError] = useState<string | null>(null);
-  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [archivingId, setArchivingId] = useState<string | null>(null);
 
   useEffect(() => {
     apiGet<Project[]>("/projects/")
@@ -194,9 +194,6 @@ export default function ProjectsPage() {
                         <span className="rounded-full border border-slate-300 dark:border-slate-700 px-2.5 py-1">
                           截止日期：{formatDate(project.deadline)}
                         </span>
-                        <span className="rounded-full border border-slate-300 dark:border-slate-700 px-2.5 py-1">
-                          项目中心
-                        </span>
                       </div>
                     </div>
 
@@ -212,42 +209,46 @@ export default function ProjectsPage() {
                           场景输出
                         </Link>
                         <Link
-                          href={`/chat?project_id=${project.id}`}
+                          href={`/chat?project_id=${project.id}&new_chat=1`}
                           className="pointer-events-auto relative z-20 rounded-xl border border-slate-300 dark:border-slate-700 bg-white/90 dark:bg-slate-900/60 px-4 py-2.5 text-center text-sm text-slate-700 dark:text-slate-300 transition hover:border-slate-300 dark:border-slate-600 hover:bg-slate-200 dark:hover:bg-slate-900"
                         >
                           对话创作
                         </Link>
                       </div>
-                      {project.my_role === "owner" ? (
+                      {project.my_role === "owner" && project.status !== "archived" ? (
                         <button
                           type="button"
-                          disabled={deletingId === project.id}
+                          disabled={archivingId === project.id}
                           className="pointer-events-auto relative z-20 rounded-xl border border-red-300 bg-red-100 px-4 py-2 text-center text-sm text-red-900 transition hover:border-red-400 hover:bg-red-200 disabled:cursor-not-allowed disabled:opacity-50 dark:border-red-900/60 dark:bg-red-950/40 dark:text-red-200 dark:hover:border-red-700 dark:hover:bg-red-950/70"
                           onClick={async (e) => {
                             e.preventDefault();
                             e.stopPropagation();
                             if (
                               !confirm(
-                                `确定删除项目「${project.name}」？关联场景绑定、附件记录等将一并清理，不可恢复。`,
+                                `确定归档项目「${project.name}」？归档后项目将标记为已归档，数据仍保留。`,
                               )
                             ) {
                               return;
                             }
                             setOpError(null);
-                            setDeletingId(project.id);
+                            setArchivingId(project.id);
                             try {
-                              await apiDelete(`/projects/${project.id}`);
-                              setProjects((prev) => prev.filter((p) => p.id !== project.id));
+                              const updated = await apiPut<Project>(`/projects/${project.id}`, {
+                                status: "archived",
+                              });
+                              setProjects((prev) =>
+                                prev.map((p) => (p.id === project.id ? updated : p)),
+                              );
                             } catch (err) {
                               setOpError(
-                                err instanceof Error ? err.message : "删除失败",
+                                err instanceof Error ? err.message : "归档失败",
                               );
                             } finally {
-                              setDeletingId(null);
+                              setArchivingId(null);
                             }
                           }}
                         >
-                          {deletingId === project.id ? "删除中…" : "删除项目"}
+                          {archivingId === project.id ? "归档中…" : "归档项目"}
                         </button>
                       ) : null}
                     </div>

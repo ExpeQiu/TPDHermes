@@ -334,7 +334,11 @@ async def workshop_generate_from_kb(
 
     User-provided context overrides auto-mapped fields.
     """
-    kb_result = await kb_query(query, collection_name, limit, project_id)
+    ctx = context or {}
+    run_id = str(ctx.get("tphermes_run_id") or "").strip() or None
+    kb_result = await kb_query(
+        query, collection_name, limit, project_id, tphermes_run_id=run_id
+    )
     built_context = _build_context_from_kb(
         skill_name=skill_name,
         query=query,

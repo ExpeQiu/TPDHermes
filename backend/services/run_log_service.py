@@ -66,6 +66,7 @@ async def finalize_run(
     save_output: bool,
     output_title: str | None = None,
     output_owner_id: str | None = None,
+    citations_json: str | None = None,
 ) -> tuple[OrchestrationRun, str | None]:
     """
     更新 run；若 save_output 且校验通过则写入 outputs，返回 output_id。
@@ -104,7 +105,7 @@ async def finalize_run(
             content=assistant_content,
             content_format="markdown",
             status=out_status,
-            citations_json=None,
+            citations_json=citations_json,
             owner_id=(output_owner_id or "default"),
         )
         db.add(out)
