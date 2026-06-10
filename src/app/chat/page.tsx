@@ -2114,7 +2114,7 @@ function ChatPageInner() {
             <p className="mt-0.5 text-[10px] text-slate-500">对话与场景生产 · 云端同步</p>
           </div>
           <button
-            onClick={createSession}
+            onClick={() => createSession()}
             className="text-xs bg-blue-600 hover:bg-blue-500 text-white px-3 py-1.5 rounded-lg transition"
           >
             + 新对话
