@@ -26,6 +26,15 @@ ROOT = Path(__file__).resolve().parent.parent
 SKILLS_ROOT = ROOT / "skills"
 
 
+def test_list_skill_metadata_discovers_templates_folder_without_skill_json() -> None:
+    """编排页元数据应能扫描 templates/*.md，不依赖 skill.json 显式声明。"""
+    loader = SkillLoader(str(SKILLS_ROOT))
+    meta = {row["name"]: row for row in loader.list_skill_metadata()}
+    speech_draft = meta["speech_draft_skill"]
+    paths = [t["path"] for t in speech_draft["templates"]]
+    assert "templates/speech_draft.md" in paths
+
+
 @pytest.mark.parametrize("skill_name", STUB_SKILLS)
 def test_stub_skills_render_markdown(skill_name: str) -> None:
     skill_dir = SKILLS_ROOT / skill_name

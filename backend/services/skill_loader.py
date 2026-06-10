@@ -15,6 +15,7 @@ from __future__ import annotations
 import importlib
 import importlib.util
 import json
+import logging
 import os
 import re
 import sys
@@ -22,6 +23,7 @@ from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+logger = logging.getLogger("tpdx.hermes.skill_loader")
 
 # ─── Skill 基类 ──────────────────────────────────────────────────────────────
 
@@ -156,8 +158,56 @@ class SkillLoader:
             "sections": parsed["sections"],
         }
 
+    def _template_label_from_file(self, skill_path: Path, rel_path: str) -> str:
+        """优先用模版 frontmatter title，否则用文件名。"""
+        parsed = self._extract_template_tags_sections(skill_path, rel_path)
+        tpl_path = Path(rel_path)
+        if not tpl_path.is_absolute():
+            tpl_path = skill_path / tpl_path
+        if tpl_path.is_file():
+            try:
+                raw = tpl_path.read_text(encoding="utf-8")
+                fm_match = re.match(r"^---\n([\s\S]*?)\n---", raw)
+                if fm_match:
+                    title_match = re.search(r"^title:\s*(.+?)\s*$", fm_match.group(1), re.MULTILINE)
+                    if title_match:
+                        title = title_match.group(1).strip().strip("\"'")
+                        if title:
+                            return title
+            except Exception:
+                pass
+        return Path(rel_path).stem
+
+    def _discover_package_templates(self, skill_path: Path) -> list[tuple[str, str]]:
+        """
+        扫描技能包内实际存在的模版文件（与工坊脚本 runner 一致）。
+
+        顺序：templates/*.md → 根目录 template.md
+        返回 (相对路径, 展示标签) 列表。
+        """
+        found: list[tuple[str, str]] = []
+        seen: set[str] = set()
+
+        templates_dir = skill_path / "templates"
+        if templates_dir.is_dir():
+            for md in sorted(templates_dir.glob("*.md")):
+                rel = f"templates/{md.name}"
+                if rel in seen:
+                    continue
+                seen.add(rel)
+                found.append((rel, self._template_label_from_file(skill_path, rel)))
+
+        root_tpl = skill_path / "template.md"
+        if root_tpl.is_file():
+            rel = "template.md"
+            if rel not in seen:
+                seen.add(rel)
+                found.append((rel, self._template_label_from_file(skill_path, rel)))
+
+        return found
+
     def list_skill_metadata(self) -> list[dict[str, Any]]:
-        """发现技能及其输出模版选项（来自 skill.json）。"""
+        """发现技能及其输出模版选项（skill.json 声明 + 包内 templates/ 自动扫描）。"""
         items: list[dict[str, Any]] = []
         for name in self.discover():
             skill_path = self.skills_root / name
@@ -189,6 +239,24 @@ class SkillLoader:
                             label=f"{display} · {label}",
                             path=path,
                         )
+                    )
+            if not templates:
+                for rel_path, label in self._discover_package_templates(skill_path):
+                    if any(x["path"] == rel_path for x in templates):
+                        continue
+                    templates.append(
+                        self._template_meta_entry(
+                            skill_path,
+                            tpl_id=rel_path,
+                            label=label,
+                            path=rel_path,
+                        )
+                    )
+                if templates:
+                    logger.info(
+                        "skill_loader auto-discovered templates skill=%s count=%s",
+                        name,
+                        len(templates),
                     )
             items.append(
                 {
