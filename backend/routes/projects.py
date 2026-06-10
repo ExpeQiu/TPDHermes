@@ -21,7 +21,14 @@ from pydantic import BaseModel
 
 from backend.schemas.orchestration import TaskExecuteRequest, TaskExecuteOverrides
 from backend.services.orchestration_service import assemble_payload
-from backend.services.project_access import require_project_for_user
+from backend.services.project_access import list_visible_project_filter, project_owner_id, require_project_for_user
+from backend.services.project_member_service import (
+    ensure_owner_membership,
+    get_project_role,
+    list_project_members,
+    remove_project_member,
+    upsert_project_member,
+)
 from backend.services.project_kb import project_kb_collection
 from backend.services.project_kb_ingest import (
     schedule_ingest_attachment,
@@ -30,7 +37,7 @@ from backend.services.project_kb_ingest import (
     ingest_project_attachment,
     remove_attachment_from_kb,
 )
-from backend.services.user_identity import get_effective_user_id, is_global_admin_user, viewer_role
+from backend.services.user_identity import get_effective_user_id, viewer_role
 from backend.data.builtin_scenarios import BUILTIN_SCENARIOS, BUILTIN_VERSION
 
 router = APIRouter(prefix="/projects", tags=["projects"])
@@ -114,9 +121,28 @@ class ProjectResponse(BaseModel):
     status: str
     created_at: str
     updated_at: str
+    my_role: Optional[str] = None
 
 
-def _project_to_response(project: Project) -> ProjectResponse:
+class ProjectMemberIn(BaseModel):
+    user_id: str
+    role: str = "viewer"
+
+
+class ProjectMemberUpdate(BaseModel):
+    role: str
+
+
+class ProjectMemberResponse(BaseModel):
+    id: str
+    project_id: str
+    user_id: str
+    role: str
+    created_at: str
+    updated_at: str
+
+
+def _project_to_response(project: Project, *, my_role: str | None = None) -> ProjectResponse:
     constraints_val = None
     if project.constraints:
         try:
@@ -135,6 +161,7 @@ def _project_to_response(project: Project) -> ProjectResponse:
         status=project.status,
         created_at=project.created_at,
         updated_at=project.updated_at,
+        my_role=my_role,
     )
 
 
@@ -162,6 +189,7 @@ async def create_project(
     )
     db.add(project)
     await db.flush()
+    await ensure_owner_membership(db, project_id=project.id, owner_user_id=effective_uid)
     await _seed_default_scenario_bindings(db, project.id)
     await db.commit()
     await db.refresh(project)
@@ -176,15 +204,20 @@ async def list_projects(
     effective_uid: str = Depends(get_effective_user_id),
 ):
     query = select(Project)
-    if not is_global_admin_user(effective_uid):
-        query = query.where(Project.owner_id == effective_uid)
+    visibility = await list_visible_project_filter(db, effective_uid)
+    if visibility is not None:
+        query = query.where(visibility)
     if status:
         query = query.where(Project.status == status)
     query = query.order_by(Project.created_at.desc())
     result = await db.execute(query)
     projects = result.scalars().all()
-    logger.info("projects list count=%s user_id=%s", len(projects), effective_uid[:24])
-    return [_project_to_response(p) for p in projects]
+    out: list[ProjectResponse] = []
+    for project in projects:
+        role = await get_project_role(db, project_id=project.id, user_id=effective_uid, project=project)
+        out.append(_project_to_response(project, my_role=role))
+    logger.info("projects list count=%s user_id=%s", len(out), effective_uid[:24])
+    return out
 
 
 @router.get("/{project_id}", response_model=ProjectResponse)
@@ -194,7 +227,8 @@ async def get_project(
     effective_uid: str = Depends(get_effective_user_id),
 ):
     project = await require_project_for_user(db, project_id, effective_uid)
-    return _project_to_response(project)
+    role = await get_project_role(db, project_id=project_id, user_id=effective_uid, project=project)
+    return _project_to_response(project, my_role=role)
 
 
 @router.put("/{project_id}", response_model=ProjectResponse)
@@ -204,7 +238,7 @@ async def update_project(
     db: AsyncSession = Depends(get_db),
     effective_uid: str = Depends(get_effective_user_id),
 ):
-    project = await require_project_for_user(db, project_id, effective_uid)
+    project = await require_project_for_user(db, project_id, effective_uid, min_perm="write")
     update_data = data.model_dump(exclude_unset=True)
     if "constraints" in update_data:
         update_data["constraints"] = (
@@ -226,9 +260,7 @@ async def delete_project(
     db: AsyncSession = Depends(get_db),
     effective_uid: str = Depends(get_effective_user_id),
 ):
-    project = await require_project_for_user(db, project_id, effective_uid)
-
-    await db.delete(project)
+    project = await require_project_for_user(db, project_id, effective_uid, min_perm="delete")
     await db.commit()
     return {"message": "Project deleted"}
 
@@ -623,7 +655,7 @@ async def upload_project_attachment(
     db: AsyncSession = Depends(get_db),
     effective_uid: str = Depends(get_effective_user_id),
 ):
-    await require_project_for_user(db, project_id, effective_uid)
+    await require_project_for_user(db, project_id, effective_uid, min_perm="write")
     content = await file.read()
     size = len(content)
     if size == 0:
@@ -717,7 +749,7 @@ async def delete_project_attachment(
     db: AsyncSession = Depends(get_db),
     effective_uid: str = Depends(get_effective_user_id),
 ):
-    await require_project_for_user(db, project_id, effective_uid)
+    await require_project_for_user(db, project_id, effective_uid, min_perm="write")
     q = await db.execute(
         select(ProjectAttachment).where(
             ProjectAttachment.id == attachment_id,
@@ -752,7 +784,7 @@ async def reingest_project_attachment(
     db: AsyncSession = Depends(get_db),
     effective_uid: str = Depends(get_effective_user_id),
 ):
-    await require_project_for_user(db, project_id, effective_uid)
+    await require_project_for_user(db, project_id, effective_uid, min_perm="write")
     q = await db.execute(
         select(ProjectAttachment).where(
             ProjectAttachment.id == attachment_id,
@@ -839,7 +871,7 @@ async def bind_project_scenario(
     db: AsyncSession = Depends(get_db),
     effective_uid: str = Depends(get_effective_user_id),
 ):
-    await require_project_for_user(db, project_id, effective_uid)
+    await require_project_for_user(db, project_id, effective_uid, min_perm="write")
     sp = await db.get(ScenarioProfile, body.scenario_id)
     if not sp:
         raise HTTPException(status_code=404, detail="场景不存在")
@@ -897,7 +929,7 @@ async def sync_project_scenario_version(
     effective_uid: str = Depends(get_effective_user_id),
 ):
     """将已绑定场景的版本钉选同步到当前已发布版本。"""
-    await require_project_for_user(db, project_id, effective_uid)
+    await require_project_for_user(db, project_id, effective_uid, min_perm="write")
     sp = await db.get(ScenarioProfile, scenario_id)
     if not sp:
         raise HTTPException(status_code=404, detail="场景不存在")
@@ -945,7 +977,7 @@ async def unbind_project_scenario(
     db: AsyncSession = Depends(get_db),
     effective_uid: str = Depends(get_effective_user_id),
 ):
-    await require_project_for_user(db, project_id, effective_uid)
+    await require_project_for_user(db, project_id, effective_uid, min_perm="write")
     res = await db.execute(
         select(ProjectScenario).where(
             ProjectScenario.project_id == project_id,
@@ -967,7 +999,7 @@ async def set_default_project_scenario(
     db: AsyncSession = Depends(get_db),
     effective_uid: str = Depends(get_effective_user_id),
 ):
-    await require_project_for_user(db, project_id, effective_uid)
+    await require_project_for_user(db, project_id, effective_uid, min_perm="write")
     res = await db.execute(
         select(ProjectScenario, ScenarioProfile)
         .join(ScenarioProfile, ScenarioProfile.id == ProjectScenario.scenario_id)
@@ -1010,7 +1042,7 @@ async def create_output_version(
     db: AsyncSession = Depends(get_db),
     effective_uid: str = Depends(get_effective_user_id),
 ):
-    await require_project_for_user(db, project_id, effective_uid)
+    await require_project_for_user(db, project_id, effective_uid, min_perm="write")
     q = await db.execute(
         select(OutputAsset).where(
             OutputAsset.id == output_id,
@@ -1072,7 +1104,7 @@ async def approve_output(
     db: AsyncSession = Depends(get_db),
     effective_uid: str = Depends(get_effective_user_id),
 ):
-    await require_project_for_user(db, project_id, effective_uid)
+    await require_project_for_user(db, project_id, effective_uid, min_perm="write")
     q = await db.execute(
         select(OutputAsset).where(
             OutputAsset.id == output_id,
@@ -1110,7 +1142,7 @@ async def archive_output(
     db: AsyncSession = Depends(get_db),
     effective_uid: str = Depends(get_effective_user_id),
 ):
-    await require_project_for_user(db, project_id, effective_uid)
+    await require_project_for_user(db, project_id, effective_uid, min_perm="write")
     q = await db.execute(
         select(OutputAsset).where(
             OutputAsset.id == output_id,
@@ -1139,3 +1171,90 @@ async def archive_output(
         content_format=row.content_format or "markdown",
         content=row.content or "",
     )
+
+
+@router.get("/{project_id}/members", response_model=list[ProjectMemberResponse])
+async def list_project_members_api(
+    project_id: str,
+    db: AsyncSession = Depends(get_db),
+    effective_uid: str = Depends(get_effective_user_id),
+):
+    await require_project_for_user(db, project_id, effective_uid, min_perm="read")
+    rows = await list_project_members(db, project_id)
+    return [
+        ProjectMemberResponse(
+            id=row.id,
+            project_id=row.project_id,
+            user_id=row.user_id,
+            role=row.role,
+            created_at=row.created_at,
+            updated_at=row.updated_at,
+        )
+        for row in rows
+    ]
+
+
+@router.post("/{project_id}/members", response_model=ProjectMemberResponse)
+async def add_project_member_api(
+    project_id: str,
+    body: ProjectMemberIn,
+    db: AsyncSession = Depends(get_db),
+    effective_uid: str = Depends(get_effective_user_id),
+):
+    project = await require_project_for_user(db, project_id, effective_uid, min_perm="manage_members")
+    row = await upsert_project_member(
+        db,
+        project_id=project_id,
+        member_user_id=body.user_id,
+        role=body.role,
+    )
+    return ProjectMemberResponse(
+        id=row.id,
+        project_id=row.project_id,
+        user_id=row.user_id,
+        role=row.role,
+        created_at=row.created_at,
+        updated_at=row.updated_at,
+    )
+
+
+@router.patch("/{project_id}/members/{member_user_id}", response_model=ProjectMemberResponse)
+async def update_project_member_api(
+    project_id: str,
+    member_user_id: str,
+    body: ProjectMemberUpdate,
+    db: AsyncSession = Depends(get_db),
+    effective_uid: str = Depends(get_effective_user_id),
+):
+    project = await require_project_for_user(db, project_id, effective_uid, min_perm="manage_members")
+    row = await upsert_project_member(
+        db,
+        project_id=project_id,
+        member_user_id=member_user_id,
+        role=body.role,
+    )
+    return ProjectMemberResponse(
+        id=row.id,
+        project_id=row.project_id,
+        user_id=row.user_id,
+        role=row.role,
+        created_at=row.created_at,
+        updated_at=row.updated_at,
+    )
+
+
+@router.delete("/{project_id}/members/{member_user_id}")
+async def remove_project_member_api(
+    project_id: str,
+    member_user_id: str,
+    db: AsyncSession = Depends(get_db),
+    effective_uid: str = Depends(get_effective_user_id),
+):
+    project = await require_project_for_user(db, project_id, effective_uid, min_perm="manage_members")
+    await remove_project_member(
+        db,
+        project_id=project_id,
+        member_user_id=member_user_id,
+        owner_user_id=project_owner_id(project),
+    )
+    return {"ok": True}

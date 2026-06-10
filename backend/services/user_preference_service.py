@@ -16,6 +16,7 @@ logger = logging.getLogger("tpdx.hermes.user_preference")
 
 PREF_KEY_UNIFIED_USER_ID = "unified_user_id"
 PREF_KEY_ACTIVE_CHAT_SESSION = "active_chat_session_id"
+PREF_KEY_PLATFORM_ROLE = "platform_role"
 
 
 def _load_prefs(raw: str | None) -> dict[str, Any]:
@@ -71,4 +72,18 @@ async def set_unified_user_id(db: AsyncSession, user_id: str, unified_user_id: s
         db,
         user_id,
         {PREF_KEY_UNIFIED_USER_ID: unified_user_id.strip()},
+    )
+
+
+async def get_platform_role_pref(db: AsyncSession, user_id: str) -> str | None:
+    prefs = await get_user_preferences(db, user_id)
+    raw = str(prefs.get(PREF_KEY_PLATFORM_ROLE) or "").strip()
+    return raw or None
+
+
+async def set_platform_role(db: AsyncSession, user_id: str, platform_role: str) -> dict[str, Any]:
+    return await set_user_preferences(
+        db,
+        user_id,
+        {PREF_KEY_PLATFORM_ROLE: platform_role.strip()},
     )

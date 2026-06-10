@@ -10,7 +10,7 @@ import {
   normalizeUserId,
 } from "./user-id";
 
-export const USER_ROLE_STORAGE_KEY = "tpdhermes_user_role";
+import { USER_ROLE_STORAGE_KEY } from "./rbac";
 
 export function loadUserRoleFromStorage(): string {
   if (typeof window === "undefined") return "";

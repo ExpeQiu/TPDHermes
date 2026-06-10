@@ -3,8 +3,9 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { apiDelete, apiGet } from "@/lib/api";
-import { useIsDefaultAdmin } from "@/lib/admin-access";
+import { useUserAccess } from "@/lib/admin-access";
 import { CONTENT_MAX_CLASS } from "@/lib/content-shell";
+import { projectRoleBadgeClass, projectRoleLabel } from "@/lib/rbac";
 import { projectStatusLabel } from "@/lib/ui-labels";
 
 interface Project {
@@ -13,6 +14,7 @@ interface Project {
   status: "active" | "paused" | "completed" | "archived";
   deadline: string | null;
   background: string | null;
+  my_role?: string | null;
 }
 
 const statusColors: Record<string, string> = {
@@ -37,7 +39,7 @@ function formatDate(value: string | null | undefined) {
 }
 
 export default function ProjectsPage() {
-  const { isAdmin } = useIsDefaultAdmin();
+  const { canAccess } = useUserAccess();
   const [projects, setProjects] = useState<Project[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -107,7 +109,7 @@ export default function ProjectsPage() {
                   accent="from-amber-600 to-orange-600"
                   compact
                 />
-                {isAdmin ? (
+                {canAccess("create") ? (
                   <ActionCard
                     href="/create"
                     title="场景编排"
@@ -177,6 +179,13 @@ export default function ProjectsPage() {
                         >
                           {projectStatusLabel(project.status)}
                         </span>
+                        {project.my_role ? (
+                          <span
+                            className={`rounded-full border px-2.5 py-1 text-xs font-medium ${projectRoleBadgeClass(project.my_role)}`}
+                          >
+                            {projectRoleLabel(project.my_role)}
+                          </span>
+                        ) : null}
                       </div>
                       <p className="line-clamp-2 text-sm leading-relaxed text-slate-400">
                         {project.background || "暂无背景描述"}
@@ -209,36 +218,38 @@ export default function ProjectsPage() {
                           对话创作
                         </Link>
                       </div>
-                      <button
-                        type="button"
-                        disabled={deletingId === project.id}
-                        className="pointer-events-auto relative z-20 rounded-xl border border-red-300 bg-red-100 px-4 py-2 text-center text-sm text-red-900 transition hover:border-red-400 hover:bg-red-200 disabled:cursor-not-allowed disabled:opacity-50 dark:border-red-900/60 dark:bg-red-950/40 dark:text-red-200 dark:hover:border-red-700 dark:hover:bg-red-950/70"
-                        onClick={async (e) => {
-                          e.preventDefault();
-                          e.stopPropagation();
-                          if (
-                            !confirm(
-                              `确定删除项目「${project.name}」？关联场景绑定、附件记录等将一并清理，不可恢复。`,
-                            )
-                          ) {
-                            return;
-                          }
-                          setOpError(null);
-                          setDeletingId(project.id);
-                          try {
-                            await apiDelete(`/projects/${project.id}`);
-                            setProjects((prev) => prev.filter((p) => p.id !== project.id));
-                          } catch (err) {
-                            setOpError(
-                              err instanceof Error ? err.message : "删除失败",
-                            );
-                          } finally {
-                            setDeletingId(null);
-                          }
-                        }}
-                      >
-                        {deletingId === project.id ? "删除中…" : "删除项目"}
-                      </button>
+                      {project.my_role === "owner" ? (
+                        <button
+                          type="button"
+                          disabled={deletingId === project.id}
+                          className="pointer-events-auto relative z-20 rounded-xl border border-red-300 bg-red-100 px-4 py-2 text-center text-sm text-red-900 transition hover:border-red-400 hover:bg-red-200 disabled:cursor-not-allowed disabled:opacity-50 dark:border-red-900/60 dark:bg-red-950/40 dark:text-red-200 dark:hover:border-red-700 dark:hover:bg-red-950/70"
+                          onClick={async (e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            if (
+                              !confirm(
+                                `确定删除项目「${project.name}」？关联场景绑定、附件记录等将一并清理，不可恢复。`,
+                              )
+                            ) {
+                              return;
+                            }
+                            setOpError(null);
+                            setDeletingId(project.id);
+                            try {
+                              await apiDelete(`/projects/${project.id}`);
+                              setProjects((prev) => prev.filter((p) => p.id !== project.id));
+                            } catch (err) {
+                              setOpError(
+                                err instanceof Error ? err.message : "删除失败",
+                              );
+                            } finally {
+                              setDeletingId(null);
+                            }
+                          }}
+                        >
+                          {deletingId === project.id ? "删除中…" : "删除项目"}
+                        </button>
+                      ) : null}
                     </div>
                   </div>
                 </div>

@@ -1,0 +1,283 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 1120">
+  <defs>
+    <style>
+      .bg { fill: #f4f7fb; }
+      .frame { fill: #ffffff; stroke: #d9e3f2; stroke-width: 1.5; rx: 20; }
+      .lane-blue { fill: #eef4ff; stroke: #b7cdfc; stroke-width: 1.5; rx: 22; }
+      .lane-green { fill: #eefbf5; stroke: #b8ead0; stroke-width: 1.5; rx: 22; }
+      .lane-purple { fill: #f6f1ff; stroke: #d7c8ff; stroke-width: 1.5; rx: 22; }
+      .lane-orange { fill: #fff6ee; stroke: #ffd8b8; stroke-width: 1.5; rx: 22; }
+      .card { fill: #ffffff; stroke: #dbe4f1; stroke-width: 1.3; rx: 14; }
+      .card-blue { fill: #f8fbff; stroke: #b8cdfc; stroke-width: 1.3; rx: 14; }
+      .card-green { fill: #f8fffb; stroke: #b5e5cd; stroke-width: 1.3; rx: 14; }
+      .card-purple { fill: #fcfaff; stroke: #d8cbff; stroke-width: 1.3; rx: 14; }
+      .card-orange { fill: #fffaf6; stroke: #ffd9bb; stroke-width: 1.3; rx: 14; }
+      .title { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; font-size: 30px; font-weight: 700; fill: #1f2a44; }
+      .subtitle { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; font-size: 14px; fill: #62708a; }
+      .lane-title { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; font-size: 20px; font-weight: 700; fill: #24324a; }
+      .card-title { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; font-size: 17px; font-weight: 700; fill: #24324a; text-anchor: middle; }
+      .card-body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; font-size: 12px; fill: #5e6c84; text-anchor: middle; }
+      .line-blue { fill: none; stroke: #5b8def; stroke-width: 2.5; }
+      .line-green { fill: none; stroke: #31a56f; stroke-width: 2.5; }
+      .line-purple { fill: none; stroke: #8b63f3; stroke-width: 2.5; }
+      .line-orange { fill: none; stroke: #ef8d2f; stroke-width: 2.5; }
+      .line-neutral { fill: none; stroke: #7f8ba7; stroke-width: 2.3; stroke-dasharray: 7 6; }
+      .label-bg { fill: #ffffff; stroke: #d8e0ec; stroke-width: 1; rx: 10; }
+      .label-text { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; font-size: 11px; font-weight: 700; fill: #4c596f; text-anchor: middle; dominant-baseline: central; }
+      .legend-text { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; font-size: 12px; fill: #56647c; }
+    </style>
+    <filter id="shadow" x="-10%" y="-10%" width="130%" height="130%">
+      <feDropShadow dx="0" dy="6" stdDeviation="10" flood-color="#27446b" flood-opacity="0.10"/>
+    </filter>
+    <marker id="arrow-blue" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#5b8def"/>
+    </marker>
+    <marker id="arrow-green" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#31a56f"/>
+    </marker>
+    <marker id="arrow-purple" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#8b63f3"/>
+    </marker>
+    <marker id="arrow-orange" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#ef8d2f"/>
+    </marker>
+    <marker id="arrow-neutral" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#7f8ba7"/>
+    </marker>
+  </defs>
+
+  <rect width="1600" height="1120" class="bg"/>
+  <rect x="28" y="28" width="1544" height="1064" class="frame" filter="url(#shadow)"/>
+
+  <text x="72" y="82" class="title">TPDHermes 分图版一：静态系统分层架构</text>
+  <text x="72" y="110" class="subtitle">只表达系统边界与模块归属，不表达动态请求顺序；用于汇报“系统由哪些层组成”。</text>
+
+  <g transform="translate(56, 146)">
+    <rect width="1488" height="180" class="lane-blue" filter="url(#shadow)"/>
+    <text x="28" y="34" class="lane-title">1. 接入与体验层</text>
+
+    <g transform="translate(32, 66)">
+      <rect width="240" height="84" class="card-blue" filter="url(#shadow)"/>
+      <text x="120" y="28" class="card-title">用户 / 业务角色</text>
+      <text x="120" y="52" class="card-body">浏览器用户、项目协作者、飞书用户</text>
+      <text x="120" y="70" class="card-body">作为系统入口与消费方</text>
+    </g>
+
+    <g transform="translate(322, 66)">
+      <rect width="236" height="84" class="card-blue" filter="url(#shadow)"/>
+      <text x="118" y="28" class="card-title">Nginx 网关</text>
+      <text x="118" y="52" class="card-body">统一入口 `:8033`</text>
+      <text x="118" y="70" class="card-body">静态页与 API 请求转发</text>
+    </g>
+
+    <g transform="translate(610, 66)">
+      <rect width="282" height="84" class="card-blue" filter="url(#shadow)"/>
+      <text x="141" y="28" class="card-title">Next.js 前端工作台</text>
+      <text x="141" y="52" class="card-body">项目、对话、知识、工坊、技能管理页面</text>
+      <text x="141" y="70" class="card-body">统一使用 `apiV1()` 调后端</text>
+    </g>
+
+    <g transform="translate(944, 66)">
+      <rect width="230" height="84" class="card-blue" filter="url(#shadow)"/>
+      <text x="115" y="28" class="card-title">飞书触点</text>
+      <text x="115" y="52" class="card-body">Bot、回调、鉴权链路</text>
+      <text x="115" y="70" class="card-body">补充外部入口</text>
+    </g>
+
+    <g transform="translate(1224, 66)">
+      <rect width="232" height="84" class="card-blue" filter="url(#shadow)"/>
+      <text x="116" y="28" class="card-title">创作边界面板</text>
+      <text x="116" y="52" class="card-body">项目 / 文件 / 知识 / 技能范围</text>
+      <text x="116" y="70" class="card-body">在聊天页显式选择上下文</text>
+    </g>
+
+    <path d="M 272 108 L 322 108" class="line-blue" marker-end="url(#arrow-blue)"/>
+    <path d="M 558 108 L 610 108" class="line-blue" marker-end="url(#arrow-blue)"/>
+    <path d="M 892 108 L 944 108" class="line-blue" marker-end="url(#arrow-blue)"/>
+    <path d="M 1174 108 L 1224 108" class="line-blue" marker-end="url(#arrow-blue)"/>
+  </g>
+
+  <g transform="translate(56, 354)">
+    <rect width="1488" height="258" class="lane-green" filter="url(#shadow)"/>
+    <text x="28" y="34" class="lane-title">2. 后端应用与编排层</text>
+
+    <g transform="translate(32, 62)">
+      <rect width="252" height="96" class="card-green" filter="url(#shadow)"/>
+      <text x="126" y="28" class="card-title">FastAPI 路由层</text>
+      <text x="126" y="52" class="card-body">`/projects` ` /chat` ` /tasks` ` /kb`</text>
+      <text x="126" y="70" class="card-body">`/skills` ` /mcp` ` /feishu`</text>
+    </g>
+
+    <g transform="translate(332, 62)">
+      <rect width="280" height="96" class="card-green" filter="url(#shadow)"/>
+      <text x="140" y="28" class="card-title">统一任务编排</text>
+      <text x="140" y="52" class="card-body">`POST /tasks/execute` 组装 orchestration</text>
+      <text x="140" y="70" class="card-body">合并项目、场景、模板、技能策略</text>
+    </g>
+
+    <g transform="translate(660, 62)">
+      <rect width="246" height="96" class="card-green" filter="url(#shadow)"/>
+      <text x="123" y="28" class="card-title">聊天代理</text>
+      <text x="123" y="52" class="card-body">`/chat/completions` 代理上游</text>
+      <text x="123" y="70" class="card-body">统一错误、token 与历史窗口控制</text>
+    </g>
+
+    <g transform="translate(954, 62)">
+      <rect width="244" height="96" class="card-green" filter="url(#shadow)"/>
+      <text x="122" y="28" class="card-title">工坊执行层</text>
+      <text x="122" y="52" class="card-body">Agent Tool Capture</text>
+      <text x="122" y="70" class="card-body">或 Direct Skill 降级执行</text>
+    </g>
+
+    <g transform="translate(1246, 62)">
+      <rect width="210" height="96" class="card-green" filter="url(#shadow)"/>
+      <text x="105" y="28" class="card-title">MCP 管理</text>
+      <text x="105" y="52" class="card-body">server 开关 / include / probe</text>
+      <text x="105" y="70" class="card-body">同步 Hermes 配置</text>
+    </g>
+
+    <g transform="translate(136, 182)">
+      <rect width="268" height="54" class="card" filter="url(#shadow)"/>
+      <text x="134" y="24" class="card-title">知识库代理与缓存</text>
+      <text x="134" y="42" class="card-body">`kb_proxy` `kb_cache` `kb_ingest`</text>
+    </g>
+
+    <g transform="translate(468, 182)">
+      <rect width="268" height="54" class="card" filter="url(#shadow)"/>
+      <text x="134" y="24" class="card-title">项目上下文与访问控制</text>
+      <text x="134" y="42" class="card-body">项目摘要、附件、输出、场景绑定</text>
+    </g>
+
+    <g transform="translate(800, 182)">
+      <rect width="268" height="54" class="card" filter="url(#shadow)"/>
+      <text x="134" y="24" class="card-title">运行记录沉淀</text>
+      <text x="134" y="42" class="card-body">Run / Output / Validation / Chat Session</text>
+    </g>
+
+    <g transform="translate(1132, 182)">
+      <rect width="268" height="54" class="card" filter="url(#shadow)"/>
+      <text x="134" y="24" class="card-title">生命周期任务</text>
+      <text x="134" y="42" class="card-body">DB Init / Warmup / Scheduler</text>
+    </g>
+
+    <path d="M 284 110 L 332 110" class="line-green" marker-end="url(#arrow-green)"/>
+    <path d="M 612 110 L 660 110" class="line-green" marker-end="url(#arrow-green)"/>
+    <path d="M 906 110 L 954 110" class="line-green" marker-end="url(#arrow-green)"/>
+    <path d="M 1198 110 L 1246 110" class="line-green" marker-end="url(#arrow-green)"/>
+
+    <path d="M 472 158 L 270 182" class="line-neutral" marker-end="url(#arrow-neutral)"/>
+    <path d="M 472 158 L 602 182" class="line-neutral" marker-end="url(#arrow-neutral)"/>
+    <path d="M 1076 158 L 934 182" class="line-neutral" marker-end="url(#arrow-neutral)"/>
+    <path d="M 1351 158 L 1266 182" class="line-neutral" marker-end="url(#arrow-neutral)"/>
+  </g>
+
+  <g transform="translate(56, 640)">
+    <rect width="1488" height="180" class="lane-purple" filter="url(#shadow)"/>
+    <text x="28" y="34" class="lane-title">3. Agent 执行与 MCP 工具体系</text>
+
+    <g transform="translate(84, 62)">
+      <rect width="312" height="84" class="card-purple" filter="url(#shadow)"/>
+      <text x="156" y="28" class="card-title">Hermes-agent</text>
+      <text x="156" y="52" class="card-body">OpenAI Compatible Chat API</text>
+      <text x="156" y="70" class="card-body">LLM 执行与工具调用中枢</text>
+    </g>
+
+    <g transform="translate(462, 62)">
+      <rect width="316" height="84" class="card-purple" filter="url(#shadow)"/>
+      <text x="158" y="28" class="card-title">TPDHermes MCP HTTP Server</text>
+      <text x="158" y="52" class="card-body">`backend.mcp_http_server`</text>
+      <text x="158" y="70" class="card-body">向 Agent 暴露项目 / 知识 / 工坊工具</text>
+    </g>
+
+    <g transform="translate(844, 62)">
+      <rect width="186" height="84" class="card-purple" filter="url(#shadow)"/>
+      <text x="93" y="28" class="card-title">KB Tools</text>
+      <text x="93" y="52" class="card-body">`kb_query` `kb_get_entry`</text>
+      <text x="93" y="70" class="card-body">`kb_list_collections`</text>
+    </g>
+
+    <g transform="translate(1088, 62)">
+      <rect width="198" height="84" class="card-purple" filter="url(#shadow)"/>
+      <text x="99" y="28" class="card-title">Workshop Tools</text>
+      <text x="99" y="52" class="card-body">`workshop_generate`</text>
+      <text x="99" y="70" class="card-body">`workshop_generate_from_kb`</text>
+    </g>
+
+    <g transform="translate(1344, 62)">
+      <rect width="118" height="84" class="card-purple" filter="url(#shadow)"/>
+      <text x="59" y="28" class="card-title">Misc Tools</text>
+      <text x="59" y="52" class="card-body">项目辅助</text>
+      <text x="59" y="70" class="card-body">外部工具桥接</text>
+    </g>
+
+    <path d="M 396 104 L 462 104" class="line-purple" marker-end="url(#arrow-purple)"/>
+    <path d="M 778 104 L 844 104" class="line-purple" marker-end="url(#arrow-purple)"/>
+    <path d="M 1030 104 L 1088 104" class="line-purple" marker-end="url(#arrow-purple)"/>
+    <path d="M 1286 104 L 1344 104" class="line-purple" marker-end="url(#arrow-purple)"/>
+  </g>
+
+  <g transform="translate(56, 848)">
+    <rect width="1488" height="206" class="lane-orange" filter="url(#shadow)"/>
+    <text x="28" y="34" class="lane-title">4. 数据与外部依赖层</text>
+
+    <g transform="translate(88, 62)">
+      <rect width="210" height="72" class="card-orange" filter="url(#shadow)"/>
+      <text x="105" y="28" class="card-title">SQLite</text>
+      <text x="105" y="50" class="card-body">项目、运行记录、缓存、会话</text>
+    </g>
+
+    <g transform="translate(360, 62)">
+      <rect width="228" height="72" class="card-orange" filter="url(#shadow)"/>
+      <text x="114" y="28" class="card-title">`skills/` 本地技能仓</text>
+      <text x="114" y="50" class="card-body">技能脚本与模板目录</text>
+    </g>
+
+    <g transform="translate(650, 62)">
+      <rect width="222" height="72" class="card-orange" filter="url(#shadow)"/>
+      <text x="111" y="28" class="card-title">Chroma / 外部知识库</text>
+      <text x="111" y="50" class="card-body">向量检索与 collection 存储</text>
+    </g>
+
+    <g transform="translate(934, 62)">
+      <rect width="220" height="72" class="card-orange" filter="url(#shadow)"/>
+      <text x="110" y="28" class="card-title">kb_cache</text>
+      <text x="110" y="50" class="card-body">本地只读降级缓存</text>
+    </g>
+
+    <g transform="translate(1216, 62)">
+      <rect width="160" height="72" class="card-orange" filter="url(#shadow)"/>
+      <text x="80" y="28" class="card-title">Embedding Cache</text>
+      <text x="80" y="50" class="card-body">HF 模型与预热缓存</text>
+    </g>
+
+    <g transform="translate(1406, 62)">
+      <rect width="58" height="72" class="card-orange" filter="url(#shadow)"/>
+      <text x="29" y="28" class="card-title">外部</text>
+      <text x="29" y="50" class="card-body">平台</text>
+    </g>
+  </g>
+
+  <path d="M 800 326 L 800 354" class="line-blue" marker-end="url(#arrow-blue)"/>
+  <rect x="748" y="330" width="104" height="24" class="label-bg"/>
+  <text x="800" y="342" class="label-text">API 调用</text>
+
+  <path d="M 800 612 L 800 640" class="line-green" marker-end="url(#arrow-green)"/>
+  <rect x="740" y="616" width="120" height="24" class="label-bg"/>
+  <text x="800" y="628" class="label-text">编排到执行</text>
+
+  <path d="M 800 820 L 800 848" class="line-purple" marker-end="url(#arrow-purple)"/>
+  <rect x="738" y="824" width="124" height="24" class="label-bg"/>
+  <text x="800" y="836" class="label-text">执行依赖资源</text>
+
+  <g transform="translate(1230, 58)">
+    <rect width="290" height="54" class="card" filter="url(#shadow)"/>
+    <circle cx="20" cy="18" r="6" fill="#5b8def"/>
+    <text x="34" y="22" class="legend-text">蓝色：接入主链</text>
+    <circle cx="20" cy="38" r="6" fill="#31a56f"/>
+    <text x="34" y="42" class="legend-text">绿色：后端编排主链</text>
+    <circle cx="154" cy="18" r="6" fill="#8b63f3"/>
+    <text x="168" y="22" class="legend-text">紫色：Agent / MCP 主链</text>
+    <circle cx="154" cy="38" r="6" fill="#ef8d2f"/>
+    <text x="168" y="42" class="legend-text">橙色：资源层</text>
+  </g>
+</svg>

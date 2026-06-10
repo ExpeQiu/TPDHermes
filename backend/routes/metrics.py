@@ -15,6 +15,7 @@ from backend.models.usage_event import UsageEvent
 from backend.services.chat_wordcloud_service import build_chat_wordcloud
 from backend.services.conversation_metrics_service import build_conversation_metrics
 from backend.services.skill_metrics_service import build_skill_metrics
+from backend.services.rbac import require_feature
 from backend.services.user_identity import get_effective_user_id
 
 router = APIRouter(prefix="/metrics", tags=["metrics"])
@@ -159,6 +160,7 @@ async def get_feature_usage_overview(
     days: int = 7,
     top: int = 20,
     db: AsyncSession = Depends(get_db),
+    _ops: str = Depends(require_feature("ops")),
 ):
     q_days = min(max(days, 1), 60)
     q_top = min(max(top, 5), 100)

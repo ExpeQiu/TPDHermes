@@ -22,6 +22,7 @@ import {
   scenarioStatusLabel,
 } from "@/lib/ui-labels";
 import { trackUsage } from "@/lib/usage-tracker";
+import ProjectMembersPanel from "@/components/projects/ProjectMembersPanel";
 
 interface Project {
   id: string;
@@ -31,6 +32,7 @@ interface Project {
   background: string | null;
   audience: string | null;
   constraints: unknown;
+  my_role?: string | null;
 }
 
 const statusColors: Record<string, string> = {
@@ -769,6 +771,8 @@ export default function ProjectDetailPage() {
                 hint={latestRun ? runStatusLabel(latestRun.status) : "等待执行"}
               />
             </div>
+
+            <ProjectMembersPanel projectId={project.id} myRole={project.my_role} />
 
             <div className="mb-6 flex gap-1 overflow-x-auto border-b border-slate-300 dark:border-slate-700">
               {[

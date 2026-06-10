@@ -109,7 +109,7 @@ const DEFAULT_SCENARIO_ID = SCENARIOS[0]?.id ?? "general";
 
 export default function CreatePage() {
   return (
-    <AdminOnlyPageGuard pageTitle="create">
+    <AdminOnlyPageGuard pageTitle="create" feature="create">
       <Suspense
         fallback={
           <div className="flex min-h-screen items-center justify-center text-sm text-slate-500 dark:bg-slate-950 dark:text-slate-400">

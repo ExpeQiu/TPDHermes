@@ -3,7 +3,9 @@ export type WorkflowNavItem = {
   label: string;
   shortLabel: string;
   description: string;
+  /** @deprecated 使用 requiredFeature */
   adminOnly?: boolean;
+  requiredFeature?: import("./rbac").FeatureKey;
 };
 
 export const WORKFLOW_NAV_ITEMS: WorkflowNavItem[] = [
@@ -37,6 +39,7 @@ export const WORKFLOW_NAV_ITEMS: WorkflowNavItem[] = [
     shortLabel: "场景编排",
     description: "定义任务边界、知识范围和期望输出。",
     adminOnly: true,
+    requiredFeature: "create",
   },
   {
     href: "/knowledge",
@@ -44,12 +47,21 @@ export const WORKFLOW_NAV_ITEMS: WorkflowNavItem[] = [
     shortLabel: "知识库",
     description: "配置知识范围并验证检索效果。",
     adminOnly: true,
+    requiredFeature: "knowledge",
   },
   {
     href: "/skills",
     label: "技能工坊",
     shortLabel: "技能工坊",
     description: "维护可用于任务执行的能力池。",
+    requiredFeature: "skills",
+  },
+  {
+    href: "/ops/usage",
+    label: "运维用量",
+    shortLabel: "运维",
+    description: "功能使用、对话与技能采纳统计（平台管理员）。",
+    requiredFeature: "ops",
   },
   {
     href: "/settings",

@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { apiGet } from "@/lib/api";
+import { FeaturePageGuard } from "@/components/admin-only-page-guard";
 import { CONTENT_MAX_CLASS } from "@/lib/content-shell";
 import { trackUsage } from "@/lib/usage-tracker";
 
@@ -141,6 +142,7 @@ export default function FeatureUsagePage() {
   const topSkill = useMemo(() => data?.skill_usage[0] ?? null, [data]);
 
   return (
+    <FeaturePageGuard feature="ops" pageTitle="ops/usage">
     <main className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-slate-100 p-4 text-slate-900 sm:p-6 md:p-8 dark:from-slate-950 dark:via-slate-900 dark:to-slate-950 dark:text-white">
       <div className={CONTENT_MAX_CLASS}>
         <div className="mb-6 flex items-center justify-between gap-3">
@@ -459,5 +461,6 @@ export default function FeatureUsagePage() {
         ) : null}
       </div>
     </main>
+    </FeaturePageGuard>
   );
 }

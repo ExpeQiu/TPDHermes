@@ -3,13 +3,18 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { GLOBAL_NAV_INNER_CLASS } from "@/lib/content-shell";
-import { useIsDefaultAdmin } from "@/lib/admin-access";
+import { useUserAccess } from "@/lib/admin-access";
 import { WORKFLOW_NAV_ITEMS } from "@/lib/workflow-nav";
+import type { FeatureKey } from "@/lib/rbac";
 
 export default function GlobalWorkflowNav() {
   const pathname = usePathname();
-  const { isAdmin } = useIsDefaultAdmin();
-  const navItems = WORKFLOW_NAV_ITEMS.filter((item) => !item.adminOnly || isAdmin);
+  const { canAccess } = useUserAccess();
+  const navItems = WORKFLOW_NAV_ITEMS.filter((item) => {
+    if (item.requiredFeature) return canAccess(item.requiredFeature);
+    if (item.adminOnly) return canAccess("create" as FeatureKey) || canAccess("knowledge" as FeatureKey);
+    return true;
+  });
 
   return (
     <header className="z-40 shrink-0 border-b border-slate-200 bg-white/85 backdrop-blur-md dark:border-slate-800 dark:bg-slate-950/85">

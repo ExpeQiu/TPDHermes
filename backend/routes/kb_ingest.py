@@ -13,7 +13,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Optional
 
-from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 
@@ -38,7 +38,13 @@ from backend.services.kb_entry_manage import (
 )
 from backend.services.kb_write import add_kb_harvest_entry
 
-router = APIRouter(prefix="/kb", tags=["knowledge_base"])
+from backend.services.rbac import require_feature
+
+router = APIRouter(
+    prefix="/kb",
+    tags=["knowledge_base"],
+    dependencies=[Depends(require_feature("knowledge"))],
+)
 log = logging.getLogger("tpdx.hermes")
 
 KB_UPLOAD_DIR = os.getenv("KB_UPLOAD_DIR", str(Path("./data/kb_uploads").resolve()))

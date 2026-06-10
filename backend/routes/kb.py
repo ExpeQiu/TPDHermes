@@ -5,7 +5,7 @@
 import logging
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 
 from backend.services.kb_proxy import kb_proxy_service
@@ -14,8 +14,13 @@ from backend.services.kb_browse import DEFAULT_TREE_ENTRY_LIMIT, build_browse_tr
 from backend.services.kb_cache import kb_cache_service
 from backend.services.kg_service import kb_kg_link_service
 from backend.services.kb_vault_assets import serve_vault_asset
+from backend.services.rbac import require_feature
 
-router = APIRouter(prefix="/kb", tags=["knowledge_base"])
+router = APIRouter(
+    prefix="/kb",
+    tags=["knowledge_base"],
+    dependencies=[Depends(require_feature("knowledge"))],
+)
 kb_route_logger = logging.getLogger("tpdx.hermes")
 
 

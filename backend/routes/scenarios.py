@@ -20,11 +20,16 @@ from backend.models.template import Template
 from backend.schemas.orchestration import TaskExecuteRequest, TaskExecuteOverrides
 from backend.services.orchestration_service import assemble_payload
 from backend.services.project_access import require_project_for_user
+from backend.services.rbac import require_feature
 from backend.services.user_identity import get_effective_user_id, viewer_role
 
 logger = logging.getLogger("tpdx.hermes")
 
-router = APIRouter(prefix="/scenarios", tags=["scenarios"])
+router = APIRouter(
+    prefix="/scenarios",
+    tags=["scenarios"],
+    dependencies=[Depends(require_feature("create"))],
+)
 
 
 def _dump(d: dict[str, Any] | None) -> str:

@@ -13,6 +13,7 @@ from sqlalchemy import select
 
 from backend.db import async_session_maker
 from backend.models.project import Project
+from backend.services.project_member_service import list_member_project_ids, project_visibility_filter
 from backend.services.user_identity import is_global_admin_user
 
 
@@ -36,7 +37,8 @@ async def project_list(status: Optional[str] = None, user_id: str = "") -> dict:
         if status:
             query = query.where(Project.status == status)
         if not is_global_admin_user(uid):
-            query = query.where(Project.owner_id == uid)
+            member_ids = await list_member_project_ids(db, uid)
+            query = query.where(project_visibility_filter(uid, member_ids))
         query = query.order_by(Project.created_at.desc())
         result = await db.execute(query)
         projects = result.scalars().all()

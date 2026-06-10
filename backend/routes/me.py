@@ -1,4 +1,4 @@
-"""当前用户上下文：与 X-User-ID / 飞书会话一致。"""
+"""当前用户上下文：与 X-User-ID / 飞书会话 / 平台 Role 一致。"""
 
 from __future__ import annotations
 
@@ -10,17 +10,26 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.db import get_db
 from backend.services.feishu_auth import get_user_session
+from backend.services.rbac import (
+    PLATFORM_ROLE_LABELS,
+    PROJECT_ROLE_LABELS,
+    assert_assignable_platform_role,
+    list_features,
+    resolve_platform_role,
+)
 from backend.services.user_identity import (
     derive_user_id,
     effective_user_id_for_api,
     feishu_effective_user_id,
     get_effective_user_id,
+    is_global_admin_user,
     normalize_user_id,
     viewer_role,
 )
 from backend.services.user_preference_service import (
     PREF_KEY_UNIFIED_USER_ID,
     get_user_preferences,
+    set_platform_role,
     set_unified_user_id,
 )
 
@@ -31,6 +40,10 @@ class IdentitySyncIn(BaseModel):
     unified_user_id: str = Field(min_length=1, max_length=128)
 
 
+class PlatformRoleIn(BaseModel):
+    platform_role: str = Field(min_length=1, max_length=64)
+
+
 @router.get("/me/derived-user-id")
 async def api_derived_user_id(req: Request):
     """按 IP + User-Agent 生成匿名 ID（与未传 X-User-ID 时服务端推导一致）。"""
@@ -38,9 +51,13 @@ async def api_derived_user_id(req: Request):
 
 
 @router.get("/me")
-async def api_me(req: Request):
+async def api_me(
+    req: Request,
+    db: AsyncSession = Depends(get_db),
+    effective_uid: str = Depends(get_effective_user_id),
+):
     uid = effective_user_id_for_api(req)
-    role = viewer_role(req)
+    platform_role = await resolve_platform_role(db, req, effective_uid)
     feishu_id = feishu_effective_user_id(req)
     name: str | None = None
     avatar_url: str | None = None
@@ -54,10 +71,55 @@ async def api_me(req: Request):
             avatar_url = u.avatar_url
     return {
         "user_id": uid,
-        "role": role,
+        "role": platform_role,
+        "header_role": viewer_role(req),
+        "platform_role": platform_role,
+        "is_global_admin": is_global_admin_user(effective_uid),
         "feishu_bound": bool(feishu_id),
         "name": name,
         "avatar_url": avatar_url,
+    }
+
+
+@router.get("/me/access")
+async def api_me_access(
+    req: Request,
+    db: AsyncSession = Depends(get_db),
+    effective_uid: str = Depends(get_effective_user_id),
+):
+    """平台 Role、功能入口权限与 Role 字典（供前端导航/守卫）。"""
+    platform_role = await resolve_platform_role(db, req, effective_uid)
+    return {
+        "user_id": effective_uid,
+        "platform_role": platform_role,
+        "platform_role_label": PLATFORM_ROLE_LABELS.get(platform_role, platform_role),
+        "features": list_features(platform_role),
+        "is_global_admin": is_global_admin_user(effective_uid),
+        "platform_roles": [
+            {"id": rid, "label": PLATFORM_ROLE_LABELS[rid]} for rid in sorted(PLATFORM_ROLE_LABELS)
+        ],
+        "project_roles": [
+            {"id": rid, "label": PROJECT_ROLE_LABELS[rid]} for rid in sorted(PROJECT_ROLE_LABELS)
+        ],
+    }
+
+
+@router.put("/me/role")
+async def api_put_me_role(
+    body: PlatformRoleIn,
+    req: Request,
+    db: AsyncSession = Depends(get_db),
+    effective_uid: str = Depends(get_effective_user_id),
+):
+    """保存平台 Role 到用户偏好（禁止自助提升为 platform_admin）。"""
+    role = assert_assignable_platform_role(effective_uid, body.platform_role)
+    await set_platform_role(db, effective_uid, role)
+    return {
+        "ok": True,
+        "platform_role": role,
+        "features": list_features(role),
+        "is_global_admin": is_global_admin_user(effective_uid),
+        "feishu_bound": bool(feishu_effective_user_id(req)),
     }
 
 

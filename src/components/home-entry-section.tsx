@@ -2,7 +2,8 @@
 
 import Link from "next/link";
 
-import { useIsDefaultAdmin } from "@/lib/admin-access";
+import { useUserAccess } from "@/lib/admin-access";
+import type { FeatureKey } from "@/lib/rbac";
 
 type EntryItem = {
   href: string;
@@ -11,11 +12,23 @@ type EntryItem = {
   accent: string;
   eyebrow: string;
   adminOnly?: boolean;
+  requiredFeature?: FeatureKey;
+};
+
+const HREF_FEATURE: Partial<Record<string, FeatureKey>> = {
+  "/create": "create",
+  "/knowledge": "knowledge",
+  "/skills": "skills",
 };
 
 export default function HomeEntrySection({ entries }: { entries: readonly EntryItem[] }) {
-  const { isAdmin } = useIsDefaultAdmin();
-  const visibleEntries = entries.filter((item) => !item.adminOnly || isAdmin);
+  const { canAccess, isAdmin } = useUserAccess();
+  const visibleEntries = entries.filter((item) => {
+    const feature = item.requiredFeature ?? HREF_FEATURE[item.href];
+    if (feature) return canAccess(feature);
+    if (item.adminOnly) return isAdmin;
+    return true;
+  });
 
   return (
     <section

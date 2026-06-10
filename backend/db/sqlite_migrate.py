@@ -310,8 +310,30 @@ def run_sqlite_migrations(connection: Connection) -> None:
         text("CREATE INDEX IF NOT EXISTS idx_chat_messages_session_sort ON chat_messages (session_id, sort_index)")
     )
 
+    if "project_members" not in names:
+        connection.execute(
+            text(
+                """
+                CREATE TABLE project_members (
+                    id TEXT PRIMARY KEY,
+                    project_id TEXT NOT NULL,
+                    user_id TEXT NOT NULL,
+                    role TEXT NOT NULL DEFAULT 'viewer',
+                    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+                    UNIQUE(project_id, user_id)
+                )
+                """
+            )
+        )
+        connection.execute(
+            text("CREATE INDEX IF NOT EXISTS idx_project_members_user ON project_members (user_id)")
+        )
+        logger.info("sqlite_migrate: created table project_members")
+
     _seed_builtin_scenarios(connection)
     _backfill_project_scenario_bindings(connection)
+    _backfill_project_owner_members(connection)
     _ensure_growth_tables(connection)
 
 
@@ -550,3 +572,40 @@ def _backfill_project_scenario_bindings(connection: Connection) -> None:
                 sid,
                 is_def,
             )
+
+
+def _backfill_project_owner_members(connection: Connection) -> None:
+    """为既有项目补 owner 成员记录，便于 Role 组管理。"""
+    tables = connection.execute(
+        text("SELECT name FROM sqlite_master WHERE type='table'")
+    ).fetchall()
+    table_names = {str(r[0]) for r in tables}
+    if "project_members" not in table_names or "projects" not in table_names:
+        return
+
+    rows = connection.execute(text("SELECT id, owner_id FROM projects")).fetchall()
+    now = datetime.now().isoformat()
+    for project_id, owner_id in rows:
+        pid = str(project_id)
+        uid = str(owner_id or "default").strip() or "default"
+        exists = connection.execute(
+            text(
+                """
+                SELECT 1 FROM project_members
+                WHERE project_id = :pid AND user_id = :uid LIMIT 1
+                """
+            ),
+            {"pid": pid, "uid": uid},
+        ).fetchone()
+        if exists:
+            continue
+        connection.execute(
+            text(
+                """
+                INSERT INTO project_members (id, project_id, user_id, role, created_at, updated_at)
+                VALUES (:id, :pid, :uid, 'owner', :ts, :ts)
+                """
+            ),
+            {"id": str(uuid4()), "pid": pid, "uid": uid, "ts": now},
+        )
+        logger.info("sqlite_migrate: seeded project member owner project=%s user=%s", pid[:8], uid[:24])
