@@ -92,9 +92,16 @@ def effective_user_id_for_api(
 
 def viewer_role(request: Request | None) -> str:
     if request is None:
-        return os.getenv("TPDHERMES_DEFAULT_USER_ROLE", "tenant_admin")
-    r = (request.headers.get("X-User-Role") or request.headers.get("x-user-role") or "").strip()
-    return r or os.getenv("TPDHERMES_DEFAULT_USER_ROLE", "tenant_admin")
+        uid = "default"
+    else:
+        r = (request.headers.get("X-User-Role") or request.headers.get("x-user-role") or "").strip()
+        if r:
+            return r
+        uid = (request.headers.get("X-User-ID") or request.headers.get("x-user-id") or "").strip() or "default"
+    uid = (uid or "default").strip() or "default"
+    if uid == "default" or is_global_admin_user(uid):
+        return "platform_admin"
+    return os.getenv("TPDHERMES_DEFAULT_USER_ROLE", "tenant_partner") or "tenant_partner"
 
 
 def is_global_admin_user(user_id: str) -> bool:

@@ -123,6 +123,22 @@ def test_system_admin_can_assign_managed_user_role():
         assert assigned.json()["platform_role"] == "tenant_partner"
 
 
+def test_default_user_is_platform_admin_new_user_is_partner():
+    with TestClient(app) as client:
+        default_access = client.get(
+            "/api/v1/me/access",
+            headers={"X-User-ID": "default"},
+        ).json()
+        assert default_access["platform_role"] == "platform_admin"
+
+        partner_access = client.get(
+            "/api/v1/me/access",
+            headers={"X-User-ID": "new_member_user"},
+        ).json()
+        assert partner_access["platform_role"] == "tenant_partner"
+        assert "ops" not in partner_access["features"]
+
+
 def test_client_role_header_cannot_elevate_without_server_pref():
     """默认不信任 X-User-Role 提权；须 PUT /me/role 写入服务端偏好。"""
     hdr = {"X-User-ID": "header_forge_user", "X-User-Role": "platform_admin"}

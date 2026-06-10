@@ -52,6 +52,9 @@ PLATFORM_ROLE_LABELS: dict[str, str] = {
     "tenant_partner": "项目成员",
 }
 
+# 非 default 用户的默认平台分组（项目成员）
+DEFAULT_MEMBER_PLATFORM_ROLE: str = "tenant_partner"
+
 PROJECT_ROLE_LABELS: dict[str, str] = {
     "owner": "负责人",
     "editor": "编辑",
@@ -86,6 +89,30 @@ def is_default_platform_admin_user(user_id: str) -> bool:
     return (user_id or "").strip() == "default"
 
 
+async def ensure_default_member_platform_role(db: AsyncSession, user_id: str) -> None:
+    """未单独保存分组时，为非 default 用户写入默认「项目成员」。"""
+    uid = (user_id or "").strip()
+    if not uid or is_default_platform_admin_user(uid) or is_global_admin_user(uid):
+        return
+    prefs = await get_user_preferences(db, uid)
+    if str(prefs.get(PREF_KEY_PLATFORM_ROLE) or "").strip():
+        return
+    from backend.services.user_preference_service import set_platform_role
+
+    await set_platform_role(db, uid, DEFAULT_MEMBER_PLATFORM_ROLE)
+
+
+def default_platform_role_for_user(user_id: str) -> str:
+    """除 User ID default / 全局管理员外，默认均为项目成员。"""
+    uid = (user_id or "").strip() or "default"
+    if is_global_admin_user(uid) or is_default_platform_admin_user(uid):
+        return "platform_admin"
+    env_default = normalize_platform_role(
+        os.getenv("TPDHERMES_DEFAULT_USER_ROLE", DEFAULT_MEMBER_PLATFORM_ROLE)
+    )
+    return env_default or DEFAULT_MEMBER_PLATFORM_ROLE
+
+
 async def resolve_platform_role(
     db: AsyncSession,
     request: Request | None,
@@ -113,8 +140,7 @@ async def resolve_platform_role(
             logger.debug("platform_role from trusted header user=%s role=%s", uid[:24], header_role)
             return header_role
 
-    env_default = normalize_platform_role(os.getenv("TPDHERMES_DEFAULT_USER_ROLE", "tenant_admin"))
-    return env_default or "tenant_admin"
+    return default_platform_role_for_user(uid)
 
 
 def feature_allowed(platform_role: str, feature: str) -> bool:

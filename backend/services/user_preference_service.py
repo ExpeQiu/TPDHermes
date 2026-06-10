@@ -87,3 +87,5 @@ async def set_platform_role(db: AsyncSession, user_id: str, platform_role: str) 
         user_id,
         {PREF_KEY_PLATFORM_ROLE: platform_role.strip()},
     )
+
+

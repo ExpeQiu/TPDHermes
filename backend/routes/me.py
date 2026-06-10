@@ -15,6 +15,7 @@ from backend.services.rbac import (
     PROJECT_ROLE_LABELS,
     assert_admin_assignable_platform_role,
     assert_assignable_platform_role,
+    ensure_default_member_platform_role,
     list_features,
     require_system_admin,
     resolve_platform_role,
@@ -172,6 +173,8 @@ async def api_put_me_identity(
     await set_unified_user_id(db, effective_uid, unified)
     if unified != effective_uid:
         await set_unified_user_id(db, unified, unified)
+    for uid in {effective_uid, unified}:
+        await ensure_default_member_platform_role(db, uid)
     return {
         "ok": True,
         "unified_user_id": unified,
