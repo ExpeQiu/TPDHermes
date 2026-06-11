@@ -7,6 +7,8 @@ from fastapi.testclient import TestClient
 
 from backend import app
 
+HDR_ADMIN = {"X-User-ID": "default"}
+
 
 def test_tasks_execute_unknown_project_id_returns_404():
     with TestClient(app) as client:
@@ -80,13 +82,19 @@ def test_workshop_execute_calls_configured_skill_not_agent_only():
 
 def test_workshop_execute_without_project_scenario_binding():
     """工坊不应要求提前在项目详情绑定场景。"""
-    hdr_admin = {"X-User-ID": "default"}
     with TestClient(app) as client:
         pr = client.post("/api/v1/projects/", json={"name": "未绑定场景工坊项目"}).json()
         pid = pr["id"]
+        iname = "hello_skill"
+        client.delete(f"/api/v1/skills/{iname}")
+        assert client.post(
+            "/api/v1/skills/",
+            json={"name": iname, "description": "t", "source": "local"},
+        ).status_code == 200
+
         sc = client.post(
             "/api/v1/scenarios/",
-            headers=hdr_admin,
+            headers=HDR_ADMIN,
             json={
                 "code": f"ws-unbound-{pid[:8]}",
                 "name": "未绑定测试场景",
@@ -95,24 +103,21 @@ def test_workshop_execute_without_project_scenario_binding():
                 "conversation_mode": "task_oriented",
                 "domain": {},
                 "knowledge_policy": {"mode": "off", "collections": []},
-                "skills_policy": {"mode": "agent_select", "allowed": [], "preferred": []},
-                "output_policy": {},
+                "skills_policy": {"mode": "allowed_list", "allowed": [iname], "preferred": []},
+                "output_policy": {
+                    "must_follow_template": False,
+                    "required_sections": ["背景"],
+                    "format": "markdown",
+                },
             },
         )
         assert sc.status_code == 200, sc.text
         scenario_id = sc.json()["id"]
-        pub = client.post(f"/api/v1/scenarios/{scenario_id}/publish", headers=hdr_admin)
+        pub = client.post(f"/api/v1/scenarios/{scenario_id}/publish", headers=HDR_ADMIN)
         assert pub.status_code == 200, pub.text
 
         bound = client.get(f"/api/v1/projects/{pid}/scenarios").json()
         assert not any(row["scenario_id"] == scenario_id for row in bound)
-
-        iname = "hello_skill"
-        client.delete(f"/api/v1/skills/{iname}")
-        assert client.post(
-            "/api/v1/skills/",
-            json={"name": iname, "description": "t", "source": "local"},
-        ).status_code == 200
 
         r = client.post(
             "/api/v1/tasks/execute",
@@ -334,6 +339,7 @@ def test_scenario_put_goal_only_preserves_required_sections():
         sections = ["定制章节甲", "定制章节乙"]
         cr = client.post(
             "/api/v1/scenarios/",
+            headers=HDR_ADMIN,
             json={
                 "code": code,
                 "name": "章节保真",
@@ -347,9 +353,13 @@ def test_scenario_put_goal_only_preserves_required_sections():
         )
         assert cr.status_code == 200, cr.text
         sid = cr.json()["id"]
-        pu = client.put(f"/api/v1/scenarios/{sid}", json={"goal": "仅改目标"})
+        pu = client.put(
+            f"/api/v1/scenarios/{sid}",
+            headers=HDR_ADMIN,
+            json={"goal": "仅改目标"},
+        )
         assert pu.status_code == 200, pu.text
-        g = client.get(f"/api/v1/scenarios/{sid}").json()
+        g = client.get(f"/api/v1/scenarios/{sid}", headers=HDR_ADMIN).json()
     assert g.get("goal") == "仅改目标"
     assert g.get("output_policy", {}).get("required_sections") == sections
 
@@ -361,6 +371,7 @@ def test_scenario_put_goal_only_preserves_skills_allowlist_with_missing_names():
         allow = ["hello_skill", "not_installed_skill_xyz"]
         cr = client.post(
             "/api/v1/scenarios/",
+            headers=HDR_ADMIN,
             json={
                 "code": code,
                 "name": "白名单保真",
@@ -374,9 +385,13 @@ def test_scenario_put_goal_only_preserves_skills_allowlist_with_missing_names():
         )
         assert cr.status_code == 200, cr.text
         sid = cr.json()["id"]
-        pu = client.put(f"/api/v1/scenarios/{sid}", json={"goal": "g2"})
+        pu = client.put(
+            f"/api/v1/scenarios/{sid}",
+            headers=HDR_ADMIN,
+            json={"goal": "g2"},
+        )
         assert pu.status_code == 200, pu.text
-        g = client.get(f"/api/v1/scenarios/{sid}").json()
+        g = client.get(f"/api/v1/scenarios/{sid}", headers=HDR_ADMIN).json()
     assert g.get("skills_policy", {}).get("allowed") == allow
 
 
@@ -385,6 +400,7 @@ def test_scenario_publish_rejects_empty_skills_allowed():
         code = f"pub-empty-{uuid.uuid4().hex[:8]}"
         cr = client.post(
             "/api/v1/scenarios/",
+            headers=HDR_ADMIN,
             json={
                 "code": code,
                 "name": "发布校验空技能",
@@ -398,7 +414,7 @@ def test_scenario_publish_rejects_empty_skills_allowed():
         )
         assert cr.status_code == 200, cr.text
         sid = cr.json()["id"]
-        pub = client.post(f"/api/v1/scenarios/{sid}/publish")
+        pub = client.post(f"/api/v1/scenarios/{sid}/publish", headers=HDR_ADMIN)
     assert pub.status_code == 400
     assert "allowed" in str(pub.json().get("detail", ""))
 
@@ -417,6 +433,7 @@ def test_scenario_publish_rejects_must_follow_without_sections():
         code = f"pub-mft-{uuid.uuid4().hex[:8]}"
         cr = client.post(
             "/api/v1/scenarios/",
+            headers=HDR_ADMIN,
             json={
                 "code": code,
                 "name": "强制模版无章节",
@@ -430,7 +447,7 @@ def test_scenario_publish_rejects_must_follow_without_sections():
         )
         assert cr.status_code == 200, cr.text
         sid = cr.json()["id"]
-        pub = client.post(f"/api/v1/scenarios/{sid}/publish")
+        pub = client.post(f"/api/v1/scenarios/{sid}/publish", headers=HDR_ADMIN)
     assert pub.status_code == 400
     assert "required_sections" in str(pub.json().get("detail", ""))
 
@@ -449,6 +466,7 @@ def test_scenario_publish_200_when_contract_valid():
         code = f"pub-ok-{uuid.uuid4().hex[:8]}"
         cr = client.post(
             "/api/v1/scenarios/",
+            headers=HDR_ADMIN,
             json={
                 "code": code,
                 "name": "可发布场景",
@@ -462,7 +480,7 @@ def test_scenario_publish_200_when_contract_valid():
         )
         assert cr.status_code == 200, cr.text
         sid = cr.json()["id"]
-        pub = client.post(f"/api/v1/scenarios/{sid}/publish")
+        pub = client.post(f"/api/v1/scenarios/{sid}/publish", headers=HDR_ADMIN)
     assert pub.status_code == 200, pub.text
     body = pub.json()
     assert body.get("status") == "published"
@@ -520,12 +538,30 @@ def test_chat_doc_optimize_requires_source_output_id():
     assert "来源输出" in ex.text or "source" in ex.text.lower()
 
 
-def test_chat_doc_optimize_injects_full_source_material():
+def test_chat_doc_optimize_injects_full_source_material(monkeypatch):
     """文稿优化须将来源输出全文写入 task_input.source_material，而非 kb 上下文提示。"""
     import asyncio
 
     from backend.db import async_session_maker
     from backend.models.orchestration_run import OrchestrationRun
+
+    class FakeResp:
+        status_code = 200
+
+        def json(self):
+            return {"choices": [{"message": {"content": "optimized draft"}}]}
+
+    class FakeClient:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return None
+
+        async def post(self, _url, json=None, headers=None, **_kwargs):
+            return FakeResp()
+
+    monkeypatch.setattr("backend.routes.tasks._chat_client", lambda timeout: FakeClient())
 
     async def _load_request_json(run_id: str) -> dict:
         async with async_session_maker() as db:

@@ -135,8 +135,8 @@ def test_workshop_agent_mode_forwards_to_upstream(monkeypatch):
         async def __aexit__(self, *args):
             return None
 
-        async def post(self, url, _headers=None, json=None):
-            calls.append({"url": url, "json": json})
+        async def post(self, url, json=None, headers=None, **_kwargs):
+            calls.append({"url": url, "json": json, "headers": headers})
             return FakeResp()
 
     monkeypatch.setattr("backend.routes.tasks._chat_client", lambda timeout: FakeClient())
@@ -190,7 +190,7 @@ def test_workshop_agent_mode_uses_tool_capture(monkeypatch):
         async def __aexit__(self, *args):
             return None
 
-        async def post(self, _url, _headers=None, json=None):
+        async def post(self, _url, json=None, headers=None, **_kwargs):
             run_id = _run_id_from_upstream_body(json or {})
             assert run_id, "upstream 应携带 run_id"
             async with async_session_maker() as db:

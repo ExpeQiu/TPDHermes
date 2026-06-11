@@ -102,6 +102,7 @@ def test_kb_policy_can_bind_project_and_scenario(monkeypatch):
 
         scenario = client.post(
             "/api/v1/scenarios/",
+            headers=HDR_ADMIN,
             json={
                 "code": f"scn-{uuid.uuid4().hex[:6]}",
                 "name": "场景绑定测试",
@@ -121,6 +122,7 @@ def test_kb_policy_can_bind_project_and_scenario(monkeypatch):
 
         bind_scenario = client.put(
             f"/api/v1/scenarios/{scenario_id}",
+            headers=HDR_ADMIN,
             json={"knowledge_policy_id": policy_id},
         )
         assert bind_scenario.status_code == 200, bind_scenario.text
@@ -133,7 +135,7 @@ def test_kb_policy_can_bind_project_and_scenario(monkeypatch):
             for item in project_list.json()
         )
 
-        scenario_list = client.get("/api/v1/scenarios/")
+        scenario_list = client.get("/api/v1/scenarios/", headers=HDR_ADMIN)
         assert scenario_list.status_code == 200, scenario_list.text
         assert any(
             item["id"] == scenario_id and item["knowledge_policy_id"] == policy_id

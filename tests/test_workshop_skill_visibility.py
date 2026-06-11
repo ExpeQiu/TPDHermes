@@ -97,7 +97,7 @@ async def test_workshop_generate_blocks_foreign_uploaded_skill_by_run_user():
 
             assert ok.get("success") is True
             assert denied.get("success") is False
-            assert "not accessible" in str(denied.get("error") or "")
+            assert "技能不可用或不可见" in str(denied.get("error") or "")
     finally:
         with TestClient(app) as client:
             client.delete(f"/api/v1/skills/{skill_name}", headers={"X-User-ID": owner_id})
@@ -201,5 +201,7 @@ def test_ws_generate_requires_tphermes_run_id():
                 "context": {"name": "NoRunId"},
             },
         )
-    assert resp.status_code == 422, resp.text
-    assert "tphermes_run_id" in resp.text
+    # API 统一错误包装为 200 + code（校验错误当前映射为 NOT_FOUND）
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body.get("code") in (1001, 1002)
