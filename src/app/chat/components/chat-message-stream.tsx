@@ -5,8 +5,6 @@ import React from "react";
 import { ChatMarkdownWithCitations } from "@/components/chat-markdown-with-citations";
 import { ChatMessageQuickActions } from "@/components/chat-message-quick-actions";
 import type { ContextBlock } from "@/lib/chat-context";
-import { kbCollectionLabel } from "@/lib/ui-labels";
-
 import type { ChatSession, Message } from "@/app/chat/chat-types";
 
 type ChatMessageStreamProps = {
@@ -41,28 +39,21 @@ function isFirstAssistantTurn(session: ChatSession, message: Message): boolean {
   return userCount === 1 && assistantCount === 1;
 }
 
-function resolveKbLoadingLabel(kbCollection: string): string {
-  const kb = kbCollection.trim();
-  if (!kb) return "知识库";
-  const label = kbCollectionLabel(kb);
-  if (label.includes("知识库")) return label;
-  return `${label}知识库`;
-}
+/** 首次对话加载提示：不暴露具体 collection 规范名，统一为产品侧「技术推广知识库」 */
+const KB_LOADING_DISPLAY_NAME = "技术推广知识库";
 
 function buildStreamingWaitHint(options: {
   isFirstTurn: boolean;
-  kbCollection: string;
   includeProject: boolean;
 }): string {
   if (!options.isFirstTurn) {
     return "正在生成回复";
   }
 
-  const kbLabel = resolveKbLoadingLabel(options.kbCollection);
   if (options.includeProject) {
-    return `首次对话等待时间会比较长，我正在拼命地加载${kbLabel}与项目上下文`;
+    return `首次对话时间比较长，我正在拼命加载${KB_LOADING_DISPLAY_NAME}与项目上下文`;
   }
-  return `首次对话等待时间会比较长，我正在拼命地加载${kbLabel}`;
+  return `首次对话时间比较长，我正在拼命加载${KB_LOADING_DISPLAY_NAME}`;
 }
 
 function AssistantStreamWaitHint({ text }: { text: string }) {
@@ -179,7 +170,6 @@ export function ChatMessageStream({
                       <AssistantStreamWaitHint
                         text={buildStreamingWaitHint({
                           isFirstTurn: isFirstAssistantTurn(activeSession, msg),
-                          kbCollection: effectiveKbCollection,
                           includeProject: includeProjectContext,
                         })}
                       />

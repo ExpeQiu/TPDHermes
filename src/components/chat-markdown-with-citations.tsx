@@ -4,9 +4,13 @@ import { useMemo, useState } from "react";
 import { ChatMarkdownBody } from "@/components/chat-markdown-body";
 import {
   type CitationSource,
+  citationBadgeClassName,
+  citationListTagClassName,
+  citationScopeKind,
   citationSourceLabel,
   isWebCitationSource,
   maskCitationMarkers,
+  sortCitationsByScope,
 } from "@/lib/chat-citations";
 
 function CitationBadge({
@@ -27,19 +31,16 @@ function CitationBadge({
         : `片段 ${source.chunkIndex}`
       : null;
 
-  const isWeb = source ? isWebCitationSource(source) : false;
+  const scope = source ? citationScopeKind(source) : "public_kb";
 
   return (
     <span className="relative inline align-super leading-none">
       <button
         type="button"
-        className={`mx-0.5 inline-flex h-4 min-w-4 items-center justify-center rounded px-1 text-[10px] font-semibold leading-none transition-colors ${
-          unresolved
-            ? "bg-amber-200 text-amber-900 hover:bg-amber-300 dark:bg-amber-900/60 dark:text-amber-100"
-            : isWeb
-              ? "bg-emerald-200/90 text-emerald-900 hover:bg-emerald-300 dark:bg-emerald-900/70 dark:text-emerald-100"
-              : "bg-blue-200/90 text-blue-900 hover:bg-blue-300 dark:bg-blue-900/70 dark:text-blue-100"
-        }`}
+        className={`mx-0.5 inline-flex h-4 min-w-4 items-center justify-center rounded px-1 text-[10px] font-semibold leading-none transition-colors ${citationBadgeClassName(
+          scope,
+          unresolved,
+        )}`}
         aria-label={source ? `引用来源 ${refNum}: ${source.title}` : `未解析引用 ${refNum}`}
         onMouseEnter={() => setOpen(true)}
         onMouseLeave={() => setOpen(false)}
@@ -60,13 +61,13 @@ function CitationBadge({
               <span className="block text-xs font-semibold text-slate-900 dark:text-slate-100">
                 {source.title || "未命名资料"}
               </span>
-              {!isWeb && source.collection ? (
+              {scope !== "web" && source.collection ? (
                 <span className="mt-0.5 block text-[10px] text-slate-500 dark:text-slate-400">
                   {source.collection}
                   {chunkLabel ? ` · ${chunkLabel}` : ""}
                 </span>
               ) : null}
-              {isWeb && source.url ? (
+              {scope === "web" && source.url ? (
                 <a
                   href={source.url}
                   target="_blank"
@@ -109,30 +110,31 @@ function CitationSourcesList({
         引用来源 ({citations.length})
       </summary>
       <ul className="mt-1.5 space-y-1.5">
-        {citations.map((s) => (
+        {sortCitationsByScope(citations).map((s) => {
+          const scope = citationScopeKind(s);
+          return (
           <li
             key={`${s.ref}-${s.chunkId}`}
             className="rounded-md bg-slate-200/60 px-2 py-1.5 text-[11px] dark:bg-slate-800/60"
           >
             <span
-              className={`mr-1.5 inline-block rounded px-1 py-0.5 text-[10px] font-medium ${
-                isWebCitationSource(s)
-                  ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-950/50 dark:text-emerald-200"
-                  : "bg-blue-100 text-blue-800 dark:bg-blue-950/50 dark:text-blue-200"
-              }`}
+              className={`mr-1.5 inline-block rounded px-1 py-0.5 text-[10px] font-medium ${citationListTagClassName(
+                scope,
+              )}`}
             >
               {citationSourceLabel(s)}
             </span>
             <span className="font-semibold text-blue-800 dark:text-blue-200">[{s.ref}]</span>{" "}
             <span className="text-slate-800 dark:text-slate-200">{s.title}</span>
-            {isWebCitationSource(s) && s.url ? (
+            {scope === "web" && s.url ? (
               <p className="mt-0.5 truncate text-emerald-700 dark:text-emerald-300">{s.url}</p>
             ) : null}
             {s.excerpt ? (
               <p className="mt-0.5 line-clamp-2 text-slate-600 dark:text-slate-400">{s.excerpt}</p>
             ) : null}
           </li>
-        ))}
+          );
+        })}
       </ul>
     </details>
   );

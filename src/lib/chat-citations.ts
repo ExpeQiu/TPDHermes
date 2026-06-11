@@ -1,3 +1,5 @@
+import { isInternalSectionCollection } from "@/lib/kb-collection-catalog";
+
 export interface CitationSource {
   ref: number;
   chunkId: string;
@@ -15,6 +17,65 @@ export interface CitationSource {
 
 export function isWebCitationSource(source: Pick<CitationSource, "sourceKind" | "collection">): boolean {
   return source.sourceKind === "web" || source.collection === "互联网";
+}
+
+/** 引用角标 / 来源列表分区：内部真源 → 公共知识库 → 互联网 */
+export type CitationScopeKind = "internal" | "public_kb" | "web";
+
+const CITATION_SCOPE_SORT_RANK: Record<CitationScopeKind, number> = {
+  internal: 0,
+  public_kb: 1,
+  web: 2,
+};
+
+export function citationScopeKind(
+  source: Pick<CitationSource, "sourceKind" | "collection">,
+): CitationScopeKind {
+  if (isWebCitationSource(source)) return "web";
+  const col = source.collection.trim();
+  if (col.startsWith("internal.") || isInternalSectionCollection(col)) {
+    return "internal";
+  }
+  return "public_kb";
+}
+
+export function sortCitationsByScope(citations: CitationSource[]): CitationSource[] {
+  return [...citations].sort((a, b) => {
+    const rankA = CITATION_SCOPE_SORT_RANK[citationScopeKind(a)];
+    const rankB = CITATION_SCOPE_SORT_RANK[citationScopeKind(b)];
+    if (rankA !== rankB) return rankA - rankB;
+    return a.ref - b.ref;
+  });
+}
+
+export function citationBadgeClassName(
+  scope: CitationScopeKind,
+  unresolved?: boolean,
+): string {
+  if (unresolved) {
+    return "bg-amber-200 text-amber-900 hover:bg-amber-300 dark:bg-amber-900/60 dark:text-amber-100";
+  }
+  switch (scope) {
+    case "internal":
+      return "bg-blue-700 text-blue-50 hover:bg-blue-800 dark:bg-blue-950 dark:text-blue-100";
+    case "web":
+      return "bg-emerald-200/90 text-emerald-900 hover:bg-emerald-300 dark:bg-emerald-900/70 dark:text-emerald-100";
+    case "public_kb":
+    default:
+      return "bg-blue-200/90 text-blue-900 hover:bg-blue-300 dark:bg-blue-900/70 dark:text-blue-100";
+  }
+}
+
+export function citationListTagClassName(scope: CitationScopeKind): string {
+  switch (scope) {
+    case "internal":
+      return "bg-blue-800 text-blue-50 dark:bg-blue-950 dark:text-blue-100";
+    case "web":
+      return "bg-emerald-100 text-emerald-800 dark:bg-emerald-950/50 dark:text-emerald-200";
+    case "public_kb":
+    default:
+      return "bg-blue-100 text-blue-800 dark:bg-blue-950/50 dark:text-blue-200";
+  }
 }
 
 export function citationSourceLabel(source: Pick<CitationSource, "sourceKind" | "collection">): string {
