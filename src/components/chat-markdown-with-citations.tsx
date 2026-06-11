@@ -6,7 +6,7 @@ import {
   type CitationSource,
   citationSourceLabel,
   isWebCitationSource,
-  splitContentWithCitations,
+  maskCitationMarkers,
 } from "@/lib/chat-citations";
 
 function CitationBadge({
@@ -30,7 +30,7 @@ function CitationBadge({
   const isWeb = source ? isWebCitationSource(source) : false;
 
   return (
-    <span className="relative inline-block align-super leading-none">
+    <span className="relative inline align-super leading-none">
       <button
         type="button"
         className={`mx-0.5 inline-flex h-4 min-w-4 items-center justify-center rounded px-1 text-[10px] font-semibold leading-none transition-colors ${
@@ -162,46 +162,28 @@ export function ChatMarkdownWithCitations({
     [unresolvedCitationRefs],
   );
 
-  const hasInlineMarkers = content.includes("[^");
+  const hasInlineMarkers = content.includes("[^") || content.includes("{{CITE:");
   // 正文含 [^N] 时始终渲染角标；无溯源元数据则标为未解析（避免 GFM 脚注只显示数字、无来源）
   const showBadges = !streaming && hasInlineMarkers;
 
-  const segments = useMemo(
-    () => (showBadges ? splitContentWithCitations(content) : null),
-    [content, showBadges],
-  );
+  const renderCitation = useMemo(() => {
+    if (!showBadges) return undefined;
+    return (ref: number) => {
+      const source = sourceByRef.get(ref);
+      const unresolved = unresolvedSet.has(ref) || !source;
+      return <CitationBadge refNum={ref} source={source} unresolved={unresolved} />;
+    };
+  }, [showBadges, sourceByRef, unresolvedSet]);
 
-  if (!showBadges || !segments) {
-    const showSourceList = !streaming && citations && citations.length > 0;
-    return (
-      <div>
-        <ChatMarkdownBody content={content} />
-        {showSourceList ? (
-          <CitationSourcesList citations={citations} defaultOpen={!hasInlineMarkers} />
-        ) : null}
-      </div>
-    );
-  }
+  const markdownContent = showBadges ? maskCitationMarkers(content) : content;
+  const showSourceList = !streaming && citations && citations.length > 0;
 
   return (
-    <div className="text-sm leading-relaxed break-words">
-      {segments.map((seg, idx) => {
-        if (seg.kind === "text") {
-          if (!seg.value) return null;
-          return <ChatMarkdownBody key={`t-${idx}`} content={seg.value} />;
-        }
-        const source = sourceByRef.get(seg.ref);
-        const unresolved = unresolvedSet.has(seg.ref) || !source;
-        return (
-          <CitationBadge
-            key={`c-${idx}-${seg.ref}`}
-            refNum={seg.ref}
-            source={source}
-            unresolved={unresolved}
-          />
-        );
-      })}
-      {citations && citations.length > 0 ? <CitationSourcesList citations={citations} /> : null}
+    <div>
+      <ChatMarkdownBody content={markdownContent} renderCitation={renderCitation} />
+      {showSourceList ? (
+        <CitationSourcesList citations={citations} defaultOpen={!hasInlineMarkers} />
+      ) : null}
     </div>
   );
 }

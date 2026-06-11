@@ -119,10 +119,39 @@ export function parseTpHermesStreamMeta(data: string): TpHermesStreamMeta | null
 }
 
 const CITATION_MARKER_RE = /\[\^(\d+)\]/g;
+const CITATION_PLACEHOLDER_RE = /\{\{CITE:(\d+)\}\}/g;
 
 export type ContentSegment =
   | { kind: "text"; value: string }
   | { kind: "cite"; ref: number };
+
+/** 将 [^N] 转为占位符，避免 GFM 脚注解析且便于在 Markdown 文本节点内联渲染角标。 */
+export function maskCitationMarkers(content: string): string {
+  return content.replace(CITATION_MARKER_RE, "{{CITE:$1}}");
+}
+
+export function splitTextWithCitationPlaceholders(text: string): ContentSegment[] {
+  if (!text.includes("{{CITE:")) {
+    return [{ kind: "text", value: text }];
+  }
+  const segments: ContentSegment[] = [];
+  let lastIndex = 0;
+  for (const match of text.matchAll(CITATION_PLACEHOLDER_RE)) {
+    const index = match.index ?? 0;
+    if (index > lastIndex) {
+      segments.push({ kind: "text", value: text.slice(lastIndex, index) });
+    }
+    const ref = Number(match[1]);
+    if (Number.isFinite(ref)) {
+      segments.push({ kind: "cite", ref });
+    }
+    lastIndex = index + match[0].length;
+  }
+  if (lastIndex < text.length) {
+    segments.push({ kind: "text", value: text.slice(lastIndex) });
+  }
+  return segments.length > 0 ? segments : [{ kind: "text", value: text }];
+}
 
 export function splitContentWithCitations(content: string): ContentSegment[] {
   if (!content.includes("[^")) {
