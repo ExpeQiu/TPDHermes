@@ -29,9 +29,14 @@ import KnowledgePolicyDomain from "@/app/knowledge/components/KnowledgePolicyDom
 import { createKnowledgeQueryCache } from "@/app/knowledge/knowledge-query-cache";
 import {
   fieldLabel,
+  isInternalSectionCollection,
+  isKbCollectionHidden,
   isPublicKbCollection,
+  sortInternalSectionCollections,
   isTpdExperienceCollection,
   isTpdExperienceEntry,
+  isAuthoritativeKbCollection,
+  kbCollectionDescription,
   kbCollectionLabel,
   KB_DOMAIN_LABELS,
   kbDomainLabel,
@@ -676,7 +681,8 @@ function KbClassifyRulesHint({ compact }: { compact?: boolean }) {
         <li>
           <strong className="text-slate-700 dark:text-slate-300">按集合</strong>：按 Chroma{" "}
           <code className="text-emerald-700 dark:text-emerald-300/90">collection</code> 分组，规范名如{" "}
-          <code className="text-emerald-700 dark:text-emerald-300/90">public.structured_tech.geely_tech</code>
+          <code className="text-emerald-700 dark:text-emerald-300/90">internal.structured_tech.tech_points</code>
+          （展示名「内部知识库·技术点」）
         </li>
         <li>导入时在「上传导入」填写 domain / folder_path，或在 metadata 中补全后刷新</li>
       </ul>
@@ -3034,9 +3040,19 @@ export default function KnowledgePageClient() {
   };
 
   const renderCollectionWorkspace = () => {
-    const cols = collections.length > 0 ? collections : MOCK_COLLECTIONS;
-    const publicCols = cols.filter((c) => isPublicKbCollection(c.name));
-    const otherCols = cols.filter((c) => !isPublicKbCollection(c.name));
+    const cols = (collections.length > 0 ? collections : MOCK_COLLECTIONS).filter(
+      (c) => !isKbCollectionHidden(c.name),
+    );
+    const internalSectionCols = sortInternalSectionCollections(
+      cols.filter((c) => isInternalSectionCollection(c.name)),
+    );
+    const publicCols = cols.filter(
+      (c) => isPublicKbCollection(c.name) && !isInternalSectionCollection(c.name),
+    );
+    const otherCols = cols.filter(
+      (c) =>
+        !isPublicKbCollection(c.name) && !isInternalSectionCollection(c.name),
+    );
     const rawRows =
       visibleBrowseEntries.length > 0
         ? visibleBrowseEntries
@@ -3047,6 +3063,7 @@ export default function KnowledgePageClient() {
 
     const renderColButton = (col: Collection) => {
       const label = kbCollectionLabel(col.name, { projectNames: projectNameMap });
+      const desc = kbCollectionDescription(col.name);
       const active = filterCollection === col.name;
       return (
         <button
@@ -3062,10 +3079,15 @@ export default function KnowledgePageClient() {
               ? "bg-blue-600 border-blue-500 text-white"
               : "bg-slate-200 dark:bg-slate-800 border-slate-300 dark:border-slate-700 hover:bg-slate-300 dark:bg-slate-700"
           }`}
-          title={col.name}
+          title={desc ? `${col.name}\n${desc}` : col.name}
         >
           <span className="block font-medium text-slate-900 dark:text-white">
             {label}
+            {isAuthoritativeKbCollection(col.name) ? (
+              <span className="ml-1.5 inline-block rounded bg-emerald-500/15 px-1.5 py-0.5 text-[10px] font-normal text-emerald-700 dark:text-emerald-300">
+                真源
+              </span>
+            ) : null}
             {isTpdExperienceCollection(col.name) ? (
               <span className="ml-1.5 inline-block rounded bg-violet-500/15 px-1.5 py-0.5 text-[10px] font-normal text-violet-700 dark:text-violet-300">
                 经验库
@@ -3168,6 +3190,14 @@ export default function KnowledgePageClient() {
           <div className="mb-4">
             <p className="text-xs text-slate-500 mb-2 uppercase tracking-wide">公共知识库</p>
             <div className="flex gap-2 flex-wrap">{publicCols.map(renderColButton)}</div>
+          </div>
+        ) : null}
+        {internalSectionCols.length > 0 ? (
+          <div className="mb-4">
+            <p className="text-xs text-slate-500 mb-2 uppercase tracking-wide">内部知识库</p>
+            <div className="flex gap-2 flex-wrap">
+              {internalSectionCols.map(renderColButton)}
+            </div>
           </div>
         ) : null}
         {otherCols.length > 0 ? (

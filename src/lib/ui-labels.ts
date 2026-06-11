@@ -3,6 +3,20 @@
  * 请求体字段名仍使用英文，仅 UI 展示层调用本模块。
  */
 
+import {
+  KB_COLLECTION_DISPLAY,
+  kbCollectionDescription,
+} from "@/lib/kb-collection-catalog";
+
+export {
+  isAuthoritativeKbCollection,
+  isInternalKbCollection,
+  isInternalSectionCollection,
+  isKbCollectionHidden,
+  kbCollectionDescription,
+  sortInternalSectionCollections,
+} from "@/lib/kb-collection-catalog";
+
 export function stepLabel(n: number): string {
   return `步骤 ${n}`;
 }
@@ -289,6 +303,10 @@ export function kbCollectionLabel(
 ): string {
   const key = name.trim();
   if (!key) return "—";
+
+  if (KB_COLLECTION_DISPLAY[key]) {
+    return KB_COLLECTION_DISPLAY[key];
+  }
 
   if (isTpdExperienceCollection(key)) {
     return "经验库";

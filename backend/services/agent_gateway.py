@@ -9,6 +9,7 @@ import os
 from typing import Any
 
 from backend.schemas.orchestration import OrchestrationPayload, TaskInputPayload
+from backend.services.kb_contract import KB_AUTHORITATIVE_COLLECTIONS
 
 ORCHESTRATION_MARKER_BEGIN = "<<<ORCHESTRATION_JSON_BEGIN>>>"
 ORCHESTRATION_MARKER_END = "<<<ORCHESTRATION_JSON_END>>>"
@@ -30,7 +31,12 @@ def _build_orchestration_guidance(payload: OrchestrationPayload) -> str:
         "项目附件与输出沉淀已写入 orchestration.knowledge.collections 中的 project.*.kb 集合；"
         "需要引用时请调用 kb_query / kb_get_entry 按需检索，不要假设 prompt 中已包含全文。",
         "知识库 collection_name 必须与 kb_list_collections 返回的完整名称完全一致"
-        "（如 public.structured_tech.geely_tech），禁止省略 public./project. 前缀或使用短名 geely_tech。",
+        "（如 public.structured_tech.geely_tech、internal.structured_tech.tech_points），"
+        "禁止省略 public./internal./project. 前缀或使用短名。",
+        "真源集合（冲突时优先采纳）："
+        + "、".join(sorted(KB_AUTHORITATIVE_COLLECTIONS))
+        + "（内部知识库·技术点、发布素材·发言稿）。"
+        "公开情报·技术库（public.structured_tech.geely_tech）为互联网检索补充，不得覆盖真源口径。",
         "kb_query 的 query 优先使用文档中的产品代号、技术缩写、英文标识（如 GEA、Flyme），"
         "避免仅用营销口号或空泛词；若 count 为 0，应换用更具体的检索词重试，勿直接编造正文。",
     ]

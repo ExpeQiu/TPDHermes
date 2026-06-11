@@ -1,6 +1,6 @@
 {
   "vault_root": "/Users/expeqiu/Library/Mobile Documents/iCloud~md~obsidian/Documents/expe/myKW/4.Knowledge",
-  "generated_at": "2026-05-18T05:48:46.784322+00:00",
+  "generated_at": "2026-06-11T12:38:48.773900+00:00",
   "targets": [
     {
       "name": "auto_company_strategy",
@@ -20,7 +20,10 @@
         "published": true,
         "language": "zh",
         "source": "obsidian_import",
-        "source_type": "file"
+        "source_type": "file",
+        "include_files": [],
+        "exclude_files": [],
+        "title_overrides": null
       }
     },
     {
@@ -41,28 +44,66 @@
         "published": true,
         "language": "zh",
         "source": "obsidian_import",
-        "source_type": "file"
+        "source_type": "file",
+        "include_files": [],
+        "exclude_files": [],
+        "title_overrides": null
       }
     },
     {
       "name": "geely_tech_knowledge",
       "collection": "public.structured_tech.geely_tech",
-      "document_count": 36,
+      "document_count": 131,
       "source_root": "/Users/expeqiu/Library/Mobile Documents/iCloud~md~obsidian/Documents/expe/myKW/4.Knowledge/02-知识库/吉利技术知识库",
       "manifest_path": "/Volumes/Lexar/git/03T/TPDHermes/data/obsidian_imports/manifests/geely_tech_knowledge.manifest.json",
       "config": {
         "name": "geely_tech_knowledge",
         "relative_dir": "02-知识库/吉利技术知识库",
         "collection": "public.structured_tech.geely_tech",
+        "domain": "public_intel",
+        "tags": [
+          "公开情报",
+          "技术库",
+          "互联网检索"
+        ],
+        "published": true,
+        "language": "zh",
+        "source": "web_retrieval",
+        "source_type": "web",
+        "include_files": [],
+        "exclude_files": [
+          "JLGF.md"
+        ],
+        "title_overrides": null
+      }
+    },
+    {
+      "name": "jlgf_tech_points",
+      "collection": "internal.structured_tech.tech_points",
+      "document_count": 1,
+      "source_root": "/Users/expeqiu/Library/Mobile Documents/iCloud~md~obsidian/Documents/expe/myKW/4.Knowledge/02-知识库/吉利技术知识库",
+      "manifest_path": "/Volumes/Lexar/git/03T/TPDHermes/data/obsidian_imports/manifests/jlgf_tech_points.manifest.json",
+      "config": {
+        "name": "jlgf_tech_points",
+        "relative_dir": "02-知识库/吉利技术知识库",
+        "collection": "internal.structured_tech.tech_points",
         "domain": "structured_tech",
         "tags": [
-          "知识库",
-          "吉利技术知识库"
+          "内部知识库",
+          "技术点",
+          "JLGF"
         ],
         "published": true,
         "language": "zh",
         "source": "obsidian_import",
-        "source_type": "file"
+        "source_type": "file",
+        "include_files": [
+          "JLGF.md"
+        ],
+        "exclude_files": [],
+        "title_overrides": {
+          "JLGF.md": "吉利核心技术信息参考（JLGF）"
+        }
       }
     },
     {
@@ -83,7 +124,10 @@
         "published": true,
         "language": "zh",
         "source": "obsidian_import",
-        "source_type": "file"
+        "source_type": "file",
+        "include_files": [],
+        "exclude_files": [],
+        "title_overrides": null
       }
     }
   ]

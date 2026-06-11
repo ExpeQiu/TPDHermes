@@ -317,7 +317,9 @@ def run_cloud_import(args: argparse.Namespace, targets: list[dict[str, Any]], *,
 
     reports_dir = Path(args.output_dir) / "reports"
     reports_dir.mkdir(parents=True, exist_ok=True)
-    headers = {"X-API-Key": args.cloud_api_key} if args.cloud_api_key else {}
+    headers: dict[str, str] = {"X-User-ID": "default"}
+    if args.cloud_api_key:
+        headers["X-API-Key"] = args.cloud_api_key
     with httpx.Client(timeout=300.0, headers=headers) as client:
         for target in targets:
             report = upload_manifest_to_cloud(
@@ -340,7 +342,9 @@ def run_cloud_ingest_only(args: argparse.Namespace, targets: list[dict[str, Any]
 
     reports_dir = Path(args.output_dir) / "reports"
     reports_dir.mkdir(parents=True, exist_ok=True)
-    headers = {"X-API-Key": args.cloud_api_key} if args.cloud_api_key else {}
+    headers: dict[str, str] = {"X-User-ID": "default"}
+    if args.cloud_api_key:
+        headers["X-API-Key"] = args.cloud_api_key
     with httpx.Client(timeout=300.0, headers=headers) as client:
         for target in targets:
             report = ingest_existing_cloud_upload(

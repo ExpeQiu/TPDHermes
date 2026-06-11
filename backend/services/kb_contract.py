@@ -19,6 +19,26 @@ KB_DOMAIN_ENUM: frozenset[str] = frozenset(
 # TPD 经验库 collection 命名（第五层知识）
 TPD_EXPERIENCE_COLLECTION = "public.internal_methodology.tpd_experience"
 
+# 真源集合：与其它 collection 冲突时 Agent 须优先采纳
+KB_AUTHORITATIVE_COLLECTIONS: frozenset[str] = frozenset(
+    {
+        "internal.structured_tech.tech_points",
+        "public.release_assets.speeches",
+    }
+)
+
+KB_COLLECTION_DESCRIPTIONS: dict[str, str] = {
+    "public.structured_tech.geely_tech": (
+        "来自互联网检索的结构化技术点信息，供参考与补充，冲突时以真源集合为准。"
+    ),
+    "internal.structured_tech.tech_points": (
+        "内部官方技术点汇编（JLGF），真源信息，优先遵守和采纳。"
+    ),
+    "public.release_assets.speeches": (
+        "发言稿与发布口径，真源信息，优先遵守和采纳。"
+    ),
+}
+
 # 文档级 chunk metadata 必填（写入 Chroma 前校验）
 KB_REQUIRED_METADATA_KEYS: tuple[str, ...] = (
     "id",

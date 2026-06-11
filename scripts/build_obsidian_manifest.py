@@ -34,6 +34,9 @@ class ImportTarget:
     language: str = "zh"
     source: str = "obsidian_import"
     source_type: str = "file"
+    include_files: tuple[str, ...] = ()
+    exclude_files: tuple[str, ...] = ()
+    title_overrides: dict[str, str] | None = None
 
 
 TARGETS: tuple[ImportTarget, ...] = (
@@ -55,8 +58,20 @@ TARGETS: tuple[ImportTarget, ...] = (
         name="geely_tech_knowledge",
         relative_dir="02-知识库/吉利技术知识库",
         collection="public.structured_tech.geely_tech",
+        domain="public_intel",
+        tags=["公开情报", "技术库", "互联网检索"],
+        source="web_retrieval",
+        source_type="web",
+        exclude_files=("JLGF.md",),
+    ),
+    ImportTarget(
+        name="jlgf_tech_points",
+        relative_dir="02-知识库/吉利技术知识库",
+        collection="internal.structured_tech.tech_points",
         domain="structured_tech",
-        tags=["知识库", "吉利技术知识库"],
+        tags=["内部知识库", "技术点", "JLGF"],
+        include_files=("JLGF.md",),
+        title_overrides={"JLGF.md": "吉利核心技术信息参考（JLGF）"},
     ),
     ImportTarget(
         name="release_speeches",
@@ -155,11 +170,26 @@ def build_manifest(
     if not source_root.is_dir():
         raise FileNotFoundError(f"目录不存在: {source_root}")
 
-    documents = [
-        build_document_entry(vault_root, target, source_root, path)
-        for path in sorted(source_root.rglob("*.md"))
-        if path.is_file()
-    ]
+    if target.include_files:
+        documents = []
+        for rel_name in target.include_files:
+            file_path = source_root / rel_name
+            if not file_path.is_file():
+                raise FileNotFoundError(f"指定文件不存在: {file_path}")
+            entry = build_document_entry(vault_root, target, source_root, file_path)
+            override_title = (target.title_overrides or {}).get(rel_name)
+            if override_title:
+                entry["title"] = override_title
+            documents.append(entry)
+        documents.sort(key=lambda item: str(item.get("file_path") or ""))
+    else:
+        excluded = set(target.exclude_files)
+        documents = [
+            build_document_entry(vault_root, target, source_root, path)
+            for path in sorted(source_root.rglob("*.md"))
+            if path.is_file()
+            and path.relative_to(source_root).as_posix() not in excluded
+        ]
     if not documents:
         raise ValueError(f"目录下未找到 Markdown 文件: {source_root}")
 

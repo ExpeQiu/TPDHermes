@@ -1,0 +1,19 @@
+{
+  "job_id": "ing_20260611_125854_8882bac1",
+  "batch_id": "obsidian_import_jlgf_tech_points_20260611_123848",
+  "collection": "internal.structured_tech.tech_points",
+  "status": "completed",
+  "doc_total": 1,
+  "doc_succeeded": 1,
+  "doc_failed": 0,
+  "chunk_total": 73,
+  "chunk_upserted": 73,
+  "chunk_skipped": 0,
+  "chunks_deleted_stale": 0,
+  "cache_sync_triggered": true,
+  "cache_sync_error": null,
+  "started_at": "2026-06-11T12:58:54+0000",
+  "finished_at": "2026-06-11T12:58:55+0000",
+  "errors": [],
+  "dry_run": false
+}
