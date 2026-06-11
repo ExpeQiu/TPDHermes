@@ -265,6 +265,13 @@ export interface LocalRewriteInput {
   rewriteGoal?: string;
 }
 
+export function hasLocalRewrite(input: LocalRewriteInput | undefined): boolean {
+  if (!input) return false;
+  return Boolean(
+    input.targetSection?.trim() || input.sourceExcerpt?.trim() || input.rewriteGoal?.trim(),
+  );
+}
+
 /** 文稿优化场景：结构化局部改写约束写入 task_input.extra */
 export function formatLocalRewriteExtra(input: LocalRewriteInput): string {
   const lines: string[] = ["[局部改写约束]"];
@@ -288,10 +295,7 @@ export function formatDocOptimizeTaskExtra(
     `待优化输出: output_id=${output.id} title=${output.title}`,
     "服务端已将上述输出的完整正文写入 task_input.source_material；请基于全文做局部优化，勿将其仅作参考上下文或依赖 kb 检索。",
   ];
-  const section = input.targetSection?.trim();
-  const excerpt = input.sourceExcerpt?.trim();
-  const goal = input.rewriteGoal?.trim();
-  if (section || excerpt || goal) {
+  if (hasLocalRewrite(input)) {
     parts.push(formatLocalRewriteExtra(input));
   } else {
     parts.push("改写要求见本轮用户消息；请仅修改用户指明范围，保留其余部分原意与结构。");
@@ -407,20 +411,20 @@ export function buildChatTaskContextPayload(
     if (block) parts.push(block);
   }
   if (options.includeFileContext && decoded?.kind === "output") {
-    if (options.localRewrite?.rewriteGoal?.trim()) {
-      parts.push(formatLocalRewriteExtra(options.localRewrite));
+    if (hasLocalRewrite(options.localRewrite)) {
+      parts.push(formatLocalRewriteExtra(options.localRewrite ?? {}));
     }
     return { sourceOutputId: decoded.id, taskInputExtra: parts.join("\n\n"), error: null };
   }
   if (options.includeFileContext && decoded?.kind === "attachment" && selectedFile) {
     parts.push(formatAttachmentContextExtra(selectedFile));
-    if (options.localRewrite?.rewriteGoal?.trim()) {
-      parts.push(formatLocalRewriteExtra(options.localRewrite));
+    if (hasLocalRewrite(options.localRewrite)) {
+      parts.push(formatLocalRewriteExtra(options.localRewrite ?? {}));
     }
     return { sourceOutputId: null, taskInputExtra: parts.join("\n\n"), error: null };
   }
-  if (options.localRewrite?.rewriteGoal?.trim()) {
-    parts.push(formatLocalRewriteExtra(options.localRewrite));
+  if (hasLocalRewrite(options.localRewrite)) {
+    parts.push(formatLocalRewriteExtra(options.localRewrite ?? {}));
   }
   return { sourceOutputId: null, taskInputExtra: parts.join("\n\n"), error: null };
 }

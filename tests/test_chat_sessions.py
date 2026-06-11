@@ -51,6 +51,89 @@ def test_chat_sessions_crud():
         assert deleted.status_code == 200
 
 
+def test_chat_session_patch_and_message_sync():
+    headers = {"X-User-ID": f"patch_user_{uuid.uuid4().hex[:8]}"}
+    with TestClient(app) as client:
+        assistant_id = f"m2-{uuid.uuid4().hex[:8]}"
+        create = client.post(
+            "/api/v1/chat/sessions",
+            headers=headers,
+            json={
+                "title": "原始标题",
+                "messages": [{"id": f"m1-{uuid.uuid4().hex[:8]}", "role": "user", "content": "你好"}],
+                "selectedCollection": "default-kb",
+            },
+        )
+        assert create.status_code == 200
+        sid = create.json()["id"]
+
+        patched = client.patch(
+            f"/api/v1/chat/sessions/{sid}",
+            headers=headers,
+            json={
+                "title": "已修正标题",
+                "selectedCollection": "team-kb",
+                "includeKnowledgeContext": True,
+            },
+        )
+        assert patched.status_code == 200
+        patched_body = patched.json()
+        assert patched_body["title"] == "已修正标题"
+        assert patched_body["selectedCollection"] == "team-kb"
+        assert patched_body["includeKnowledgeContext"] is True
+
+        sync_added = client.post(
+            f"/api/v1/chat/sessions/{sid}/messages/sync",
+            headers=headers,
+            json={
+                "messages": [
+                    {
+                        "id": assistant_id,
+                        "role": "assistant",
+                        "content": "第一版回答",
+                        "runId": "run-1",
+                    }
+                ]
+            },
+        )
+        assert sync_added.status_code == 200
+        sync_body = sync_added.json()
+        assert sync_body["stats"]["created"] == 1
+        assert sync_body["session"]["messages"][-1]["content"] == "第一版回答"
+
+        sync_updated = client.post(
+            f"/api/v1/chat/sessions/{sid}/messages/sync",
+            headers=headers,
+            json={
+                "messages": [
+                    {
+                        "id": assistant_id,
+                        "role": "assistant",
+                        "content": "最终回答",
+                        "runId": "run-1",
+                        "citations": [{"title": "source-a"}],
+                    }
+                ]
+            },
+        )
+        assert sync_updated.status_code == 200
+        sync_updated_body = sync_updated.json()
+        assert sync_updated_body["stats"]["rewritten"] == 1
+        assert sync_updated_body["session"]["messages"][-1]["content"] == "最终回答"
+        assert sync_updated_body["session"]["messages"][-1]["citations"][0]["title"] == "source-a"
+
+        sync_removed = client.post(
+            f"/api/v1/chat/sessions/{sid}/messages/sync",
+            headers=headers,
+            json={"messages": [], "removedMessageIds": [assistant_id]},
+        )
+        assert sync_removed.status_code == 200
+        sync_removed_body = sync_removed.json()
+        assert sync_removed_body["stats"]["deleted"] == 1
+        remaining_ids = [item["id"] for item in sync_removed_body["session"]["messages"]]
+        assert assistant_id not in remaining_ids
+
+
 def test_me_identity_sync():
     headers = {"X-User-ID": "identity_sync_user"}
     with TestClient(app) as client:

@@ -17,6 +17,8 @@ from backend.services.chat_session_service import (
     list_sessions_for_user,
     list_sessions_full_for_user,
     migrate_local_sessions,
+    patch_session_for_user,
+    sync_session_messages_for_user,
     upsert_session_for_user,
 )
 from backend.services.user_identity import get_effective_user_id
@@ -43,6 +45,22 @@ class MigrateLocalIn(BaseModel):
 
 class BulkUpsertIn(BaseModel):
     sessions: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class ChatSessionPatchPayload(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    title: str | None = None
+    linkedOutputIds: list[str] | None = None
+    linkedRunIds: list[str] | None = None
+    sessionKind: str | None = None
+
+
+class SessionMessagesSyncIn(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    messages: list[dict[str, Any]] = Field(default_factory=list)
+    removedMessageIds: list[str] = Field(default_factory=list)
 
 
 @router.get("")
@@ -100,6 +118,59 @@ async def api_upsert_chat_session(
     return detail
 
 
+@router.patch("/{session_id}")
+async def api_patch_chat_session(
+    session_id: str,
+    body: ChatSessionPatchPayload,
+    db: AsyncSession = Depends(get_db),
+    effective_uid: str = Depends(get_effective_user_id),
+):
+    payload = body.model_dump(exclude_unset=True)
+    detail = await patch_session_for_user(
+        db,
+        session_id=session_id,
+        user_id=effective_uid,
+        payload=payload,
+    )
+    if not detail:
+        raise HTTPException(404, "会话不存在或无权访问")
+    logger.info(
+        "chat_session patch user_id=%s session_id=%s payload_bytes=%s",
+        effective_uid[:24],
+        session_id,
+        len(str(payload)),
+    )
+    return detail
+
+
+@router.post("/{session_id}/messages/sync")
+async def api_sync_chat_session_messages(
+    session_id: str,
+    body: SessionMessagesSyncIn,
+    db: AsyncSession = Depends(get_db),
+    effective_uid: str = Depends(get_effective_user_id),
+):
+    payload = body.model_dump()
+    result = await sync_session_messages_for_user(
+        db,
+        session_id=session_id,
+        user_id=effective_uid,
+        messages=payload.get("messages") or [],
+        removed_message_ids=payload.get("removedMessageIds") or [],
+    )
+    if not result:
+        raise HTTPException(404, "会话不存在或无权访问")
+    logger.info(
+        "chat_session message_sync_api user_id=%s session_id=%s payload_bytes=%s message_count=%s removed_count=%s",
+        effective_uid[:24],
+        session_id,
+        len(str(payload)),
+        len(payload.get("messages") or []),
+        len(payload.get("removedMessageIds") or []),
+    )
+    return result
+
+
 @router.delete("/{session_id}")
 async def api_delete_chat_session(
     session_id: str,
@@ -129,11 +200,17 @@ async def api_bulk_upsert_sessions(
     effective_uid: str = Depends(get_effective_user_id),
 ):
     count = 0
+    payload_bytes = len(body.model_dump_json())
     for item in body.sessions:
         sid = str(item.get("id") or "").strip()
         if not sid:
             continue
         await upsert_session_for_user(db, session_id=sid, user_id=effective_uid, payload=item)
         count += 1
-    logger.info("chat_session bulk_upsert user_id=%s count=%s", effective_uid[:24], count)
+    logger.info(
+        "chat_session bulk_upsert user_id=%s count=%s payload_bytes=%s",
+        effective_uid[:24],
+        count,
+        payload_bytes,
+    )
     return {"ok": True, "count": count, "user_id": effective_uid}

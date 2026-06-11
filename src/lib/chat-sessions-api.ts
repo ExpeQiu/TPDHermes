@@ -1,5 +1,5 @@
 /** 服务端聊天/场景会话历史 API */
-import { apiGet, apiPost, apiPut, apiDelete } from "./api";
+import { apiGet, apiPost, apiPut, apiDelete, apiPatch } from "./api";
 
 export type ChatSessionKind = "chat" | "scenario";
 
@@ -38,6 +38,26 @@ export async function upsertChatSessionOnServer(
   payload: Record<string, unknown>,
 ): Promise<ServerChatSession> {
   return apiPut<ServerChatSession>(`/chat/sessions/${encodeURIComponent(sessionId)}`, payload);
+}
+
+export async function patchChatSessionOnServer(
+  sessionId: string,
+  payload: Record<string, unknown>,
+): Promise<ServerChatSession> {
+  return apiPatch<ServerChatSession>(`/chat/sessions/${encodeURIComponent(sessionId)}`, payload);
+}
+
+export async function syncChatSessionMessagesOnServer(
+  sessionId: string,
+  payload: {
+    messages: Record<string, unknown>[];
+    removedMessageIds?: string[];
+  },
+): Promise<{
+  session: ServerChatSession;
+  stats: { created: number; rewritten: number; deleted: number };
+}> {
+  return apiPost(`/chat/sessions/${encodeURIComponent(sessionId)}/messages/sync`, payload);
 }
 
 export async function deleteChatSessionOnServer(sessionId: string): Promise<void> {
