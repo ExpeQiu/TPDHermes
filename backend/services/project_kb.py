@@ -34,6 +34,13 @@ def is_project_kb_collection(collection_name: str) -> bool:
     return name.startswith(PROJECT_KB_PREFIX) and name.endswith(".kb")
 
 
+def project_id_from_kb_collection(collection_name: str) -> str | None:
+    name = str(collection_name or "").strip()
+    if not is_project_kb_collection(name):
+        return None
+    return name[len(PROJECT_KB_PREFIX) : -len(".kb")] or None
+
+
 def attachment_doc_id(attachment_id: str) -> str:
     return f"att_{attachment_id}"
 

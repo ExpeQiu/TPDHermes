@@ -21,6 +21,7 @@ class ScenarioProfile(Base):
     goal = Column(Text)
     conversation_mode = Column(String, nullable=False, default="task_oriented")
     domain_json = Column(Text, nullable=False, default="{}")
+    knowledge_policy_id = Column(String)
     knowledge_policy_json = Column(Text, nullable=False, default="{}")
     skills_policy_json = Column(Text, nullable=False, default="{}")
     output_policy_json = Column(Text, nullable=False, default="{}")

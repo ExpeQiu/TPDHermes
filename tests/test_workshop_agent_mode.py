@@ -10,7 +10,11 @@ from fastapi.testclient import TestClient
 from backend import app
 from backend.services.agent_gateway import ORCHESTRATION_MARKER_BEGIN, ORCHESTRATION_MARKER_END
 from backend.services.workshop_execution import extract_text_from_tool_payload, primary_text_from_capture
-from backend.services.workshop_tool_capture import append_workshop_tool_capture, load_workshop_tool_capture
+from backend.services.workshop_tool_capture import (
+    append_workshop_tool_capture,
+    load_workshop_tool_capture,
+    save_workshop_tool_capture_for_context,
+)
 from backend.db import async_session_maker
 from backend.services.run_log_service import create_run
 
@@ -68,6 +72,52 @@ async def test_tool_capture_roundtrip():
     assert primary_text_from_capture(loaded) == "hello capture"
 
 
+@pytest.mark.asyncio
+async def test_tool_capture_requires_explicit_run_id_and_does_not_cross_runs():
+    run_id_a = str(uuid.uuid4())
+    run_id_b = str(uuid.uuid4())
+    project_id = str(uuid.uuid4())
+    async with async_session_maker() as db:
+        await create_run(
+            db,
+            run_id=run_id_a,
+            project_id=project_id,
+            entrypoint="workshop",
+            user_id="capture-owner",
+            request_json="{}",
+            snapshot_json="{}",
+        )
+        await create_run(
+            db,
+            run_id=run_id_b,
+            project_id=project_id,
+            entrypoint="workshop",
+            user_id="capture-owner",
+            request_json="{}",
+            snapshot_json="{}",
+        )
+
+    await save_workshop_tool_capture_for_context(
+        {"project_id": project_id},
+        "workshop_generate",
+        {"success": True, "content": "should skip", "skill": "hello_skill"},
+        skill_name="hello_skill",
+    )
+    await save_workshop_tool_capture_for_context(
+        {"tphermes_run_id": run_id_a, "project_id": project_id},
+        "workshop_generate",
+        {"success": True, "content": "capture-a", "skill": "hello_skill"},
+        skill_name="hello_skill",
+    )
+
+    async with async_session_maker() as db:
+        loaded_a = await load_workshop_tool_capture(db, run_id_a)
+        loaded_b = await load_workshop_tool_capture(db, run_id_b)
+
+    assert primary_text_from_capture(loaded_a) == "capture-a"
+    assert loaded_b is None
+
+
 def test_workshop_agent_mode_forwards_to_upstream(monkeypatch):
     monkeypatch.setenv("WORKSHOP_EXECUTION_MODE", "agent")
     calls: list[dict] = []
@@ -85,7 +135,7 @@ def test_workshop_agent_mode_forwards_to_upstream(monkeypatch):
         async def __aexit__(self, *args):
             return None
 
-        async def post(self, url, headers=None, json=None):
+        async def post(self, url, _headers=None, json=None):
             calls.append({"url": url, "json": json})
             return FakeResp()
 
@@ -140,7 +190,7 @@ def test_workshop_agent_mode_uses_tool_capture(monkeypatch):
         async def __aexit__(self, *args):
             return None
 
-        async def post(self, url, headers=None, json=None):
+        async def post(self, _url, _headers=None, json=None):
             run_id = _run_id_from_upstream_body(json or {})
             assert run_id, "upstream 应携带 run_id"
             async with async_session_maker() as db:

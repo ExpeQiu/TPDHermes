@@ -3,10 +3,12 @@ KBCache 服务：管理本地 SQLite kb_cache 表，与外部 ChromaDB 保持元
 """
 
 import json
+import logging
 import uuid
 from datetime import datetime
 from typing import Any, Optional
-from sqlalchemy import or_, select
+
+from sqlalchemy import delete, or_, select
 
 from backend.models.kb_cache import KBCache
 from backend.db import engine, async_session_maker
@@ -15,6 +17,7 @@ from backend.services.kb_ids import kb_doc_id_from_ref
 from backend.services.kb_metadata import normalize_kb_metadata_dict
 
 ALL_PROJECT_IDS = {"__all__", "*", "all"}
+logger = logging.getLogger("tpdx.hermes.kb_cache")
 
 
 class KBCacheService:
@@ -180,6 +183,205 @@ class KBCacheService:
             data={"synced": results["synced"], "failed": results["failed"], "skipped": results["skipped"]},
         )
         return results
+
+    @staticmethod
+    def _flatten_rows(data: dict[str, Any]) -> tuple[list[str], list[Any], list[Any]]:
+        ids_raw = data.get("ids") or []
+        docs_raw = data.get("documents") or []
+        metas_raw = data.get("metadatas") or []
+        if ids_raw and isinstance(ids_raw[0], list):
+            ids_raw = ids_raw[0]
+        if docs_raw and isinstance(docs_raw[0], list):
+            docs_raw = docs_raw[0]
+        if metas_raw and isinstance(metas_raw[0], list):
+            metas_raw = metas_raw[0]
+        ids = [str(x) for x in ids_raw if x is not None]
+        docs = docs_raw if isinstance(docs_raw, list) else []
+        metas = metas_raw if isinstance(metas_raw, list) else []
+        return ids, docs, metas
+
+    async def delete_entries_by_doc_ids(
+        self,
+        *,
+        project_id: str,
+        collection: str,
+        doc_ids: list[str],
+    ) -> int:
+        if not doc_ids:
+            return 0
+        await self.ensure_table()
+        pid = str(project_id).strip() or "__all__"
+        col = str(collection).strip()
+        async with async_session_maker() as db:
+            total_removed = 0
+            for doc_id in doc_ids:
+                did = str(doc_id).strip()
+                if not did:
+                    continue
+                prefix = f"{did}_chunk_"
+                stmt = delete(KBCache).where(
+                    KBCache.collection == col,
+                    or_(
+                        KBCache.id == did,
+                        KBCache.id.like(f"{prefix}%"),
+                    ),
+                )
+                if pid not in ALL_PROJECT_IDS:
+                    stmt = stmt.where(KBCache.project_id == pid)
+                res = await db.execute(stmt)
+                total_removed += int(res.rowcount or 0)
+            await db.commit()
+        if total_removed:
+            logger.info(
+                "kb_cache delete_entries_by_doc_ids project=%s collection=%s removed=%s",
+                pid,
+                col,
+                total_removed,
+            )
+        return total_removed
+
+    async def sync_selection_from_external(
+        self,
+        *,
+        external_kb_url: str,
+        project_id: str,
+        collection: str,
+        doc_ids: Optional[list[str]] = None,
+        chunk_ids: Optional[list[str]] = None,
+        purge_missing_doc_ids: bool = False,
+    ) -> dict[str, Any]:
+        """
+        按 doc_id / chunk_id 增量同步，供写后快速回填 cache。
+        """
+        await self.ensure_table()
+        col = str(collection).strip()
+        pid = str(project_id).strip() or "__all__"
+        norm_doc_ids = [str(x).strip() for x in (doc_ids or []) if str(x).strip()]
+        norm_chunk_ids = [str(x).strip() for x in (chunk_ids or []) if str(x).strip()]
+        if not col:
+            raise ValueError("collection required")
+        if not norm_doc_ids and not norm_chunk_ids:
+            raise ValueError("doc_ids or chunk_ids required")
+
+        async def _notify(event_type: str, **extra: object) -> None:
+            try:
+                from backend.routes.kb_sse import notify_kb_event
+
+                await notify_kb_event(event_type, source="kb_cache", **extra)
+            except Exception:
+                pass
+
+        try:
+            import httpx
+
+            async with httpx.AsyncClient(timeout=20.0) as client:
+                resp = await client.get(f"{external_kb_url}/api/v1/collections")
+                resp.raise_for_status()
+                collections_data = resp.json()
+                collection_ref = col
+                for item in collections_data:
+                    if not isinstance(item, dict):
+                        continue
+                    name = str(item.get("name") or item.get("id") or "").strip()
+                    ref = str(item.get("id") or item.get("name") or "").strip()
+                    if name == col or ref == col:
+                        collection_ref = ref or name
+                        break
+
+                if norm_chunk_ids:
+                    where: dict[str, Any]
+                    if len(norm_chunk_ids) == 1:
+                        where = {"id": norm_chunk_ids[0]}
+                    else:
+                        where = {"id": {"$in": norm_chunk_ids}}
+                else:
+                    if len(norm_doc_ids) == 1:
+                        where = {"doc_id": norm_doc_ids[0]}
+                    else:
+                        where = {"doc_id": {"$in": norm_doc_ids}}
+
+                get_resp = await client.post(
+                    f"{external_kb_url}/api/v1/collections/{collection_ref}/get",
+                    json={
+                        "where": where,
+                        "limit": max(1000, len(norm_doc_ids or norm_chunk_ids) * 64),
+                        "offset": 0,
+                        "include": ["metadatas", "documents"],
+                    },
+                )
+                get_resp.raise_for_status()
+                data = get_resp.json()
+        except Exception:
+            self._sync_mode = True
+            await _notify(
+                "query_fallback",
+                project_id=pid,
+                collection=col,
+                data={"phase": "incremental_sync_failed"},
+            )
+            raise
+
+        ids, docs, metas = self._flatten_rows(data)
+        items: list[dict[str, Any]] = []
+        matched_doc_ids: set[str] = set()
+        for idx, chunk_id in enumerate(ids):
+            metadata = (metas[idx] if idx < len(metas) else {}) or {}
+            if not isinstance(metadata, dict):
+                metadata = {}
+            metadata = normalize_kb_metadata_dict(metadata)
+            metadata.setdefault("id", chunk_id)
+            if metadata.get("doc_id") is not None:
+                matched_doc_ids.add(str(metadata.get("doc_id")))
+            items.append(
+                {
+                    "id": chunk_id,
+                    "content": docs[idx] if idx < len(docs) else "",
+                    "metadata": metadata,
+                }
+            )
+
+        written = 0
+        if items:
+            written = await self.upsert_cache_chunks(
+                project_id=pid,
+                collection=col,
+                items=items,
+            )
+
+        removed = 0
+        if purge_missing_doc_ids and norm_doc_ids:
+            missing = [doc_id for doc_id in norm_doc_ids if doc_id not in matched_doc_ids]
+            if missing:
+                removed = await self.delete_entries_by_doc_ids(
+                    project_id=pid,
+                    collection=col,
+                    doc_ids=missing,
+                )
+
+        self._sync_mode = False
+        await _notify(
+            "sync_complete",
+            project_id=pid,
+            collection=col,
+            data={
+                "synced": written,
+                "failed": 0,
+                "skipped": 0,
+                "incremental": True,
+                "doc_ids": norm_doc_ids,
+                "chunk_ids": norm_chunk_ids,
+                "removed": removed,
+            },
+        )
+        return {
+            "synced": written,
+            "failed": 0,
+            "skipped": 0,
+            "incremental": True,
+            "doc_ids": norm_doc_ids,
+            "chunk_ids": norm_chunk_ids,
+            "removed": removed,
+        }
 
     async def upsert_cache_chunks(
         self,

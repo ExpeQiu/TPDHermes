@@ -11,10 +11,22 @@ import {
 import KBDegradedBanner from "@/components/kb/KBDegradedBanner";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { apiDelete, apiFetch, apiGet, apiPatch, apiPost, getPublicApiBase } from "@/lib/api";
+import { apiDelete, apiGet, apiPatch, apiPost, getPublicApiBase } from "@/lib/api";
 import { CONTENT_MAX_CLASS } from "@/lib/content-shell";
 import { KbMarkdown } from "@/components/kb-markdown";
 import type { KbMarkdownAssetContext } from "@/lib/kb-markdown-assets";
+import {
+  KnowledgeBrowseDomain,
+  KnowledgeIngestDomain,
+  KnowledgeKgDomain,
+  KnowledgePolicyDomainPanel,
+  KnowledgeTreeDomain,
+} from "@/app/knowledge/components/KnowledgeDomainPanels";
+import KnowledgeIngestWorkspace, {
+  type KnowledgeIngestPrefill,
+} from "@/app/knowledge/components/KnowledgeIngestWorkspace";
+import KnowledgePolicyDomain from "@/app/knowledge/components/KnowledgePolicyDomain";
+import { createKnowledgeQueryCache } from "@/app/knowledge/knowledge-query-cache";
 import {
   fieldLabel,
   isPublicKbCollection,
@@ -27,7 +39,6 @@ import {
   kbFolderSegmentLabel,
   kbSourceTypeLabel,
   kgKindLabel,
-  runStatusLabel,
   TPD_EXPERIENCE_COLLECTION,
 } from "@/lib/ui-labels";
 
@@ -790,7 +801,14 @@ function KbEntryListDetailSplit({
 export default function KnowledgePageClient() {
   const searchParams = useSearchParams();
   const [workspaceMode, setWorkspaceMode] = useState<
-    "tree" | "collections" | "search" | "graph" | "ingest" | "harvest" | "experience"
+    | "tree"
+    | "collections"
+    | "search"
+    | "graph"
+    | "ingest"
+    | "harvest"
+    | "experience"
+    | "policy"
   >("tree");
 
   const [searchScopeCollection, setSearchScopeCollection] = useState<string>("");
@@ -870,21 +888,13 @@ export default function KnowledgePageClient() {
   const [kgLinkKind, setKgLinkKind] = useState<string>("CoreTech");
   const [kgLinkNodeId, setKgLinkNodeId] = useState("");
   const [previewMode, setPreviewMode] = useState<"summary" | "markdown">("summary");
-
-  const [ingestCollection, setIngestCollection] = useState("");
-  const [ingestDomain, setIngestDomain] = useState("structured_tech");
-  const [ingestFolderPath, setIngestFolderPath] = useState("02-知识库/导入");
-  const [ingestProjectId, setIngestProjectId] = useState("__all__");
-  const [ingestUploadIds, setIngestUploadIds] = useState<string[]>([]);
-  const [ingestBusy, setIngestBusy] = useState(false);
-  const [ingestMessage, setIngestMessage] = useState<string | null>(null);
-  const [ingestJobId, setIngestJobId] = useState<string | null>(null);
-  const [ingestJobView, setIngestJobView] = useState<Record<string, unknown> | null>(null);
-  const [ingestDocIdOnUpload, setIngestDocIdOnUpload] = useState("");
-  const [ingestUploadDocIdsJson, setIngestUploadDocIdsJson] = useState("");
-  const [ingestDocIdStrategy, setIngestDocIdStrategy] = useState<"filename" | "checksum">(
-    "filename",
-  );
+  const [ingestPrefill, setIngestPrefill] = useState<KnowledgeIngestPrefill>({
+    collection: "",
+    domain: "structured_tech",
+    folder_path: "02-知识库/导入",
+    project_id: "__all__",
+  });
+  const [ingestPrefillNonce, setIngestPrefillNonce] = useState(0);
 
   const [kgStats, setKgStats] = useState<Record<string, unknown> | null>(null);
   const [kgValidate, setKgValidate] = useState<{
@@ -916,8 +926,10 @@ export default function KnowledgePageClient() {
   browseEntriesRef.current = browseEntries;
 
   const detailFetchAbortRef = useRef<AbortController | null>(null);
+  const knowledgeQueryCacheRef = useRef(createKnowledgeQueryCache());
 
-  const reloadKbBrowse = useCallback(async () => {
+  const reloadKbBrowse = useCallback(async (options?: { force?: boolean }) => {
+    const force = options?.force !== false;
     if (USE_MOCK_KB) {
       setCollections(MOCK_COLLECTIONS);
       setBrowseEntries(MOCK_ENTRIES);
@@ -926,16 +938,26 @@ export default function KnowledgePageClient() {
     }
     try {
       setKbLoadError(null);
-      const colRes = await apiGet<{ collections: string[]; warning?: string }>(
-        "/kb/collections",
+      const colRes = await knowledgeQueryCacheRef.current.fetch(
+        "browse:collections",
+        () =>
+          apiGet<{ collections: string[]; warning?: string }>(
+            "/kb/collections",
+          ),
+        { force },
       );
       const cols: Collection[] = colRes.collections.map((name) => ({
         name,
         description: name,
         entry_count: 0,
       }));
-      const entRes = await apiGet<{ entries: Record<string, unknown>[] }>(
-        `/kb/cache/entries/__all__?limit=${KB_BROWSE_LIMIT}`,
+      const entRes = await knowledgeQueryCacheRef.current.fetch(
+        `browse:entries:${KB_BROWSE_LIMIT}`,
+        () =>
+          apiGet<{ entries: Record<string, unknown>[] }>(
+            `/kb/cache/entries/__all__?limit=${KB_BROWSE_LIMIT}`,
+          ),
+        { force },
       );
       const entries = entRes.entries.map((row) => mapCacheRow(row));
       const counts = new Map<string, number>();
@@ -962,7 +984,8 @@ export default function KnowledgePageClient() {
     }
   }, []);
 
-  const reloadBrowseTree = useCallback(async () => {
+  const reloadBrowseTree = useCallback(async (options?: { force?: boolean }) => {
+    const force = options?.force !== false;
     if (USE_MOCK_KB) {
       setBrowseTree([
         {
@@ -994,11 +1017,16 @@ export default function KnowledgePageClient() {
     setTreeLoading(true);
     setTreeError(null);
     try {
-      const data = await apiGet<{
-        domains: TreeNode[];
-        truncated: boolean;
-        entry_count_scanned: number;
-      }>("/kb/browse-tree?project_id=__all__&limit=3000");
+      const data = await knowledgeQueryCacheRef.current.fetch(
+        "tree:__all__:3000",
+        () =>
+          apiGet<{
+            domains: TreeNode[];
+            truncated: boolean;
+            entry_count_scanned: number;
+          }>("/kb/browse-tree?project_id=__all__&limit=3000"),
+        { force },
+      );
       setBrowseTree(data.domains || []);
       setTreeMeta({
         truncated: !!data.truncated,
@@ -1013,12 +1041,12 @@ export default function KnowledgePageClient() {
   }, []);
 
   useEffect(() => {
-    void reloadKbBrowse();
+    void reloadKbBrowse({ force: false });
   }, [reloadKbBrowse]);
 
   useEffect(() => {
     if (workspaceMode === "tree") {
-      void reloadBrowseTree();
+      void reloadBrowseTree({ force: false });
     }
   }, [workspaceMode, reloadBrowseTree]);
 
@@ -1044,8 +1072,10 @@ export default function KnowledgePageClient() {
           t === "query_fallback"
         ) {
           setLastSseMessage(`知识库事件：${t}`);
-          void reloadKbBrowse();
-          void reloadBrowseTree();
+          knowledgeQueryCacheRef.current.invalidatePrefix("browse:");
+          knowledgeQueryCacheRef.current.invalidatePrefix("tree:");
+          void reloadKbBrowse({ force: true });
+          void reloadBrowseTree({ force: true });
         }
       } catch {
         /* ignore */
@@ -1212,10 +1242,26 @@ export default function KnowledgePageClient() {
     }
   };
 
+  const openIngestWorkspace = useCallback(
+    (opts?: KnowledgeIngestPrefill) => {
+      const next: KnowledgeIngestPrefill = {
+        collection: opts?.collection?.trim() || "",
+        domain: opts?.domain?.trim() || treeTargetDomain.trim() || "structured_tech",
+        folder_path: opts?.folder_path?.trim() || treeTargetFolderPath.trim() || "02-知识库/导入",
+        project_id: opts?.project_id?.trim() || ingestPrefill.project_id || "__all__",
+      };
+      setIngestPrefill(next);
+      setIngestPrefillNonce((n) => n + 1);
+      handleWorkspaceMode("ingest");
+    },
+    [handleWorkspaceMode, ingestPrefill.project_id, treeTargetDomain, treeTargetFolderPath],
+  );
+
   const jumpToIngestFromTree = () => {
-    setIngestDomain(treeTargetDomain.trim() || "structured_tech");
-    setIngestFolderPath(treeTargetFolderPath.trim() || "02-知识库/导入");
-    handleWorkspaceMode("ingest");
+    openIngestWorkspace({
+      domain: treeTargetDomain.trim() || "structured_tech",
+      folder_path: treeTargetFolderPath.trim() || "02-知识库/导入",
+    });
   };
 
   const pickDefaultCollection = useCallback(
@@ -1244,8 +1290,6 @@ export default function KnowledgePageClient() {
     const fp = path.trim() || "02-知识库/手动录入";
     setTreeTargetDomain(dom);
     setTreeTargetFolderPath(fp);
-    setIngestDomain(dom);
-    setIngestFolderPath(fp);
     return { domain: dom, folder_path: fp };
   }, []);
 
@@ -1285,9 +1329,7 @@ export default function KnowledgePageClient() {
       opts?.folder_path ?? treeTargetFolderPath,
       opts?.domain ?? treeTargetDomain,
     );
-    setIngestDomain(domain);
-    setIngestFolderPath(folder_path);
-    handleWorkspaceMode("ingest");
+    openIngestWorkspace({ domain, folder_path });
   };
 
   const createCategoryIndexEntry = async () => {
@@ -1313,7 +1355,7 @@ export default function KnowledgePageClient() {
       const domain = addCategoryDomain.trim() || "structured_tech";
       await apiPost<{ entry_id?: string; doc_id?: string }>("/kb/entries/manual", {
         collection: col,
-        project_id: ingestProjectId || "__all__",
+        project_id: ingestPrefill.project_id || "__all__",
         title: `${seg}（分类索引）`,
         content: `# ${seg}\n\n> 本条目用于在目录树中占位展示「${path}」分类，可在详情页编辑或替换为正式文档。`,
         domain,
@@ -1675,7 +1717,7 @@ export default function KnowledgePageClient() {
     try {
       const res = await apiPost<{ entry_id?: string; doc_id?: string }>("/kb/entries/manual", {
         collection: col,
-        project_id: ingestProjectId || "__all__",
+        project_id: ingestPrefill.project_id || "__all__",
         title: createEntryForm.title.trim(),
         content: createEntryForm.content,
         domain: createEntryForm.domain.trim(),
@@ -1878,10 +1920,15 @@ export default function KnowledgePageClient() {
     }
   };
 
-  const loadKgPanel = async () => {
+  const loadKgPanel = async (options?: { force?: boolean }) => {
+    const force = options?.force !== false;
     setKgBusy(true);
     try {
-      const stats = await apiGet<Record<string, unknown>>("/kg/stats");
+      const stats = await knowledgeQueryCacheRef.current.fetch(
+        "kg:stats",
+        () => apiGet<Record<string, unknown>>("/kg/stats"),
+        { force },
+      );
       setKgStats(stats);
     } catch {
       setKgStats(null);
@@ -1902,11 +1949,17 @@ export default function KnowledgePageClient() {
     }
   };
 
-  const loadKgNodes = async () => {
+  const loadKgNodes = async (options?: { force?: boolean }) => {
+    const force = options?.force !== false;
     setKgBusy(true);
     try {
-      const r = await apiGet<{ items: Record<string, unknown>[] }>(
-        `/kg/nodes/${encodeURIComponent(kgKindPick)}?limit=200`,
+      const r = await knowledgeQueryCacheRef.current.fetch(
+        `kg:nodes:${kgKindPick}`,
+        () =>
+          apiGet<{ items: Record<string, unknown>[] }>(
+            `/kg/nodes/${encodeURIComponent(kgKindPick)}?limit=200`,
+          ),
+        { force },
       );
       setKgNodes(r.items || []);
     } catch {
@@ -1916,11 +1969,17 @@ export default function KnowledgePageClient() {
     }
   };
 
-  const loadKgRels = async () => {
+  const loadKgRels = async (options?: { force?: boolean }) => {
+    const force = options?.force !== false;
     setKgBusy(true);
     try {
-      const r = await apiGet<{ items: Record<string, unknown>[] }>(
-        "/kg/relations?limit=200",
+      const r = await knowledgeQueryCacheRef.current.fetch(
+        "kg:relations",
+        () =>
+          apiGet<{ items: Record<string, unknown>[] }>(
+            "/kg/relations?limit=200",
+          ),
+        { force },
       );
       setKgRelations(r.items || []);
     } catch {
@@ -1932,7 +1991,7 @@ export default function KnowledgePageClient() {
 
   useEffect(() => {
     if (workspaceMode === "graph" && !USE_MOCK_KB) {
-      void loadKgPanel();
+      void loadKgPanel({ force: false });
     }
   }, [workspaceMode]);
 
@@ -1946,7 +2005,8 @@ export default function KnowledgePageClient() {
     setKgBusy(true);
     try {
       await apiPost("/kg/import", body);
-      await loadKgPanel();
+      knowledgeQueryCacheRef.current.invalidatePrefix("kg:");
+      await loadKgPanel({ force: true });
       await runKgValidate();
     } finally {
       setKgBusy(false);
@@ -1973,8 +2033,9 @@ export default function KnowledgePageClient() {
     setKgBusy(true);
     try {
       await apiPost("/kg/relations", relForm);
-      await loadKgRels();
-      await loadKgPanel();
+      knowledgeQueryCacheRef.current.invalidatePrefix("kg:");
+      await loadKgRels({ force: true });
+      await loadKgPanel({ force: true });
     } catch {
       /* ignore */
     } finally {
@@ -2752,14 +2813,14 @@ export default function KnowledgePageClient() {
             <button
               type="button"
               onClick={() => {
-                setIngestDomain(
-                  entry.domain && entry.domain !== "_uncategorized"
-                    ? entry.domain
-                    : "structured_tech",
-                );
-                setIngestFolderPath(entry.folder_path || "02-知识库/导入");
-                setIngestCollection(entry.collection);
-                handleWorkspaceMode("ingest");
+                openIngestWorkspace({
+                  domain:
+                    entry.domain && entry.domain !== "_uncategorized"
+                      ? entry.domain
+                      : "structured_tech",
+                  folder_path: entry.folder_path || "02-知识库/导入",
+                  collection: entry.collection,
+                });
               }}
               className="rounded px-2 py-1 text-[11px] bg-emerald-600/80 text-white hover:bg-emerald-500"
             >
@@ -3548,257 +3609,6 @@ export default function KnowledgePageClient() {
     );
   };
 
-  const renderIngestWorkspace = () => {
-    if (USE_MOCK_KB) {
-      return (
-        <p className="text-slate-500 text-sm text-center py-12">
-          Mock 模式下请关闭 NEXT_PUBLIC_USE_MOCK_KB 以使用上传与导入。
-        </p>
-      );
-    }
-
-    const onPickFiles = async (files: FileList | null) => {
-      if (!files?.length) return;
-      setIngestMessage(null);
-      setIngestBusy(true);
-      const ids: string[] = [];
-      try {
-        for (let i = 0; i < files.length; i++) {
-          const f = files[i];
-          const fd = new FormData();
-          fd.append("file", f);
-          const hint = ingestDocIdOnUpload.trim();
-          if (hint) {
-            fd.append("doc_id", hint);
-          }
-          const res = await apiFetch("/kb/upload", { method: "POST", body: fd });
-          const j = (await res.json()) as { upload_id?: string; detail?: string };
-          if (!res.ok) {
-            throw new Error(typeof j.detail === "string" ? j.detail : `上传失败 HTTP ${res.status}`);
-          }
-          if (j.upload_id) ids.push(j.upload_id);
-        }
-        setIngestUploadIds((prev) => [...prev, ...ids]);
-        setIngestMessage(`已上传 ${ids.length} 个文件`);
-      } catch (e) {
-        setIngestMessage(e instanceof Error ? e.message : "上传失败");
-      } finally {
-        setIngestBusy(false);
-      }
-    };
-
-    const runIngest = async () => {
-      if (!ingestCollection.trim()) {
-        setIngestMessage("请填写 collection");
-        return;
-      }
-      if (!ingestUploadIds.length) {
-        setIngestMessage("请先上传文件");
-        return;
-      }
-      setIngestBusy(true);
-      setIngestMessage(null);
-      try {
-        let upload_doc_ids: Record<string, string> | undefined;
-        const mapRaw = ingestUploadDocIdsJson.trim();
-        if (mapRaw) {
-          try {
-            upload_doc_ids = JSON.parse(mapRaw) as Record<string, string>;
-            if (
-              !upload_doc_ids ||
-              typeof upload_doc_ids !== "object" ||
-              Array.isArray(upload_doc_ids)
-            ) {
-              throw new Error("需为对象");
-            }
-          } catch {
-            setIngestMessage("上传 ID 映射须为「上传 ID → 文档 ID」的 JSON 对象");
-            setIngestBusy(false);
-            return;
-          }
-        }
-        const body: Record<string, unknown> = {
-          source_type: "upload",
-          collection: ingestCollection.trim(),
-          project_id: ingestProjectId.trim() || "__all__",
-          sync_cache: true,
-          upload_ids: ingestUploadIds,
-          defaults: {
-            domain: ingestDomain.trim(),
-            folder_path: ingestFolderPath.trim(),
-            published: true,
-            source: "manual_import",
-            source_type: "file",
-            language: "zh",
-            doc_id_strategy: ingestDocIdStrategy,
-          },
-        };
-        if (upload_doc_ids) {
-          body.upload_doc_ids = upload_doc_ids;
-        }
-        const report = await apiPost<Record<string, unknown>>("/kb/ingest", body);
-        const jid = typeof report.job_id === "string" ? report.job_id : null;
-        setIngestJobId(jid);
-        setIngestJobView(report);
-        setIngestMessage(
-          typeof report.status === "string"
-            ? `任务状态：${runStatusLabel(report.status)}`
-            : "导入已完成",
-        );
-        void reloadKbBrowse();
-        void reloadBrowseTree();
-      } catch (e) {
-        setIngestMessage(e instanceof Error ? e.message : "导入失败");
-      } finally {
-        setIngestBusy(false);
-      }
-    };
-
-    const pollJob = async () => {
-      if (!ingestJobId) return;
-      try {
-        const row = await apiGet<{
-          status: string;
-          result: Record<string, unknown> | null;
-        }>(`/kb/ingest-jobs/${encodeURIComponent(ingestJobId)}`);
-        setIngestJobView(row.result ?? { status: row.status });
-        setIngestMessage(`任务 ${ingestJobId}：${runStatusLabel(row.status)}`);
-      } catch (e) {
-        setIngestMessage(e instanceof Error ? e.message : "查询任务失败");
-      }
-    };
-
-    return (
-      <div className="space-y-6 max-w-3xl">
-        <p className="text-sm text-slate-400">
-          上传 Markdown / 纯文本 → 写入外部 Chroma → 同步 kb_cache。需后端可访问{" "}
-          外部向量库服务。
-        </p>
-        <div className="grid gap-4 sm:grid-cols-2">
-          <label className="block text-sm">
-            <span className="text-slate-400">知识集合</span>
-            <input
-              value={ingestCollection}
-              onChange={(e) => setIngestCollection(e.target.value)}
-              placeholder="如：public.structured_tech.topic"
-              className="mt-1 w-full rounded-lg border border-slate-300 dark:border-slate-700 bg-slate-100 dark:bg-slate-900 px-3 py-2 text-sm"
-            />
-          </label>
-          <label className="block text-sm">
-            <span className="text-slate-400">业务域</span>
-            <input
-              value={ingestDomain}
-              onChange={(e) => setIngestDomain(e.target.value)}
-              className="mt-1 w-full rounded-lg border border-slate-300 dark:border-slate-700 bg-slate-100 dark:bg-slate-900 px-3 py-2 text-sm"
-            />
-          </label>
-          <label className="block text-sm sm:col-span-2">
-            <span className="text-slate-400">目录路径</span>
-            <input
-              value={ingestFolderPath}
-              onChange={(e) => setIngestFolderPath(e.target.value)}
-              className="mt-1 w-full rounded-lg border border-slate-300 dark:border-slate-700 bg-slate-100 dark:bg-slate-900 px-3 py-2 text-sm"
-            />
-          </label>
-          <label className="block text-sm sm:col-span-2">
-            <span className="text-slate-400">缓存同步项目 ID</span>
-            <input
-              value={ingestProjectId}
-              onChange={(e) => setIngestProjectId(e.target.value)}
-              className="mt-1 w-full rounded-lg border border-slate-300 dark:border-slate-700 bg-slate-100 dark:bg-slate-900 px-3 py-2 text-sm"
-            />
-          </label>
-          <label className="block text-sm">
-            <span className="text-slate-400">上传时文档 ID（可选，写入服务器）</span>
-            <input
-              value={ingestDocIdOnUpload}
-              onChange={(e) => setIngestDocIdOnUpload(e.target.value)}
-              placeholder="稳定文档 ID，幂等更新 / publish"
-              className="mt-1 w-full rounded-lg border border-slate-300 dark:border-slate-700 bg-slate-100 dark:bg-slate-900 px-3 py-2 text-sm"
-            />
-          </label>
-          <label className="block text-sm">
-            <span className="text-slate-400">默认 doc_id 策略（无显式 doc_id 时）</span>
-            <select
-              value={ingestDocIdStrategy}
-              onChange={(e) =>
-                setIngestDocIdStrategy(e.target.value === "checksum" ? "checksum" : "filename")
-              }
-              className="mt-1 w-full rounded-lg border border-slate-300 dark:border-slate-700 bg-slate-100 dark:bg-slate-900 px-3 py-2 text-sm"
-            >
-              <option value="filename">原文件名 stem</option>
-              <option value="checksum">sha256 前缀（跨重命名稳定）</option>
-            </select>
-          </label>
-          <label className="block text-sm sm:col-span-2">
-            <span className="text-slate-400">导入时上传 ID → 文档 ID 映射（JSON 可选）</span>
-            <input
-              value={ingestUploadDocIdsJson}
-              onChange={(e) => setIngestUploadDocIdsJson(e.target.value)}
-              placeholder='{"uuid-1":"my_doc_a"}'
-              className="mt-1 w-full rounded-lg border border-slate-300 dark:border-slate-700 bg-slate-100 dark:bg-slate-900 px-3 py-2 text-sm font-mono"
-            />
-          </label>
-        </div>
-        <div>
-          <input
-            type="file"
-            multiple
-            accept=".md,.markdown,.txt,text/markdown,text/plain"
-            disabled={ingestBusy}
-            onChange={(e) => void onPickFiles(e.target.files)}
-            className="block w-full text-sm text-slate-700 dark:text-slate-300"
-          />
-          {ingestUploadIds.length > 0 ? (
-            <p className="text-xs text-slate-500 mt-2">
-              已选上传 ID：{ingestUploadIds.join(", ")}
-            </p>
-          ) : null}
-        </div>
-        <div className="flex flex-wrap gap-2">
-          <button
-            type="button"
-            disabled={ingestBusy}
-            onClick={() => void runIngest()}
-            className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white disabled:opacity-40"
-          >
-            开始导入
-          </button>
-          <button
-            type="button"
-            disabled={!ingestJobId}
-            onClick={() => void pollJob()}
-            className="rounded-lg border border-slate-300 dark:border-slate-600 px-4 py-2 text-sm text-slate-800 dark:text-slate-200 disabled:opacity-40"
-          >
-            刷新任务状态
-          </button>
-          <button
-            type="button"
-            disabled={ingestBusy}
-            onClick={() => {
-              setIngestUploadIds([]);
-              setIngestJobId(null);
-              setIngestJobView(null);
-              setIngestMessage(null);
-              setIngestUploadDocIdsJson("");
-            }}
-            className="rounded-lg border border-slate-300 dark:border-slate-600 px-4 py-2 text-sm text-slate-800 dark:text-slate-200"
-          >
-            清空队列
-          </button>
-        </div>
-        {ingestMessage ? (
-          <p className={`text-sm whitespace-pre-wrap ${KB_TEXT_AMBER}`}>{ingestMessage}</p>
-        ) : null}
-        {ingestJobView ? (
-          <pre className="text-xs bg-slate-100 dark:bg-slate-950/80 border border-slate-200 dark:border-slate-800 rounded-lg p-3 overflow-auto max-h-64 text-slate-700 dark:text-slate-300">
-            {JSON.stringify(ingestJobView, null, 2)}
-          </pre>
-        ) : null}
-      </div>
-    );
-  };
-
   const renderCreateEntryPanel = () => {
     if (!showCreateEntry || USE_MOCK_KB) return null;
     const colOptions = collections.length > 0 ? collections : MOCK_COLLECTIONS;
@@ -4552,17 +4362,50 @@ export default function KnowledgePageClient() {
 
   const kbWorkspaceBody = (
     <>
-      {entryManageMessage && showCreateEntry ? (
-        <p className={`text-xs mb-3 whitespace-pre-wrap ${KB_TEXT_AMBER}`}>{entryManageMessage}</p>
-      ) : null}
-      {renderCreateEntryPanel()}
-      {workspaceMode === "tree" && renderTreeWorkspace()}
-      {workspaceMode === "collections" && renderCollectionWorkspace()}
-      {workspaceMode === "harvest" && renderHarvestWorkspace()}
-      {workspaceMode === "experience" && renderExperienceWorkspace()}
-      {workspaceMode === "search" && renderSearchView()}
-      {workspaceMode === "graph" && renderGraphWorkspace()}
-      {workspaceMode === "ingest" && renderIngestWorkspace()}
+      {workspaceMode === "tree" && (
+        <KnowledgeTreeDomain>{renderTreeWorkspace()}</KnowledgeTreeDomain>
+      )}
+      {(workspaceMode === "collections" ||
+        workspaceMode === "harvest" ||
+        workspaceMode === "experience" ||
+        workspaceMode === "search") && (
+        <KnowledgeBrowseDomain
+          workspaceMode={workspaceMode}
+          entryManageMessage={
+            entryManageMessage && showCreateEntry ? (
+              <p className={`text-xs mb-3 whitespace-pre-wrap ${KB_TEXT_AMBER}`}>
+                {entryManageMessage}
+              </p>
+            ) : null
+          }
+          createEntryPanel={renderCreateEntryPanel()}
+          renderCollectionWorkspace={renderCollectionWorkspace}
+          renderHarvestWorkspace={renderHarvestWorkspace}
+          renderExperienceWorkspace={renderExperienceWorkspace}
+          renderSearchView={renderSearchView}
+        />
+      )}
+      {workspaceMode === "graph" && <KnowledgeKgDomain>{renderGraphWorkspace()}</KnowledgeKgDomain>}
+      {workspaceMode === "ingest" && (
+        <KnowledgeIngestDomain>
+          <KnowledgeIngestWorkspace
+            useMock={USE_MOCK_KB}
+            prefill={ingestPrefill}
+            prefillNonce={ingestPrefillNonce}
+            onCompleted={() => {
+              knowledgeQueryCacheRef.current.invalidatePrefix("browse:");
+              knowledgeQueryCacheRef.current.invalidatePrefix("tree:");
+              void reloadKbBrowse({ force: true });
+              void reloadBrowseTree({ force: true });
+            }}
+          />
+        </KnowledgeIngestDomain>
+      )}
+      {workspaceMode === "policy" && (
+        <KnowledgePolicyDomainPanel>
+          <KnowledgePolicyDomain active={workspaceMode === "policy"} />
+        </KnowledgePolicyDomainPanel>
+      )}
     </>
   );
 
@@ -4582,8 +4425,8 @@ export default function KnowledgePageClient() {
               <p className="mt-2 max-w-2xl text-sm text-slate-400 sm:text-base">
                 公共知识库：<strong className="text-slate-800 dark:text-slate-200">目录树</strong>治理与{" "}
                 <strong className="text-slate-800 dark:text-slate-200">知识图谱</strong>
-                信息点；执行侧仍只消费场景{" "}
-                场景合同中的知识集合配置。
+                信息点；治理侧新增 <strong className="text-slate-800 dark:text-slate-200">Policy 管理台</strong>
+                ，执行侧消费项目 / 场景绑定后的知识策略配置。
               </p>
             </div>
             <div className="flex flex-wrap gap-2">
@@ -4628,7 +4471,7 @@ export default function KnowledgePageClient() {
           <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
             <div>
               <p className="text-xs uppercase tracking-[0.2em] text-slate-500">知识工作台</p>
-              <h2 className="mt-2 text-xl font-semibold text-slate-900 dark:text-white">目录 · 集合 · 检索 · 图谱 · 导入</h2>
+              <h2 className="mt-2 text-xl font-semibold text-slate-900 dark:text-white">目录 · 集合 · 检索 · 图谱 · 导入 · Policy</h2>
             </div>
             <div className="flex flex-wrap gap-1 rounded-lg border border-slate-300 dark:border-slate-700 bg-slate-200/60 dark:bg-slate-800/60 p-1">
               {(
@@ -4640,6 +4483,7 @@ export default function KnowledgePageClient() {
                   ["search", "检索验证"],
                   ["graph", "知识图谱"],
                   ["ingest", "上传导入"],
+                  ["policy", "策略治理"],
                 ] as const
               ).map(([k, label]) => (
                 <button
@@ -4703,4 +4547,3 @@ function MetricCard({
     </div>
   );
 }
-

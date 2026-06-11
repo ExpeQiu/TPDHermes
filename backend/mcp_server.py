@@ -145,14 +145,13 @@ async def workshop_get_skill_info(skill_name: str, user_id: str | None = None) -
 async def workshop_generate(
     skill_name: str,
     context: dict[str, Any] | str | None = None,
-    tphermes_run_id: str | None = None,
+    tphermes_run_id: str = "",
 ) -> dict:
     """Execute a Skill."""
     from backend.tools.workshop_tools import workshop_generate as _gen
 
     ctx = coerce_tool_context(context)
-    if tphermes_run_id:
-        ctx["tphermes_run_id"] = tphermes_run_id
+    ctx["tphermes_run_id"] = tphermes_run_id
     return await _gen(skill_name, ctx)
 
 
@@ -170,14 +169,13 @@ async def workshop_generate_from_kb(
     limit: int = 3,
     project_id: str | None = None,
     context: dict[str, Any] | str | None = None,
-    tphermes_run_id: str | None = None,
+    tphermes_run_id: str = "",
 ) -> dict:
     """Execute a Skill with KB-augmented context."""
     from backend.tools.workshop_tools import workshop_generate_from_kb as _gen_from_kb
 
     ctx = coerce_tool_context(context)
-    if tphermes_run_id:
-        ctx["tphermes_run_id"] = tphermes_run_id
+    ctx["tphermes_run_id"] = tphermes_run_id
     return await _gen_from_kb(
         skill_name=skill_name,
         query=query,

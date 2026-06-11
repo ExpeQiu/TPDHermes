@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -85,7 +85,7 @@ async def test_harvest_success_writes_and_syncs(harvest_params, tmp_path, monkey
     }
 
     async def fake_sync(**kwargs):
-        return {"synced": 1}
+        return 2
 
     with patch("backend.services.kb_write.ChromaHttpClient") as CC:
         cli = MagicMock()
@@ -100,8 +100,7 @@ async def test_harvest_success_writes_and_syncs(harvest_params, tmp_path, monkey
 
         with patch("backend.services.kb_write.run_kb_ingestion", return_value=ingest_report):
             with patch(
-                "backend.services.kb_write.kb_cache_service.sync_from_external",
-                new_callable=AsyncMock,
+                "backend.services.kb_write.sync_harvest_doc_to_cache",
                 side_effect=fake_sync,
             ) as sync_m:
                 out = await add_kb_harvest_entry(**harvest_params)

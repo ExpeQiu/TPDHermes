@@ -114,7 +114,9 @@ def test_ingest_attachment_txt(mock_client_cls, mock_ingest, tmp_path: Path):
     import asyncio
 
     with patch("backend.services.project_kb_ingest.kb_cache_service") as mock_cache:
-        mock_cache.sync_from_external = MagicMock(return_value={"synced": 1})
+        mock_cache.sync_selection_from_external = MagicMock(
+            return_value={"synced": 1, "incremental": True}
+        )
         result = asyncio.run(ingest_project_attachment(aid))
     assert result.ok, result.message
     assert result.doc_id == f"att_{aid}"

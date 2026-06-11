@@ -135,3 +135,71 @@ async def test_workshop_list_skills_filters_uploaded_owner():
         with TestClient(app) as client:
             client.delete(f"/api/v1/skills/{skill_name}", headers={"X-User-ID": owner_id})
         _cleanup_skill(skill_name)
+
+
+def test_ws_generate_rejects_hidden_uploaded_skill():
+    skill_name = f"ws_upload_{uuid.uuid4().hex[:8]}"
+    owner_id = "ws_route_owner"
+    foreign_id = "ws_route_foreign"
+    _cleanup_skill(skill_name)
+
+    try:
+        with TestClient(app) as client:
+            uploaded = client.post(
+                "/api/v1/skills/upload",
+                headers={"X-User-ID": owner_id},
+                files={
+                    "file": (
+                        f"{skill_name}.zip",
+                        _build_skill_zip(skill_name),
+                        "application/zip",
+                    )
+                },
+            )
+            assert uploaded.status_code == 200, uploaded.text
+
+            foreign_run_id = str(uuid.uuid4())
+            import asyncio
+
+            async def _prepare() -> None:
+                async with async_session_maker() as db:
+                    await create_run(
+                        db,
+                        run_id=foreign_run_id,
+                        project_id=None,
+                        entrypoint="workshop",
+                        user_id=foreign_id,
+                        request_json="{}",
+                        snapshot_json="{}",
+                    )
+
+            asyncio.run(_prepare())
+
+            denied = client.post(
+                "/api/v1/ws/generate",
+                headers={"X-User-ID": foreign_id},
+                json={
+                    "skill_name": skill_name,
+                    "tphermes_run_id": foreign_run_id,
+                    "context": {},
+                },
+            )
+        assert denied.status_code == 400, denied.text
+        assert "技能不可用或不可见" in denied.text
+    finally:
+        with TestClient(app) as client:
+            client.delete(f"/api/v1/skills/{skill_name}", headers={"X-User-ID": owner_id})
+        _cleanup_skill(skill_name)
+
+
+def test_ws_generate_requires_tphermes_run_id():
+    with TestClient(app) as client:
+        resp = client.post(
+            "/api/v1/ws/generate",
+            json={
+                "skill_name": "hello_skill",
+                "context": {"name": "NoRunId"},
+            },
+        )
+    assert resp.status_code == 422, resp.text
+    assert "tphermes_run_id" in resp.text

@@ -13,6 +13,7 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from backend.services.knowledge_policy import resolve_effective_knowledge_policy
 from backend.services.project_kb import merge_project_kb_collections
 from backend.models.project import Project
 from backend.models.project_config import ProjectConfig
@@ -143,13 +144,14 @@ async def _load_scenario_profile(db: AsyncSession, scenario_id: str) -> Scenario
     return res.scalar_one_or_none()
 
 
-async def _ensure_workshop_binding(
+async def _sync_workshop_binding_version_if_present(
     db: AsyncSession,
     *,
     project_id: str,
     scenario_id: str,
     profile_version: str,
 ) -> None:
+    """若项目已绑定该场景，则同步钉选版本；未绑定不阻断工坊执行。"""
     res = await db.execute(
         select(ProjectScenario).where(
             ProjectScenario.project_id == project_id,
@@ -159,7 +161,7 @@ async def _ensure_workshop_binding(
     )
     row = res.scalar_one_or_none()
     if not row:
-        raise WorkshopBindingError(f"项目在工坊中未启用该场景绑定: scenario_id={scenario_id}")
+        return
     if row.scenario_version != profile_version:
         logger.info(
             "workshop binding version sync project=%s scenario=%s %s -> %s",
@@ -334,7 +336,7 @@ async def assemble_payload(
             raise WorkshopBindingError(f"场景不存在或未入库: {scenario_id}")
         if profile_row.status == "disabled":
             raise WorkshopBindingError(f"场景已停用: {scenario_id}")
-        await _ensure_workshop_binding(
+        await _sync_workshop_binding_version_if_present(
             db,
             project_id=pid,
             scenario_id=scenario_id,
@@ -484,9 +486,26 @@ async def assemble_payload(
 
     if profile_row:
         domain = _apply_profile_domain(domain, _loads_json_obj(profile_row.domain_json))
-        knowledge = _apply_profile_knowledge(knowledge, _loads_json_obj(profile_row.knowledge_policy_json))
+        effective_policy = await resolve_effective_knowledge_policy(
+            project_id=str(project_row.id) if project_row else "__all__",
+            scenario_id=profile_row.id,
+        )
+        if effective_policy:
+            knowledge = _apply_profile_knowledge(knowledge, effective_policy)
+        else:
+            knowledge = _apply_profile_knowledge(
+                knowledge,
+                _loads_json_obj(profile_row.knowledge_policy_json),
+            )
         skills = _apply_profile_skills(skills, _loads_json_obj(profile_row.skills_policy_json))
         output = _apply_profile_output(output, _loads_json_obj(profile_row.output_policy_json))
+    elif project_row and project_row.knowledge_policy_id:
+        effective_policy = await resolve_effective_knowledge_policy(
+            project_id=str(project_row.id),
+            scenario_id=None,
+        )
+        if effective_policy:
+            knowledge = _apply_profile_knowledge(knowledge, effective_policy)
 
     if overrides:
         if overrides.template_id:

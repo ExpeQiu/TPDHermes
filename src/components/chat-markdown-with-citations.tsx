@@ -84,7 +84,7 @@ function CitationBadge({
             </>
           ) : (
             <span className="block text-[11px] text-amber-800 dark:text-amber-200">
-              未找到对应检索片段（ref {refNum}）
+              未找到对应检索片段（ref {refNum}）。可能来源未落库，或编号与 kb_query / 联网检索返回的 ref 不一致。
             </span>
           )}
         </span>
@@ -163,8 +163,8 @@ export function ChatMarkdownWithCitations({
   );
 
   const hasInlineMarkers = content.includes("[^");
-  const showBadges =
-    !streaming && hasInlineMarkers && ((citations?.length ?? 0) > 0 || (unresolvedCitationRefs?.length ?? 0) > 0);
+  // 正文含 [^N] 时始终渲染角标；无溯源元数据则标为未解析（避免 GFM 脚注只显示数字、无来源）
+  const showBadges = !streaming && hasInlineMarkers;
 
   const segments = useMemo(
     () => (showBadges ? splitContentWithCitations(content) : null),

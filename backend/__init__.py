@@ -86,9 +86,15 @@ async def lifespan(app: FastAPI):
         logger.info("KB embedding warmup mode=background")
         asyncio.create_task(warmup_embed_model())
     from backend.services.growth_scheduler import growth_scheduler
+    from backend.services.kb_ingest_worker import kb_ingest_worker
+    from backend.services.kb_reconcile_scheduler import kb_reconcile_scheduler
 
     await growth_scheduler.start()
+    await kb_ingest_worker.start()
+    await kb_reconcile_scheduler.start()
     yield
+    await kb_reconcile_scheduler.stop()
+    await kb_ingest_worker.stop()
     await growth_scheduler.stop()
     logger.info("Shutting down...")
 
@@ -145,6 +151,7 @@ def include_router_with_version(router, strip_prefix: str = "", **kwargs):
 from backend.routes import projects_router
 from backend.routes.kb import router as kb_router
 from backend.routes.kb_ingest import router as kb_ingest_router
+from backend.routes.kb_policies import router as kb_policies_router
 from backend.routes.kb_sse import router as kb_sse_router
 from backend.routes.kg import router as kg_router
 from backend.routes.workshop import router as workshop_router
@@ -166,6 +173,7 @@ include_router_with_version(mcp_router, strip_prefix="/mcp")
 include_router_with_version(projects_router, strip_prefix="/projects")
 include_router_with_version(kb_router,       strip_prefix="/kb")
 include_router_with_version(kb_ingest_router, strip_prefix="/kb")
+include_router_with_version(kb_policies_router, strip_prefix="/kb")
 include_router_with_version(kb_sse_router,   strip_prefix="/kb")
 include_router_with_version(kg_router,         strip_prefix="/kg")
 include_router_with_version(workshop_router, strip_prefix="/ws")

@@ -789,6 +789,7 @@ function ChatPageInner() {
   const activeIdRef = useRef<string | null>(null);
   const sessionScopeHydratingRef = useRef(false);
   const sessionsSyncTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const citationHydrateAttemptedRef = useRef<Set<string>>(new Set());
 
   const chatApiBase =
     process.env.NEXT_PUBLIC_CHAT_API_URL ??
@@ -1017,6 +1018,43 @@ function ChatPageInner() {
       cancelled = true;
     };
   }, [scopeUserId]);
+
+  useEffect(() => {
+    if (sessionsLoading || !activeId) return;
+    const session = sessionsRef.current.find((s) => s.id === activeId);
+    if (!session) return;
+
+    for (const msg of session.messages) {
+      if (msg.role !== "assistant" || !msg.runId || !msg.content.includes("[^")) continue;
+      if (msg.citations?.length) continue;
+      const hydrateKey = `${msg.id}:${msg.runId}`;
+      if (citationHydrateAttemptedRef.current.has(hydrateKey)) continue;
+      citationHydrateAttemptedRef.current.add(hydrateKey);
+
+      void fetchRunKbSources(msg.runId)
+        .then((fetched) => {
+          if (fetched.citations.length === 0 && fetched.unresolvedCitationRefs.length === 0) return;
+          updateSession(activeId, (s) => ({
+            ...s,
+            messages: s.messages.map((m) =>
+              m.id === msg.id
+                ? {
+                    ...m,
+                    citations: fetched.citations,
+                    unresolvedCitationRefs: fetched.unresolvedCitationRefs,
+                  }
+                : m,
+            ),
+          }));
+          console.info(
+            `[chat] citations hydrated run_id=${msg.runId} count=${fetched.citations.length} unresolved=${fetched.unresolvedCitationRefs.length}`,
+          );
+        })
+        .catch((err) => {
+          console.warn("[chat] citation hydrate failed", err);
+        });
+    }
+  }, [activeId, sessions, sessionsLoading, updateSession]);
 
   useEffect(() => {
     if (!sessions.length || chatDeepLinkAppliedRef.current) return;
@@ -1670,7 +1708,7 @@ function ChatPageInner() {
             if (!existingCitations?.length) {
               try {
                 const fetched = await fetchRunKbSources(runIdForSources);
-                if (fetched.citations.length > 0) {
+                if (fetched.citations.length > 0 || fetched.unresolvedCitationRefs.length > 0) {
                   updateSession(sessionId, (session) => ({
                     ...session,
                     messages: session.messages.map((message) =>
@@ -1684,7 +1722,7 @@ function ChatPageInner() {
                     ),
                   }));
                   console.info(
-                    `[chat] kb sources fetched run_id=${runIdForSources} count=${fetched.citations.length}`,
+                    `[chat] kb sources fetched run_id=${runIdForSources} count=${fetched.citations.length} unresolved=${fetched.unresolvedCitationRefs.length}`,
                   );
                 }
               } catch (err) {

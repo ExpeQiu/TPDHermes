@@ -3,10 +3,9 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import Any
 
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.db import async_session_maker
@@ -74,39 +73,13 @@ async def append_workshop_tool_capture(
 async def _resolve_run_id_from_context(db: AsyncSession, ctx: dict[str, Any]) -> str | None:
     run_id = (ctx.get("tphermes_run_id") or ctx.get("run_id") or "").strip()
     if run_id:
-        return run_id
-
-    project_id = str(ctx.get("project_id") or "").strip()
-    task_input = ctx.get("task_input")
-    if not project_id and isinstance(task_input, dict):
-        project_id = str(task_input.get("project_id") or "").strip()
-    if not project_id:
-        logger.warning("workshop tool capture skipped: missing tphermes_run_id and project_id")
+        row = await db.get(OrchestrationRun, run_id)
+        if row:
+            return run_id
+        logger.warning("workshop tool capture skipped: run not found run_id=%s", run_id)
         return None
 
-    cutoff = (datetime.now() - timedelta(minutes=30)).isoformat()
-    q = await db.execute(
-        select(OrchestrationRun)
-        .where(
-            OrchestrationRun.project_id == project_id,
-            OrchestrationRun.entrypoint == "workshop",
-            OrchestrationRun.created_at >= cutoff,
-        )
-        .order_by(OrchestrationRun.created_at.desc())
-        .limit(5)
-    )
-    for row in q.scalars():
-        if not row.tool_capture_json:
-            logger.info(
-                "workshop tool capture fallback run_id=%s project_id=%s",
-                row.id,
-                project_id,
-            )
-            return row.id
-    logger.warning(
-        "workshop tool capture skipped: no pending workshop run project_id=%s",
-        project_id,
-    )
+    logger.warning("workshop tool capture skipped: missing tphermes_run_id")
     return None
 
 
@@ -117,7 +90,7 @@ async def save_workshop_tool_capture_for_context(
     *,
     skill_name: str | None = None,
 ) -> None:
-    """供 workshop_tools / MCP 调用；context 须含 tphermes_run_id（或 project_id 供降级匹配）。"""
+    """供 workshop_tools / MCP 调用；context 必须显式携带 tphermes_run_id。"""
     ctx = context or {}
     async with async_session_maker() as db:
         run_id = await _resolve_run_id_from_context(db, ctx)

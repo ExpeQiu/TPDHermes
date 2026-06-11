@@ -86,8 +86,16 @@ async def _sync_cache(
     chroma_url: str,
     project_id: str,
     collection: str,
+    doc_ids: list[str] | None = None,
 ) -> dict[str, Any] | None:
     try:
+        if doc_ids:
+            return await kb_cache_service.sync_selection_from_external(
+                external_kb_url=chroma_url,
+                project_id=project_id,
+                collection=collection,
+                doc_ids=doc_ids,
+            )
         return await kb_cache_service.sync_from_external(
             external_kb_url=chroma_url,
             project_id=project_id,
@@ -333,6 +341,7 @@ async def update_kb_entry(
             chroma_url=chroma,
             project_id=project_id.strip() or "__all__",
             collection=collection.strip(),
+            doc_ids=[doc_id.strip()],
         )
     result["cache_synced"] = bool(sync_cache)
     if cache_detail is not None:
@@ -382,17 +391,7 @@ async def delete_kb_entry(
         "cache_removed": cache_removed,
     }
 
-    if sync_cache:
-        cache_detail = await _sync_cache(
-            chroma_url=chroma,
-            project_id=project_id.strip() or "__all__",
-            collection=col,
-        )
-        result["cache_synced"] = True
-        if cache_detail is not None:
-            result["cache_sync_detail"] = cache_detail
-    else:
-        result["cache_synced"] = False
+    result["cache_synced"] = False
     return result
 
 
@@ -415,17 +414,7 @@ async def delete_kb_collection(
         return result
     cache_removed = await delete_cached_entries_by_collection(col)
     result["cache_removed"] = cache_removed
-    if sync_cache and (result.get("removed_chunks") or 0) > 0:
-        cache_detail = await _sync_cache(
-            chroma_url=chroma,
-            project_id=project_id.strip() or "__all__",
-            collection=col,
-        )
-        result["cache_synced"] = True
-        if cache_detail is not None:
-            result["cache_sync_detail"] = cache_detail
-    else:
-        result["cache_synced"] = False
+    result["cache_synced"] = False
     return result
 
 
@@ -537,6 +526,7 @@ async def create_kb_manual_entry(
             chroma_url=chroma,
             project_id=project_id.strip() or "__all__",
             collection=collection.strip(),
+            doc_ids=[str(result.get("doc_id") or "").strip()],
         )
         result["cache_synced"] = True
         if cache_detail is not None:

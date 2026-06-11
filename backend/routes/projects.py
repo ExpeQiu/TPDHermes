@@ -99,6 +99,7 @@ class ProjectCreate(BaseModel):
     audience: Optional[str] = None
     deadline: Optional[str] = None
     constraints: Optional[dict] = None
+    knowledge_policy_id: Optional[str] = None
 
 
 class ProjectUpdate(BaseModel):
@@ -109,6 +110,7 @@ class ProjectUpdate(BaseModel):
     deadline: Optional[str] = None
     constraints: Optional[dict] = None
     status: Optional[str] = None
+    knowledge_policy_id: Optional[str] = None
 
 
 class ProjectResponse(BaseModel):
@@ -120,6 +122,7 @@ class ProjectResponse(BaseModel):
     deadline: Optional[str]
     constraints: Optional[dict]
     status: str
+    knowledge_policy_id: Optional[str] = None
     created_at: str
     updated_at: str
     my_role: Optional[str] = None
@@ -168,6 +171,7 @@ def _project_to_response(project: Project, *, my_role: str | None = None) -> Pro
         deadline=project.deadline,
         constraints=constraints_val,
         status=project.status,
+        knowledge_policy_id=project.knowledge_policy_id,
         created_at=project.created_at,
         updated_at=project.updated_at,
         my_role=my_role,
@@ -192,6 +196,7 @@ async def create_project(
         deadline=data.deadline,
         constraints=constraints_str,
         status="active",
+        knowledge_policy_id=data.knowledge_policy_id,
         owner_id=effective_uid,
         created_at=datetime.now().isoformat(),
         updated_at=datetime.now().isoformat(),

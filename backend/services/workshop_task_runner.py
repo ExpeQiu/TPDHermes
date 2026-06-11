@@ -1,16 +1,12 @@
-"""
-工坊编排：确定性执行选中的 Skill.generate，不依赖 Agent 自行理解白名单。
-"""
+"""工坊编排执行与 SSE 事件帮助方法。"""
 
 from __future__ import annotations
 
 import asyncio
 import json
 import logging
-from concurrent.futures import ThreadPoolExecutor
 from typing import Any, AsyncGenerator
 
-from backend.schemas.orchestration import OrchestrationPayload
 from backend.services.skill_loader import SkillLoadError, SkillNotFoundError, get_loader
 
 logger = logging.getLogger("tpdx.hermes")
@@ -40,6 +36,15 @@ def sse_openai_delta(content: str) -> str:
     return f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
 
 
+def sse_error_event(message: str, *, code: str = "workshop_error") -> str:
+    payload = {"error": {"message": message, "code": code}}
+    return f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
+
+
+def sse_meta_event(meta: dict[str, Any]) -> str:
+    return f"data: {json.dumps(meta, ensure_ascii=False)}\n\n"
+
+
 async def run_workshop_skill_async(skill_name: str, context: dict[str, Any]) -> str:
     loader = get_loader()
     try:
@@ -49,12 +54,7 @@ async def run_workshop_skill_async(skill_name: str, context: dict[str, Any]) -> 
     except SkillLoadError as e:
         raise RuntimeError(f"Skill load error: {e}") from e
 
-    loop = asyncio.get_running_loop()
-    executor = ThreadPoolExecutor(max_workers=1)
-    try:
-        result = await loop.run_in_executor(executor, lambda: skill.generate(context))
-    finally:
-        executor.shutdown(wait=False)
+    result = await asyncio.to_thread(skill.generate, context)
 
     text = _skill_result_to_text(result)
     logger.info("workshop_direct skill=%s result_len=%s", skill_name, len(text))

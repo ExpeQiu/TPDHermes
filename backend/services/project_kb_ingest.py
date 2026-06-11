@@ -13,8 +13,6 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from sqlalchemy import select
-
 from backend.db import async_session_maker
 from backend.models.orchestration_run import OrchestrationRun
 from backend.models.output_asset import OutputAsset
@@ -174,8 +172,22 @@ def _ingest_markdown_sync(
     )
 
 
-async def _sync_after_ingest(chroma_url: str, project_id: str, collection: str) -> None:
+async def _sync_after_ingest(
+    chroma_url: str,
+    project_id: str,
+    collection: str,
+    *,
+    doc_id: str | None = None,
+) -> None:
     try:
+        if doc_id:
+            await kb_cache_service.sync_selection_from_external(
+                external_kb_url=chroma_url,
+                project_id=project_id,
+                collection=collection,
+                doc_ids=[doc_id],
+            )
+            return
         await kb_cache_service.sync_from_external(
             external_kb_url=chroma_url,
             project_id=project_id,
@@ -190,7 +202,12 @@ async def _run_ingest_and_sync(fn, *args, **kwargs) -> IngestResult:
     if isinstance(raw, tuple) and len(raw) == 3:
         result, chroma, proj = raw
         if result.ok and chroma and proj and result.collection:
-            await _sync_after_ingest(str(chroma), str(proj), result.collection)
+            await _sync_after_ingest(
+                str(chroma),
+                str(proj),
+                result.collection,
+                doc_id=result.doc_id,
+            )
         return result
     return raw  # type: ignore[return-value]
 
@@ -300,7 +317,6 @@ async def ingest_project_output(output_id: str) -> IngestResult:
 
         project_id = row.project_id
         doc_id = output_doc_id(row.id)
-        collection = project_kb_collection(project_id)
         published = output_published_for_status(row.status)
         title = (row.title or "项目输出").strip() or doc_id
         content = (row.content or "").strip()

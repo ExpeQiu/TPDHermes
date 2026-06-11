@@ -108,26 +108,6 @@ def _add_kb_harvest_entry_sync_inner(
     trace_id = str(uuid.uuid4())
     chroma = (chroma_url or CHROMA_HOST).strip()
 
-    ok_pol, pol_err, allowed = validate_harvest_collection(
-        collection_name,
-        project_id=project_id,
-        scenario_id=scenario_id,
-    )
-    if not ok_pol:
-        log.info(
-            "kb_harvest policy reject trace=%s collection=%s allowed=%s",
-            trace_id,
-            collection_name,
-            allowed,
-        )
-        return {
-            "ok": False,
-            "readonly": False,
-            "message": pol_err or "collection_not_allowed",
-            "trace_id": trace_id,
-            "allowed_collections": allowed,
-        }
-
     dom = (domain or "internal_methodology").strip()
     if strict_domain and dom not in KB_DOMAIN_ENUM:
         return {
@@ -426,6 +406,26 @@ async def add_kb_harvest_entry(
     strict_domain: bool = False,
 ) -> dict[str, Any]:
     """异步入口：ingest 在线程池执行，cache 同步 await。"""
+    ok_pol, pol_err, allowed = await validate_harvest_collection(
+        collection_name,
+        project_id=project_id,
+        scenario_id=scenario_id,
+    )
+    if not ok_pol:
+        trace_id = str(uuid.uuid4())
+        log.info(
+            "kb_harvest policy reject trace=%s collection=%s allowed=%s",
+            trace_id,
+            collection_name,
+            allowed,
+        )
+        return {
+            "ok": False,
+            "readonly": False,
+            "message": pol_err or "collection_not_allowed",
+            "trace_id": trace_id,
+            "allowed_collections": allowed,
+        }
     result = await asyncio.to_thread(
         _add_kb_harvest_entry_sync_inner,
         collection_name=collection_name,

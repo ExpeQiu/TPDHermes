@@ -22,6 +22,7 @@ from backend.services.orchestration_service import assemble_payload
 from backend.services.project_access import require_project_for_user
 from backend.services.rbac import require_feature
 from backend.services.user_identity import get_effective_user_id, viewer_role
+from backend.services.workshop_guard import WorkshopGuardError, ensure_single_workshop_skill_contract
 
 logger = logging.getLogger("tpdx.hermes")
 
@@ -56,6 +57,7 @@ class ScenarioCreate(BaseModel):
     goal: str | None = None
     conversation_mode: str = "task_oriented"
     domain: dict[str, Any] | None = None
+    knowledge_policy_id: str | None = None
     knowledge_policy: dict[str, Any] | None = None
     skills_policy: dict[str, Any] | None = None
     output_policy: dict[str, Any] | None = None
@@ -70,6 +72,7 @@ class ScenarioUpdate(BaseModel):
     goal: str | None = None
     conversation_mode: str | None = None
     domain: dict[str, Any] | None = None
+    knowledge_policy_id: str | None = None
     knowledge_policy: dict[str, Any] | None = None
     skills_policy: dict[str, Any] | None = None
     output_policy: dict[str, Any] | None = None
@@ -87,6 +90,7 @@ class ScenarioContractResponse(BaseModel):
     goal: str | None
     preset_instructions: str | None
     opening_hint: str | None
+    knowledge_policy_id: str | None
     knowledge_policy: dict[str, Any]
     skills_policy: dict[str, Any]
     output_policy: dict[str, Any]
@@ -103,6 +107,7 @@ class ScenarioResponse(BaseModel):
     goal: str | None
     conversation_mode: str
     domain: dict[str, Any]
+    knowledge_policy_id: str | None
     knowledge_policy: dict[str, Any]
     skills_policy: dict[str, Any]
     output_policy: dict[str, Any]
@@ -124,6 +129,7 @@ def _row_to_response(row: ScenarioProfile) -> ScenarioResponse:
         goal=row.goal,
         conversation_mode=row.conversation_mode,
         domain=json.loads(row.domain_json) if row.domain_json else {},
+        knowledge_policy_id=row.knowledge_policy_id,
         knowledge_policy=json.loads(row.knowledge_policy_json) if row.knowledge_policy_json else {},
         skills_policy=json.loads(row.skills_policy_json) if row.skills_policy_json else {},
         output_policy=json.loads(row.output_policy_json) if row.output_policy_json else {},
@@ -152,6 +158,7 @@ async def create_scenario(body: ScenarioCreate, db: AsyncSession = Depends(get_d
         goal=body.goal,
         conversation_mode=body.conversation_mode or "task_oriented",
         domain_json=_dump(body.domain),
+        knowledge_policy_id=body.knowledge_policy_id,
         knowledge_policy_json=_dump(body.knowledge_policy),
         skills_policy_json=_dump(body.skills_policy),
         output_policy_json=_dump(body.output_policy),
@@ -208,6 +215,7 @@ async def get_scenario_contract(scenario_id: str, db: AsyncSession = Depends(get
         goal=row.goal,
         preset_instructions=row.preset_instructions,
         opening_hint=row.opening_hint,
+        knowledge_policy_id=row.knowledge_policy_id,
         knowledge_policy=json.loads(row.knowledge_policy_json) if row.knowledge_policy_json else {},
         skills_policy=json.loads(row.skills_policy_json) if row.skills_policy_json else {},
         output_policy=json.loads(row.output_policy_json) if row.output_policy_json else {},
@@ -240,6 +248,8 @@ async def update_scenario(
         kp = data["knowledge_policy"]
         _log_knowledge_policy_warnings(kp if isinstance(kp, dict) else None)
         row.knowledge_policy_json = _dump(data.pop("knowledge_policy"))
+    if "knowledge_policy_id" in data:
+        row.knowledge_policy_id = data.pop("knowledge_policy_id")
     if "skills_policy" in data:
         row.skills_policy_json = _dump(data.pop("skills_policy"))
     if "output_policy" in data:
@@ -269,12 +279,13 @@ async def _ensure_scenario_publishable(db: AsyncSession, row: ScenarioProfile) -
     allowed = skills.get("allowed")
     if not isinstance(allowed, list):
         allowed = []
-    allowed_n = [str(x).strip() for x in allowed if str(x).strip()]
-    if not allowed_n:
+    try:
+        ensure_single_workshop_skill_contract(allowed)
+    except WorkshopGuardError as exc:
         raise HTTPException(
             status_code=400,
-            detail="发布前校验失败：skills_policy.allowed 须为非空列表（工坊依赖合同内技能白名单）",
-        )
+            detail=f"发布前校验失败：{exc.detail}",
+        ) from exc
 
     output = _parse_policy_field(row.output_policy_json)
     req_raw = output.get("required_sections")

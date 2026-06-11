@@ -3,7 +3,6 @@
 import json
 import uuid
 
-import pytest
 from fastapi.testclient import TestClient
 
 from backend import app
@@ -77,6 +76,86 @@ def test_workshop_execute_calls_configured_skill_not_agent_only():
     assert iname in (body.get("used_skills") or [])
     assert "RegressionUser" in body.get("content", "")
     assert body.get("content", "").count("hello_skill") >= 1 or "Hello" in body.get("content", "")
+
+
+def test_workshop_execute_without_project_scenario_binding():
+    """工坊不应要求提前在项目详情绑定场景。"""
+    hdr_admin = {"X-User-ID": "default"}
+    with TestClient(app) as client:
+        pr = client.post("/api/v1/projects/", json={"name": "未绑定场景工坊项目"}).json()
+        pid = pr["id"]
+        sc = client.post(
+            "/api/v1/scenarios/",
+            headers=hdr_admin,
+            json={
+                "code": f"ws-unbound-{pid[:8]}",
+                "name": "未绑定测试场景",
+                "description": "无需项目绑定即可工坊执行",
+                "goal": "验证",
+                "conversation_mode": "task_oriented",
+                "domain": {},
+                "knowledge_policy": {"mode": "off", "collections": []},
+                "skills_policy": {"mode": "agent_select", "allowed": [], "preferred": []},
+                "output_policy": {},
+            },
+        )
+        assert sc.status_code == 200, sc.text
+        scenario_id = sc.json()["id"]
+        pub = client.post(f"/api/v1/scenarios/{scenario_id}/publish", headers=hdr_admin)
+        assert pub.status_code == 200, pub.text
+
+        bound = client.get(f"/api/v1/projects/{pid}/scenarios").json()
+        assert not any(row["scenario_id"] == scenario_id for row in bound)
+
+        iname = "hello_skill"
+        client.delete(f"/api/v1/skills/{iname}")
+        assert client.post(
+            "/api/v1/skills/",
+            json={"name": iname, "description": "t", "source": "local"},
+        ).status_code == 200
+
+        r = client.post(
+            "/api/v1/tasks/execute",
+            json={
+                "entrypoint": "workshop",
+                "project_id": pid,
+                "scenario_id": scenario_id,
+                "user_message": json.dumps({"name": "UnboundUser", "title": "t"}),
+                "stream": False,
+                "overrides": {"skills": {"allowed": [iname]}},
+            },
+        )
+    assert r.status_code == 200, r.text
+    assert "UnboundUser" in r.json().get("content", "")
+
+
+def test_workshop_execute_rejects_multiple_allowed_skills():
+    with TestClient(app) as client:
+        pr = client.post("/api/v1/projects/", json={"name": "多技能工坊校验"}).json()
+        pid = pr["id"]
+        client.post(
+            f"/api/v1/projects/{pid}/scenarios",
+            json={"scenario_id": "general", "scenario_version": "1.0.0", "is_default": True},
+        )
+        for iname in ("hello_skill", "speech_skill"):
+            client.delete(f"/api/v1/skills/{iname}")
+            assert client.post(
+                "/api/v1/skills/",
+                json={"name": iname, "description": "t", "source": "local"},
+            ).status_code == 200
+
+        r = client.post(
+            "/api/v1/tasks/execute",
+            json={
+                "entrypoint": "workshop",
+                "project_id": pid,
+                "user_message": json.dumps({"name": "MultiSkillUser"}),
+                "stream": False,
+                "overrides": {"skills": {"allowed": ["hello_skill", "speech_skill"]}},
+            },
+        )
+    assert r.status_code == 400, r.text
+    assert "恰好 1 项" in str(r.json().get("detail", ""))
 
 
 def test_project_output_detail_returns_full_content():

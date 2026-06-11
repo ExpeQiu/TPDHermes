@@ -10,10 +10,9 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-from concurrent.futures import ThreadPoolExecutor
 from typing import Any, AsyncGenerator, Dict
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -26,7 +25,13 @@ from backend.services.skill_loader import (
     get_loader,
 )
 from backend.services.user_identity import get_effective_user_id
+from backend.services.workshop_guard import (
+    WorkshopGuardError,
+    raise_http_if_workshop_guard_failed,
+    require_workshop_invocation,
+)
 from backend.services.workshop_skill_access import visible_workshop_skill_names
+from backend.services.workshop_task_runner import sse_error_event, sse_meta_event, sse_openai_delta
 
 router = APIRouter(prefix="/ws", tags=["workshop"])
 logger = logging.getLogger("tpdx.hermes.workshop")
@@ -40,27 +45,23 @@ def _loader_dep() -> SkillLoader:
 
 class GenerateRequest(BaseModel):
     skill_name: str
+    tphermes_run_id: str
     context: Dict[str, Any]
 
 
 class GenerateFromKBRequest(BaseModel):
     skill_name: str
+    tphermes_run_id: str
     query: str
     collection_name: str
     limit: int = 3
     project_id: str | None = None
-    context: Dict[str, Any] = {}
-
-
-# ─── SSE Event Helpers ────────────────────────────────────────────────────────
-
-def sse_event(data: Dict[str, Any]) -> str:
-    """将 dict 序列化为 SSE data 行"""
-    return f"data: {json.dumps(data, ensure_ascii=False)}\n\n"
+    context: Dict[str, Any] | None = None
 
 
 async def _generate_stream(
     skill_name: str,
+    tphermes_run_id: str,
     context: Dict[str, Any],
     loader: SkillLoader,
 ) -> AsyncGenerator[str, None]:
@@ -76,47 +77,42 @@ async def _generate_stream(
     try:
         skill = loader.load(skill_name)
     except SkillNotFoundError:
-        yield sse_event({"type": "error", "message": f"Skill '{skill_name}' not found"})
+        yield sse_error_event(f"Skill '{skill_name}' not found", code="workshop_skill_not_found")
         return
     except SkillLoadError as e:
-        yield sse_event({"type": "error", "message": f"Failed to load skill: {e}"})
+        yield sse_error_event(f"Failed to load skill: {e}", code="workshop_skill_load_error")
         return
-
-    # ── 发送开始事件 ──────────────────────────────────────────────────────────
-    yield sse_event({
-        "type": "start",
-        "skill": skill_name,
-        "context_keys": list(context.keys()),
-    })
-
-    # ── 在线程池执行 Skill.generate（支持协程生成器） ─────────────────────────
-    loop = asyncio.get_running_loop()
-    executor = ThreadPoolExecutor(max_workers=1)
 
     try:
-        result = await loop.run_in_executor(executor, lambda: skill.generate(context))
+        result = await asyncio.to_thread(skill.generate, context)
     except Exception as e:
-        yield sse_event({"type": "error", "message": f"Generation failed: {e}"})
+        yield sse_error_event(f"Generation failed: {e}", code="workshop_generation_failed")
         return
-    finally:
-        executor.shutdown(wait=False)
 
-    # ── 分片发送结果（支持 str / dict / list） ────────────────────────────────
+    # ── 统一为 OpenAI 兼容 delta 事件 ───────────────────────────────────────
     if isinstance(result, str):
-        # 按行分片
         for line in result.splitlines(keepends=True):
-            yield sse_event({"type": "chunk", "content": line})
+            yield sse_openai_delta(line)
     elif isinstance(result, dict):
-        # 整体作为 chunk 发送
-        yield sse_event({"type": "chunk", "content": result})
+        yield sse_openai_delta(json.dumps(result, ensure_ascii=False, indent=2))
     elif isinstance(result, list):
         for item in result:
-            yield sse_event({"type": "chunk", "content": item})
+            if isinstance(item, str):
+                yield sse_openai_delta(item)
+            else:
+                yield sse_openai_delta(json.dumps(item, ensure_ascii=False))
     else:
-        yield sse_event({"type": "chunk", "content": str(result)})
+        yield sse_openai_delta(str(result))
 
-    # ── 发送完成事件 ─────────────────────────────────────────────────────────
-    yield sse_event({"type": "done", "skill": skill_name})
+    yield sse_meta_event(
+        {
+            "tphermes_task": {
+                "run_id": tphermes_run_id,
+                "skill": skill_name,
+                "status": "completed",
+            }
+        }
+    )
 
 
 # ─── SSE Endpoint ──────────────────────────────────────────────────────────────
@@ -125,6 +121,7 @@ async def _generate_stream(
 async def generate_stream(
     request: GenerateRequest,
     loader: SkillLoader = Depends(_loader_dep),
+    db: AsyncSession = Depends(get_db),
     effective_uid: str = Depends(get_effective_user_id),
 ):
     """
@@ -150,8 +147,24 @@ async def generate_stream(
         effective_uid[:24],
         request.skill_name,
     )
+    try:
+        invocation = await require_workshop_invocation(
+            db,
+            tphermes_run_id=request.tphermes_run_id,
+            skill_name=request.skill_name,
+            viewer_user_id=effective_uid,
+            project_id=request.context.get("project_id"),
+        )
+    except WorkshopGuardError as exc:
+        raise_http_if_workshop_guard_failed(exc)
+        raise HTTPException(status_code=500, detail="unexpected workshop guard state")
+
+    context = dict(request.context)
+    context["tphermes_run_id"] = invocation.run_id
+    if invocation.project_id:
+        context.setdefault("project_id", invocation.project_id)
     return StreamingResponse(
-        _generate_stream(request.skill_name, request.context, loader),
+        _generate_stream(request.skill_name, invocation.run_id, context, loader),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",
@@ -199,6 +212,7 @@ async def list_skills_metadata(
 @router.post("/generate-from-kb", response_model=None)
 async def generate_from_kb(
     request: GenerateFromKBRequest,
+    db: AsyncSession = Depends(get_db),
     effective_uid: str = Depends(get_effective_user_id),
 ):
     """
@@ -211,13 +225,30 @@ async def generate_from_kb(
         effective_uid[:24],
         request.skill_name,
     )
+    try:
+        invocation = await require_workshop_invocation(
+            db,
+            tphermes_run_id=request.tphermes_run_id,
+            skill_name=request.skill_name,
+            viewer_user_id=effective_uid,
+            project_id=request.project_id or (request.context or {}).get("project_id"),
+            collection_name=request.collection_name,
+        )
+    except WorkshopGuardError as exc:
+        raise_http_if_workshop_guard_failed(exc)
+        raise HTTPException(status_code=500, detail="unexpected workshop guard state")
+
     from backend.tools.workshop_tools import workshop_generate_from_kb
 
+    context = dict(request.context or {})
+    context["tphermes_run_id"] = invocation.run_id
+    if invocation.project_id:
+        context["project_id"] = invocation.project_id
     return await workshop_generate_from_kb(
         skill_name=request.skill_name,
         query=request.query,
-        collection_name=request.collection_name,
+        collection_name=invocation.collection_name or request.collection_name,
         limit=request.limit,
-        project_id=request.project_id,
-        context=request.context,
+        project_id=invocation.project_id,
+        context=context,
     )

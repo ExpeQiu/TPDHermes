@@ -36,9 +36,17 @@ from backend.services.project_kb_ingest import schedule_ingest_output
 from backend.services.project_access import require_project_for_user
 from backend.services.run_log_service import create_run, finalize_run, mark_run_failed
 from backend.services.template_service import extract_required_sections, get_template_by_id, validate_markdown_sections
+from backend.services.workshop_guard import (
+    WorkshopGuardError,
+    ensure_single_workshop_skill_contract,
+    require_workshop_collection_for_user,
+    require_workshop_skill_for_user,
+)
 from backend.services.workshop_task_runner import (
     _parse_workshop_context,
     run_workshop_skill_async,
+    sse_error_event,
+    sse_meta_event,
     sse_openai_delta,
 )
 from backend.services.workshop_execution import (
@@ -46,7 +54,6 @@ from backend.services.workshop_execution import (
     workshop_agent_fallback_direct,
     workshop_execution_mode,
 )
-from backend.services.workshop_skill_access import visible_workshop_skill_names
 from backend.services.workshop_tool_capture import load_workshop_tool_capture
 from backend.services.kb_source_capture import build_sources_for_sse, build_sources_payload_from_capture, load_kb_sources, prefetch_kb_sources_for_run
 from backend.services.user_identity import effective_user_id_for_api, viewer_role
@@ -125,24 +132,28 @@ async def _validate_task_request(
     effective_uid: str,
 ) -> None:
     if request.entrypoint == "workshop":
-        allowed = payload.skills.allowed
-        if not allowed:
+        try:
+            skill_name = ensure_single_workshop_skill_contract(payload.skills.allowed)
+        except WorkshopGuardError as exc:
             raise HTTPException(
-                status_code=400,
-                detail="工坊入口需要有效的技能白名单：请在场景编排中配置 skills_policy.allowed，或在请求中提供 overrides.skills.allowed。",
+                status_code=exc.status_code,
+                detail=exc.detail,
+            ) from exc
+        try:
+            await require_workshop_skill_for_user(
+                db,
+                viewer_user_id=effective_uid,
+                skill_name=skill_name,
             )
-        names = await visible_workshop_skill_names(
-            db,
-            effective_uid,
-            enabled_only=True,
-            require_loadable=True,
-        )
-        for name in allowed:
-            if name not in names:
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"技能不可用或不可见: {name}",
+            for collection_name in payload.knowledge.collections:
+                await require_workshop_collection_for_user(
+                    db,
+                    viewer_user_id=effective_uid,
+                    collection_name=collection_name,
+                    project_id=request.project_id,
                 )
+        except WorkshopGuardError as exc:
+            raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
 
     if payload.output.must_follow_template and payload.output.template_id:
         tpl = await get_template_by_id(db, payload.output.template_id)
@@ -519,7 +530,7 @@ async def execute_task(req: Request, task_req: TaskExecuteRequest, db: AsyncSess
             except RuntimeError as exc:
                 async with async_session_maker() as s:
                     await mark_run_failed(s, run_id, str(exc))
-                yield "data: " + json.dumps({"error": {"message": str(exc)}}, ensure_ascii=False) + "\n\n"
+                yield sse_error_event(str(exc), code="workshop_direct_failed")
                 return
 
             for line in text.splitlines(keepends=True):
@@ -567,7 +578,7 @@ async def execute_task(req: Request, task_req: TaskExecuteRequest, db: AsyncSess
                     "execution_mode": "direct",
                 }
             }
-            yield "data: " + json.dumps(meta, ensure_ascii=False) + "\n\n"
+            yield sse_meta_event(meta)
 
         return StreamingResponse(
             workshop_direct_stream(),
@@ -651,7 +662,7 @@ async def execute_task(req: Request, task_req: TaskExecuteRequest, db: AsyncSess
             except RuntimeError as exc:
                 async with async_session_maker() as s:
                     await mark_run_failed(s, run_id, str(exc))
-                yield "data: " + json.dumps({"error": {"message": str(exc)}}, ensure_ascii=False) + "\n\n"
+                yield sse_error_event(str(exc), code="chat_forced_skill_failed")
                 return
 
             for line in text.splitlines(keepends=True):
@@ -701,7 +712,7 @@ async def execute_task(req: Request, task_req: TaskExecuteRequest, db: AsyncSess
                     "used_skills": [forced_skill],
                 }
             }
-            yield "data: " + json.dumps(meta, ensure_ascii=False) + "\n\n"
+            yield sse_meta_event(meta)
 
         return StreamingResponse(
             chat_forced_skill_stream(),

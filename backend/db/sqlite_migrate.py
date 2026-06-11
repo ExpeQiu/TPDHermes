@@ -54,6 +54,15 @@ def run_sqlite_migrations(connection: Connection) -> None:
             ],
         )
 
+    if "scenario_profiles" in names:
+        _add_columns(
+            connection,
+            "scenario_profiles",
+            [
+                ("knowledge_policy_id", "TEXT"),
+            ],
+        )
+
     if "templates" in names:
         _add_columns(
             connection,
@@ -129,6 +138,57 @@ def run_sqlite_migrations(connection: Connection) -> None:
             )
         )
         logger.info("sqlite_migrate: created table project_configs")
+
+    if "knowledge_policies" not in names:
+        connection.execute(
+            text(
+                """
+                CREATE TABLE knowledge_policies (
+                    id TEXT PRIMARY KEY,
+                    code TEXT NOT NULL UNIQUE,
+                    name TEXT NOT NULL,
+                    description TEXT,
+                    config_json TEXT NOT NULL DEFAULT '{}',
+                    version TEXT NOT NULL DEFAULT '0.0.1',
+                    status TEXT NOT NULL DEFAULT 'draft',
+                    created_by TEXT,
+                    approved_by TEXT,
+                    published_by TEXT,
+                    offlined_by TEXT,
+                    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+                    approved_at TEXT,
+                    published_at TEXT,
+                    offlined_at TEXT
+                )
+                """
+            )
+        )
+        logger.info("sqlite_migrate: created table knowledge_policies")
+
+    if "knowledge_policy_versions" not in names:
+        connection.execute(
+            text(
+                """
+                CREATE TABLE knowledge_policy_versions (
+                    id TEXT PRIMARY KEY,
+                    policy_id TEXT NOT NULL,
+                    version TEXT NOT NULL,
+                    status TEXT NOT NULL DEFAULT 'draft',
+                    snapshot_json TEXT NOT NULL DEFAULT '{}',
+                    change_note TEXT,
+                    created_by TEXT,
+                    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+                )
+                """
+            )
+        )
+        connection.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS idx_knowledge_policy_versions_policy_id ON knowledge_policy_versions(policy_id)"
+            )
+        )
+        logger.info("sqlite_migrate: created table knowledge_policy_versions")
 
     if "orchestration_runs" in names:
         _add_columns(

@@ -241,14 +241,7 @@ function WorkshopPageInner() {
     return isScenarioPublished(item.remote);
   }, []);
 
-  const isWorkshopExecutable = useCallback(
-    (item: ScenarioListItem): boolean => {
-      if (!isWorkshopSelectable(item)) return false;
-      const binding = boundByScenarioId.get(item.id);
-      return Boolean(binding && binding.enabled === 1);
-    },
-    [boundByScenarioId, isWorkshopSelectable],
-  );
+  const isWorkshopExecutable = isWorkshopSelectable;
 
   useEffect(() => {
     if (!selectedProjectId) {
@@ -335,26 +328,26 @@ function WorkshopPageInner() {
   }, [scenarioListItems, isWorkshopSelectable, quickScenarioIdSet, boundByScenarioId]);
 
   const workshopScenarioOptions = useMemo((): WorkshopScenarioOption[] => {
-    return scenarioListItems
-      .filter((item) => isWorkshopExecutable(item))
-      .map((item) => {
-        const binding = boundByScenarioId.get(item.id)!;
-        const isQuickDefault =
-          projectQuickScenarios?.defaultScenarioId === item.id ||
-          quickScenarioIdSet.has(item.id) ||
-          (binding.is_default === 1 && !projectQuickScenarios?.scenarioIds?.length);
-        return {
-          id: item.id,
-          name: item.title,
-          versionLine: `${scenarioStatusLabel(binding.scenario_status)} · v${binding.scenario_version}${
-            isQuickDefault ? " · 默认" : ""
-          }`,
-        };
-      });
+    return workshopDisplayScenarios.map((item) => {
+      const binding = boundByScenarioId.get(item.id);
+      const remote = item.remote;
+      const isQuickDefault =
+        projectQuickScenarios?.defaultScenarioId === item.id ||
+        quickScenarioIdSet.has(item.id) ||
+        (binding?.is_default === 1 && !projectQuickScenarios?.scenarioIds?.length);
+      const status = remote?.status ?? binding?.scenario_status ?? "published";
+      const version = remote?.version ?? binding?.scenario_version ?? "—";
+      return {
+        id: item.id,
+        name: item.title,
+        versionLine: `${scenarioStatusLabel(status)} · v${version}${
+          isQuickDefault ? " · 默认" : ""
+        }`,
+      };
+    });
   }, [
-    scenarioListItems,
+    workshopDisplayScenarios,
     boundByScenarioId,
-    isWorkshopExecutable,
     projectQuickScenarios,
     quickScenarioIdSet,
   ]);
@@ -384,8 +377,7 @@ function WorkshopPageInner() {
       setSelectedScenarioId(def.scenario_id);
       return;
     }
-    const firstExecutable = workshopDisplayScenarios.find((s) => isWorkshopExecutable(s));
-    setSelectedScenarioId(firstExecutable?.id ?? workshopDisplayScenarios[0]?.id ?? "");
+    setSelectedScenarioId(workshopDisplayScenarios[0]?.id ?? "");
   }, [
     selectedProjectId,
     loadingBound,
@@ -394,7 +386,7 @@ function WorkshopPageInner() {
     selectedScenarioId,
     boundScenarios,
     projectQuickScenarios,
-    isWorkshopExecutable,
+    isWorkshopSelectable,
   ]);
 
   useEffect(() => {
@@ -695,8 +687,8 @@ function WorkshopPageInner() {
       return;
     }
     const selectedItem = scenarioListItems.find((s) => s.id === selectedScenarioId);
-    if (!selectedItem || !isWorkshopExecutable(selectedItem)) {
-      alert("当前场景未绑定本项目。请先在项目详情「设置快捷场景」中勾选并保存，或选择已绑定的场景。");
+    if (!selectedItem || !isWorkshopSelectable(selectedItem)) {
+      alert("请选择已发布的场景。");
       return;
     }
     if (loadingScenarioDetail || !scenarioDetail) {
@@ -961,7 +953,7 @@ function WorkshopPageInner() {
           </div>
           <h1 className="mt-4 text-3xl font-bold sm:text-4xl">场景输出</h1>
           <p className="mt-2 max-w-2xl text-sm text-slate-400 sm:text-base">
-            先选择项目，仅能使用该项目已绑定的场景；场景合同（知识 / 技能 / 输出策略）来自服务端。未绑定场景时请到项目页绑定或前往场景编排维护。
+            先选择项目，再选择已发布场景执行输出；场景合同（知识 / 技能 / 输出策略）来自服务端。可在项目详情设置快捷场景作为默认推荐。
           </p>
         </div>
 
@@ -1068,7 +1060,6 @@ function WorkshopPageInner() {
                     {workshopDisplayScenarios.map((scenario) => {
                       const active = scenario.id === selectedScenarioId;
                       const binding = boundByScenarioId.get(scenario.id);
-                      const executable = isWorkshopExecutable(scenario);
                       const isQuick = quickScenarioIdSet.has(scenario.id);
                       const remote = scenario.remote;
                       return (
@@ -1079,16 +1070,14 @@ function WorkshopPageInner() {
                           className={`rounded-2xl border p-4 text-left transition ${
                             active
                               ? "border-blue-500 bg-blue-500/10"
-                              : executable
-                                ? "border-slate-300 dark:border-slate-700 bg-slate-100/80 dark:bg-slate-950/60 hover:border-slate-300 dark:border-slate-600"
-                                : "border-slate-200 dark:border-slate-800 bg-slate-100/60 dark:bg-slate-950/40 hover:border-slate-300 dark:hover:border-slate-700"
+                              : "border-slate-300 dark:border-slate-700 bg-slate-100/80 dark:bg-slate-950/60 hover:border-slate-300 dark:border-slate-600"
                           }`}
                         >
                           <div className="flex items-start justify-between gap-2">
                             <h3 className="font-semibold text-slate-900 dark:text-white">{scenario.title}</h3>
                             <span
                               className={`h-2 w-2 shrink-0 rounded-full ${
-                                active ? "bg-blue-400" : executable ? "bg-emerald-500/80" : "bg-slate-600"
+                                active ? "bg-blue-400" : "bg-emerald-500/80"
                               }`}
                             />
                           </div>
@@ -1114,13 +1103,9 @@ function WorkshopPageInner() {
                             ) : null}
                             {binding?.enabled === 1 ? (
                               <span className="rounded-full border border-blue-300 bg-blue-50 px-2 py-0.5 text-[10px] text-blue-800 dark:border-blue-600/50 dark:bg-blue-500/10 dark:text-blue-200">
-                                已绑定{binding.is_default && !isQuick ? " · 默认" : ""}
+                                项目快捷{binding.is_default && !isQuick ? " · 默认" : ""}
                               </span>
-                            ) : (
-                              <span className="rounded-full border border-amber-300 bg-amber-50 px-2 py-0.5 text-[10px] text-amber-800 dark:border-amber-700/50 dark:bg-amber-500/10 dark:text-amber-200">
-                                未绑定本项目
-                              </span>
-                            )}
+                            ) : null}
                           </div>
                         </button>
                       );
@@ -1133,19 +1118,7 @@ function WorkshopPageInner() {
                     <Link href="/create" className="underline">
                       场景编排
                     </Link>{" "}
-                    发布场景，再到{" "}
-                    <Link href={`/projects/${selectedProjectId}`} className="underline">
-                      项目详情
-                    </Link>{" "}
-                    设置快捷场景。
-                  </p>
-                ) : null}
-                {selectedProjectId &&
-                !loadingBound &&
-                workshopDisplayScenarios.length > 0 &&
-                workshopScenarioOptions.length === 0 ? (
-                  <p className="text-xs text-amber-700 dark:text-amber-400/90">
-                    已有已发布场景，但均未绑定本项目。请在项目详情「设置快捷场景」中勾选并保存后再执行。
+                    发布场景后再执行输出。
                   </p>
                 ) : null}
               </div>
