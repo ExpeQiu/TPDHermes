@@ -5,6 +5,7 @@ import React from "react";
 import { ChatMarkdownWithCitations } from "@/components/chat-markdown-with-citations";
 import { ChatMessageQuickActions } from "@/components/chat-message-quick-actions";
 import type { ContextBlock } from "@/lib/chat-context";
+import { kbCollectionLabel } from "@/lib/ui-labels";
 
 import type { ChatSession, Message } from "@/app/chat/chat-types";
 
@@ -13,6 +14,7 @@ type ChatMessageStreamProps = {
   streaming: boolean;
   preparingContext: boolean;
   effectiveKbCollection: string;
+  includeProjectContext: boolean;
   selectedProjectId: string;
   projectFromUrl: string;
   activeId: string | null;
@@ -32,11 +34,52 @@ function visibleContextBlocks(message: Message): ContextBlock[] {
   return message.contextBlocks?.filter((block) => block.tool !== "orchestration_preview") ?? [];
 }
 
+function isFirstAssistantTurn(session: ChatSession, message: Message): boolean {
+  if (message.role !== "assistant") return false;
+  const userCount = session.messages.filter((m) => m.role === "user").length;
+  const assistantCount = session.messages.filter((m) => m.role === "assistant").length;
+  return userCount === 1 && assistantCount === 1;
+}
+
+function resolveKbLoadingLabel(kbCollection: string): string {
+  const kb = kbCollection.trim();
+  if (!kb) return "知识库";
+  const label = kbCollectionLabel(kb);
+  if (label.includes("知识库")) return label;
+  return `${label}知识库`;
+}
+
+function buildStreamingWaitHint(options: {
+  isFirstTurn: boolean;
+  kbCollection: string;
+  includeProject: boolean;
+}): string {
+  if (!options.isFirstTurn) {
+    return "正在生成回复";
+  }
+
+  const kbLabel = resolveKbLoadingLabel(options.kbCollection);
+  if (options.includeProject) {
+    return `首次对话等待时间会比较长，我正在拼命地加载${kbLabel}与项目上下文`;
+  }
+  return `首次对话等待时间会比较长，我正在拼命地加载${kbLabel}`;
+}
+
+function AssistantStreamWaitHint({ text }: { text: string }) {
+  return (
+    <p className="text-sm leading-relaxed text-slate-600 dark:text-slate-300" role="status" aria-live="polite">
+      {text}
+      <span className="inline-block animate-pulse text-blue-500 dark:text-blue-400"> … …</span>
+    </p>
+  );
+}
+
 export function ChatMessageStream({
   activeSession,
   streaming,
   preparingContext,
   effectiveKbCollection,
+  includeProjectContext,
   selectedProjectId,
   projectFromUrl,
   activeId,
@@ -132,8 +175,14 @@ export function ChatMessageStream({
                       />
                     ) : null}
                     {!msg.content && !isStreamingAssistant ? "…" : null}
-                    {isStreamingAssistant && msg.content === "" ? (
-                      <span className="inline-block h-3.5 w-1.5 animate-pulse bg-blue-400" />
+                    {isStreamingAssistant && !msg.content.trim() ? (
+                      <AssistantStreamWaitHint
+                        text={buildStreamingWaitHint({
+                          isFirstTurn: isFirstAssistantTurn(activeSession, msg),
+                          kbCollection: effectiveKbCollection,
+                          includeProject: includeProjectContext,
+                        })}
+                      />
                     ) : null}
                   </>
                 )}

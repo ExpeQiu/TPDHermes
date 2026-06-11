@@ -903,6 +903,7 @@ function ChatPageInner() {
             streaming={streaming}
             preparingContext={preparingContext}
             effectiveKbCollection={effectiveKbCollection}
+            includeProjectContext={includeProjectContext}
             selectedProjectId={selectedProjectId}
             projectFromUrl={projectFromUrl}
             activeId={activeId}
