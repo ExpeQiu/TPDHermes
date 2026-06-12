@@ -1,15 +1,15 @@
 {
   "target": "release_speeches",
   "collection": "public.release_assets.speeches",
-  "status": "completed",
+  "status": "failed",
   "group_count": 2,
   "doc_total": 9,
-  "doc_succeeded": 9,
+  "doc_succeeded": 0,
   "doc_failed": 0,
-  "chunk_total": 38,
-  "chunk_upserted": 38,
+  "chunk_total": 0,
+  "chunk_upserted": 0,
   "chunk_skipped": 0,
-  "cache_sync_triggered": true,
+  "cache_sync_triggered": false,
   "errors": [],
   "jobs": [
     {
@@ -17,28 +17,16 @@
       "folder_path": "03-发布成果/领导人稿件/DaH发言稿/新技术发布稿",
       "doc_count": 4,
       "result": {
-        "job_id": "ing_20260518_062248_ee2428f6",
-        "batch_id": "ing_20260518_062248_ee2428f6",
+        "job_id": "ing_20260612_010031_fbfb4b25",
+        "status": "queued",
         "collection": "public.release_assets.speeches",
-        "status": "completed",
-        "doc_total": 4,
-        "doc_succeeded": 4,
-        "doc_failed": 0,
-        "chunk_total": 15,
-        "chunk_upserted": 15,
-        "chunk_skipped": 0,
-        "chunks_deleted_stale": 0,
-        "cache_sync_triggered": true,
-        "cache_sync_error": null,
-        "started_at": "2026-05-18T06:22:48+0000",
-        "finished_at": "2026-05-18T06:22:49+0000",
-        "errors": [],
-        "dry_run": false,
-        "cache_sync_detail": {
-          "synced": 15,
-          "failed": 0,
-          "skipped": 0
-        }
+        "doc_ids": [
+          "obs_release_speeches_g_asd_9739fdc807af",
+          "obs_release_speeches_p185_83faae8296af",
+          "obs_release_speeches_ai_96c317f77387",
+          "obs_release_speeches_ai_759e3c78095a"
+        ],
+        "created_at": "2026-06-12T01:00:31.057294"
       }
     },
     {
@@ -46,28 +34,17 @@
       "folder_path": "03-发布成果/领导人稿件/DaH发言稿/直播互动稿",
       "doc_count": 5,
       "result": {
-        "job_id": "ing_20260518_062249_05ce75b8",
-        "batch_id": "ing_20260518_062249_05ce75b8",
+        "job_id": "ing_20260612_010031_e5c798b6",
+        "status": "queued",
         "collection": "public.release_assets.speeches",
-        "status": "completed",
-        "doc_total": 5,
-        "doc_succeeded": 5,
-        "doc_failed": 0,
-        "chunk_total": 23,
-        "chunk_upserted": 23,
-        "chunk_skipped": 0,
-        "chunks_deleted_stale": 0,
-        "cache_sync_triggered": true,
-        "cache_sync_error": null,
-        "started_at": "2026-05-18T06:22:49+0000",
-        "finished_at": "2026-05-18T06:22:49+0000",
-        "errors": [],
-        "dry_run": false,
-        "cache_sync_detail": {
-          "synced": 38,
-          "failed": 0,
-          "skipped": 0
-        }
+        "doc_ids": [
+          "obs_release_speeches_p181_0bb79a6449d8",
+          "obs_release_speeches_p187_c02007a694ef",
+          "obs_release_speeches_p189_16e11d5d2f07",
+          "obs_release_speeches_6_32e2a5bf7581",
+          "obs_release_speeches_7_b36eefb1bcd1"
+        ],
+        "created_at": "2026-06-12T01:00:31.275845"
       }
     }
   ]
