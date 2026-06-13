@@ -22,6 +22,10 @@ from backend.services.orchestration_service import assemble_payload
 from backend.services.project_access import require_project_for_user
 from backend.services.rbac import require_feature
 from backend.services.user_identity import get_effective_user_id, viewer_role
+from backend.services.scenario_seed_suppression import (
+    is_builtin_scenario_id,
+    suppress_builtin_async,
+)
 from backend.services.workshop_guard import WorkshopGuardError, ensure_single_workshop_skill_contract
 
 logger = logging.getLogger("tpdx.hermes")
@@ -368,12 +372,16 @@ async def delete_scenario(scenario_id: str, db: AsyncSession = Depends(get_db)):
     )
     name = row.name
     code = row.code
+    builtin = is_builtin_scenario_id(scenario_id)
+    if builtin:
+        await suppress_builtin_async(db, scenario_id)
     await db.delete(row)
     await db.commit()
     logger.info(
-        "scenario deleted id=%s code=%s project_bindings_removed=%s",
+        "scenario deleted id=%s code=%s builtin=%s project_bindings_removed=%s",
         scenario_id,
         code,
+        builtin,
         int(bind_count or 0),
     )
     return {

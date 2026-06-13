@@ -15,6 +15,10 @@ from sqlalchemy import text
 from sqlalchemy.engine import Connection
 
 from backend.data.builtin_scenarios import BUILTIN_SCENARIOS, BUILTIN_VERSION
+from backend.services.scenario_seed_suppression import (
+    ensure_suppression_table,
+    load_suppressed_ids_sync,
+)
 
 logger = logging.getLogger("tpdx.hermes")
 
@@ -392,6 +396,7 @@ def run_sqlite_migrations(connection: Connection) -> None:
         )
         logger.info("sqlite_migrate: created table project_members")
 
+    ensure_suppression_table(connection)
     _seed_builtin_scenarios(connection)
     _backfill_project_scenario_bindings(connection)
     _backfill_project_owner_members(connection)
@@ -536,10 +541,14 @@ def _ensure_growth_tables(connection: Connection) -> None:
 
 
 def _seed_builtin_scenarios(connection: Connection) -> None:
-    """写入内置场景；已存在 id 则跳过。"""
+    """写入内置场景；已存在 id 或用户已删除（抑制表）则跳过。"""
     now = datetime.now().isoformat()
+    suppressed = load_suppressed_ids_sync(connection)
     for row in BUILTIN_SCENARIOS:
         sid = str(row["id"])
+        if sid in suppressed:
+            logger.debug("sqlite_migrate: skip seeded scenario id=%s (suppressed)", sid)
+            continue
         exists = connection.execute(
             text("SELECT 1 FROM scenario_profiles WHERE id = :id LIMIT 1"),
             {"id": sid},
@@ -595,10 +604,13 @@ def _backfill_project_scenario_bindings(connection: Connection) -> None:
 
     projects = connection.execute(text("SELECT id FROM projects")).fetchall()
     now = datetime.now().isoformat()
+    suppressed = load_suppressed_ids_sync(connection)
     for (pid,) in projects:
         project_id = str(pid)
         for row in BUILTIN_SCENARIOS:
             sid = str(row["id"])
+            if sid in suppressed:
+                continue
             dup = connection.execute(
                 text(
                     """

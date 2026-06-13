@@ -23,7 +23,7 @@ from backend.models.orchestration_run import OrchestrationRun
 from backend.models.output_asset import OutputAsset
 from backend.routes.chat import _chat_target_required
 from backend.schemas.orchestration import OrchestrationPayload, TaskExecuteRequest, TaskInputPayload
-from backend.services.agent_gateway import build_chat_completion_body, parse_sse_data_line
+from backend.services.agent_gateway import build_chat_completion_body, is_lightweight_chat_message, parse_sse_data_line
 from backend.services.orchestration_service import (
     ProjectNotFoundError,
     ScenarioVersionMismatchError,
@@ -725,16 +725,38 @@ async def execute_task(req: Request, task_req: TaskExecuteRequest, db: AsyncSess
         )
 
     messages = _trim_chat_messages(merge_chat_messages(eff_request.messages, user_text))
-    upstream_body = build_chat_completion_body(
-        payload,
-        messages,
-        workshop_skill_name=workshop_skill if is_workshop else None,
-        task_input=eff_request.task_input if is_workshop else None,
-    )
-    _apply_chat_generation_limits(upstream_body)
-    upstream_body["stream"] = eff_request.stream
+    chat_lightweight = payload.entrypoint == "chat" and is_lightweight_chat_message(user_text)
+
+    async def _prefetch_kb_for_chat() -> tuple[str, int]:
+        if chat_lightweight or not user_text.strip() or payload.entrypoint != "chat":
+            return "", 0
+        kb_cols = [c for c in payload.knowledge.collections if c]
+        pf = await prefetch_kb_sources_for_run(
+            run_id=run_id,
+            project_id=eff_request.project_id,
+            collections=kb_cols,
+            query_text=user_text,
+        )
+        logger.info(
+            "kb prefetch complete run_id=%s sources=%s lightweight=%s",
+            run_id,
+            pf.source_count,
+            chat_lightweight,
+        )
+        return pf.prompt_block, pf.source_count
 
     if not eff_request.stream:
+        kb_prefetch_block, _ = await _prefetch_kb_for_chat()
+        upstream_body = build_chat_completion_body(
+            payload,
+            messages,
+            workshop_skill_name=workshop_skill if is_workshop else None,
+            task_input=eff_request.task_input if is_workshop else None,
+            kb_prefetch_block=kb_prefetch_block or None,
+            lightweight_mode=chat_lightweight,
+        )
+        _apply_chat_generation_limits(upstream_body)
+        upstream_body["stream"] = eff_request.stream
         target_url, api_key = _chat_target_required()
         headers = {"Content-Type": "application/json"}
         if api_key:
@@ -845,14 +867,35 @@ async def execute_task(req: Request, task_req: TaskExecuteRequest, db: AsyncSess
         return JSONResponse(content=body)
 
     async def event_stream() -> AsyncGenerator[str, None]:
-        kb_cols = [c for c in payload.knowledge.collections if c]
-        if user_text.strip():
-            await prefetch_kb_sources_for_run(
-                run_id=run_id,
-                project_id=eff_request.project_id,
-                collections=kb_cols,
-                query_text=user_text,
+        kb_prefetch_block = ""
+        kb_prefetch_count = 0
+        if payload.entrypoint == "chat" and not chat_lightweight and user_text.strip():
+            yield sse_meta_event(
+                {"tphermes_task": {"phase": "kb_prefetch", "run_id": run_id}}
             )
+            kb_prefetch_block, kb_prefetch_count = await _prefetch_kb_for_chat()
+
+        upstream_body = build_chat_completion_body(
+            payload,
+            messages,
+            workshop_skill_name=workshop_skill if is_workshop else None,
+            task_input=eff_request.task_input if is_workshop else None,
+            kb_prefetch_block=kb_prefetch_block or None,
+            lightweight_mode=chat_lightweight,
+        )
+        _apply_chat_generation_limits(upstream_body)
+        upstream_body["stream"] = True
+
+        yield sse_meta_event(
+            {
+                "tphermes_task": {
+                    "phase": "agent_generating",
+                    "run_id": run_id,
+                    "kb_prefetch_count": kb_prefetch_count,
+                    "lightweight": chat_lightweight,
+                }
+            }
+        )
 
         target_url, api_key = _chat_target_required()
         headers = {"Content-Type": "application/json"}

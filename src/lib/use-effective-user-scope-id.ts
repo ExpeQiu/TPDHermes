@@ -11,7 +11,9 @@ import { adoptServerUnifiedUserIdIfNeeded } from "./user-identity-sync";
 
 /** 与 API 头一致的有效用户 ID；随 localStorage / 匿名推导 / 焦点同步（多标签） */
 export function useEffectiveUserScopeId(): string {
-  const [userId, setUserId] = useState("");
+  const [userId, setUserId] = useState(() =>
+    typeof window !== "undefined" ? getEffectiveUserIdSync() : "",
+  );
 
   useEffect(() => {
     const sync = () => setUserId(getEffectiveUserIdSync());

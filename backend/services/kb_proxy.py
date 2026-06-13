@@ -627,9 +627,21 @@ class KBProxyService:
             "warning": col_res.get("warning") or "readonly cache mode - multi collection scan",
         }
 
-    async def list_collections(self, project_id: Optional[str] = None) -> dict:
+    async def list_collections(
+        self,
+        project_id: Optional[str] = None,
+        *,
+        prefer_cache: bool = False,
+    ) -> dict:
+        if prefer_cache:
+            stats = await kb_cache_service.get_cache_stats(project_id=project_id or "__all__")
+            return {
+                "collections": stats.get("collections", []),
+                "source": "cache",
+                "warning": "prefer_cache",
+            }
         try:
-            async with httpx.AsyncClient(timeout=5.0) as client:
+            async with httpx.AsyncClient(timeout=2.0) as client:
                 resp = await client.get(f"{self.chroma_host}/api/v1/collections")
                 if resp.status_code == 200:
                     self._clear_readonly_after_upstream_ok()

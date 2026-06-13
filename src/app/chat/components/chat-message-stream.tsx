@@ -11,6 +11,7 @@ type ChatMessageStreamProps = {
   activeSession?: ChatSession;
   streaming: boolean;
   preparingContext: boolean;
+  streamingPhase?: string;
   effectiveKbCollection: string;
   includeProjectContext: boolean;
   selectedProjectId: string;
@@ -45,7 +46,17 @@ const KB_LOADING_DISPLAY_NAME = "技术推广知识库";
 function buildStreamingWaitHint(options: {
   isFirstTurn: boolean;
   includeProject: boolean;
+  phase?: string;
 }): string {
+  if (options.phase === "kb_prefetch") {
+    if (options.includeProject) {
+      return `正在检索${KB_LOADING_DISPLAY_NAME}与项目上下文`;
+    }
+    return `正在检索${KB_LOADING_DISPLAY_NAME}`;
+  }
+  if (options.phase === "agent_generating") {
+    return options.isFirstTurn ? "正在根据知识库生成回复" : "正在生成回复";
+  }
   if (!options.isFirstTurn) {
     return "正在生成回复";
   }
@@ -69,6 +80,7 @@ export function ChatMessageStream({
   activeSession,
   streaming,
   preparingContext,
+  streamingPhase,
   effectiveKbCollection,
   includeProjectContext,
   selectedProjectId,
@@ -171,6 +183,7 @@ export function ChatMessageStream({
                         text={buildStreamingWaitHint({
                           isFirstTurn: isFirstAssistantTurn(activeSession, msg),
                           includeProject: includeProjectContext,
+                          phase: streamingPhase,
                         })}
                       />
                     ) : null}

@@ -1,9 +1,11 @@
 """KB 检索来源按 run_id 跨进程落库，供聊天回复溯源标记。"""
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import re
+from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any
 
@@ -20,6 +22,47 @@ WEB_TOOL_NAMES = frozenset({"tavily_search", "tavily_extract"})
 
 _CITATION_REF_RE = re.compile(r"\[\^(\d+)\]")
 _EXCERPT_MAX = 200
+_PREFETCH_PROMPT_EXCERPT_MAX = 320
+
+
+@dataclass(frozen=True)
+class KbPrefetchResult:
+    """KB 预检索结果，供注入 prompt 以减少 Agent 重复工具调用。"""
+
+    source_count: int
+    prompt_block: str
+    query: str
+
+
+def format_kb_prefetch_prompt_block(capture: dict[str, Any] | None, query: str) -> str:
+    """将已捕获来源格式化为 system 注入块。"""
+    if not capture:
+        return ""
+    sources = capture.get("sources") or []
+    if not isinstance(sources, list) or not sources:
+        return ""
+    q = (query or "").strip()[:120]
+    lines = [
+        "[系统预检索结果] 以下为对用户问题已完成的 kb_query 预检索（query="
+        + q
+        + "）。优先据此回答并在句末标注 [^N]（N 为下方 ref）。"
+        "勿对相同 query 重复调用 kb_query 或 kb_list_collections；"
+        "仅当预检索明显不足或用户追问新方向时再补充检索。",
+        "",
+    ]
+    for raw in sources[:12]:
+        if not isinstance(raw, dict):
+            continue
+        ref = raw.get("ref")
+        if not isinstance(ref, int):
+            continue
+        title = str(raw.get("title") or "").strip()[:120]
+        col = str(raw.get("collection") or "").strip()
+        excerpt = str(raw.get("excerpt") or "").strip()
+        lines.append(f"[^{ref}] collection={col} title={title}")
+        if excerpt:
+            lines.append(f"  excerpt: {excerpt[:_PREFETCH_PROMPT_EXCERPT_MAX]}")
+    return "\n".join(lines)
 
 
 def _trim_excerpt(text: str | None, max_len: int = _EXCERPT_MAX) -> str:
@@ -316,15 +359,16 @@ async def prefetch_kb_sources_for_run(
     project_id: str | None,
     collections: list[str],
     query_text: str,
-) -> None:
-    """编排开始前预检索并捕获来源，避免 Agent 未传 tphermes_run_id 时无溯源数据。"""
+) -> KbPrefetchResult:
+    """编排开始前预检索并捕获来源；返回可注入 prompt 的片段以减少 Agent 重复检索。"""
     cols = [c.strip() for c in collections if c and str(c).strip()]
     q = (query_text or "").strip()[:400]
     if not q:
-        return
+        return KbPrefetchResult(source_count=0, prompt_block="", query="")
+
     from backend.tools.kb_tools import kb_query
 
-    for col in cols[:3]:
+    async def _query_collection(col: str) -> None:
         try:
             result = await kb_query(
                 q,
@@ -347,36 +391,44 @@ async def prefetch_kb_sources_for_run(
                 exc,
             )
 
+    if cols:
+        await asyncio.gather(*[_query_collection(col) for col in cols[:3]], return_exceptions=True)
+
     async with async_session_maker() as db:
         existing = await load_kb_sources(db, run_id)
-    if existing and (existing.get("sources") or []):
-        return
+    if not (existing and (existing.get("sources") or [])):
+        try:
+            from backend.services.kb_proxy import kb_proxy_service
 
-    try:
-        from backend.services.kb_proxy import kb_proxy_service
-
-        cross = await kb_proxy_service.query_all_collections(
-            query_text=q,
-            n_results=5,
-            project_id=project_id,
-            collection=None,
-        )
-        if int(cross.get("count") or 0) > 0:
-            async with async_session_maker() as db:
-                await append_kb_sources(
-                    db,
-                    run_id=run_id,
-                    tool_name="kb_query",
-                    payload=cross,
-                    collection_name="__all__",
-                )
-            logger.info(
-                "kb prefetch cross-collection run_id=%s count=%s",
-                run_id,
-                cross.get("count", 0),
+            cross = await kb_proxy_service.query_all_collections(
+                query_text=q,
+                n_results=5,
+                project_id=project_id,
+                collection=None,
             )
-    except Exception as exc:
-        logger.warning("kb prefetch cross-collection failed run_id=%s err=%s", run_id, exc)
+            if int(cross.get("count") or 0) > 0:
+                async with async_session_maker() as db:
+                    await append_kb_sources(
+                        db,
+                        run_id=run_id,
+                        tool_name="kb_query",
+                        payload=cross,
+                        collection_name="__all__",
+                    )
+                logger.info(
+                    "kb prefetch cross-collection run_id=%s count=%s",
+                    run_id,
+                    cross.get("count", 0),
+                )
+        except Exception as exc:
+            logger.warning("kb prefetch cross-collection failed run_id=%s err=%s", run_id, exc)
+
+    async with async_session_maker() as db:
+        final = await load_kb_sources(db, run_id)
+    sources = (final or {}).get("sources") or []
+    count = len(sources) if isinstance(sources, list) else 0
+    block = format_kb_prefetch_prompt_block(final, q)
+    return KbPrefetchResult(source_count=count, prompt_block=block, query=q)
 
 
 async def save_kb_sources_for_run(

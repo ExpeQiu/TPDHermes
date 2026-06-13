@@ -44,3 +44,13 @@ export function createKnowledgeQueryCache(): KnowledgeQueryCache {
     },
   };
 }
+
+/** 跨页面导航复用的模块级缓存（组件卸载后仍保留，SSE/写操作可 invalidate） */
+let sharedKnowledgeQueryCache: KnowledgeQueryCache | null = null;
+
+export function getKnowledgeQueryCache(): KnowledgeQueryCache {
+  if (!sharedKnowledgeQueryCache) {
+    sharedKnowledgeQueryCache = createKnowledgeQueryCache();
+  }
+  return sharedKnowledgeQueryCache;
+}

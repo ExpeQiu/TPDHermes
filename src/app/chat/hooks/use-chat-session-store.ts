@@ -5,12 +5,14 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   createChatSessionOnServer,
   deleteChatSessionOnServer,
-  fetchChatSessionsFull,
+  fetchChatSessionDetail,
+  fetchChatSessionsSummary,
   inferSessionKind,
   migrateLocalChatSessions,
   patchChatSessionOnServer,
   syncChatSessionMessagesOnServer,
   upsertChatSessionOnServer,
+  type ServerChatSessionSummary,
 } from "@/lib/chat-sessions-api";
 import type { QuickCreateFlowOverrides } from "@/lib/chat-context";
 
@@ -136,6 +138,37 @@ function messageToSyncPayload(message: Message, sortIndex: number): Record<strin
     ...message,
     sortIndex,
   };
+}
+
+
+
+function summaryToShellSession(summary: ServerChatSessionSummary): ChatSession {
+  return {
+    id: summary.id,
+    title: summary.title || "新对话",
+    messages: [],
+    createdAt: summary.createdAt ?? Date.now(),
+    linkedOutputIds: [],
+    linkedRunIds: [],
+    selectedProjectId: "",
+    selectedCollection: "",
+    includeProjectContext: false,
+    includeKnowledgeContext: false,
+    includeSkillsContext: false,
+    chatMode: "co_create",
+    includeFileContext: false,
+    selectedFileId: "",
+  };
+}
+
+async function hydrateSessionDetail(sessionId: string): Promise<ChatSession | null> {
+  try {
+    const detail = await fetchChatSessionDetail(sessionId);
+    return serverSessionToClient(detail);
+  } catch (err) {
+    console.warn("[chat] 拉取会话详情失败", sessionId, err);
+    return null;
+  }
 }
 
 function serverSessionToClient(raw: Record<string, unknown>): ChatSession {
@@ -382,8 +415,18 @@ export function useChatSessionStore({
     (id: string) => {
       setActiveId(id);
       localStorage.setItem(chatActiveStorageKey(scopeUserId), id);
+      const existing = sessionsRef.current.find((session) => session.id === id);
+      if (existing && existing.messages.length === 0 && scopeUserId) {
+        void hydrateSessionDetail(id).then((full) => {
+          if (!full) return;
+          const next = sessionsRef.current.map((session) =>
+            session.id === id ? full : session,
+          );
+          saveAndSet(next);
+        });
+      }
     },
-    [scopeUserId],
+    [saveAndSet, scopeUserId],
   );
 
   const deleteSession = useCallback(
@@ -468,18 +511,33 @@ export function useChatSessionStore({
       };
 
       try {
-        let serverItems = await fetchChatSessionsFull();
+        let serverSummaries = await fetchChatSessionsSummary();
         const localRaw = loadSessions(scopeUserId);
-        if (serverItems.length === 0 && localRaw.length > 0) {
+        if (serverSummaries.length === 0 && localRaw.length > 0) {
           const migrated = await migrateLocalChatSessions(
             localRaw.map((session) => sessionToServerPayload(session)),
           );
           console.info("[chat] 已将本机会话迁移至服务端", migrated);
-          serverItems = await fetchChatSessionsFull();
+          serverSummaries = await fetchChatSessionsSummary();
         }
         if (cancelled) return;
-        if (serverItems.length > 0) {
-          initFromSessions(serverItems.map((item) => serverSessionToClient(item)));
+        if (serverSummaries.length > 0) {
+          let clientSessions = serverSummaries.map((item) => summaryToShellSession(item));
+          const storedActive = localStorage.getItem(chatActiveStorageKey(scopeUserId));
+          const targetActive =
+            storedActive && clientSessions.some((session) => session.id === storedActive)
+              ? storedActive
+              : clientSessions[0]?.id;
+          if (targetActive) {
+            const hydrated = await hydrateSessionDetail(targetActive);
+            if (hydrated) {
+              clientSessions = clientSessions.map((session) =>
+                session.id === targetActive ? hydrated : session,
+              );
+            }
+          }
+          if (cancelled) return;
+          initFromSessions(clientSessions);
           return;
         }
         initFromSessions(localRaw);

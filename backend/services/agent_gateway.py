@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from typing import Any
 
 from backend.schemas.orchestration import OrchestrationPayload, TaskInputPayload
@@ -14,12 +15,44 @@ from backend.services.kb_contract import KB_AUTHORITATIVE_COLLECTIONS
 ORCHESTRATION_MARKER_BEGIN = "<<<ORCHESTRATION_JSON_BEGIN>>>"
 ORCHESTRATION_MARKER_END = "<<<ORCHESTRATION_JSON_END>>>"
 
+_LIGHTWEIGHT_CHAT_PATTERNS: tuple[re.Pattern[str], ...] = (
+    re.compile(r"^(你好|您好|hi|hello|hey)[!！。.…~\s]*$", re.IGNORECASE),
+    re.compile(r"^(谢谢|感谢|多谢)[!！。.…~\s]*$", re.IGNORECASE),
+    re.compile(r"^(好的?|嗯|哦|OK|ok)[!！。.…~\s]*$", re.IGNORECASE),
+    re.compile(r"^(再见|拜拜|bye)[!！。.…~\s]*$", re.IGNORECASE),
+    re.compile(r"^用?一句话.{0,16}(介绍|回复|回答|说说)", re.IGNORECASE),
+    re.compile(r"^.{0,16}一句话回复", re.IGNORECASE),
+)
+
+
+def is_lightweight_chat_message(text: str) -> bool:
+    """寒暄/短问句：跳过 KB 预检索与强制工具链，降低首字延迟。"""
+    t = (text or "").strip()
+    if not t or len(t) > 48:
+        return False
+    return any(p.search(t) for p in _LIGHTWEIGHT_CHAT_PATTERNS)
+
 
 def orchestration_mode() -> str:
     return os.getenv("HERMES_ORCHESTRATION_MODE", "prompt").strip().lower()
 
 
-def _build_orchestration_guidance(payload: OrchestrationPayload) -> str:
+def _build_lightweight_chat_guidance(payload: OrchestrationPayload) -> str:
+    run_id = (payload.execution.run_id or "").strip()
+    lines = [
+        "你是 TPDHermes 对话助手。当前为简单寒暄或无需查库的短问题，请直接简洁回复。",
+        "禁止调用 kb_query、kb_list_collections、tavily_search、workshop_generate 等工具。",
+    ]
+    if run_id:
+        lines.append(f"当前 run_id={run_id}（本回合无需引用标注）。")
+    return " ".join(lines)
+
+
+def _build_orchestration_guidance(
+    payload: OrchestrationPayload,
+    *,
+    kb_prefetch_block: str = "",
+) -> str:
     knowledge_collections = [c for c in payload.knowledge.collections if c]
     preferred_skills = [s for s in payload.skills.preferred if s]
     allowed_skills = [s for s in payload.skills.allowed if s]
@@ -28,18 +61,31 @@ def _build_orchestration_guidance(payload: OrchestrationPayload) -> str:
     lines = [
         "你是 TPDHermes 编排执行代理。你必须优先遵循 orchestration 中的边界、模板和技能策略。",
         "用户自然语言需求在对话消息中给出；不要在未授权时编造事实。",
-        "项目附件与输出沉淀已写入 orchestration.knowledge.collections 中的 project.*.kb 集合；"
-        "需要引用时请调用 kb_query / kb_get_entry 按需检索，不要假设 prompt 中已包含全文。",
-        "知识库 collection_name 必须与 kb_list_collections 返回的完整名称完全一致"
-        "（如 public.structured_tech.geely_tech、internal.structured_tech.tech_points），"
-        "禁止省略 public./internal./project. 前缀或使用短名。",
-        "真源集合（冲突时优先采纳）："
-        + "、".join(sorted(KB_AUTHORITATIVE_COLLECTIONS))
-        + "（内部知识库·技术点、发布素材·发言稿）。"
-        "公开情报·技术库（public.structured_tech.geely_tech）为互联网检索补充，不得覆盖真源口径。",
-        "kb_query 的 query 优先使用文档中的产品代号、技术缩写、英文标识（如 GEA、Flyme），"
-        "避免仅用营销口号或空泛词；若 count 为 0，应换用更具体的检索词重试，勿直接编造正文。",
     ]
+
+    if kb_prefetch_block.strip():
+        lines.extend(
+            [
+                "系统已在 prompt 中注入「系统预检索结果」块：优先据此回答并标注 [^N]。",
+                "勿对相同 query 重复 kb_query 或 kb_list_collections；仅当预检索明显不足时再补充检索。",
+            ]
+        )
+    else:
+        lines.extend(
+            [
+                "项目附件与输出沉淀已写入 orchestration.knowledge.collections 中的 project.*.kb 集合；"
+                "需要引用时请调用 kb_query / kb_get_entry 按需检索，不要假设 prompt 中已包含全文。",
+                "知识库 collection_name 必须与 kb_list_collections 返回的完整名称完全一致"
+                "（如 public.structured_tech.geely_tech、internal.structured_tech.tech_points），"
+                "禁止省略 public./internal./project. 前缀或使用短名。",
+                "真源集合（冲突时优先采纳）："
+                + "、".join(sorted(KB_AUTHORITATIVE_COLLECTIONS))
+                + "（内部知识库·技术点、发布素材·发言稿）。"
+                "公开情报·技术库（public.structured_tech.geely_tech）为互联网检索补充，不得覆盖真源口径。",
+                "kb_query 的 query 优先使用文档中的产品代号、技术缩写、英文标识（如 GEA、Flyme），"
+                "避免仅用营销口号或空泛词；若 count 为 0，应换用更具体的检索词重试，勿直接编造正文。",
+            ]
+        )
 
     if knowledge_collections:
         lines.append(
@@ -133,6 +179,8 @@ def build_chat_completion_body(
     *,
     workshop_skill_name: str | None = None,
     task_input: TaskInputPayload | None = None,
+    kb_prefetch_block: str | None = None,
+    lightweight_mode: bool = False,
 ) -> dict[str, Any]:
     """
     构造转发给上游的 JSON body。
@@ -143,7 +191,13 @@ def build_chat_completion_body(
     mode = orchestration_mode()
     model_name = model or os.getenv("HERMES_CHAT_MODEL", "hermes-agent")
 
-    system_intro = _build_orchestration_guidance(payload)
+    if lightweight_mode and payload.entrypoint == "chat":
+        system_intro = _build_lightweight_chat_guidance(payload)
+    else:
+        system_intro = _build_orchestration_guidance(
+            payload,
+            kb_prefetch_block=kb_prefetch_block or "",
+        )
     if payload.entrypoint == "workshop" and workshop_skill_name and payload.execution.run_id:
         ti_dict = task_input.model_dump(exclude_none=True) if task_input else None
         system_intro = (
@@ -158,10 +212,13 @@ def build_chat_completion_body(
         )
 
     if mode == "extra":
+        extra_system = system_intro
+        if kb_prefetch_block and not lightweight_mode:
+            extra_system = f"{extra_system}\n\n{kb_prefetch_block.strip()}"
         body: dict[str, Any] = {
             "model": model_name,
             "messages": [
-                {"role": "system", "content": system_intro},
+                {"role": "system", "content": extra_system},
                 *messages,
             ],
             "stream": payload.execution.stream,
@@ -175,6 +232,8 @@ def build_chat_completion_body(
         f"{json.dumps(orch, ensure_ascii=False)}\n"
         f"{ORCHESTRATION_MARKER_END}"
     )
+    if kb_prefetch_block and not lightweight_mode:
+        embedded = f"{embedded}\n\n{kb_prefetch_block.strip()}"
     return {
         "model": model_name,
         "messages": [

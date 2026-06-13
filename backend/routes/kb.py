@@ -254,13 +254,22 @@ async def kb_query_by_collection(
 
 
 @router.get("/collections", response_model=CollectionListResponse)
-async def list_collections(project_id: Optional[str] = Query(None)):
+async def list_collections(
+    project_id: Optional[str] = Query(None),
+    prefer_cache: bool = Query(
+        False,
+        description="为 true 时跳过 ChromaDB，直接读本地 kb_cache 集合列表（页面浏览加速）",
+    ),
+):
     """
     列出所有可用 collection
 
     优先从 ChromaDB 获取；降级时从本地缓存读取。
     """
-    result = await kb_proxy_service.list_collections(project_id=project_id)
+    result = await kb_proxy_service.list_collections(
+        project_id=project_id,
+        prefer_cache=prefer_cache,
+    )
     return CollectionListResponse(**result)
 
 
@@ -318,6 +327,10 @@ async def get_cached_entries(
     collection: Optional[str] = Query(None),
     limit: int = Query(100, ge=1, le=8000),
     offset: int = Query(0, ge=0),
+    include_content: bool = Query(
+        True,
+        description="为 false 时不返回正文 content（列表浏览加速，详情请用 /cache/entry/{id}）",
+    ),
 ):
     """
     读取本地 kb_cache 缓存条目（不依赖外部 ChromaDB）。
@@ -329,6 +342,7 @@ async def get_cached_entries(
         collection=collection,
         limit=limit,
         offset=offset,
+        include_content=include_content,
     )
     return {"entries": entries, "count": len(entries)}
 

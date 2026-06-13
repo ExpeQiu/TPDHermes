@@ -26,7 +26,7 @@ import KnowledgeIngestWorkspace, {
   type KnowledgeIngestPrefill,
 } from "@/app/knowledge/components/KnowledgeIngestWorkspace";
 import KnowledgePolicyDomain from "@/app/knowledge/components/KnowledgePolicyDomain";
-import { createKnowledgeQueryCache } from "@/app/knowledge/knowledge-query-cache";
+import { getKnowledgeQueryCache } from "@/app/knowledge/knowledge-query-cache";
 import {
   fieldLabel,
   isInternalSectionCollection,
@@ -144,6 +144,31 @@ const MOCK_ENTRIES: KBEntry[] = [
 ];
 
 const KB_BROWSE_LIMIT = 3000;
+
+function countUnclassifiedInTree(nodes: TreeNode[]): number {
+  let count = 0;
+  const walk = (list: TreeNode[]) => {
+    for (const node of list) {
+      for (const doc of node.documents || []) {
+        const st = entryClassifyStatus({
+          domain: doc.domain,
+          folder_path: doc.folder_path,
+        });
+        if (!st.ok) count += 1;
+      }
+      if (node.children?.length) walk(node.children);
+    }
+  };
+  walk(nodes);
+  return count;
+}
+
+/** 需要拉取 browse 条目列表的模式（树模式仅拉 browse-tree） */
+const BROWSE_ENTRY_MODES: ReadonlySet<string> = new Set([
+  "collections",
+  "harvest",
+  "experience",
+]);
 
 /** 浅色背景下可读的标签/按钮（dark: 保持原语义色） */
 const KB_BADGE_OK =
@@ -932,36 +957,50 @@ export default function KnowledgePageClient() {
   browseEntriesRef.current = browseEntries;
 
   const detailFetchAbortRef = useRef<AbortController | null>(null);
-  const knowledgeQueryCacheRef = useRef(createKnowledgeQueryCache());
+  const knowledgeQueryCacheRef = useRef(getKnowledgeQueryCache());
 
-  const reloadKbBrowse = useCallback(async (options?: { force?: boolean }) => {
-    const force = options?.force !== false;
+  const reloadCollections = useCallback(async (options?: { force?: boolean }) => {
+    const force = options?.force === true;
     if (USE_MOCK_KB) {
       setCollections(MOCK_COLLECTIONS);
+      return;
+    }
+    const colRes = await knowledgeQueryCacheRef.current.fetch(
+      "browse:collections",
+      () =>
+        apiGet<{ collections: string[]; warning?: string }>(
+          "/kb/collections?prefer_cache=1",
+        ),
+      { force },
+    );
+    const cols: Collection[] = colRes.collections.map((name) => ({
+      name,
+      description: name,
+      entry_count: 0,
+    }));
+    setCollections((prev) => {
+      const counts = new Map(prev.map((c) => [c.name, c.entry_count]));
+      return cols.map((c) => ({
+        ...c,
+        entry_count: counts.get(c.name) ?? 0,
+      }));
+    });
+  }, []);
+
+  const reloadBrowseEntries = useCallback(async (options?: { force?: boolean }) => {
+    const force = options?.force === true;
+    if (USE_MOCK_KB) {
       setBrowseEntries(MOCK_ENTRIES);
       setKbLoadError(null);
       return;
     }
     try {
       setKbLoadError(null);
-      const colRes = await knowledgeQueryCacheRef.current.fetch(
-        "browse:collections",
-        () =>
-          apiGet<{ collections: string[]; warning?: string }>(
-            "/kb/collections",
-          ),
-        { force },
-      );
-      const cols: Collection[] = colRes.collections.map((name) => ({
-        name,
-        description: name,
-        entry_count: 0,
-      }));
       const entRes = await knowledgeQueryCacheRef.current.fetch(
-        `browse:entries:${KB_BROWSE_LIMIT}`,
+        `browse:entries:${KB_BROWSE_LIMIT}:lite`,
         () =>
           apiGet<{ entries: Record<string, unknown>[] }>(
-            `/kb/cache/entries/__all__?limit=${KB_BROWSE_LIMIT}`,
+            `/kb/cache/entries/__all__?limit=${KB_BROWSE_LIMIT}&include_content=false`,
           ),
         { force },
       );
@@ -970,28 +1009,45 @@ export default function KnowledgePageClient() {
       for (const e of entries) {
         counts.set(e.collection, (counts.get(e.collection) ?? 0) + 1);
       }
-      setCollections(
-        cols.map((c) => ({
+      setBrowseEntries(entries);
+      setCollections((prev) =>
+        prev.map((c) => ({
           ...c,
           entry_count: counts.get(c.name) ?? 0,
         })),
       );
-      setBrowseEntries(entries);
     } catch (e) {
       if (USE_MOCK_KB) {
-        setCollections(MOCK_COLLECTIONS);
         setBrowseEntries(MOCK_ENTRIES);
         setKbLoadError(null);
         return;
       }
       setKbLoadError(e instanceof Error ? e.message : "加载失败");
-      setCollections([]);
       setBrowseEntries([]);
     }
   }, []);
 
+  const reloadKbBrowse = useCallback(async (options?: { force?: boolean }) => {
+    const force = options?.force === true;
+    if (USE_MOCK_KB) {
+      setCollections(MOCK_COLLECTIONS);
+      setBrowseEntries(MOCK_ENTRIES);
+      setKbLoadError(null);
+      return;
+    }
+    try {
+      setKbLoadError(null);
+      await Promise.all([
+        reloadCollections({ force }),
+        reloadBrowseEntries({ force }),
+      ]);
+    } catch (e) {
+      setKbLoadError(e instanceof Error ? e.message : "加载失败");
+    }
+  }, [reloadCollections, reloadBrowseEntries]);
+
   const reloadBrowseTree = useCallback(async (options?: { force?: boolean }) => {
-    const force = options?.force !== false;
+    const force = options?.force === true;
     if (USE_MOCK_KB) {
       setBrowseTree([
         {
@@ -1047,8 +1103,13 @@ export default function KnowledgePageClient() {
   }, []);
 
   useEffect(() => {
-    void reloadKbBrowse({ force: false });
-  }, [reloadKbBrowse]);
+    void reloadCollections({ force: false });
+  }, [reloadCollections]);
+
+  useEffect(() => {
+    if (!BROWSE_ENTRY_MODES.has(workspaceMode)) return;
+    void reloadBrowseEntries({ force: false });
+  }, [workspaceMode, reloadBrowseEntries]);
 
   useEffect(() => {
     if (workspaceMode === "tree") {
@@ -1117,16 +1178,17 @@ export default function KnowledgePageClient() {
     return m;
   }, [projects]);
 
-  const unclassifiedCount = useMemo(
-    () =>
-      browseEntries.filter(
+  const unclassifiedCount = useMemo(() => {
+    if (browseEntries.length > 0) {
+      return browseEntries.filter(
         (e) =>
           !e.domain?.trim() ||
           e.domain === "_uncategorized" ||
           !e.folder_path?.trim(),
-      ).length,
-    [browseEntries],
-  );
+      ).length;
+    }
+    return countUnclassifiedInTree(browseTree);
+  }, [browseEntries, browseTree]);
 
   const filteredTreeDocs = useMemo(() => {
     let base = treeDocs;
@@ -1371,8 +1433,8 @@ export default function KnowledgePageClient() {
       });
       applyCategoryTarget(path, domain);
       setAddCategoryMessage(`已创建分类索引：${path}`);
-      await reloadKbBrowse();
-      await reloadBrowseTree();
+      await reloadKbBrowse({ force: true });
+      await reloadBrowseTree({ force: true });
     } catch (e) {
       setAddCategoryMessage(e instanceof Error ? e.message : "创建分类索引失败");
     } finally {
@@ -1501,8 +1563,8 @@ export default function KnowledgePageClient() {
       });
       setEntryManageMessage("已保存并同步缓存。");
       setEntryEditing(false);
-      await reloadKbBrowse();
-      await reloadBrowseTree();
+      await reloadKbBrowse({ force: true });
+      await reloadBrowseTree({ force: true });
     } catch (e) {
       setEntryManageMessage(e instanceof Error ? e.message : "保存失败");
     } finally {
@@ -1537,8 +1599,8 @@ export default function KnowledgePageClient() {
         },
       });
       setEntryManageMessage("已保存业务域与目录路径。");
-      await reloadKbBrowse();
-      await reloadBrowseTree();
+      await reloadKbBrowse({ force: true });
+      await reloadBrowseTree({ force: true });
     } catch (e) {
       setEntryManageMessage(e instanceof Error ? e.message : "保存分类失败");
     } finally {
@@ -1628,8 +1690,8 @@ export default function KnowledgePageClient() {
         setSelectedEntry(null);
         setEntryEditing(false);
       }
-      await reloadKbBrowse();
-      await reloadBrowseTree();
+      await reloadKbBrowse({ force: true });
+      await reloadBrowseTree({ force: true });
       const okMsg = `已删除：${label}`;
       setEntryManageMessage(okMsg);
       setNodeManageMessage(okMsg);
@@ -1700,8 +1762,8 @@ export default function KnowledgePageClient() {
         setFilterCollection(null);
       }
       setTreeNodeDocFilter(null);
-      await reloadKbBrowse();
-      await reloadBrowseTree();
+      await reloadKbBrowse({ force: true });
+      await reloadBrowseTree({ force: true });
       setEntryManageMessage(`已删除合集：${label}`);
     } catch (e) {
       const msg = e instanceof Error ? e.message : "合集删除失败";
@@ -1740,8 +1802,8 @@ export default function KnowledgePageClient() {
         content: "",
         doc_id: "",
       }));
-      await reloadKbBrowse();
-      await reloadBrowseTree();
+      await reloadKbBrowse({ force: true });
+      await reloadBrowseTree({ force: true });
       if (res.entry_id) {
         const hit = browseEntries.find((e) => e.id === res.entry_id);
         if (hit) handleEntryClick(hit);
@@ -1801,8 +1863,8 @@ export default function KnowledgePageClient() {
             : "已发布并完成缓存同步。"
           : "已保持草稿（未对外发布）。",
       );
-      await reloadKbBrowse();
-      await reloadBrowseTree();
+      await reloadKbBrowse({ force: true });
+      await reloadBrowseTree({ force: true });
       setSelectedEntry((prev) =>
         prev && prev.id === fromEntry.id ? { ...prev, published } : prev,
       );
@@ -2361,8 +2423,8 @@ export default function KnowledgePageClient() {
           <button
             type="button"
             onClick={() => {
-              void reloadKbBrowse();
-              void reloadBrowseTree();
+              void reloadKbBrowse({ force: true });
+              void reloadBrowseTree({ force: true });
             }}
             className="rounded-lg border border-slate-300 dark:border-slate-600 px-3 py-1.5 text-xs text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:bg-slate-800"
           >
@@ -2879,7 +2941,7 @@ export default function KnowledgePageClient() {
         <div className="flex flex-wrap gap-2 mb-4 items-center">
           <button
             type="button"
-            onClick={() => void reloadKbBrowse()}
+            onClick={() => void reloadKbBrowse({ force: true })}
             className="rounded-lg border border-slate-300 dark:border-slate-600 px-3 py-1.5 text-xs text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:bg-slate-800"
           >
             刷新
@@ -2989,7 +3051,7 @@ export default function KnowledgePageClient() {
         <div className="flex flex-wrap gap-2 mb-4 items-center">
           <button
             type="button"
-            onClick={() => void reloadKbBrowse()}
+            onClick={() => void reloadKbBrowse({ force: true })}
             className="rounded-lg border border-slate-300 dark:border-slate-600 px-3 py-1.5 text-xs text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:bg-slate-800"
           >
             刷新
@@ -3149,7 +3211,7 @@ export default function KnowledgePageClient() {
         <div className="flex flex-wrap gap-2 mb-4 items-center">
           <button
             type="button"
-            onClick={() => void reloadKbBrowse()}
+            onClick={() => void reloadKbBrowse({ force: true })}
             className="rounded-lg border border-slate-300 dark:border-slate-600 px-3 py-1.5 text-xs text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:bg-slate-800"
           >
             刷新

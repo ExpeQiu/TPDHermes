@@ -49,6 +49,15 @@ async def test_kb_cache_entries_all_projects_semantic():
     ids = {e["id"] for e in body["entries"]}
     assert rid in ids
 
+    with TestClient(app) as client:
+        lite = client.get(
+            "/api/v1/kb/cache/entries/__all__?limit=50&include_content=false"
+        )
+    assert lite.status_code == 200
+    lite_body = lite.json()
+    assert rid in {e["id"] for e in lite_body["entries"]}
+    assert lite_body["entries"][0].get("content") == ""
+
 
 def test_skill_install_rejects_missing_package():
     with TestClient(app) as client:

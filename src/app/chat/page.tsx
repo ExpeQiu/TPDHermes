@@ -160,6 +160,7 @@ export default function ChatPage() {
 function ChatPageInner() {
   const [input, setInput] = useState("");
   const [streaming, setStreaming] = useState(false);
+  const [streamingPhase, setStreamingPhase] = useState("");
   const [preparingContext, setPreparingContext] = useState(false);
   const [error, setError] = useState("");
   const [sidebarOpen, setSidebarOpen] = useState(true);
@@ -219,6 +220,7 @@ function ChatPageInner() {
   const resetTransientState = useCallback(() => {
     abortRef.current?.abort();
     setStreaming(false);
+    setStreamingPhase("");
     setPreparingContext(false);
     setError("");
     setInput("");
@@ -689,6 +691,7 @@ function ChatPageInner() {
     preparingContext,
     setStreaming,
     setPreparingContext,
+    setStreamingPhase,
     setError,
     setInput,
     setSessionsSyncError,
@@ -902,6 +905,7 @@ function ChatPageInner() {
             activeSession={activeSession}
             streaming={streaming}
             preparingContext={preparingContext}
+            streamingPhase={streamingPhase}
             effectiveKbCollection={effectiveKbCollection}
             includeProjectContext={includeProjectContext}
             selectedProjectId={selectedProjectId}

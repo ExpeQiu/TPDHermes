@@ -468,6 +468,8 @@ class KBCacheService:
         collection: Optional[str] = None,
         limit: int = 100,
         offset: int = 0,
+        *,
+        include_content: bool = True,
     ) -> list[dict]:
         """
         按 project_id 读取本地 kb_cache 缓存条目
@@ -477,13 +479,26 @@ class KBCacheService:
             collection: 可选，按 collection 过滤
             limit: 返回条数上限
             offset: 翻页偏移
+            include_content: False 时不读取 content 列（列表浏览加速）
 
         Returns:
             缓存条目列表，每条包含 id, collection, content, metadata, source, reliability 等
         """
         await self.ensure_table()
         async with async_session_maker() as db:
-            query = select(KBCache)
+            if include_content:
+                query = select(KBCache)
+            else:
+                query = select(
+                    KBCache.id,
+                    KBCache.project_id,
+                    KBCache.collection,
+                    KBCache.metadata_,
+                    KBCache.source,
+                    KBCache.reliability,
+                    KBCache.created_at,
+                    KBCache.updated_at,
+                )
             if project_id not in ALL_PROJECT_IDS:
                 query = query.where(KBCache.project_id == project_id)
             if collection:
@@ -492,24 +507,12 @@ class KBCacheService:
             query = query.limit(limit).offset(offset)
 
             result = await db.execute(query)
-            entries = result.scalars().all()
+            if include_content:
+                entries = result.scalars().all()
+                return [self._format_cache_row(e) for e in entries]
 
-            return [
-                {
-                    "id": e.id,
-                    "project_id": e.project_id,
-                    "collection": e.collection,
-                    "content": e.content,
-                    "metadata": normalize_kb_metadata_dict(
-                        json.loads(e.metadata_) if e.metadata_ else {}
-                    ),
-                    "source": e.source,
-                    "reliability": e.reliability,
-                    "created_at": e.created_at,
-                    "updated_at": e.updated_at,
-                }
-                for e in entries
-            ]
+            rows = result.all()
+            return [self._format_cache_row_lite(row) for row in rows]
 
     def _format_cache_row(self, e: KBCache) -> dict:
         return {
@@ -524,6 +527,38 @@ class KBCacheService:
             "reliability": e.reliability,
             "created_at": e.created_at,
             "updated_at": e.updated_at,
+        }
+
+    def _format_cache_row_lite(self, row: object) -> dict:
+        """不含 content 的列表项（Row 或 KBCache）。"""
+        if isinstance(row, KBCache):
+            meta_raw = row.metadata_
+            return {
+                "id": row.id,
+                "project_id": row.project_id,
+                "collection": row.collection,
+                "content": "",
+                "metadata": normalize_kb_metadata_dict(
+                    json.loads(meta_raw) if meta_raw else {}
+                ),
+                "source": row.source,
+                "reliability": row.reliability,
+                "created_at": row.created_at,
+                "updated_at": row.updated_at,
+            }
+        rid, pid, col, meta_raw, source, reliability, created_at, updated_at = row  # type: ignore[misc]
+        return {
+            "id": rid,
+            "project_id": pid,
+            "collection": col,
+            "content": "",
+            "metadata": normalize_kb_metadata_dict(
+                json.loads(meta_raw) if meta_raw else {}
+            ),
+            "source": source,
+            "reliability": reliability,
+            "created_at": created_at,
+            "updated_at": updated_at,
         }
 
     async def get_cached_entry_by_id(self, entry_id: str) -> dict | None:

@@ -35,6 +35,7 @@ type UseChatExecutionOptions = {
   preparingContext: boolean;
   setStreaming: (value: boolean) => void;
   setPreparingContext: (value: boolean) => void;
+  setStreamingPhase: (value: string) => void;
   setError: (value: string) => void;
   setInput: (value: string) => void;
   setSessionsSyncError: (value: string) => void;
@@ -185,6 +186,7 @@ export function useChatExecution(options: UseChatExecutionOptions) {
     preparingContext,
     setStreaming,
     setPreparingContext,
+    setStreamingPhase,
     setError,
     setInput,
     setSessionsSyncError,
@@ -231,6 +233,7 @@ export function useChatExecution(options: UseChatExecutionOptions) {
       priorSession,
     }: RunAssistantStreamParams) => {
       setStreaming(true);
+      setStreamingPhase("");
       if (abortRef.current) abortRef.current.abort();
       const controller = new AbortController();
       abortRef.current = controller;
@@ -399,7 +402,8 @@ export function useChatExecution(options: UseChatExecutionOptions) {
               if (!line.startsWith("data: ")) continue;
               const data = line.slice(6).trim();
               const meta = parseTpHermesStreamMeta(data);
-              if (meta?.runId || meta?.citations?.length || meta?.unresolvedCitationRefs?.length) {
+              if (meta?.phase) setStreamingPhase(meta.phase);
+              if (meta?.runId || meta?.phase || meta?.citations?.length || meta?.unresolvedCitationRefs?.length) {
                 updateSession(sessionId, (session) => ({
                   ...session,
                   linkedOutputIds:
@@ -444,7 +448,8 @@ export function useChatExecution(options: UseChatExecutionOptions) {
               if (!line.startsWith("data: ")) continue;
               const data = line.slice(6).trim();
               const meta = parseTpHermesStreamMeta(data);
-              if (meta?.runId || meta?.citations?.length || meta?.unresolvedCitationRefs?.length) {
+              if (meta?.phase) setStreamingPhase(meta.phase);
+              if (meta?.runId || meta?.phase || meta?.citations?.length || meta?.unresolvedCitationRefs?.length) {
                 updateSession(sessionId, (session) => ({
                   ...session,
                   linkedOutputIds:
@@ -614,6 +619,7 @@ export function useChatExecution(options: UseChatExecutionOptions) {
           console.warn("[chat] 最终落库失败", err);
         });
         setStreaming(false);
+        setStreamingPhase("");
       }
     },
     [
@@ -641,6 +647,7 @@ export function useChatExecution(options: UseChatExecutionOptions) {
       setError,
       setSessionsSyncError,
       setStreaming,
+      setStreamingPhase,
       sessionsRef,
       showAdvancedOrchestration,
       skills,

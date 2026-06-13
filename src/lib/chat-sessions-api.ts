@@ -22,6 +22,15 @@ export interface ServerChatSession extends Record<string, unknown> {
   sessionKind?: ChatSessionKind;
 }
 
+export async function fetchChatSessionsSummary(): Promise<ServerChatSessionSummary[]> {
+  const data = await apiGet<{ items: ServerChatSessionSummary[] }>("/chat/sessions");
+  return data.items ?? [];
+}
+
+export async function fetchChatSessionDetail(sessionId: string): Promise<ServerChatSession> {
+  return apiGet<ServerChatSession>(`/chat/sessions/${encodeURIComponent(sessionId)}`);
+}
+
 export async function fetchChatSessionsFull(): Promise<ServerChatSession[]> {
   const data = await apiGet<{ items: ServerChatSession[] }>("/chat/sessions?full=1");
   return data.items ?? [];

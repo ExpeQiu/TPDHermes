@@ -90,6 +90,10 @@ export interface TpHermesStreamMeta {
   validation?: unknown;
   citations?: CitationSource[];
   unresolvedCitationRefs?: number[];
+  /** 编排流式阶段：kb_prefetch | agent_generating */
+  phase?: string;
+  kbPrefetchCount?: number;
+  lightweight?: boolean;
 }
 
 function mapSourceRow(raw: Record<string, unknown>): CitationSource | null {
@@ -162,7 +166,13 @@ export function parseTpHermesStreamMeta(data: string): TpHermesStreamMeta | null
     const sourcesRaw = parsed.tphermes_sources;
     const mapped = mapApiSourcesPayload(sourcesRaw);
 
-    if (!task && mapped.citations.length === 0 && mapped.unresolvedCitationRefs.length === 0) {
+    const phase = typeof task?.phase === "string" ? task.phase : undefined;
+    const hasTaskPayload =
+      phase ||
+      typeof task?.run_id === "string" ||
+      typeof task?.output_id === "string" ||
+      task?.validation !== undefined;
+    if (!hasTaskPayload && mapped.citations.length === 0 && mapped.unresolvedCitationRefs.length === 0) {
       return null;
     }
 
@@ -173,6 +183,10 @@ export function parseTpHermesStreamMeta(data: string): TpHermesStreamMeta | null
       citations: mapped.citations.length > 0 ? mapped.citations : undefined,
       unresolvedCitationRefs:
         mapped.unresolvedCitationRefs.length > 0 ? mapped.unresolvedCitationRefs : undefined,
+      phase,
+      kbPrefetchCount:
+        typeof task?.kb_prefetch_count === "number" ? task.kb_prefetch_count : undefined,
+      lightweight: typeof task?.lightweight === "boolean" ? task.lightweight : undefined,
     };
   } catch {
     return null;

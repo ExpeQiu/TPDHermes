@@ -19,12 +19,12 @@ export function isDefaultAdminUser(userId: string | null | undefined): boolean {
 
 export function useUserAccess() {
   const userId = useEffectiveUserScopeId();
-  const ready = userId.trim().length > 0;
+  const readyUser = userId.trim().length > 0;
   const [access, setAccess] = useState<UserAccessState | null>(() => loadCachedUserAccess());
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(() => loadCachedUserAccess() === null);
 
   const refresh = useCallback(async () => {
-    if (!ready) return null;
+    if (!readyUser) return null;
     try {
       const next = await fetchUserAccess();
       setAccess(next);
@@ -34,7 +34,7 @@ export function useUserAccess() {
     } finally {
       setLoading(false);
     }
-  }, [ready]);
+  }, [readyUser]);
 
   useEffect(() => {
     void refresh();
@@ -54,7 +54,9 @@ export function useUserAccess() {
     access?.platform_role === "platform_admin" ||
     isDefaultAdminUser(userId);
 
-  return { access, ready: ready && !loading, loading, userId, isAdmin, canAccess, refresh };
+  const ready = readyUser && (access !== null || !loading);
+
+  return { access, ready, loading, userId, isAdmin, canAccess, refresh };
 }
 
 /** @deprecated 使用 useUserAccess */
