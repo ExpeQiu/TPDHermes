@@ -48,7 +48,7 @@ export default function RootLayout({
           }}
         />
       </head>
-      <body className="flex h-dvh min-h-0 flex-col bg-slate-50 font-sans text-slate-900 antialiased dark:bg-slate-950 dark:text-slate-100">
+      <body className="flex h-dvh min-h-0 flex-col bg-slate-50 font-sans text-slate-900 antialiased dark:bg-slate-950 dark:text-slate-100" suppressHydrationWarning>
         <ThemeInit />
         <UserIdentityInit />
         <GlobalWorkflowNav />
