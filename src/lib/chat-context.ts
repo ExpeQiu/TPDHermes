@@ -528,6 +528,12 @@ export interface TaskExecuteBody {
   overrides?: TaskExecuteOverrides;
   stream: boolean;
   messages?: Array<{ role: "user" | "assistant"; content: string }>;
+  /** 项目共创：关联会话 ID */
+  session_id?: string | null;
+  /** 项目共创：本轮引用文件 ID（output/attachment id） */
+  project_file_ids?: string[] | null;
+  /** 项目共创：固定引用文件 ID */
+  pinned_file_ids?: string[] | null;
 }
 
 export interface OrchestrationPreviewResponse {

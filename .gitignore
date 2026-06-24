@@ -34,3 +34,38 @@ tmp/
 
 # Hermes 源码 zip（解压到 hermes-agent/hermes-agent-main/ 后勿提交压缩包）
 hermes-agent/*.zip
+
+# 本地数据与文档（不上传 GitHub）
+data/
+docs/
+guide/
+EPLOY.md
+
+# 本地环境与密钥（保留 *.example 模板）
+.env.local
+.env.production
+
+# 进程 PID（start.sh / stop.sh 生成）
+*.pid
+
+# 本地 SQLite
+*.db
+
+# TypeScript 增量构建
+*.tsbuildinfo
+
+# ML / HuggingFace 模型缓存
+.cache/
+
+# npm 离线缓存
+.npm-cache/
+
+# 运行时上传文件
+backend/data/project_uploads/
+
+# Python 工具缓存
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/

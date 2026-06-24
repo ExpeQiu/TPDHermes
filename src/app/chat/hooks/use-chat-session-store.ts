@@ -16,36 +16,41 @@ import {
 } from "@/lib/chat-sessions-api";
 import type { QuickCreateFlowOverrides } from "@/lib/chat-context";
 
+import {
+  condenseTopicTitle,
+  isPlaceholderSessionTitle,
+  isProjectCoCreateSession,
+} from "@/lib/chat-session-utils";
+
 import type { ChatSession, Message } from "@/app/chat/chat-types";
 
 type UseChatSessionStoreOptions = {
   scopeUserId: string;
   defaultCollection: string;
+  storageNamespace?: string;
   onResetTransientState?: () => void;
 };
 
-const PLACEHOLDER_SESSION_TITLES = new Set(["新对话", "对话创作"]);
-
-function chatSessionsStorageKey(scopeUserId: string): string {
-  return `tphermes-chat-sessions:${scopeUserId}`;
+function chatSessionsStorageKey(scopeUserId: string, namespace = "chat"): string {
+  return `tphermes-${namespace}-sessions:${scopeUserId}`;
 }
 
-function chatActiveStorageKey(scopeUserId: string): string {
-  return `tphermes-chat-active:${scopeUserId}`;
+function chatActiveStorageKey(scopeUserId: string, namespace = "chat"): string {
+  return `tphermes-${namespace}-active:${scopeUserId}`;
 }
 
-function loadSessions(scopeUserId: string): ChatSession[] {
+function loadSessions(scopeUserId: string, namespace = "chat"): ChatSession[] {
   if (typeof window === "undefined") return [];
   try {
-    return JSON.parse(localStorage.getItem(chatSessionsStorageKey(scopeUserId)) ?? "[]");
+    return JSON.parse(localStorage.getItem(chatSessionsStorageKey(scopeUserId, namespace)) ?? "[]");
   } catch {
     return [];
   }
 }
 
-function saveSessions(scopeUserId: string, sessions: ChatSession[]) {
+function saveSessions(scopeUserId: string, sessions: ChatSession[], namespace = "chat") {
   if (typeof window === "undefined") return;
-  localStorage.setItem(chatSessionsStorageKey(scopeUserId), JSON.stringify(sessions));
+  localStorage.setItem(chatSessionsStorageKey(scopeUserId, namespace), JSON.stringify(sessions));
 }
 
 function uuid() {
@@ -57,32 +62,6 @@ function firstUserMessageContent(session: ChatSession): string | null {
   if (!msg) return null;
   const text = msg.content.trim();
   return text || null;
-}
-
-function isPlaceholderSessionTitle(title: string): boolean {
-  return PLACEHOLDER_SESSION_TITLES.has(title.trim());
-}
-
-function condenseTopicTitle(text: string, maxLen = 16): string {
-  let s = text.trim().replace(/\s+/g, " ");
-  const firstLine = (s.split(/\n/)[0] ?? s).trim();
-  s = firstLine;
-  const prefixPatterns = [
-    /^请?(帮我|帮忙|协助)?/u,
-    /^我想(了解|咨询|问|知道|写|做)?/u,
-    /^能否/u,
-    /^可以(吗|么)?/u,
-    /^关于/u,
-    /^请问/u,
-  ];
-  for (const re of prefixPatterns) {
-    const next = s.replace(re, "").trim();
-    if (next.length >= 2) s = next;
-  }
-  s = s.replace(/[？?。！!，,、；;：:.]+$/gu, "").trim();
-  if (!s) s = firstLine;
-  if (s.length <= maxLen) return s;
-  return `${s.slice(0, maxLen)}…`;
 }
 
 function normalizeSessionsPlaceholders(sessions: ChatSession[]): ChatSession[] {
@@ -105,8 +84,27 @@ function calcPayloadBytes(payload: unknown): number {
 function sessionToServerPayload(session: ChatSession): Record<string, unknown> {
   return {
     ...session,
-    sessionKind: inferSessionKind(session as unknown as Record<string, unknown>),
+    sessionKind:
+      session.sessionKind ??
+      inferSessionKind(session as unknown as Record<string, unknown>),
   };
+}
+
+function filterSessionsForNamespace(
+  sessions: ChatSession[],
+  namespace: string,
+): ChatSession[] {
+  if (namespace === "co-create") {
+    return sessions.filter((session) => isProjectCoCreateSession(session));
+  }
+  return sessions;
+}
+
+function filterSummariesForNamespace(
+  summaries: ServerChatSessionSummary[],
+  namespace: string,
+): ServerChatSessionSummary[] {
+  return summaries;
 }
 
 export function sessionToPatchPayload(session: ChatSession): Record<string, unknown> {
@@ -129,9 +127,18 @@ export function sessionToPatchPayload(session: ChatSession): Record<string, unkn
     rewriteTargetSection: session.rewriteTargetSection,
     rewriteSourceExcerpt: session.rewriteSourceExcerpt,
     rewriteGoal: session.rewriteGoal,
-    sessionKind: inferSessionKind(session as unknown as Record<string, unknown>),
+    sessionKind:
+      session.sessionKind ??
+      inferSessionKind(session as unknown as Record<string, unknown>),
+    pinnedFileIds: session.pinnedFileIds ?? [],
+    roundFileIds: session.roundFileIds ?? [],
+    archived: session.archived ?? false,
+    pendingProposalIds: session.pendingProposalIds ?? [],
+    coCreatePipelinePreference: session.coCreatePipelinePreference ?? "auto",
   };
 }
+
+export { condenseTopicTitle, isPlaceholderSessionTitle };
 
 function messageToSyncPayload(message: Message, sortIndex: number): Record<string, unknown> {
   return {
@@ -143,6 +150,7 @@ function messageToSyncPayload(message: Message, sortIndex: number): Record<strin
 
 
 function summaryToShellSession(summary: ServerChatSessionSummary): ChatSession {
+  const sessionKind = summary.sessionKind;
   return {
     id: summary.id,
     title: summary.title || "新对话",
@@ -152,12 +160,13 @@ function summaryToShellSession(summary: ServerChatSessionSummary): ChatSession {
     linkedRunIds: [],
     selectedProjectId: "",
     selectedCollection: "",
-    includeProjectContext: false,
+    includeProjectContext: sessionKind === "project_co_create",
     includeKnowledgeContext: false,
     includeSkillsContext: false,
     chatMode: "co_create",
-    includeFileContext: false,
+    includeFileContext: sessionKind === "project_co_create",
     selectedFileId: "",
+    sessionKind,
   };
 }
 
@@ -201,12 +210,20 @@ function serverSessionToClient(raw: Record<string, unknown>): ChatSession {
     rewriteSourceExcerpt:
       typeof raw.rewriteSourceExcerpt === "string" ? raw.rewriteSourceExcerpt : undefined,
     rewriteGoal: typeof raw.rewriteGoal === "string" ? raw.rewriteGoal : undefined,
+    sessionKind: typeof raw.sessionKind === "string" ? raw.sessionKind : undefined,
+    pinnedFileIds: Array.isArray(raw.pinnedFileIds) ? (raw.pinnedFileIds as string[]) : [],
+    roundFileIds: Array.isArray(raw.roundFileIds) ? (raw.roundFileIds as string[]) : [],
+    archived: Boolean(raw.archived),
+    pendingProposalIds: Array.isArray(raw.pendingProposalIds)
+      ? (raw.pendingProposalIds as string[])
+      : [],
   };
 }
 
 export function useChatSessionStore({
   scopeUserId,
   defaultCollection,
+  storageNamespace = "chat",
   onResetTransientState,
 }: UseChatSessionStoreOptions) {
   const [sessions, setSessions] = useState<ChatSession[]>([]);
@@ -230,11 +247,20 @@ export function useChatSessionStore({
 
   const saveAndSet = useCallback(
     (updated: ChatSession[]) => {
-      sessionsRef.current = updated;
-      setSessions(updated);
-      saveSessions(scopeUserId, updated);
+      const scoped = filterSessionsForNamespace(updated, storageNamespace);
+      sessionsRef.current = scoped;
+      setSessions(scoped);
+      saveSessions(scopeUserId, scoped, storageNamespace);
+      if (activeIdRef.current && !scoped.some((session) => session.id === activeIdRef.current)) {
+        const nextActive = scoped[0]?.id ?? null;
+        activeIdRef.current = nextActive;
+        setActiveId(nextActive);
+        if (nextActive) {
+          localStorage.setItem(chatActiveStorageKey(scopeUserId, storageNamespace), nextActive);
+        }
+      }
     },
-    [scopeUserId],
+    [scopeUserId, storageNamespace],
   );
 
   const updateSession = useCallback(
@@ -376,7 +402,7 @@ export function useChatSessionStore({
       onResetTransientState?.();
       const session: ChatSession = {
         id: uuid(),
-        title: "新对话",
+        title: defaults?.title ?? "新对话",
         messages: [],
         createdAt: Date.now(),
         selectedProjectId: defaults?.selectedProjectId ?? "",
@@ -390,11 +416,16 @@ export function useChatSessionStore({
         rewriteTargetSection: defaults?.rewriteTargetSection ?? "",
         rewriteSourceExcerpt: defaults?.rewriteSourceExcerpt ?? "",
         rewriteGoal: defaults?.rewriteGoal ?? "",
+        sessionKind: defaults?.sessionKind,
+        pinnedFileIds: defaults?.pinnedFileIds ?? [],
+        roundFileIds: defaults?.roundFileIds ?? [],
+        archived: defaults?.archived ?? false,
+        pendingProposalIds: defaults?.pendingProposalIds ?? [],
       };
       const next = [session, ...sessionsRef.current];
       saveAndSet(next);
       setActiveId(session.id);
-      localStorage.setItem(chatActiveStorageKey(scopeUserId), session.id);
+      localStorage.setItem(chatActiveStorageKey(scopeUserId, storageNamespace), session.id);
       if (scopeUserId) {
         console.info("[chat-metrics] create session", {
           session_id: session.id,
@@ -408,13 +439,13 @@ export function useChatSessionStore({
       }
       return session;
     },
-    [defaultCollection, onResetTransientState, saveAndSet, scopeUserId],
+    [defaultCollection, onResetTransientState, saveAndSet, scopeUserId, storageNamespace],
   );
 
   const selectSession = useCallback(
     (id: string) => {
       setActiveId(id);
-      localStorage.setItem(chatActiveStorageKey(scopeUserId), id);
+      localStorage.setItem(chatActiveStorageKey(scopeUserId, storageNamespace), id);
       const existing = sessionsRef.current.find((session) => session.id === id);
       if (existing && existing.messages.length === 0 && scopeUserId) {
         void hydrateSessionDetail(id).then((full) => {
@@ -426,7 +457,7 @@ export function useChatSessionStore({
         });
       }
     },
-    [saveAndSet, scopeUserId],
+    [saveAndSet, scopeUserId, storageNamespace],
   );
 
   const deleteSession = useCallback(
@@ -445,7 +476,7 @@ export function useChatSessionStore({
         localStorage.setItem(chatActiveStorageKey(scopeUserId), next[0].id);
       }
     },
-    [createSession, saveAndSet, scopeUserId],
+    [createSession, saveAndSet, scopeUserId, storageNamespace],
   );
 
   useEffect(() => {
@@ -475,16 +506,17 @@ export function useChatSessionStore({
 
     const bootstrapSessions = async () => {
       const initFromSessions = (saved: ChatSession[]) => {
-        const normalized = normalizeSessionsPlaceholders(saved);
-        if (normalized.some((session, index) => session.title !== saved[index]?.title)) {
-          saveSessions(scopeUserId, normalized);
+        const scoped = filterSessionsForNamespace(saved, storageNamespace);
+        const normalized = normalizeSessionsPlaceholders(scoped);
+        if (normalized.some((session, index) => session.title !== scoped[index]?.title)) {
+          saveSessions(scopeUserId, normalized, storageNamespace);
           console.info("[chat] 已根据首条用户消息回填历史会话主题");
         }
-        const active = localStorage.getItem(chatActiveStorageKey(scopeUserId));
+        const active = localStorage.getItem(chatActiveStorageKey(scopeUserId, storageNamespace));
         if (normalized.length === 0) {
           const first: ChatSession = {
             id: uuid(),
-            title: "新对话",
+            title: storageNamespace === "co-create" ? "新共创" : "新对话",
             messages: [],
             createdAt: Date.now(),
             selectedProjectId: "",
@@ -495,8 +527,11 @@ export function useChatSessionStore({
             chatMode: "co_create",
             includeFileContext: false,
             selectedFileId: "",
+            ...(storageNamespace === "co-create"
+              ? { sessionKind: "project_co_create" as const }
+              : {}),
           };
-          saveSessions(scopeUserId, [first]);
+          saveSessions(scopeUserId, [first], storageNamespace);
           sessionsRef.current = [first];
           setSessions([first]);
           setActiveId(first.id);
@@ -511,19 +546,28 @@ export function useChatSessionStore({
       };
 
       try {
-        let serverSummaries = await fetchChatSessionsSummary();
-        const localRaw = loadSessions(scopeUserId);
+        let serverSummaries = filterSummariesForNamespace(
+          await fetchChatSessionsSummary(),
+          storageNamespace,
+        );
+        const localRaw = filterSessionsForNamespace(
+          loadSessions(scopeUserId, storageNamespace),
+          storageNamespace,
+        );
         if (serverSummaries.length === 0 && localRaw.length > 0) {
           const migrated = await migrateLocalChatSessions(
             localRaw.map((session) => sessionToServerPayload(session)),
           );
           console.info("[chat] 已将本机会话迁移至服务端", migrated);
-          serverSummaries = await fetchChatSessionsSummary();
+          serverSummaries = filterSummariesForNamespace(
+            await fetchChatSessionsSummary(),
+            storageNamespace,
+          );
         }
         if (cancelled) return;
         if (serverSummaries.length > 0) {
           let clientSessions = serverSummaries.map((item) => summaryToShellSession(item));
-          const storedActive = localStorage.getItem(chatActiveStorageKey(scopeUserId));
+          const storedActive = localStorage.getItem(chatActiveStorageKey(scopeUserId, storageNamespace));
           const targetActive =
             storedActive && clientSessions.some((session) => session.id === storedActive)
               ? storedActive
@@ -537,14 +581,14 @@ export function useChatSessionStore({
             }
           }
           if (cancelled) return;
-          initFromSessions(clientSessions);
+          initFromSessions(filterSessionsForNamespace(clientSessions, storageNamespace));
           return;
         }
         initFromSessions(localRaw);
       } catch (err) {
         console.warn("[chat] 拉取服务端会话失败，回退 localStorage", err);
         if (cancelled) return;
-        initFromSessions(loadSessions(scopeUserId));
+        initFromSessions(loadSessions(scopeUserId, storageNamespace));
         setSessionsSyncError(err instanceof Error ? err.message : "会话同步失败");
       } finally {
         if (!cancelled) setSessionsLoading(false);
@@ -555,7 +599,7 @@ export function useChatSessionStore({
     return () => {
       cancelled = true;
     };
-  }, [scopeUserId]);
+  }, [scopeUserId, storageNamespace]);
 
   return {
     sessions,

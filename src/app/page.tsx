@@ -31,6 +31,13 @@ const entries = [
     eyebrow: "工坊",
   },
   {
+    href: "/projects?entry=co-create",
+    title: "项目共创",
+    desc: "基于项目文件的 Agent 协同工作台，需从项目内进入",
+    accent: "from-indigo-600 to-violet-700",
+    eyebrow: "共创",
+  },
+  {
     href: "/create",
     title: "场景编排",
     desc: "维护场景（说明、技能、模版与规则）",

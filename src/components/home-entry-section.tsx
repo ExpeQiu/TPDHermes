@@ -42,7 +42,7 @@ export default function HomeEntrySection({ entries }: { entries: readonly EntryI
         <div className="mt-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
           {visibleEntries.map((item) => (
             <Link
-              key={item.href}
+              key={`${item.href}-${item.title}`}
               href={item.href}
               className="group relative flex flex-col rounded-2xl border border-slate-200/80 dark:border-slate-800/80 bg-slate-100 dark:bg-slate-950/70 p-5 outline-none ring-slate-700/0 transition-[transform,box-shadow,border-color,background-color] duration-200 hover:-translate-y-0.5 hover:border-slate-300 dark:border-slate-600/80 hover:bg-slate-200/80 dark:hover:bg-slate-900/80 hover:shadow-xl hover:shadow-black/20 focus-visible:ring-2 focus-visible:ring-blue-500/60"
             >
@@ -73,4 +73,3 @@ export default function HomeEntrySection({ entries }: { entries: readonly EntryI
     </section>
   );
 }
-

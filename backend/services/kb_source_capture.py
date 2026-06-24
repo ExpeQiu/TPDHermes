@@ -4,10 +4,11 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import re
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from typing import Any
+from typing import Any, Awaitable, Callable
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -23,6 +24,13 @@ WEB_TOOL_NAMES = frozenset({"tavily_search", "tavily_extract"})
 _CITATION_REF_RE = re.compile(r"\[\^(\d+)\]")
 _EXCERPT_MAX = 200
 _PREFETCH_PROMPT_EXCERPT_MAX = 320
+_KB_PREFETCH_MAX_COLLECTIONS = max(1, int(os.getenv("KB_PREFETCH_MAX_COLLECTIONS", "3")))
+_KB_PREFETCH_COLLECTION_TIMEOUT_SEC = float(
+    os.getenv("KB_PREFETCH_COLLECTION_TIMEOUT_SEC", "6")
+)
+_KB_PREFETCH_FALLBACK_TIMEOUT_SEC = float(
+    os.getenv("KB_PREFETCH_FALLBACK_TIMEOUT_SEC", "8")
+)
 
 
 @dataclass(frozen=True)
@@ -359,29 +367,73 @@ async def prefetch_kb_sources_for_run(
     project_id: str | None,
     collections: list[str],
     query_text: str,
+    progress_cb: Callable[[str, dict[str, Any] | None], Awaitable[None]] | None = None,
 ) -> KbPrefetchResult:
     """编排开始前预检索并捕获来源；返回可注入 prompt 的片段以减少 Agent 重复检索。"""
-    cols = [c.strip() for c in collections if c and str(c).strip()]
+    cols = [c.strip() for c in collections if c and str(c).strip()][: _KB_PREFETCH_MAX_COLLECTIONS]
     q = (query_text or "").strip()[:400]
     if not q:
         return KbPrefetchResult(source_count=0, prompt_block="", query="")
 
     from backend.tools.kb_tools import kb_query
 
-    async def _query_collection(col: str) -> None:
+    async def _progress(phase: str, payload: dict[str, Any] | None = None) -> None:
+        if not progress_cb:
+            return
         try:
-            result = await kb_query(
-                q,
-                col,
-                limit=5,
-                project_id=project_id,
-                tphermes_run_id=run_id,
+            await progress_cb(phase, payload or {})
+        except Exception:
+            logger.debug("kb prefetch progress callback skipped run_id=%s phase=%s", run_id, phase)
+
+    async def _query_collection(col: str, index: int, total: int) -> None:
+        await _progress(
+            "kb_prefetch_querying",
+            {
+                "collection": col,
+                "index": index,
+                "total": total,
+            },
+        )
+        try:
+            result = await asyncio.wait_for(
+                kb_query(
+                    q,
+                    col,
+                    limit=5,
+                    project_id=project_id,
+                    tphermes_run_id=run_id,
+                ),
+                timeout=_KB_PREFETCH_COLLECTION_TIMEOUT_SEC,
             )
             logger.info(
                 "kb prefetch run_id=%s collection=%s count=%s",
                 run_id,
                 col,
                 result.get("count", 0),
+            )
+            await _progress(
+                "kb_prefetch_query_complete",
+                {
+                    "collection": col,
+                    "index": index,
+                    "total": total,
+                    "count": int(result.get("count", 0) or 0),
+                },
+            )
+        except TimeoutError:
+            logger.warning(
+                "kb prefetch timeout run_id=%s collection=%s timeout=%s",
+                run_id,
+                col,
+                _KB_PREFETCH_COLLECTION_TIMEOUT_SEC,
+            )
+            await _progress(
+                "kb_prefetch_query_timeout",
+                {
+                    "collection": col,
+                    "index": index,
+                    "total": total,
+                },
             )
         except Exception as exc:
             logger.warning(
@@ -390,21 +442,36 @@ async def prefetch_kb_sources_for_run(
                 col,
                 exc,
             )
+            await _progress(
+                "kb_prefetch_query_failed",
+                {
+                    "collection": col,
+                    "index": index,
+                    "total": total,
+                    "error": str(exc),
+                },
+            )
 
     if cols:
-        await asyncio.gather(*[_query_collection(col) for col in cols[:3]], return_exceptions=True)
+        await asyncio.gather(
+            *[_query_collection(col, index + 1, len(cols)) for index, col in enumerate(cols)],
+            return_exceptions=True,
+        )
 
     async with async_session_maker() as db:
         existing = await load_kb_sources(db, run_id)
     if not (existing and (existing.get("sources") or [])):
         try:
             from backend.services.kb_proxy import kb_proxy_service
-
-            cross = await kb_proxy_service.query_all_collections(
-                query_text=q,
-                n_results=5,
-                project_id=project_id,
-                collection=None,
+            await _progress("kb_prefetch_cross_collection", {"query": q})
+            cross = await asyncio.wait_for(
+                kb_proxy_service.query_all_collections(
+                    query_text=q,
+                    n_results=5,
+                    project_id=project_id,
+                    collection=None,
+                ),
+                timeout=_KB_PREFETCH_FALLBACK_TIMEOUT_SEC,
             )
             if int(cross.get("count") or 0) > 0:
                 async with async_session_maker() as db:
@@ -420,8 +487,20 @@ async def prefetch_kb_sources_for_run(
                     run_id,
                     cross.get("count", 0),
                 )
+            await _progress(
+                "kb_prefetch_cross_collection_complete",
+                {"count": int(cross.get("count") or 0)},
+            )
+        except TimeoutError:
+            logger.warning(
+                "kb prefetch cross-collection timeout run_id=%s timeout=%s",
+                run_id,
+                _KB_PREFETCH_FALLBACK_TIMEOUT_SEC,
+            )
+            await _progress("kb_prefetch_cross_collection_timeout", {})
         except Exception as exc:
             logger.warning("kb prefetch cross-collection failed run_id=%s err=%s", run_id, exc)
+            await _progress("kb_prefetch_cross_collection_failed", {"error": str(exc)})
 
     async with async_session_maker() as db:
         final = await load_kb_sources(db, run_id)

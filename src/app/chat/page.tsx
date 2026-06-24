@@ -50,8 +50,19 @@ import {
 
 type FirstTokenMetrics = { count: number; totalMs: number };
 
+import {
+  condenseTopicTitle,
+  getSessionHistoryCategory,
+  isPlaceholderSessionTitle,
+  isProjectCoCreateSession,
+  projectCoCreateSessionDefaults,
+  SESSION_HISTORY_TABS,
+  titleFromSession,
+  type SessionHistoryCategory,
+} from "@/lib/chat-session-utils";
+import { resolveCoCreateNavHref } from "@/lib/workflow-nav";
+
 const CHAT_INIT_KEY = "tphermes-chat-init";
-const PLACEHOLDER_SESSION_TITLES = new Set(["新对话", "对话创作"]);
 
 function useAutoScroll(depend: string) {
   const ref = useRef<HTMLDivElement>(null);
@@ -63,53 +74,9 @@ function useAutoScroll(depend: string) {
 
 function projectChatSessionDefaults(projectId: string): Partial<ChatSession> {
   return {
-    selectedProjectId: projectId,
-    includeProjectContext: true,
-    includeFileContext: true,
+    ...projectCoCreateSessionDefaults(projectId),
     selectedFileId: ALL_PROJECT_FILES_SELECT_VALUE,
-    chatMode: "co_create",
   };
-}
-
-function isPlaceholderSessionTitle(title: string): boolean {
-  return PLACEHOLDER_SESSION_TITLES.has(title.trim());
-}
-
-function firstUserMessageContent(session: ChatSession): string | null {
-  const msg = session.messages.find((m) => m.role === "user");
-  if (!msg) return null;
-  const text = msg.content.trim();
-  return text || null;
-}
-
-function condenseTopicTitle(text: string, maxLen = 16): string {
-  let s = text.trim().replace(/\s+/g, " ");
-  const firstLine = (s.split(/\n/)[0] ?? s).trim();
-  s = firstLine;
-  const prefixPatterns = [
-    /^请?(帮我|帮忙|协助)?/u,
-    /^我想(了解|咨询|问|知道|写|做)?/u,
-    /^能否/u,
-    /^可以(吗|么)?/u,
-    /^关于/u,
-    /^请问/u,
-  ];
-  for (const re of prefixPatterns) {
-    const next = s.replace(re, "").trim();
-    if (next.length >= 2) s = next;
-  }
-  s = s.replace(/[？?。！!，,、；;：:.]+$/gu, "").trim();
-  if (!s) s = firstLine;
-  if (s.length <= maxLen) return s;
-  return `${s.slice(0, maxLen)}…`;
-}
-
-function titleFromSession(session: ChatSession | undefined): string {
-  if (!session) return "新对话";
-  const first = firstUserMessageContent(session);
-  if (first) return condenseTopicTitle(first);
-  if (isPlaceholderSessionTitle(session.title)) return "新对话";
-  return session.title;
 }
 
 function sessionProjectIdentifier(session: ChatSession, projects: ProjectRecord[]): string {
@@ -136,6 +103,7 @@ function DocOptimizeSessionIcon({ className = "h-4 w-4" }: { className?: string 
 }
 
 function sessionListIcon(session: ChatSession) {
+  if (isProjectCoCreateSession(session)) return <span className="text-xs">📁</span>;
   const mode = session.chatMode ?? "co_create";
   if (mode === "doc_optimize") return <DocOptimizeSessionIcon />;
   const kind = inferSessionKind(session as unknown as Record<string, unknown>);
@@ -164,6 +132,7 @@ function ChatPageInner() {
   const [preparingContext, setPreparingContext] = useState(false);
   const [error, setError] = useState("");
   const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [historyTab, setHistoryTab] = useState<SessionHistoryCategory>("chat");
   const [projects, setProjects] = useState<ProjectRecord[]>([]);
   const [collections, setCollections] = useState<string[]>([]);
   const [skills, setSkills] = useState<string[]>([]);
@@ -250,6 +219,51 @@ function ChatPageInner() {
     defaultCollection: collections[0]?.trim() ?? "",
     onResetTransientState: resetTransientState,
   });
+
+  const sessionsByCategory = useMemo(() => {
+    const grouped: Record<SessionHistoryCategory, ChatSession[]> = {
+      chat: [],
+      scenario: [],
+      co_create: [],
+    };
+    for (const session of sessions) {
+      grouped[getSessionHistoryCategory(session)].push(session);
+    }
+    return grouped;
+  }, [sessions]);
+
+  const sidebarSessions = sessionsByCategory[historyTab];
+
+  const workspaceSession = useMemo(() => {
+    if (!activeSession || isProjectCoCreateSession(activeSession)) return undefined;
+    return activeSession;
+  }, [activeSession]);
+
+  const handleHistorySessionClick = useCallback(
+    (session: ChatSession) => {
+      if (getSessionHistoryCategory(session) === "co_create") {
+        const projectId = session.selectedProjectId?.trim();
+        if (projectId) {
+          router.push(
+            `/projects/${projectId}/co-create?session_id=${encodeURIComponent(session.id)}`,
+          );
+        }
+        return;
+      }
+      selectSession(session.id);
+    },
+    [router, selectSession],
+  );
+
+  const coCreateActiveFixedRef = useRef(false);
+  useEffect(() => {
+    if (sessionsLoading || coCreateActiveFixedRef.current) return;
+    if (activeSession && isProjectCoCreateSession(activeSession)) {
+      const fallback = sessionsByCategory.chat[0] ?? sessionsByCategory.scenario[0];
+      if (fallback) selectSession(fallback.id);
+      coCreateActiveFixedRef.current = true;
+    }
+  }, [activeSession, selectSession, sessionsByCategory, sessionsLoading]);
 
   const effectiveKbCollection = useMemo(() => {
     if (selectedCollection.trim()) return selectedCollection.trim();
@@ -541,7 +555,7 @@ function ChatPageInner() {
   }, [activeSession, queueSessionPatch, sessionsRef, updateSession]);
 
   useEffect(() => {
-    if (!activeSession) return;
+    if (!activeSession || isProjectCoCreateSession(activeSession)) return;
     sessionScopeHydratingRef.current = true;
     setSelectedProjectId(activeSession.selectedProjectId ?? "");
     setSelectedCollection(activeSession.selectedCollection ?? "");
@@ -738,7 +752,7 @@ function ChatPageInner() {
   };
 
   const messagesEndRef = useAutoScroll(
-    activeSession?.messages.map((m) => `${m.role}:${m.content}`).join("") ?? "",
+    workspaceSession?.messages.map((m) => `${m.role}:${m.content}`).join("") ?? "",
   );
 
   const selectedSourceOutputId = useMemo(() => {
@@ -777,7 +791,7 @@ function ChatPageInner() {
   ]);
 
   const boundaryModel: ChatTaskBoundaryModel = {
-    activeSession,
+    activeSession: workspaceSession,
     useOrchestration,
     transport,
     tasksExecuteUrl,
@@ -815,14 +829,44 @@ function ChatPageInner() {
         <div className="flex shrink-0 items-center justify-between border-b border-slate-300 p-4 dark:border-slate-700">
           <div>
             <span className="text-sm font-semibold text-slate-700 dark:text-slate-300">历史记录</span>
-            <p className="mt-0.5 text-[10px] text-slate-500">对话与场景生产 · 云端同步</p>
+            <p className="mt-0.5 text-[10px] text-slate-500">对话 · 场景 · 输出</p>
           </div>
-          <button
-            onClick={() => createSession()}
-            className="rounded-lg bg-blue-600 px-3 py-1.5 text-xs text-white transition hover:bg-blue-500"
-          >
-            + 新对话
-          </button>
+          {historyTab === "co_create" ? (
+            <Link
+              href={resolveCoCreateNavHref(scopeUserId)}
+              className="rounded-lg bg-blue-600 px-3 py-1.5 text-xs text-white transition hover:bg-blue-500"
+            >
+              + 项目共创
+            </Link>
+          ) : (
+            <button
+              onClick={() => createSession()}
+              className="rounded-lg bg-blue-600 px-3 py-1.5 text-xs text-white transition hover:bg-blue-500"
+            >
+              + 新对话
+            </button>
+          )}
+        </div>
+
+        <div className="flex shrink-0 flex-wrap gap-1 border-b border-slate-300 px-3 py-2 dark:border-slate-700">
+          {SESSION_HISTORY_TABS.map((tab) => {
+            const count = sessionsByCategory[tab.id].length;
+            return (
+              <button
+                key={tab.id}
+                type="button"
+                onClick={() => setHistoryTab(tab.id)}
+                className={`rounded-md px-2 py-0.5 text-[10px] ${
+                  historyTab === tab.id
+                    ? "bg-blue-600 text-white"
+                    : "bg-slate-300/60 text-slate-600 dark:bg-slate-700 dark:text-slate-300"
+                }`}
+              >
+                {tab.label}
+                {count > 0 ? ` (${count})` : ""}
+              </button>
+            );
+          })}
         </div>
 
         {sessionsLoading ? <p className="px-4 py-6 text-xs text-slate-500">加载历史记录…</p> : null}
@@ -833,12 +877,21 @@ function ChatPageInner() {
         ) : null}
 
         <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
-          {sessions.map((session) => (
+          {sidebarSessions.length === 0 && !sessionsLoading ? (
+            <p className="px-4 py-6 text-xs leading-relaxed text-slate-500">
+              {historyTab === "co_create"
+                ? "暂无项目共创记录。可从项目页进入共创工作台。"
+                : historyTab === "scenario"
+                  ? "暂无场景会话。"
+                  : "暂无对话记录，点击「+ 新对话」开始。"}
+            </p>
+          ) : null}
+          {sidebarSessions.map((session) => (
             <div
               key={session.id}
-              onClick={() => selectSession(session.id)}
+              onClick={() => handleHistorySessionClick(session)}
               className={`group flex cursor-pointer items-center gap-2 border-b border-slate-300 px-4 py-3 transition dark:border-slate-700/50 ${
-                session.id === activeId
+                session.id === activeId && historyTab !== "co_create"
                   ? "bg-slate-300/70 text-slate-900 dark:bg-slate-700/70 dark:text-white"
                   : "text-slate-400 hover:bg-slate-300/40 hover:text-slate-900 dark:bg-slate-700/40 dark:hover:text-white"
               }`}
@@ -880,7 +933,7 @@ function ChatPageInner() {
               ← 首页
             </Link>
             <h1 className="flex-1 truncate text-sm font-semibold text-slate-900 dark:text-white">
-              {titleFromSession(activeSession)}
+              {titleFromSession(workspaceSession)}
             </h1>
             {(preparingContext || streaming) && (
               <span className="flex items-center gap-1.5 text-xs text-blue-400">
@@ -902,7 +955,7 @@ function ChatPageInner() {
           </details>
 
           <ChatMessageStream
-            activeSession={activeSession}
+            activeSession={workspaceSession}
             streaming={streaming}
             preparingContext={preparingContext}
             streamingPhase={streamingPhase}
@@ -920,6 +973,20 @@ function ChatPageInner() {
           />
 
           <div className="shrink-0 border-t border-slate-300 bg-slate-200/60 py-4 dark:border-slate-700 dark:bg-slate-800/60">
+            {selectedProjectId &&
+            chatMode === "co_create" &&
+            (includeFileContext || selectedFileId) ? (
+              <p className="mb-2 text-center text-xs text-indigo-700 dark:text-indigo-300">
+                涉及项目文件改写时，建议在{" "}
+                <Link
+                  href={`/projects/${selectedProjectId}/co-create`}
+                  className="font-medium underline"
+                >
+                  项目共创
+                </Link>{" "}
+                中继续，可获得文件 diff 与版本沉淀。
+              </p>
+            ) : null}
             {docOptimizeBindingHint ? (
               <p className="mb-2 text-center text-xs text-amber-700 dark:text-amber-300">
                 {docOptimizeBindingHint}

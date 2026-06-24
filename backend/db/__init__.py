@@ -49,4 +49,8 @@ from backend.models.feedback_prompt import FeedbackPrompt as _FeedbackPrompt  # 
 from backend.models.experience_entry import ExperienceEntry as _ExperienceEntry  # noqa: E402, F401
 from backend.models.chat_session import ChatSessionRecord as _ChatSessionRecord  # noqa: E402, F401
 from backend.models.chat_session import ChatMessageRecord as _ChatMessageRecord  # noqa: E402, F401
+from backend.models.project_file_domain import ProjectFile as _ProjectFile  # noqa: E402, F401
+from backend.models.project_file_domain import ProjectFileVersion as _ProjectFileVersion  # noqa: E402, F401
+from backend.models.project_file_domain import ProjectSessionFileRef as _ProjectSessionFileRef  # noqa: E402, F401
+from backend.models.project_file_domain import ProjectFileActionLog as _ProjectFileActionLog  # noqa: E402, F401
 from backend.models.user_preference import UserPreference as _UserPreference  # noqa: E402, F401

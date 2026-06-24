@@ -203,6 +203,12 @@ export default function ProjectsPage() {
                       </span>
                       <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-2">
                         <Link
+                          href={`/projects/${project.id}/co-create`}
+                          className="pointer-events-auto relative z-20 rounded-xl border border-indigo-300 bg-indigo-50 px-4 py-2.5 text-center text-sm font-medium text-indigo-900 transition hover:border-indigo-400 hover:bg-indigo-100 dark:border-indigo-600/50 dark:bg-indigo-950/40 dark:text-indigo-200"
+                        >
+                          项目共创
+                        </Link>
+                        <Link
                           href={`/workshop?project_id=${project.id}`}
                           className="pointer-events-auto relative z-20 rounded-xl border border-slate-300 dark:border-slate-700 bg-white/90 dark:bg-slate-900/60 px-4 py-2.5 text-center text-sm text-slate-700 dark:text-slate-300 transition hover:border-slate-300 dark:border-slate-600 hover:bg-slate-200 dark:hover:bg-slate-900"
                         >

@@ -6,7 +6,36 @@ export type WorkflowNavItem = {
   /** @deprecated 使用 requiredFeature */
   adminOnly?: boolean;
   requiredFeature?: import("./rbac").FeatureKey;
+  /** 覆盖默认 pathname 高亮规则 */
+  matchActive?: (pathname: string) => boolean;
+  /** 客户端解析跳转目标（如项目共创需带入最近项目） */
+  resolveHref?: (scopeUserId: string) => string;
 };
+
+export function isCoCreateNavPath(pathname: string): boolean {
+  return /\/projects\/[^/]+\/co-create(?:\/|$)/.test(pathname);
+}
+
+export function resolveCoCreateNavHref(scopeUserId: string): string {
+  if (typeof window === "undefined") return "/projects?entry=co-create";
+  try {
+    const activeId = window.localStorage.getItem(`tphermes-co-create-active:${scopeUserId}`);
+    const raw = window.localStorage.getItem(`tphermes-co-create-sessions:${scopeUserId}`);
+    if (!raw) return "/projects?entry=co-create";
+    const sessions = JSON.parse(raw) as { id?: string; selectedProjectId?: string }[];
+    if (!Array.isArray(sessions) || sessions.length === 0) {
+      return "/projects?entry=co-create";
+    }
+    const active = activeId
+      ? sessions.find((session) => session.id === activeId)
+      : sessions[sessions.length - 1];
+    const projectId = active?.selectedProjectId?.trim();
+    if (projectId) return `/projects/${projectId}/co-create`;
+  } catch {
+    // 解析失败时回退到项目列表
+  }
+  return "/projects?entry=co-create";
+}
 
 export const WORKFLOW_NAV_ITEMS: WorkflowNavItem[] = [
   {
@@ -20,6 +49,16 @@ export const WORKFLOW_NAV_ITEMS: WorkflowNavItem[] = [
     label: "项目中心",
     shortLabel: "项目中心",
     description: "管理长期边界，并进入项目级任务入口。",
+    matchActive: (pathname) =>
+      pathname.startsWith("/projects") && !isCoCreateNavPath(pathname),
+  },
+  {
+    href: "/projects?entry=co-create",
+    label: "项目共创",
+    shortLabel: "项目共创",
+    description: "基于项目文件的 Agent 协同工作台。",
+    matchActive: isCoCreateNavPath,
+    resolveHref: resolveCoCreateNavHref,
   },
   {
     href: "/chat",
@@ -71,13 +110,18 @@ export const WORKFLOW_NAV_ITEMS: WorkflowNavItem[] = [
   },
 ];
 
+function isWorkflowNavItemActive(item: WorkflowNavItem, pathname: string): boolean {
+  if (item.matchActive) return item.matchActive(pathname);
+  if (item.href === "/") return pathname === "/";
+  return pathname.startsWith(item.href.split("?")[0] ?? item.href);
+}
+
 export function getWorkflowNavItem(pathname: string) {
   if (!pathname || pathname === "/") {
     return WORKFLOW_NAV_ITEMS[0];
   }
   return (
-    WORKFLOW_NAV_ITEMS.find((item) =>
-      item.href === "/" ? pathname === "/" : pathname.startsWith(item.href),
-    ) ?? WORKFLOW_NAV_ITEMS[0]
+    WORKFLOW_NAV_ITEMS.find((item) => isWorkflowNavItemActive(item, pathname)) ??
+    WORKFLOW_NAV_ITEMS[0]
   );
 }

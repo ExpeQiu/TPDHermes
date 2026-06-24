@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
@@ -75,6 +76,23 @@ def _env_int(name: str, default: int, *, min_value: int = 1, max_value: int = 10
     return max(min_value, min(max_value, v))
 
 
+def _env_float(
+    name: str,
+    default: float,
+    *,
+    min_value: float = 0.0,
+    max_value: float = 100_000.0,
+) -> float:
+    raw = os.getenv(name, "").strip()
+    if not raw:
+        return default
+    try:
+        v = float(raw)
+    except ValueError:
+        return default
+    return max(min_value, min(max_value, v))
+
+
 def _trim_chat_messages(messages: list[dict[str, str]]) -> list[dict[str, str]]:
     """
     P0：限制历史窗口，避免每轮输入无限膨胀。
@@ -122,6 +140,80 @@ def _format_upstream_error(status_code: int, detail: bytes) -> dict[str, Any]:
             "code": f"http_{status_code}",
         }
     }
+
+
+def _extract_sse_blocks(buffer: str) -> tuple[list[str], str]:
+    normalized = buffer.replace("\r\n", "\n")
+    parts = normalized.split("\n\n")
+    return [part for part in parts[:-1] if part.strip()], parts[-1] if parts else ""
+
+
+def _parse_sse_block(block: str) -> tuple[str, str] | None:
+    event = "message"
+    data_lines: list[str] = []
+    for raw_line in block.split("\n"):
+        line = raw_line.rstrip()
+        if not line:
+            continue
+        if line.startswith("event:"):
+            event = line[6:].strip() or "message"
+            continue
+        if line.startswith("data:"):
+            data_lines.append(line[5:].lstrip())
+    if not data_lines:
+        return None
+    return event, "\n".join(data_lines).strip()
+
+
+def _parse_file_tool_event(data: str) -> dict[str, Any] | None:
+    if not data:
+        return None
+    try:
+        parsed = json.loads(data)
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(parsed, dict):
+        return None
+    tool_name = parsed.get("tool") or parsed.get("tool_name") or parsed.get("toolName")
+    if tool_name not in ("write_file", "patch"):
+        return None
+    tool_call_id = parsed.get("toolCallId") or parsed.get("tool_call_id")
+    status = parsed.get("status")
+    if not isinstance(tool_call_id, str) or not tool_call_id:
+        return None
+    if status not in ("running", "completed"):
+        return None
+    path = parsed.get("path")
+    label = parsed.get("label")
+    normalized: dict[str, Any] = {
+        "tool_call_id": tool_call_id,
+        "tool_name": tool_name,
+        "status": status,
+    }
+    if isinstance(label, str) and label.strip():
+        normalized["label"] = label.strip()
+    if isinstance(parsed.get("emoji"), str) and parsed.get("emoji"):
+        normalized["emoji"] = parsed["emoji"]
+    if isinstance(path, str) and path.strip():
+        normalized["path"] = path.strip()
+    elif isinstance(label, str) and label.strip():
+        normalized["path"] = label.strip()
+    return normalized
+
+
+def _merge_tool_event_rows(
+    current: list[dict[str, Any]],
+    incoming: dict[str, Any],
+) -> list[dict[str, Any]]:
+    tool_call_id = incoming.get("tool_call_id")
+    if not isinstance(tool_call_id, str) or not tool_call_id:
+        return current
+    for index, item in enumerate(current):
+        if item.get("tool_call_id") == tool_call_id:
+            next_rows = current[:]
+            next_rows[index] = {**item, **incoming}
+            return next_rows
+    return [*current, incoming]
 
 
 async def _validate_task_request(
@@ -399,6 +491,43 @@ async def execute_task(req: Request, task_req: TaskExecuteRequest, db: AsyncSess
                     update={"task_input": ti.model_copy(update={"extra": merged_extra})},
                 )
 
+    pid_for_refs = (eff_request.project_id or "").strip()
+    if pid_for_refs and pid_for_refs != "none" and (
+        eff_request.project_file_ids or eff_request.pinned_file_ids
+    ):
+        from backend.services.project_files_service import build_referenced_files_extra
+
+        ref_extra = await build_referenced_files_extra(
+            db,
+            pid_for_refs,
+            list(eff_request.project_file_ids or []),
+            list(eff_request.pinned_file_ids or []),
+        )
+        if ref_extra.strip():
+            ti = eff_request.task_input
+            if ti is None:
+                eff_request = eff_request.model_copy(
+                    update={"task_input": TaskInputPayload(extra=ref_extra)},
+                )
+            elif ti.extra and str(ti.extra).strip():
+                eff_request = eff_request.model_copy(
+                    update={
+                        "task_input": ti.model_copy(
+                            update={"extra": f"{ti.extra.strip()}\n\n{ref_extra}"},
+                        ),
+                    },
+                )
+            else:
+                eff_request = eff_request.model_copy(
+                    update={"task_input": ti.model_copy(update={"extra": ref_extra})},
+                )
+            logger.info(
+                "[co-create] 注入结构化文件引用 project_id=%s round=%s pinned=%s",
+                pid_for_refs,
+                len(eff_request.project_file_ids or []),
+                len(eff_request.pinned_file_ids or []),
+            )
+
     pid_strip = (eff_request.project_id or "").strip()
     if pid_strip and pid_strip != "none":
         await require_project_for_user(db, pid_strip, effective_uid, detail="项目不存在")
@@ -421,6 +550,8 @@ async def execute_task(req: Request, task_req: TaskExecuteRequest, db: AsyncSess
         snapshot = {**snapshot, "source_output_id": eff_request.source_output_id.strip()}
     if eff_request.chat_mode:
         snapshot = {**snapshot, "chat_mode": eff_request.chat_mode}
+    if eff_request.session_id:
+        snapshot = {**snapshot, "session_id": eff_request.session_id.strip()}
 
     user_text = payload.user_input.message
 
@@ -726,16 +857,27 @@ async def execute_task(req: Request, task_req: TaskExecuteRequest, db: AsyncSess
 
     messages = _trim_chat_messages(merge_chat_messages(eff_request.messages, user_text))
     chat_lightweight = payload.entrypoint == "chat" and is_lightweight_chat_message(user_text)
+    kb_prefetch_timeout_sec = _env_float("KB_PREFETCH_TIMEOUT_SEC", 12.0, min_value=1.0, max_value=120.0)
+    upstream_heartbeat_sec = _env_float(
+        "CHAT_STREAM_HEARTBEAT_SEC",
+        12.0,
+        min_value=3.0,
+        max_value=60.0,
+    )
 
-    async def _prefetch_kb_for_chat() -> tuple[str, int]:
+    async def _prefetch_kb_for_chat(progress_cb=None) -> tuple[str, int]:
         if chat_lightweight or not user_text.strip() or payload.entrypoint != "chat":
             return "", 0
         kb_cols = [c for c in payload.knowledge.collections if c]
-        pf = await prefetch_kb_sources_for_run(
-            run_id=run_id,
-            project_id=eff_request.project_id,
-            collections=kb_cols,
-            query_text=user_text,
+        pf = await asyncio.wait_for(
+            prefetch_kb_sources_for_run(
+                run_id=run_id,
+                project_id=eff_request.project_id,
+                collections=kb_cols,
+                query_text=user_text,
+                progress_cb=progress_cb,
+            ),
+            timeout=kb_prefetch_timeout_sec,
         )
         logger.info(
             "kb prefetch complete run_id=%s sources=%s lightweight=%s",
@@ -870,10 +1012,64 @@ async def execute_task(req: Request, task_req: TaskExecuteRequest, db: AsyncSess
         kb_prefetch_block = ""
         kb_prefetch_count = 0
         if payload.entrypoint == "chat" and not chat_lightweight and user_text.strip():
-            yield sse_meta_event(
-                {"tphermes_task": {"phase": "kb_prefetch", "run_id": run_id}}
+            async def emit_prefetch_progress(phase: str, extra: dict[str, Any] | None = None) -> None:
+                meta = {"phase": phase, "run_id": run_id}
+                if extra:
+                    meta.update(extra)
+                await progress_queue.put(meta)
+
+            progress_queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
+            prefetch_task = asyncio.create_task(
+                _prefetch_kb_for_chat(progress_cb=emit_prefetch_progress)
             )
-            kb_prefetch_block, kb_prefetch_count = await _prefetch_kb_for_chat()
+            yield sse_meta_event({"tphermes_task": {"phase": "kb_prefetch", "run_id": run_id}})
+            try:
+                while True:
+                    if prefetch_task.done() and progress_queue.empty():
+                        break
+                    try:
+                        meta = await asyncio.wait_for(
+                            progress_queue.get(),
+                            timeout=min(2.0, kb_prefetch_timeout_sec),
+                        )
+                    except TimeoutError:
+                        if prefetch_task.done():
+                            break
+                        yield sse_meta_event(
+                            {
+                                "tphermes_task": {
+                                    "phase": "kb_prefetch_heartbeat",
+                                    "run_id": run_id,
+                                }
+                            }
+                        )
+                        continue
+                    yield sse_meta_event({"tphermes_task": meta})
+                kb_prefetch_block, kb_prefetch_count = await prefetch_task
+            except TimeoutError:
+                logger.warning(
+                    "kb prefetch degraded by timeout run_id=%s timeout=%s",
+                    run_id,
+                    kb_prefetch_timeout_sec,
+                )
+                prefetch_task.cancel()
+                yield sse_meta_event(
+                    {
+                        "tphermes_task": {
+                            "phase": "kb_prefetch_timeout",
+                            "run_id": run_id,
+                            "timeout_sec": kb_prefetch_timeout_sec,
+                        }
+                    }
+                )
+                kb_prefetch_block, kb_prefetch_count = "", 0
+            finally:
+                while not progress_queue.empty():
+                    try:
+                        meta = progress_queue.get_nowait()
+                    except asyncio.QueueEmpty:
+                        break
+                    yield sse_meta_event({"tphermes_task": meta})
 
         upstream_body = build_chat_completion_body(
             payload,
@@ -905,6 +1101,7 @@ async def execute_task(req: Request, task_req: TaskExecuteRequest, db: AsyncSess
         t0 = time.perf_counter()
         full_text = ""
         sse_buffer = ""
+        tool_events: list[dict[str, Any]] = []
         try:
             async with _chat_client(timeout) as client:
                 async with client.stream("POST", target_url, headers=headers, json=upstream_body) as resp:
@@ -918,32 +1115,81 @@ async def execute_task(req: Request, task_req: TaskExecuteRequest, db: AsyncSess
                         ) + "\n\n"
                         return
 
-                    async for chunk in resp.aiter_text():
+                    chunk_iter = resp.aiter_text()
+                    first_chunk_seen = False
+                    last_chunk_at = time.perf_counter()
+                    while True:
+                        try:
+                            chunk = await asyncio.wait_for(
+                                anext(chunk_iter),
+                                timeout=upstream_heartbeat_sec,
+                            )
+                        except StopAsyncIteration:
+                            break
+                        except TimeoutError:
+                            waiting_ms = int((time.perf_counter() - last_chunk_at) * 1000)
+                            yield sse_meta_event(
+                                {
+                                    "tphermes_task": {
+                                        "phase": "agent_waiting_first_token"
+                                        if not first_chunk_seen
+                                        else "agent_streaming",
+                                        "run_id": run_id,
+                                        "waiting_ms": waiting_ms,
+                                    }
+                                }
+                            )
+                            continue
                         if not chunk:
                             continue
+                        first_chunk_seen = True
+                        last_chunk_at = time.perf_counter()
                         yield chunk
                         sse_buffer += chunk
-                        lines = sse_buffer.split("\n")
-                        sse_buffer = lines.pop() or ""
-                        for line in lines:
-                            if not line.startswith("data: "):
+                        blocks, sse_buffer = _extract_sse_blocks(sse_buffer)
+                        for block in blocks:
+                            parsed_block = _parse_sse_block(block)
+                            if not parsed_block:
                                 continue
-                            data = line[6:].strip()
+                            event_name, data = parsed_block
+                            if event_name == "hermes.tool.progress":
+                                tool_event = _parse_file_tool_event(data)
+                                if tool_event:
+                                    tool_events = _merge_tool_event_rows(tool_events, tool_event)
+                                    yield sse_meta_event(
+                                        {
+                                            "tphermes_task": {
+                                                "run_id": run_id,
+                                                "tool_events": [tool_event],
+                                            }
+                                        }
+                                    )
+                                continue
                             delta, parsed = parse_sse_data_line(data)
                             if parsed and parsed.get("error"):
                                 continue
                             if delta:
                                 full_text += delta
                     if sse_buffer.strip():
-                        for line in sse_buffer.split("\n"):
-                            if not line.startswith("data: "):
-                                continue
-                            data = line[6:].strip()
-                            delta, parsed = parse_sse_data_line(data)
-                            if parsed and parsed.get("error"):
-                                continue
-                            if delta:
-                                full_text += delta
+                        parsed_block = _parse_sse_block(sse_buffer)
+                        if parsed_block:
+                            event_name, data = parsed_block
+                            if event_name == "hermes.tool.progress":
+                                tool_event = _parse_file_tool_event(data)
+                                if tool_event:
+                                    tool_events = _merge_tool_event_rows(tool_events, tool_event)
+                                    yield sse_meta_event(
+                                        {
+                                            "tphermes_task": {
+                                                "run_id": run_id,
+                                                "tool_events": [tool_event],
+                                            }
+                                        }
+                                    )
+                            else:
+                                delta, parsed = parse_sse_data_line(data)
+                                if not (parsed and parsed.get("error")) and delta:
+                                    full_text += delta
         except httpx.HTTPError as exc:
             async with async_session_maker() as s:
                 await mark_run_failed(s, run_id, str(exc))
@@ -1058,6 +1304,14 @@ async def execute_task(req: Request, task_req: TaskExecuteRequest, db: AsyncSess
             },
             "tphermes_sources": sources_payload,
         }
+        from backend.services.file_action_service import parse_file_actions_from_content
+
+        parsed_actions = parse_file_actions_from_content(finalize_text)
+        if parsed_actions:
+            meta["tphermes_task"]["file_actions"] = parsed_actions
+            logger.info("[co-create] stream file_actions count=%s run_id=%s", len(parsed_actions), run_id)
+        if tool_events:
+            meta["tphermes_task"]["tool_events"] = tool_events
         if is_workshop:
             meta["tphermes_task"]["execution_mode"] = exec_mode
             meta["tphermes_task"]["tool_capture_hit"] = capture_hit

@@ -558,7 +558,7 @@ def test_chat_doc_optimize_injects_full_source_material(monkeypatch):
         async def __aexit__(self, *args):
             return None
 
-        async def post(self, _url, json=None, headers=None, **_kwargs):
+        async def post(self, _url, _json=None, _headers=None, **_kwargs):
             return FakeResp()
 
     monkeypatch.setattr("backend.routes.tasks._chat_client", lambda timeout: FakeClient())
@@ -624,6 +624,106 @@ def test_chat_doc_optimize_injects_full_source_material(monkeypatch):
     sm = (req.get("task_input") or {}).get("source_material") or ""
     assert full_body in sm or sm == full_body
     assert "kb_query" not in sm.lower()
+
+
+def test_chat_stream_normalizes_file_tool_events(monkeypatch):
+    class FakeStreamResp:
+        status_code = 200
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return None
+
+        async def aread(self):
+            return b""
+
+        async def aiter_text(self):
+            chunks = [
+                'event: hermes.tool.progress\ndata: {"tool":"write_file",',
+                '"toolCallId":"call-1","status":"running","label":"docs/prd.md","emoji":"✍️"}\n\n',
+                'data: {"choices":[{"index":0,"delta":{"content":"# 标题\\n"}}]}\n\n',
+                'event: hermes.tool.progress\ndata: {"tool":"write_file","toolCallId":"call-1","status":"completed"}\n\n',
+                'data: {"choices":[{"index":0,"delta":{"content":"正文"}}]}\n\n',
+                "data: [DONE]\n\n",
+            ]
+            for chunk in chunks:
+                yield chunk
+
+    class FakeClient:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return None
+
+        def stream(self, _method, _url, _headers=None, _json=None):
+            return FakeStreamResp()
+
+    monkeypatch.setattr("backend.routes.tasks._chat_client", lambda timeout: FakeClient())
+    monkeypatch.setattr("backend.routes.tasks._chat_target_required", lambda: ("http://fake-upstream", ""))
+
+    with TestClient(app) as client:
+        pr = client.post("/api/v1/projects/", json={"name": "chat工具事件归一化"}).json()
+        pid = pr["id"]
+        resp = client.post(
+            "/api/v1/tasks/execute",
+            json={
+                "entrypoint": "chat",
+                "project_id": pid,
+                "chat_mode": "co_create",
+                "user_message": "请生成一份 PRD",
+                "stream": True,
+            },
+        )
+
+    assert resp.status_code == 200, resp.text
+    assert "event: hermes.tool.progress" in resp.text
+
+    tool_event_batches: list[list[dict[str, object]]] = []
+    for line in resp.text.splitlines():
+        if not line.startswith("data: "):
+            continue
+        payload = line[len("data: "):].strip()
+        if not payload or payload == "[DONE]":
+            continue
+        try:
+            parsed = json.loads(payload)
+        except json.JSONDecodeError:
+            continue
+        task = parsed.get("tphermes_task") if isinstance(parsed, dict) else None
+        if isinstance(task, dict) and isinstance(task.get("tool_events"), list):
+            tool_event_batches.append(task["tool_events"])
+
+    assert len(tool_event_batches) >= 3, tool_event_batches
+    assert tool_event_batches[0] == [
+        {
+            "tool_call_id": "call-1",
+            "tool_name": "write_file",
+            "status": "running",
+            "label": "docs/prd.md",
+            "emoji": "✍️",
+            "path": "docs/prd.md",
+        }
+    ]
+    assert tool_event_batches[1] == [
+        {
+            "tool_call_id": "call-1",
+            "tool_name": "write_file",
+            "status": "completed",
+        }
+    ]
+    assert tool_event_batches[-1] == [
+        {
+            "tool_call_id": "call-1",
+            "tool_name": "write_file",
+            "status": "completed",
+            "label": "docs/prd.md",
+            "emoji": "✍️",
+            "path": "docs/prd.md",
+        }
+    ]
 
 
 def test_chat_source_output_id_not_found():

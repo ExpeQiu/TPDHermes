@@ -1,7 +1,7 @@
 /** 服务端聊天/场景会话历史 API */
 import { apiGet, apiPost, apiPut, apiDelete, apiPatch } from "./api";
 
-export type ChatSessionKind = "chat" | "scenario";
+export type ChatSessionKind = "chat" | "scenario" | "project_co_create";
 
 export interface ServerChatSessionSummary {
   id: string;
@@ -90,6 +90,16 @@ export async function bulkUpsertChatSessions(
 }
 
 export function inferSessionKind(session: Record<string, unknown>): ChatSessionKind {
+  const explicit = session.sessionKind;
+  if (explicit === "project_co_create") return "project_co_create";
+  if (
+    session.chatMode === "co_create" &&
+    session.includeFileContext &&
+    typeof session.selectedProjectId === "string" &&
+    session.selectedProjectId.trim()
+  ) {
+    return "project_co_create";
+  }
   if (session.scenarioPresetInstructions || session.quickCreateOverrides || session.taskEntrySummary) {
     return "scenario";
   }
@@ -97,5 +107,7 @@ export function inferSessionKind(session: Record<string, unknown>): ChatSessionK
 }
 
 export function sessionKindLabel(kind: ChatSessionKind | undefined): string {
-  return kind === "scenario" ? "场景" : "对话";
+  if (kind === "scenario") return "场景";
+  if (kind === "project_co_create") return "共创";
+  return "对话";
 }

@@ -5,6 +5,11 @@ import React from "react";
 import { ChatMarkdownWithCitations } from "@/components/chat-markdown-with-citations";
 import { ChatMessageQuickActions } from "@/components/chat-message-quick-actions";
 import type { ContextBlock } from "@/lib/chat-context";
+import { StreamingWaitHint } from "@/components/streaming-wait-hint";
+import {
+  buildStreamingWaitHint,
+  isFirstAssistantTurn,
+} from "@/lib/streaming-wait-hint";
 import type { ChatSession, Message } from "@/app/chat/chat-types";
 
 type ChatMessageStreamProps = {
@@ -33,47 +38,9 @@ function visibleContextBlocks(message: Message): ContextBlock[] {
   return message.contextBlocks?.filter((block) => block.tool !== "orchestration_preview") ?? [];
 }
 
-function isFirstAssistantTurn(session: ChatSession, message: Message): boolean {
+function isFirstAssistantTurnForSession(session: ChatSession, message: Message): boolean {
   if (message.role !== "assistant") return false;
-  const userCount = session.messages.filter((m) => m.role === "user").length;
-  const assistantCount = session.messages.filter((m) => m.role === "assistant").length;
-  return userCount === 1 && assistantCount === 1;
-}
-
-/** 首次对话加载提示：不暴露具体 collection 规范名，统一为产品侧「技术推广知识库」 */
-const KB_LOADING_DISPLAY_NAME = "技术推广知识库";
-
-function buildStreamingWaitHint(options: {
-  isFirstTurn: boolean;
-  includeProject: boolean;
-  phase?: string;
-}): string {
-  if (options.phase === "kb_prefetch") {
-    if (options.includeProject) {
-      return `正在检索${KB_LOADING_DISPLAY_NAME}与项目上下文`;
-    }
-    return `正在检索${KB_LOADING_DISPLAY_NAME}`;
-  }
-  if (options.phase === "agent_generating") {
-    return options.isFirstTurn ? "正在根据知识库生成回复" : "正在生成回复";
-  }
-  if (!options.isFirstTurn) {
-    return "正在生成回复";
-  }
-
-  if (options.includeProject) {
-    return `首次对话时间比较长，我正在拼命加载${KB_LOADING_DISPLAY_NAME}与项目上下文`;
-  }
-  return `首次对话时间比较长，我正在拼命加载${KB_LOADING_DISPLAY_NAME}`;
-}
-
-function AssistantStreamWaitHint({ text }: { text: string }) {
-  return (
-    <p className="text-sm leading-relaxed text-slate-600 dark:text-slate-300" role="status" aria-live="polite">
-      {text}
-      <span className="inline-block animate-pulse text-blue-500 dark:text-blue-400"> … …</span>
-    </p>
-  );
+  return isFirstAssistantTurn(session.messages);
 }
 
 export function ChatMessageStream({
@@ -179,9 +146,9 @@ export function ChatMessageStream({
                     ) : null}
                     {!msg.content && !isStreamingAssistant ? "…" : null}
                     {isStreamingAssistant && !msg.content.trim() ? (
-                      <AssistantStreamWaitHint
+                      <StreamingWaitHint
                         text={buildStreamingWaitHint({
-                          isFirstTurn: isFirstAssistantTurn(activeSession, msg),
+                          isFirstTurn: isFirstAssistantTurnForSession(activeSession, msg),
                           includeProject: includeProjectContext,
                           phase: streamingPhase,
                         })}

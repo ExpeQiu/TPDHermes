@@ -20,6 +20,7 @@ import { ensureDerivedUserId, getEffectiveUserIdSync } from "@/lib/user-id";
 import { fetchRunKbSources, parseTpHermesStreamMeta } from "@/lib/chat-citations";
 
 import type {
+  AssistantFileToolEvent,
   ChatSession,
   Message,
   OrchestrationPriorTurn,
@@ -28,6 +29,13 @@ import type {
 import { sessionToPatchPayload } from "@/app/chat/hooks/use-chat-session-store";
 
 type FirstTokenMetrics = { count: number; totalMs: number };
+
+type SendMessageOptions = {
+  userPrompt?: string;
+  regionExcerpts?: import("@/app/chat/chat-types").MessageRegionExcerpt[];
+  useOrchestrationOverride?: boolean;
+  skipToolsContextBuild?: boolean;
+};
 
 type UseChatExecutionOptions = {
   input: string;
@@ -77,6 +85,14 @@ type UseChatExecutionOptions = {
   flushSessionToServer: (sessionId: string, reason: string) => Promise<void>;
   isPlaceholderSessionTitle: (title: string) => boolean;
   condenseTopicTitle: (text: string, maxLen?: number) => string;
+  coCreateSessionId?: string;
+  projectFileIds?: string[];
+  pinnedFileIdsForExecute?: string[];
+  onFileActionsFromStream?: (
+    sessionId: string,
+    assistantId: string,
+    actions: Array<Record<string, unknown>>,
+  ) => void;
 };
 
 function uuid() {
@@ -125,27 +141,67 @@ function parseSSEDataPayload(data: string): {
   }
 }
 
-function accumulateSseTextBlock(block: string): {
-  text: string;
-  finishReason: string | null;
-  errorText: string | null;
-} {
-  let text = "";
-  let finishReason: string | null = null;
-  let errorText: string | null = null;
-  for (const line of block.split("\n")) {
-    if (!line.startsWith("data: ")) continue;
-    const data = line.slice(6).trim();
-    if (data === "[DONE]") {
-      finishReason = finishReason ?? "stop";
+function extractSseBlocks(buffer: string): { blocks: string[]; rest: string } {
+  const normalized = buffer.replace(/\r\n/g, "\n");
+  const parts = normalized.split("\n\n");
+  return {
+    blocks: parts.slice(0, -1).filter((part) => part.trim().length > 0),
+    rest: parts.at(-1) ?? "",
+  };
+}
+
+function parseSseBlock(block: string): { event: string; data: string } | null {
+  let event = "message";
+  const dataLines: string[] = [];
+  for (const rawLine of block.split("\n")) {
+    const line = rawLine.trimEnd();
+    if (!line) continue;
+    if (line.startsWith("event:")) {
+      event = line.slice(6).trim() || "message";
       continue;
     }
-    const part = parseSSEDataPayload(data);
-    if (part.errorText) errorText = part.errorText;
-    text += part.content;
-    if (part.finishReason) finishReason = part.finishReason;
+    if (line.startsWith("data:")) {
+      dataLines.push(line.slice(5).trimStart());
+    }
   }
-  return { text, finishReason, errorText };
+  if (dataLines.length === 0) return null;
+  return { event, data: dataLines.join("\n").trim() };
+}
+
+function parseHermesFileToolEvent(data: string): AssistantFileToolEvent | null {
+  if (!data) return null;
+  try {
+    const parsed = JSON.parse(data) as Record<string, unknown>;
+    const toolName = parsed.tool;
+    const toolCallId = parsed.toolCallId;
+    const status = parsed.status;
+    if (toolName !== "write_file" && toolName !== "patch") return null;
+    if (typeof toolCallId !== "string" || !toolCallId) return null;
+    if (status !== "running" && status !== "completed") return null;
+    const label = typeof parsed.label === "string" ? parsed.label.trim() : "";
+    return {
+      toolCallId,
+      toolName,
+      status,
+      label: label || undefined,
+      emoji: typeof parsed.emoji === "string" ? parsed.emoji : undefined,
+      path: label || undefined,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function mergeAssistantToolEvents(
+  current: AssistantFileToolEvent[] | undefined,
+  incoming: AssistantFileToolEvent,
+): AssistantFileToolEvent[] {
+  const existing = current ?? [];
+  const index = existing.findIndex((event) => event.toolCallId === incoming.toolCallId);
+  if (index === -1) return [...existing, incoming];
+  const next = existing.slice();
+  next[index] = { ...next[index], ...incoming };
+  return next;
 }
 
 function applyStreamMetaToAssistantMessage(
@@ -159,6 +215,12 @@ function applyStreamMetaToAssistantMessage(
   if (meta.citations?.length) next.citations = meta.citations;
   if (meta.unresolvedCitationRefs?.length) {
     next.unresolvedCitationRefs = meta.unresolvedCitationRefs;
+  }
+  if (meta.toolEvents?.length) {
+    next.toolEvents = meta.toolEvents.reduce(
+      (acc, event) => mergeAssistantToolEvents(acc, event),
+      next.toolEvents,
+    );
   }
   return next;
 }
@@ -223,6 +285,10 @@ export function useChatExecution(options: UseChatExecutionOptions) {
     flushSessionToServer,
     isPlaceholderSessionTitle,
     condenseTopicTitle,
+    coCreateSessionId,
+    projectFileIds,
+    pinnedFileIdsForExecute,
+    onFileActionsFromStream,
   } = options;
 
   const runAssistantStream = useCallback(
@@ -231,9 +297,12 @@ export function useChatExecution(options: UseChatExecutionOptions) {
       text,
       orchestrationPriorMessages,
       priorSession,
+      useOrchestrationOverride,
+      fastPathEnabled,
     }: RunAssistantStreamParams) => {
+      const effectiveUseOrchestration = useOrchestrationOverride ?? useOrchestration;
       setStreaming(true);
-      setStreamingPhase("");
+      setStreamingPhase(fastPathEnabled ? "fast_path_generating" : "");
       if (abortRef.current) abortRef.current.abort();
       const controller = new AbortController();
       abortRef.current = controller;
@@ -271,6 +340,24 @@ export function useChatExecution(options: UseChatExecutionOptions) {
         });
       };
 
+      const applyToolEvent = (toolEvent: AssistantFileToolEvent) => {
+        updateSession(sessionId, (session) => ({
+          ...session,
+          messages: session.messages.map((message) =>
+            message.id === assistantId
+              ? {
+                  ...message,
+                  toolEvents: mergeAssistantToolEvents(message.toolEvents, toolEvent),
+                }
+              : message,
+          ),
+        }));
+        const updatedAssistant = sessionsRef.current
+          .find((session) => session.id === sessionId)
+          ?.messages.find((message) => message.id === assistantId);
+        if (updatedAssistant) queueMessageSync(sessionId, [updatedAssistant], [], 0);
+      };
+
       try {
         let resolvedUserId = scopeUserId || getEffectiveUserIdSync();
         if (!resolvedUserId) {
@@ -287,7 +374,7 @@ export function useChatExecution(options: UseChatExecutionOptions) {
         if (resolvedUserId) headers["X-User-ID"] = resolvedUserId;
         if (chatApiKey) headers.Authorization = `Bearer ${chatApiKey}`;
 
-        if (useOrchestration) {
+        if (effectiveUseOrchestration) {
           const qc = priorSession?.quickCreateOverrides;
           const overrides: TaskExecuteBody["overrides"] = {};
           if (showAdvancedOrchestration && includeKnowledgeContext) {
@@ -375,6 +462,9 @@ export function useChatExecution(options: UseChatExecutionOptions) {
           }
           if (scenarioPresetInstructions) body.scenario_preset_instructions = scenarioPresetInstructions;
           if (scenarioOpeningHint) body.scenario_opening_hint = scenarioOpeningHint;
+          if (coCreateSessionId) body.session_id = coCreateSessionId;
+          if (projectFileIds?.length) body.project_file_ids = projectFileIds;
+          if (pinnedFileIdsForExecute?.length) body.pinned_file_ids = pinnedFileIdsForExecute;
 
           const res = await fetch(tasksExecuteUrl, {
             method: "POST",
@@ -395,15 +485,27 @@ export function useChatExecution(options: UseChatExecutionOptions) {
             const { done, value } = await reader.read();
             if (done) break;
             buffer += decoder.decode(value, { stream: true });
-            const lines = buffer.split("\n");
-            buffer = lines.pop() ?? "";
+            const extracted = extractSseBlocks(buffer);
+            buffer = extracted.rest;
 
-            for (const line of lines) {
-              if (!line.startsWith("data: ")) continue;
-              const data = line.slice(6).trim();
+            for (const block of extracted.blocks) {
+              const parsedBlock = parseSseBlock(block);
+              if (!parsedBlock) continue;
+              if (parsedBlock.event === "hermes.tool.progress") {
+                const toolEvent = parseHermesFileToolEvent(parsedBlock.data);
+                if (toolEvent) applyToolEvent(toolEvent);
+                continue;
+              }
+              const { data } = parsedBlock;
               const meta = parseTpHermesStreamMeta(data);
               if (meta?.phase) setStreamingPhase(meta.phase);
-              if (meta?.runId || meta?.phase || meta?.citations?.length || meta?.unresolvedCitationRefs?.length) {
+              if (
+                meta?.runId ||
+                meta?.phase ||
+                meta?.citations?.length ||
+                meta?.unresolvedCitationRefs?.length ||
+                meta?.toolEvents?.length
+              ) {
                 updateSession(sessionId, (session) => ({
                   ...session,
                   linkedOutputIds:
@@ -423,6 +525,9 @@ export function useChatExecution(options: UseChatExecutionOptions) {
                 const updatedAssistant = updatedSession?.messages.find((message) => message.id === assistantId);
                 if (updatedSession) queueSessionPatch(sessionId, sessionToPatchPayload(updatedSession), 0);
                 if (updatedAssistant) queueMessageSync(sessionId, [updatedAssistant], [], 0);
+              }
+              if (meta?.fileActions?.length) {
+                onFileActionsFromStream?.(sessionId, assistantId, meta.fileActions);
               }
               const part = parseSSEDataPayload(data);
               if (part.errorText) throw new Error(part.errorText);
@@ -444,12 +549,20 @@ export function useChatExecution(options: UseChatExecutionOptions) {
           }
 
           if (buffer.trim()) {
-            for (const line of buffer.split("\n")) {
-              if (!line.startsWith("data: ")) continue;
-              const data = line.slice(6).trim();
-              const meta = parseTpHermesStreamMeta(data);
+            const parsedBlock = parseSseBlock(buffer);
+            if (parsedBlock?.event === "hermes.tool.progress") {
+              const toolEvent = parseHermesFileToolEvent(parsedBlock.data);
+              if (toolEvent) applyToolEvent(toolEvent);
+            } else if (parsedBlock) {
+              const meta = parseTpHermesStreamMeta(parsedBlock.data);
               if (meta?.phase) setStreamingPhase(meta.phase);
-              if (meta?.runId || meta?.phase || meta?.citations?.length || meta?.unresolvedCitationRefs?.length) {
+              if (
+                meta?.runId ||
+                meta?.phase ||
+                meta?.citations?.length ||
+                meta?.unresolvedCitationRefs?.length ||
+                meta?.toolEvents?.length
+              ) {
                 updateSession(sessionId, (session) => ({
                   ...session,
                   linkedOutputIds:
@@ -470,7 +583,10 @@ export function useChatExecution(options: UseChatExecutionOptions) {
                 if (updatedSession) queueSessionPatch(sessionId, sessionToPatchPayload(updatedSession), 0);
                 if (updatedAssistant) queueMessageSync(sessionId, [updatedAssistant], [], 0);
               }
-              const part = parseSSEDataPayload(data);
+              if (meta?.fileActions?.length) {
+                onFileActionsFromStream?.(sessionId, assistantId, meta.fileActions);
+              }
+              const part = parseSSEDataPayload(parsedBlock.data);
               if (part.errorText) throw new Error(part.errorText);
               if (part.content) {
                 markFirstToken();
@@ -557,36 +673,51 @@ export function useChatExecution(options: UseChatExecutionOptions) {
               const { done, value } = await reader.read();
               if (done) break;
               buffer += decoder.decode(value, { stream: true });
-              const lines = buffer.split("\n");
-              buffer = lines.pop() ?? "";
-              const { text: chunkText, finishReason, errorText } = accumulateSseTextBlock(
-                lines.join("\n"),
-              );
-              if (errorText) throw new Error(errorText);
-              if (finishReason) roundFinish = finishReason;
-              if (chunkText) {
-                markFirstToken();
-                fullContent += chunkText;
-                updateSession(sessionId, (session) => ({
-                  ...session,
-                  messages: session.messages.map((message) =>
-                    message.id === assistantId ? { ...message, content: fullContent } : message,
-                  ),
-                }));
-                const updatedAssistant = sessionsRef.current
-                  .find((session) => session.id === sessionId)
-                  ?.messages.find((message) => message.id === assistantId);
-                if (updatedAssistant) queueMessageSync(sessionId, [updatedAssistant]);
+              const extracted = extractSseBlocks(buffer);
+              buffer = extracted.rest;
+              for (const block of extracted.blocks) {
+                const parsedBlock = parseSseBlock(block);
+                if (!parsedBlock) continue;
+                if (parsedBlock.event === "hermes.tool.progress") {
+                  const toolEvent = parseHermesFileToolEvent(parsedBlock.data);
+                  if (toolEvent) applyToolEvent(toolEvent);
+                  continue;
+                }
+                const part = parseSSEDataPayload(parsedBlock.data);
+                if (part.errorText) throw new Error(part.errorText);
+                if (part.finishReason) roundFinish = part.finishReason;
+                if (part.content) {
+                  markFirstToken();
+                  if (fastPathEnabled) setStreamingPhase("fast_path_streaming");
+                  fullContent += part.content;
+                  updateSession(sessionId, (session) => ({
+                    ...session,
+                    messages: session.messages.map((message) =>
+                      message.id === assistantId ? { ...message, content: fullContent } : message,
+                    ),
+                  }));
+                  const updatedAssistant = sessionsRef.current
+                    .find((session) => session.id === sessionId)
+                    ?.messages.find((message) => message.id === assistantId);
+                  if (updatedAssistant) queueMessageSync(sessionId, [updatedAssistant]);
+                }
               }
             }
 
             if (buffer.trim()) {
-              const { text: chunkText, finishReason, errorText } = accumulateSseTextBlock(buffer);
-              if (errorText) throw new Error(errorText);
-              if (finishReason) roundFinish = finishReason;
-              if (chunkText) {
-                markFirstToken();
-                fullContent += chunkText;
+              const parsedBlock = parseSseBlock(buffer);
+              if (parsedBlock?.event === "hermes.tool.progress") {
+                const toolEvent = parseHermesFileToolEvent(parsedBlock.data);
+                if (toolEvent) applyToolEvent(toolEvent);
+              } else if (parsedBlock) {
+                const part = parseSSEDataPayload(parsedBlock.data);
+                if (part.errorText) throw new Error(part.errorText);
+                if (part.finishReason) roundFinish = part.finishReason;
+                if (part.content) {
+                  markFirstToken();
+                  if (fastPathEnabled) setStreamingPhase("fast_path_streaming");
+                  fullContent += part.content;
+                }
               }
             }
 
@@ -658,10 +789,16 @@ export function useChatExecution(options: UseChatExecutionOptions) {
     ],
   );
 
-  const sendMessage = useCallback(async () => {
-    const text = input.trim();
+  const sendMessage = useCallback(
+    async (
+      overrideText?: string,
+      sendOptions?: SendMessageOptions,
+    ) => {
+    const text = (overrideText ?? input).trim();
     const sessionId = activeIdRef.current;
     if (!text || !sessionId || streaming || preparingContext) return;
+    const effectiveUseOrchestration = sendOptions?.useOrchestrationOverride ?? useOrchestration;
+    const fastPathEnabled = !effectiveUseOrchestration && Boolean(sendOptions?.skipToolsContextBuild);
 
     if (chatMode === "doc_optimize") {
       const binding = getDocOptimizeBindingStatus({
@@ -711,12 +848,13 @@ export function useChatExecution(options: UseChatExecutionOptions) {
     let toolsContext = "";
 
     try {
-      if (useOrchestration) {
+      if (effectiveUseOrchestration) {
         if (orchestrationPreview) contextBlocks = orchestrationPreviewToBlocks(orchestrationPreview);
       } else if (
-        (includeProjectContext && selectedProjectId) ||
-        (includeKnowledgeContext && selectedCollection) ||
-        includeSkillsContext
+        !sendOptions?.skipToolsContextBuild &&
+        ((includeProjectContext && selectedProjectId) ||
+          (includeKnowledgeContext && selectedCollection) ||
+          includeSkillsContext)
       ) {
         const qc = priorSession?.quickCreateOverrides;
         const skillsForContext = (() => {
@@ -745,6 +883,8 @@ export function useChatExecution(options: UseChatExecutionOptions) {
       id: uuid(),
       role: "user",
       content: text,
+      userPrompt: sendOptions?.userPrompt,
+      regionExcerpts: sendOptions?.regionExcerpts,
       toolsContext,
       contextBlocks,
       contextWarnings,
@@ -755,7 +895,7 @@ export function useChatExecution(options: UseChatExecutionOptions) {
       const isFirstUser = !session.messages.some((message) => message.role === "user");
       const next: ChatSession = { ...session, messages };
       if (isFirstUser && isPlaceholderSessionTitle(session.title)) {
-        next.title = condenseTopicTitle(text);
+        next.title = condenseTopicTitle(sendOptions?.userPrompt?.trim() || text);
       }
       return next;
     });
@@ -774,6 +914,8 @@ export function useChatExecution(options: UseChatExecutionOptions) {
       text,
       orchestrationPriorMessages: priorMessages,
       priorSession: sessionAfterUser,
+      useOrchestrationOverride: effectiveUseOrchestration,
+      fastPathEnabled,
     });
   }, [
     activeIdRef,

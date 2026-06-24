@@ -862,6 +862,106 @@ async def reingest_project_attachment(
     }
 
 
+# --- 项目文件统一视图（项目共创） ---
+
+
+class ProjectFileListResponse(BaseModel):
+    items: list[dict]
+
+
+class FileActionApplyBody(BaseModel):
+    session_id: str | None = None
+    message_id: str | None = None
+    proposal_id: str
+    action: dict
+
+
+@router.get("/{project_id}/files", response_model=ProjectFileListResponse)
+async def list_unified_project_files(
+    project_id: str,
+    db: AsyncSession = Depends(get_db),
+    effective_uid: str = Depends(get_effective_user_id),
+):
+    await require_project_for_user(db, project_id, effective_uid)
+    from backend.services.project_files_service import list_project_files
+
+    items = await list_project_files(db, project_id)
+    return ProjectFileListResponse(items=items)
+
+
+@router.get("/{project_id}/files/{file_id}")
+async def get_unified_project_file(
+    project_id: str,
+    file_id: str,
+    kind: str = "output",
+    db: AsyncSession = Depends(get_db),
+    effective_uid: str = Depends(get_effective_user_id),
+):
+    await require_project_for_user(db, project_id, effective_uid)
+    from backend.services.project_files_service import get_project_file_detail
+
+    detail = await get_project_file_detail(db, project_id, file_id, kind.strip())
+    if not detail:
+        raise HTTPException(status_code=404, detail="File not found")
+    return detail
+
+
+@router.get("/{project_id}/files/{file_id}/versions")
+async def list_unified_project_file_versions(
+    project_id: str,
+    file_id: str,
+    kind: str = "output",
+    db: AsyncSession = Depends(get_db),
+    effective_uid: str = Depends(get_effective_user_id),
+):
+    await require_project_for_user(db, project_id, effective_uid)
+    from backend.services.project_files_service import list_output_versions
+
+    if kind.strip() != "output":
+        return {"items": []}
+    items = await list_output_versions(db, project_id, file_id)
+    return {"items": items}
+
+
+@router.get("/{project_id}/outputs/{output_id}/versions")
+async def list_output_versions_by_id(
+    project_id: str,
+    output_id: str,
+    db: AsyncSession = Depends(get_db),
+    effective_uid: str = Depends(get_effective_user_id),
+):
+    await require_project_for_user(db, project_id, effective_uid)
+    from backend.services.project_files_service import list_output_versions
+
+    items = await list_output_versions(db, project_id, output_id)
+    return {"items": items}
+
+
+@router.post("/{project_id}/file-actions/apply")
+async def apply_project_file_action(
+    project_id: str,
+    body: FileActionApplyBody,
+    db: AsyncSession = Depends(get_db),
+    effective_uid: str = Depends(get_effective_user_id),
+):
+    await require_project_for_user(db, project_id, effective_uid, min_perm="write")
+    from backend.services.file_action_service import apply_file_action
+
+    try:
+        result = await apply_file_action(
+            db,
+            project_id,
+            effective_uid=effective_uid,
+            action=body.action,
+            session_id=body.session_id,
+            message_id=body.message_id,
+            proposal_id=body.proposal_id,
+        )
+        return result
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
 # --- 项目 ⇄ 场景绑定 ---
 
 

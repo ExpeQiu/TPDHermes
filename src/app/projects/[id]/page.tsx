@@ -110,6 +110,10 @@ interface ProjectOutput {
   user_message?: string | null;
 }
 
+function buildOutputCoCreateLink(projectId: string, outputId: string): string {
+  return `/projects/${projectId}/co-create?output_id=${outputId}`;
+}
+
 function buildOutputChatRefineLink(
   projectId: string,
   output: Pick<ProjectOutput, "id" | "scenario_id">,
@@ -273,7 +277,7 @@ function ProjectOutputDetailPanel({
   outputFullContent: string | null;
   outputDetailLoading: boolean;
   copied: boolean;
-  outputActionLinks: { chat: string; workshop: string } | null;
+  outputActionLinks: { chat: string; workshop: string; coCreate: string } | null;
   outputGovernBusy: boolean;
   onCopy: () => void;
   onClose: () => void;
@@ -334,6 +338,12 @@ function ProjectOutputDetailPanel({
         <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
           {outputActionLinks ? (
             <>
+              <Link
+                href={outputActionLinks.coCreate}
+                className="min-w-[8rem] flex-1 rounded-lg border border-indigo-300 bg-indigo-50 px-4 py-2 text-center text-sm font-medium text-indigo-900 transition hover:bg-indigo-100 dark:border-indigo-500/50 dark:bg-indigo-500/10 dark:text-indigo-200 dark:hover:bg-indigo-500/20"
+              >
+                项目共创
+              </Link>
               <Link
                 href={outputActionLinks.chat}
                 className="min-w-[8rem] flex-1 rounded-lg border border-blue-300 bg-blue-50 px-4 py-2 text-center text-sm font-medium text-blue-900 transition hover:bg-blue-100 dark:border-blue-500/50 dark:bg-blue-500/10 dark:text-blue-200 dark:hover:bg-blue-500/20"
@@ -952,6 +962,7 @@ export default function ProjectDetailPage() {
     return {
       chat: buildOutputChatRefineLink(projectId, selectedOutput),
       workshop: buildOutputWorkshopRefineLink(projectId, selectedOutput),
+      coCreate: buildOutputCoCreateLink(projectId, selectedOutput.id),
     };
   }, [id, selectedOutput]);
 
@@ -1103,6 +1114,11 @@ export default function ProjectDetailPage() {
                     </p>
                     <h2 className="mt-2 text-xl font-semibold text-slate-900 dark:text-white">工作流入口</h2>
                     <div className="mt-5 space-y-3">
+                      <ActionLink
+                        href={`/projects/${id}/co-create`}
+                        title="进入项目共创"
+                        desc="围绕项目文件与 Agent 协作创作、修改与沉淀"
+                      />
                       <ActionLink
                         href={`/chat?project_id=${id}&new_chat=1`}
                         title="进入对话创作"

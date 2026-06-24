@@ -6,11 +6,32 @@ import type {
   QuickCreateFlowOverrides,
 } from "@/lib/chat-context";
 import type { CitationSource } from "@/lib/chat-citations";
+import type { CoCreatePipelinePreference } from "@/app/projects/[id]/co-create/co-create-types";
+
+export type MessageRegionExcerpt = {
+  fileName: string;
+  startLine: number;
+  endLine: number;
+  text: string;
+};
+
+export type AssistantFileToolEvent = {
+  toolCallId: string;
+  toolName: "write_file" | "patch";
+  status: "running" | "completed";
+  label?: string;
+  emoji?: string;
+  path?: string;
+};
 
 export interface Message {
   id: string;
   role: "user" | "assistant" | "system";
   content: string;
+  /** 用户输入部分（不含选段引用），用于 UI 分开展示 */
+  userPrompt?: string;
+  /** 选段引用块，用于 UI 分开展示 */
+  regionExcerpts?: MessageRegionExcerpt[];
   toolsContext?: string;
   contextBlocks?: ContextBlock[];
   contextWarnings?: string[];
@@ -19,6 +40,9 @@ export interface Message {
   feedbackLevel?: "full" | "partial" | "reject";
   citations?: CitationSource[];
   unresolvedCitationRefs?: number[];
+  fileActions?: import("@/app/projects/[id]/co-create/co-create-types").FileActionProposal[];
+  fileRecommendations?: import("@/app/projects/[id]/co-create/co-create-types").FileRecommendation[];
+  toolEvents?: AssistantFileToolEvent[];
 }
 
 export type OrchestrationPriorTurn = { role: "user" | "assistant"; content: string };
@@ -45,6 +69,13 @@ export interface ChatSession {
   rewriteTargetSection?: string;
   rewriteSourceExcerpt?: string;
   rewriteGoal?: string;
+  /** 显式会话类型，如 project_co_create */
+  sessionKind?: string;
+  pinnedFileIds?: string[];
+  roundFileIds?: string[];
+  archived?: boolean;
+  pendingProposalIds?: string[];
+  coCreatePipelinePreference?: CoCreatePipelinePreference;
 }
 
 export type RunAssistantStreamParams = {
@@ -52,4 +83,6 @@ export type RunAssistantStreamParams = {
   text: string;
   orchestrationPriorMessages: OrchestrationPriorTurn[];
   priorSession: ChatSession;
+  useOrchestrationOverride?: boolean;
+  fastPathEnabled?: boolean;
 };

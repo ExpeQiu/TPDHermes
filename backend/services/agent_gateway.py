@@ -122,6 +122,15 @@ def _build_orchestration_guidance(
             + ", ".join(payload.output.required_sections)
             + "。"
         )
+    if payload.entrypoint == "chat" and payload.project.id != "none":
+        lines.extend(
+            [
+                "当任务涉及在项目内新建文稿、改写已有输出物或直接落成文件时，优先调用 `write_file` 或 `patch` 真正执行文件创建/编辑，不要只停留在口头建议。",
+                "若你执行了 `write_file` 或 `patch`，最终回复末尾必须追加一个 `tphermes_file_actions` JSON 代码块，用于将实际结果同步回 TPDHermes 的 OutputAsset。",
+                "该代码块格式为：```tphermes_file_actions {\"actions\":[...]} ```；create 动作至少包含 type/fileName/path/content，patch 动作在上下文已给出 output_id 时至少包含 type/fileId/fileKind=fileName/after。",
+                "若本轮只是分析或问答，没有真实文件落地，则不要输出 `tphermes_file_actions`。",
+            ]
+        )
 
     run_id = (payload.execution.run_id or "").strip()
     if run_id:

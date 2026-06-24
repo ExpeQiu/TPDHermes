@@ -26,7 +26,13 @@ MESSAGE_META_KEYS = (
     "feedbackLevel",
     "citations",
     "unresolvedCitationRefs",
+    "fileActions",
+    "fileRecommendations",
+    "userPrompt",
+    "regionExcerpts",
 )
+
+SESSION_KIND_CO_CREATE = "project_co_create"
 
 
 def _json_dump(value: Any) -> str:
@@ -43,6 +49,15 @@ def _json_load(raw: str | None, default: Any) -> Any:
 
 
 def infer_session_kind(context: dict[str, Any]) -> str:
+    explicit = context.get("sessionKind")
+    if explicit == SESSION_KIND_CO_CREATE:
+        return SESSION_KIND_CO_CREATE
+    if (
+        context.get("chatMode") == "co_create"
+        and context.get("includeFileContext")
+        and str(context.get("selectedProjectId") or "").strip()
+    ):
+        return SESSION_KIND_CO_CREATE
     if context.get("scenarioPresetInstructions") or context.get("quickCreateOverrides"):
         return SESSION_KIND_SCENARIO
     if context.get("taskEntrySummary"):

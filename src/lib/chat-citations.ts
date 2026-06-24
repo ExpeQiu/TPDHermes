@@ -1,4 +1,5 @@
 import { isInternalSectionCollection } from "@/lib/kb-collection-catalog";
+import type { AssistantFileToolEvent } from "@/app/chat/chat-types";
 
 export interface CitationSource {
   ref: number;
@@ -94,6 +95,31 @@ export interface TpHermesStreamMeta {
   phase?: string;
   kbPrefetchCount?: number;
   lightweight?: boolean;
+  fileActions?: Array<Record<string, unknown>>;
+  toolEvents?: AssistantFileToolEvent[];
+}
+
+function mapToolEventRow(raw: Record<string, unknown>): AssistantFileToolEvent | null {
+  const toolName = raw.tool_name ?? raw.toolName ?? raw.tool;
+  if (toolName !== "write_file" && toolName !== "patch") return null;
+  const toolCallId = raw.tool_call_id ?? raw.toolCallId;
+  const status = raw.status;
+  if (typeof toolCallId !== "string" || !toolCallId) return null;
+  if (status !== "running" && status !== "completed") return null;
+  const path =
+    typeof raw.path === "string"
+      ? raw.path
+      : typeof raw.label === "string" && raw.label.trim()
+        ? raw.label.trim()
+        : undefined;
+  return {
+    toolCallId,
+    toolName,
+    status,
+    label: typeof raw.label === "string" ? raw.label : undefined,
+    emoji: typeof raw.emoji === "string" ? raw.emoji : undefined,
+    path,
+  };
 }
 
 function mapSourceRow(raw: Record<string, unknown>): CitationSource | null {
@@ -171,7 +197,9 @@ export function parseTpHermesStreamMeta(data: string): TpHermesStreamMeta | null
       phase ||
       typeof task?.run_id === "string" ||
       typeof task?.output_id === "string" ||
-      task?.validation !== undefined;
+      task?.validation !== undefined ||
+      Array.isArray(task?.file_actions) ||
+      Array.isArray(task?.tool_events);
     if (!hasTaskPayload && mapped.citations.length === 0 && mapped.unresolvedCitationRefs.length === 0) {
       return null;
     }
@@ -187,6 +215,15 @@ export function parseTpHermesStreamMeta(data: string): TpHermesStreamMeta | null
       kbPrefetchCount:
         typeof task?.kb_prefetch_count === "number" ? task.kb_prefetch_count : undefined,
       lightweight: typeof task?.lightweight === "boolean" ? task.lightweight : undefined,
+      fileActions: Array.isArray(task?.file_actions)
+        ? (task.file_actions as Array<Record<string, unknown>>)
+        : undefined,
+      toolEvents: Array.isArray(task?.tool_events)
+        ? task.tool_events
+            .filter((row): row is Record<string, unknown> => typeof row === "object" && row !== null)
+            .map(mapToolEventRow)
+            .filter((row): row is AssistantFileToolEvent => row !== null)
+        : undefined,
     };
   } catch {
     return null;

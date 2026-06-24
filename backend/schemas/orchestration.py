@@ -206,6 +206,15 @@ class TaskExecuteRequest(BaseModel):
     overrides: TaskExecuteOverrides | None = None
     stream: bool = True
     messages: list[ChatTurnMessage] | None = None
+    session_id: str | None = Field(default=None, description="项目共创关联会话 ID")
+    project_file_ids: list[str] | None = Field(
+        default=None,
+        description="项目共创本轮引用文件 ID 列表",
+    )
+    pinned_file_ids: list[str] | None = Field(
+        default=None,
+        description="项目共创固定引用文件 ID 列表",
+    )
 
 
 class AgentTaskMetadata(BaseModel):
