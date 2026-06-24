@@ -15,14 +15,18 @@ export type MessageRegionExcerpt = {
   text: string;
 };
 
-export type AssistantFileToolEvent = {
+export type AssistantToolEvent = {
   toolCallId: string;
-  toolName: "write_file" | "patch";
-  status: "running" | "completed";
+  toolName: string;
+  status: "running" | "completed" | "failed";
   label?: string;
   emoji?: string;
   path?: string;
+  summary?: string;
 };
+
+/** @deprecated 使用 AssistantToolEvent */
+export type AssistantFileToolEvent = AssistantToolEvent;
 
 export interface Message {
   id: string;
@@ -42,7 +46,8 @@ export interface Message {
   unresolvedCitationRefs?: number[];
   fileActions?: import("@/app/projects/[id]/co-create/co-create-types").FileActionProposal[];
   fileRecommendations?: import("@/app/projects/[id]/co-create/co-create-types").FileRecommendation[];
-  toolEvents?: AssistantFileToolEvent[];
+  toolEvents?: AssistantToolEvent[];
+  agentPlan?: import("@/app/projects/[id]/co-create/co-create-agent-utils").AgentPlan;
 }
 
 export type OrchestrationPriorTurn = { role: "user" | "assistant"; content: string };
@@ -76,6 +81,10 @@ export interface ChatSession {
   archived?: boolean;
   pendingProposalIds?: string[];
   coCreatePipelinePreference?: CoCreatePipelinePreference;
+  coCreateAgentMode?: import("@/app/projects/[id]/co-create/co-create-types").CoCreateAgentMode;
+  coCreateApplyMode?: import("@/app/projects/[id]/co-create/co-create-types").CoCreateApplyMode;
+  /** 共创：Agent 文件变更撤销栈（持久化到 context_json） */
+  agentUndoStack?: import("@/app/projects/[id]/co-create/co-create-agent-undo").AgentUndoEntry[];
 }
 
 export type RunAssistantStreamParams = {
@@ -85,4 +94,5 @@ export type RunAssistantStreamParams = {
   priorSession: ChatSession;
   useOrchestrationOverride?: boolean;
   fastPathEnabled?: boolean;
+  scenarioPresetInstructionsAppend?: string;
 };

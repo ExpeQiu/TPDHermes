@@ -13,6 +13,7 @@ type Props = {
   saveState: CoCreateSaveState;
   agentChangeSummary?: string | null;
   onUndoAgentChange?: () => void;
+  undoButtonLabel?: string;
   undoDisabled?: boolean;
   onToggleSessions?: () => void;
   sessionsOpen?: boolean;
@@ -38,6 +39,7 @@ export function CoCreateTopbar({
   saveState,
   agentChangeSummary,
   onUndoAgentChange,
+  undoButtonLabel = "撤销",
   undoDisabled,
   onToggleSessions,
   sessionsOpen,
@@ -94,7 +96,7 @@ export function CoCreateTopbar({
                 onClick={onUndoAgentChange}
                 className="rounded-md border border-slate-300 px-2 py-0.5 text-[11px] text-slate-600 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-600 dark:text-slate-300 dark:hover:bg-slate-700"
               >
-                撤销
+                {undoButtonLabel}
               </button>
             ) : null}
           </>
@@ -111,12 +113,6 @@ export function CoCreateTopbar({
         >
           {saveStateLabel[saveState]}
         </span>
-        <Link
-          href={`/chat?project_id=${projectId}&new_chat=1`}
-          className="hidden shrink-0 text-xs text-slate-500 transition hover:text-slate-800 dark:hover:text-slate-200 sm:inline"
-        >
-          对话创作
-        </Link>
       </div>
     </header>
   );

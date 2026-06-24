@@ -24,7 +24,12 @@ from backend.models.orchestration_run import OrchestrationRun
 from backend.models.output_asset import OutputAsset
 from backend.routes.chat import _chat_target_required
 from backend.schemas.orchestration import OrchestrationPayload, TaskExecuteRequest, TaskInputPayload
-from backend.services.agent_gateway import build_chat_completion_body, is_lightweight_chat_message, parse_sse_data_line
+from backend.services.agent_gateway import (
+    build_chat_completion_body,
+    is_lightweight_chat_message,
+    parse_sse_data_line,
+    should_skip_kb_prefetch_for_co_create_draft,
+)
 from backend.services.orchestration_service import (
     ProjectNotFoundError,
     ScenarioVersionMismatchError,
@@ -165,7 +170,20 @@ def _parse_sse_block(block: str) -> tuple[str, str] | None:
     return event, "\n".join(data_lines).strip()
 
 
-def _parse_file_tool_event(data: str) -> dict[str, Any] | None:
+KNOWN_TOOL_NAMES = frozenset({
+    "write_file",
+    "patch",
+    "kb_query",
+    "kb_get_entry",
+    "kb_list_collections",
+    "tavily_search",
+    "tavily_extract",
+    "workshop_generate",
+    "workshop_generate_from_kb",
+})
+
+
+def _parse_tool_progress_event(data: str) -> dict[str, Any] | None:
     if not data:
         return None
     try:
@@ -175,13 +193,13 @@ def _parse_file_tool_event(data: str) -> dict[str, Any] | None:
     if not isinstance(parsed, dict):
         return None
     tool_name = parsed.get("tool") or parsed.get("tool_name") or parsed.get("toolName")
-    if tool_name not in ("write_file", "patch"):
+    if not isinstance(tool_name, str) or tool_name not in KNOWN_TOOL_NAMES:
         return None
     tool_call_id = parsed.get("toolCallId") or parsed.get("tool_call_id")
     status = parsed.get("status")
     if not isinstance(tool_call_id, str) or not tool_call_id:
         return None
-    if status not in ("running", "completed"):
+    if status not in ("running", "completed", "failed"):
         return None
     path = parsed.get("path")
     label = parsed.get("label")
@@ -194,11 +212,18 @@ def _parse_file_tool_event(data: str) -> dict[str, Any] | None:
         normalized["label"] = label.strip()
     if isinstance(parsed.get("emoji"), str) and parsed.get("emoji"):
         normalized["emoji"] = parsed["emoji"]
+    if isinstance(parsed.get("summary"), str) and parsed.get("summary"):
+        normalized["summary"] = parsed["summary"]
     if isinstance(path, str) and path.strip():
         normalized["path"] = path.strip()
     elif isinstance(label, str) and label.strip():
         normalized["path"] = label.strip()
     return normalized
+
+
+def _parse_file_tool_event(data: str) -> dict[str, Any] | None:
+    """兼容旧调用名。"""
+    return _parse_tool_progress_event(data)
 
 
 def _merge_tool_event_rows(
@@ -857,6 +882,9 @@ async def execute_task(req: Request, task_req: TaskExecuteRequest, db: AsyncSess
 
     messages = _trim_chat_messages(merge_chat_messages(eff_request.messages, user_text))
     chat_lightweight = payload.entrypoint == "chat" and is_lightweight_chat_message(user_text)
+    skip_kb_prefetch = payload.entrypoint == "chat" and should_skip_kb_prefetch_for_co_create_draft(
+        user_text
+    )
     kb_prefetch_timeout_sec = _env_float("KB_PREFETCH_TIMEOUT_SEC", 12.0, min_value=1.0, max_value=120.0)
     upstream_heartbeat_sec = _env_float(
         "CHAT_STREAM_HEARTBEAT_SEC",
@@ -866,7 +894,12 @@ async def execute_task(req: Request, task_req: TaskExecuteRequest, db: AsyncSess
     )
 
     async def _prefetch_kb_for_chat(progress_cb=None) -> tuple[str, int]:
-        if chat_lightweight or not user_text.strip() or payload.entrypoint != "chat":
+        if (
+            chat_lightweight
+            or skip_kb_prefetch
+            or not user_text.strip()
+            or payload.entrypoint != "chat"
+        ):
             return "", 0
         kb_cols = [c for c in payload.knowledge.collections if c]
         pf = await asyncio.wait_for(
@@ -1011,7 +1044,9 @@ async def execute_task(req: Request, task_req: TaskExecuteRequest, db: AsyncSess
     async def event_stream() -> AsyncGenerator[str, None]:
         kb_prefetch_block = ""
         kb_prefetch_count = 0
-        if payload.entrypoint == "chat" and not chat_lightweight and user_text.strip():
+        if skip_kb_prefetch and user_text.strip():
+            yield sse_meta_event({"tphermes_task": {"phase": "co_create_draft", "run_id": run_id}})
+        if payload.entrypoint == "chat" and not chat_lightweight and not skip_kb_prefetch and user_text.strip():
             async def emit_prefetch_progress(phase: str, extra: dict[str, Any] | None = None) -> None:
                 meta = {"phase": phase, "run_id": run_id}
                 if extra:

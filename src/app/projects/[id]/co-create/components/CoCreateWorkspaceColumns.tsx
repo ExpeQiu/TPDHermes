@@ -23,51 +23,52 @@ export function CoCreateWorkspaceColumns({
   preview,
   files,
 }: Props) {
-  const { containerRef, widths, sessionWidth, adjustPair, persistWidths } =
+  const { containerRef, widths, sessionWidth, adjustPair, persistWidths, draggingRef } =
     useCoCreateColumnWidths(sidebarOpen);
 
   const bindResize = (left: keyof CoCreateColumnWidths, right: keyof CoCreateColumnWidths) => ({
+    onDragStart: () => {
+      draggingRef.current = true;
+    },
     onDrag: (delta: number) => adjustPair(left, right, delta),
-    onDragEnd: persistWidths,
+    onDragEnd: () => {
+      draggingRef.current = false;
+      persistWidths();
+    },
   });
 
   return (
     <div ref={containerRef} className="flex min-h-0 flex-1 overflow-hidden">
       {sidebarOpen ? (
-        <>
-          <div
-            className="min-h-0 shrink-0 overflow-hidden"
-            style={{ width: sessionWidth }}
-          >
-            {session}
-          </div>
-          <ColumnResizeHandle {...bindResize("session", "message")} />
-        </>
+        <div className="min-h-0 shrink-0 overflow-hidden" style={{ width: sessionWidth }}>
+          {session}
+        </div>
       ) : null}
 
       <div
-        className="flex min-h-0 shrink-0 flex-col overflow-hidden"
+        className="relative min-h-0 shrink-0"
         style={{ width: widths.message }}
       >
-        {message}
+        {sidebarOpen ? (
+          <ColumnResizeHandle {...bindResize("session", "message")} />
+        ) : null}
+        <div className="flex h-full min-h-0 flex-col overflow-hidden">{message}</div>
       </div>
 
-      <ColumnResizeHandle {...bindResize("message", "preview")} />
-
       <div
-        className="flex min-h-0 shrink-0 flex-col overflow-hidden"
+        className="relative min-h-0 shrink-0"
         style={{ width: widths.preview }}
       >
-        {preview}
+        <ColumnResizeHandle {...bindResize("message", "preview")} />
+        <div className="h-full overflow-hidden">{preview}</div>
       </div>
 
-      <ColumnResizeHandle {...bindResize("preview", "files")} />
-
       <div
-        className="flex min-h-0 shrink-0 flex-col overflow-hidden"
+        className="relative min-h-0 shrink-0"
         style={{ width: widths.files }}
       >
-        {files}
+        <ColumnResizeHandle {...bindResize("preview", "files")} />
+        <div className="h-full overflow-hidden">{files}</div>
       </div>
     </div>
   );

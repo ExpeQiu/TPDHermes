@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo } from "react";
+import { computeFocusedLineDiff } from "@/app/projects/[id]/co-create/co-create-partial-patch";
 import { computeLineDiff, hasDiffChanges, type DiffLineType } from "@/lib/text-line-diff";
 
 const LINE_STYLES: Record<DiffLineType, string> = {
@@ -21,10 +22,21 @@ type Props = {
   after: string;
   className?: string;
   showLegend?: boolean;
+  /** 局部 patch 时仅展示变更附近行 */
+  focused?: boolean;
 };
 
-export function InlineTextDiff({ before, after, className = "", showLegend = false }: Props) {
-  const lines = useMemo(() => computeLineDiff(before, after), [before, after]);
+export function InlineTextDiff({
+  before,
+  after,
+  className = "",
+  showLegend = false,
+  focused = false,
+}: Props) {
+  const lines = useMemo(
+    () => (focused ? computeFocusedLineDiff(before, after) : computeLineDiff(before, after)),
+    [before, after, focused],
+  );
   const changed = useMemo(() => hasDiffChanges(lines), [lines]);
 
   return (

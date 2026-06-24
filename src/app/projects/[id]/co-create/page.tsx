@@ -30,19 +30,35 @@ import {
   sessionToPatchPayload,
   useChatSessionStore,
 } from "@/app/chat/hooks/use-chat-session-store";
-import type {
-  ContentRegionBlock,
-  CoCreatePipeline,
-  CoCreatePipelinePreference,
-  FileActionProposal,
-  FileRecommendation,
-  SelectionToChatPayload,
-} from "@/app/projects/[id]/co-create/co-create-types";
 import {
   composeUserMessageForApi,
   findActivePatchProposal,
   regionBlocksToExcerpts,
+  type ContentRegionBlock,
+  type CoCreateAgentMode,
+  type CoCreateApplyMode,
+  type CoCreatePipeline,
+  type FileActionProposal,
+  type FileRecommendation,
+  type PatchEditMode,
+  type SelectionToChatPayload,
 } from "@/app/projects/[id]/co-create/co-create-types";
+import {
+  buildAgentModeInstructions,
+  inferFileRecommendations,
+  resolveExecutionFromAgentMode,
+} from "@/app/projects/[id]/co-create/co-create-agent-utils";
+import {
+  type AgentUndoEntry,
+  formatAgentUndoButtonLabel,
+  formatAgentUndoSummary,
+  popAgentUndoStack,
+  pushAgentUndoStack,
+} from "@/app/projects/[id]/co-create/co-create-agent-undo";
+import {
+  buildRegionAwarePatchInstructions,
+  resolvePatchAfterFromProposal,
+} from "@/app/projects/[id]/co-create/co-create-partial-patch";
 import { CoCreateWorkspaceColumns } from "@/app/projects/[id]/co-create/components/CoCreateWorkspaceColumns";
 import { FilePreviewPanel } from "@/app/projects/[id]/co-create/components/FilePreviewPanel";
 import { CoCreateComposer } from "@/app/projects/[id]/co-create/components/CoCreateComposer";
@@ -57,7 +73,49 @@ import {
   ProjectFilesPanel,
 } from "@/app/projects/[id]/co-create/components/ProjectFilesPanel";
 import { SessionSidebar } from "@/app/projects/[id]/co-create/components/SessionSidebar";
+import {
+  autoPatchFallbackProposalId,
+  buildRewriteSyncInstructions,
+  extractAutoPatchBody,
+  inferAutoPatchSummary,
+  isAutoPatchFallbackProposal,
+  isReadyForAutoPatch,
+  isRewritePrompt,
+  shouldAutoPatchFromAssistant,
+  type AutoPatchTargetFile,
+} from "@/app/projects/[id]/co-create/co-create-auto-patch";
+import {
+  autoCreateFallbackProposalId,
+  buildDocumentSyncInstructions,
+  extractAutoCreateDraftBody,
+  findLatestTurnUserPrompt,
+  inferAutoCreateDraftFileName,
+  isAutoCreateFallbackProposal,
+  isDocumentGenerationPrompt,
+  isReadyForAutoCreateDraft,
+  shouldAutoCreateDraftFromAssistant,
+} from "@/app/projects/[id]/co-create/co-create-auto-draft";
+import {
+  hasActiveStreamFileActions,
+  isCreateProposalReadyForApply,
+  isStreamFileActionProposal,
+  mergeFileActionProposals,
+  normalizeCreateFilePath,
+  normalizeStreamCreateProposal,
+  normalizeStreamPatchProposal,
+  reconcileStreamCreateProposals,
+  reconcileStreamPatchProposals,
+  resolveCreateActionContent,
+  upsertFileActionProposal,
+} from "@/app/projects/[id]/co-create/co-create-file-actions";
 import { useFileWorkspace } from "@/app/projects/[id]/co-create/hooks/use-file-workspace";
+
+export {
+  extractAutoCreateDraftBody,
+  inferAutoCreateDraftFileName,
+  normalizeAutoCreateDraftContent,
+  shouldAutoCreateDraftFromAssistant,
+} from "@/app/projects/[id]/co-create/co-create-auto-draft";
 
 function decodeFileIds(keys: string[]): string[] {
   return keys
@@ -67,73 +125,11 @@ function decodeFileIds(keys: string[]): string[] {
 
 const CO_CREATE_FAST_QUERY_MAX_CHARS = 20;
 const CO_CREATE_REWRITE_RE =
-  /\/(生成新文件|改写当前文件)|修改|改写|重写|润色|创建|新建|保存|写入|覆盖|patch|diff|apply/i;
+  /\/(生成新文件|改写当前文件)|修改|改写|重写|润色|增加|补充|加入|添加|创建|新建|保存|写入|覆盖|patch|diff|apply/i;
 const CO_CREATE_FILE_TARGET_RE = /文件|文档|附件|输出物|版本|副本/i;
 const CO_CREATE_PROJECT_HEAVY_RE = /当前项目|本项目|这个项目|项目内|项目中|基于项目/i;
 const CO_CREATE_RESEARCH_RE =
   /研究|分析|深度|拆解|挖掘|对标|矩阵|趋势|策略|行业|市场|用户|竞品|报告/i;
-const CO_CREATE_AUTO_CREATE_VERB_RE = /\/生成新文件|生成|创建|新建|起草|撰写|写/i;
-const CO_CREATE_AUTO_CREATE_NOUN_RE =
-  /文稿|文档|稿件|报告|方案|文章|PRD|需求文档|汇报|总结|脚本|纪要|提案|计划/i;
-const FILE_ACTIONS_BLOCK_RE = /```tphermes_file_actions\s*\n[\s\S]*?```/gi;
-const SINGLE_MARKDOWN_BLOCK_RE = /^```(?:markdown|md|mdx)?\s*\n([\s\S]*?)\n```$/i;
-const MARKDOWN_TITLE_RE = /^\s*#\s+(.+?)\s*$/m;
-
-export function normalizeAutoCreateDraftContent(content: string): string {
-  let next = (content || "").replace(FILE_ACTIONS_BLOCK_RE, "").trim();
-  const fenced = next.match(SINGLE_MARKDOWN_BLOCK_RE);
-  if (fenced?.[1]) next = fenced[1].trim();
-  return next;
-}
-
-function isLikelyDraftContent(content: string): boolean {
-  if (!content.trim()) return false;
-  if (content.length >= 200) return true;
-  if (MARKDOWN_TITLE_RE.test(content)) return true;
-  const nonEmptyLines = content
-    .split("\n")
-    .map((line) => line.trim())
-    .filter(Boolean);
-  return nonEmptyLines.length >= 6;
-}
-
-function sanitizeDraftFileName(value: string): string {
-  const cleaned = value.replace(/[\\/:*?"<>|]/g, " ").replace(/\s+/g, " ").trim();
-  return cleaned || "自动创建文稿";
-}
-
-function inferDraftTitleFromPrompt(prompt: string): string | null {
-  const compact = prompt.replace(/\s+/g, "");
-  const explicit = compact.match(
-    /(?:生成|创建|新建|起草|撰写|写)(?:一篇|一个|一份|篇|份|个)?(?:新)?(.{2,32}?(?:文稿|文档|稿件|报告|方案|文章|PRD|需求文档|汇报|总结|脚本|纪要|提案|计划))/i,
-  );
-  if (explicit?.[1]) return explicit[1];
-  return null;
-}
-
-export function inferAutoCreateDraftFileName(prompt: string, content: string): string {
-  const normalizedContent = normalizeAutoCreateDraftContent(content);
-  const heading = normalizedContent.match(MARKDOWN_TITLE_RE)?.[1]?.trim();
-  const title = sanitizeDraftFileName(heading || inferDraftTitleFromPrompt(prompt) || "自动创建文稿");
-  return /\.md$/i.test(title) ? title : `${title}.md`;
-}
-
-export function shouldAutoCreateDraftFromAssistant(
-  prompt: string,
-  assistantContent: string,
-  hasExistingFileActions = false,
-): boolean {
-  if (hasExistingFileActions) return false;
-  const normalizedPrompt = prompt.trim();
-  if (!normalizedPrompt) return false;
-  if (
-    !normalizedPrompt.startsWith("/生成新文件") &&
-    !(CO_CREATE_AUTO_CREATE_VERB_RE.test(normalizedPrompt) && CO_CREATE_AUTO_CREATE_NOUN_RE.test(normalizedPrompt))
-  ) {
-    return false;
-  }
-  return isLikelyDraftContent(normalizeAutoCreateDraftContent(assistantContent));
-}
 
 function shouldUseCoCreateFastPath(options: {
   text: string;
@@ -143,6 +139,7 @@ function shouldUseCoCreateFastPath(options: {
 }) {
   const compact = options.text.replace(/\s+/g, "");
   if (!compact) return false;
+  if (isDocumentGenerationPrompt(options.text.trim())) return false;
   if (options.pinnedFileCount > 0 || options.roundFileCount > 0 || options.regionBlockCount > 0) {
     return false;
   }
@@ -162,6 +159,13 @@ function resolveCoCreatePipeline(options: {
   const compact = options.text.replace(/\s+/g, "");
   if (options.hasPendingFileActions) return "rewrite";
   if (CO_CREATE_REWRITE_RE.test(compact)) return "rewrite";
+  if (
+    (options.roundFileCount > 0 || options.pinnedFileCount > 0) &&
+    isRewritePrompt(options.text.trim(), { hasTargetFile: true })
+  ) {
+    return "rewrite";
+  }
+  if (isDocumentGenerationPrompt(options.text.trim())) return "co_create";
   if (shouldUseCoCreateFastPath(options)) return "fast";
   if (
     CO_CREATE_RESEARCH_RE.test(compact) ||
@@ -171,13 +175,6 @@ function resolveCoCreatePipeline(options: {
     return "research";
   }
   return "co_create";
-}
-
-function effectivePipelineFromPreference(
-  preference: CoCreatePipelinePreference,
-  autoPipeline: CoCreatePipeline,
-): CoCreatePipeline {
-  return preference === "auto" ? autoPipeline : preference;
 }
 
 function regionBlockFileName(
@@ -192,21 +189,46 @@ function regionBlockFileName(
   return pathName || file?.title || tabLabels[fileKey] || "文件";
 }
 
+function parsePatchEditMode(raw: unknown): PatchEditMode {
+  const value = String(raw ?? "full");
+  if (value === "search_replace" || value === "line_range" || value === "full") return value;
+  return "full";
+}
+
+function parseOptionalInt(raw: unknown): number | undefined {
+  if (typeof raw === "number" && Number.isFinite(raw)) return raw;
+  if (typeof raw === "string" && raw.trim()) {
+    const n = Number(raw);
+    if (Number.isFinite(n)) return n;
+  }
+  return undefined;
+}
+
 function mapStreamActions(raw: Array<Record<string, unknown>>): FileActionProposal[] {
   const out: FileActionProposal[] = [];
   for (const item of raw) {
     const proposalId = String(item.proposal_id || item.proposalId || crypto.randomUUID());
     const type = String(item.type || "");
     if (type === "create") {
+      const fileName = String(item.file_name || item.fileName || "新文件.md");
       out.push({
         type: "create",
         proposalId,
-        fileName: String(item.file_name || item.fileName || "新文件.md"),
-        path: String(item.path || "/"),
+        fileName,
+        path: normalizeCreateFilePath(fileName, String(item.path || "/")),
         content: String(item.content || ""),
         status: "proposed",
       });
     } else if (type === "patch") {
+      const editMode = parsePatchEditMode(item.edit_mode ?? item.editMode);
+      const oldString = String(item.old_string ?? item.oldString ?? "");
+      const newString = String(item.new_string ?? item.newString ?? "");
+      const newText = String(item.new_text ?? item.newText ?? "");
+      const startLine = parseOptionalInt(item.start_line ?? item.startLine);
+      const endLine = parseOptionalInt(item.end_line ?? item.endLine);
+      let after = String(item.after || item.content || "");
+      if (!after && editMode === "search_replace") after = newString;
+      if (!after && editMode === "line_range") after = newText;
       out.push({
         type: "patch",
         proposalId,
@@ -215,38 +237,73 @@ function mapStreamActions(raw: Array<Record<string, unknown>>): FileActionPropos
         fileName: String(item.file_name || item.fileName || "文件"),
         summary: String(item.summary || "文件修改"),
         before: String(item.before || ""),
-        after: String(item.after || item.content || ""),
+        after,
         status: "proposed",
+        editMode,
+        oldString: oldString || undefined,
+        newString: newString || undefined,
+        replaceAll: Boolean(item.replace_all ?? item.replaceAll),
+        startLine,
+        endLine,
+        newText: newText || undefined,
       });
     }
   }
   return out;
 }
 
-type AgentUndoEntry =
-  | {
-      type: "create";
-      proposalId: string;
-      fileId: string;
-      fileName: string;
-    }
-  | {
-      type: "patch";
-      proposalId: string;
-      fileId: string;
-      fileKind: "output" | "attachment";
-      fileName: string;
-      previousContent: string;
-    };
+function resolveAutoPatchTargetFile(
+  pinnedFileKeys: string[],
+  roundFileKeys: string[],
+  files: ProjectFileItem[],
+  tabLabels: Record<string, string>,
+): AutoPatchTargetFile | null {
+  const fileKey = roundFileKeys[0] ?? pinnedFileKeys[0];
+  if (!fileKey) return null;
+  const decoded = decodeProjectFileSelectValue(fileKey);
+  if (!decoded) return null;
+  return {
+    fileKey,
+    fileId: decoded.id,
+    fileKind: decoded.kind,
+    fileName: regionBlockFileName(files, fileKey, tabLabels),
+  };
+}
+
+async function resolveFileBeforeContent(
+  projectId: string,
+  target: AutoPatchTargetFile,
+  activeFileKey: string | null,
+  previewContent: string | undefined,
+): Promise<string> {
+  if (activeFileKey === target.fileKey && previewContent?.trim()) {
+    return previewContent;
+  }
+  const detail = await fetchProjectFileDetail(projectId, target.fileId, target.fileKind);
+  return detail.content ?? "";
+}
 
 function updateProposalStatus(
   proposalId: string,
   status: FileActionProposal["status"],
   actions: FileActionProposal[],
+  patch?: { applyError?: string },
 ): FileActionProposal[] {
-  return actions.map((proposal) =>
-    proposal.proposalId === proposalId ? { ...proposal, status } : proposal,
+  return actions.map((proposal) => {
+    if (proposal.proposalId !== proposalId) return proposal;
+    return { ...proposal, status, ...patch };
+  });
+}
+
+function findAssistantContentForProposal(
+  session: { messages: Message[] } | undefined,
+  proposalId: string,
+): string {
+  if (!session) return "";
+  const hostMessage = session.messages.find((message) =>
+    message.fileActions?.some((fa) => fa.proposalId === proposalId),
   );
+  return hostMessage?.content ?? "";
 }
 
 export default function CoCreatePage() {
@@ -289,16 +346,18 @@ function CoCreatePageInner() {
     null,
   );
   const [fileSaving, setFileSaving] = useState(false);
-  const [agentUndoStack, setAgentUndoStack] = useState<AgentUndoEntry[]>([]);
   const [undoingAgentChange, setUndoingAgentChange] = useState(false);
-  const [, setActivePipeline] = useState<CoCreatePipeline>("co_create");
 
   const abortRef = useRef<AbortController | null>(null);
   const firstTokenMetricsRef = useRef({ count: 0, totalMs: 0 });
   const entryAppliedRef = useRef(false);
   const autoApplyingProposalIdsRef = useRef<Set<string>>(new Set());
   const autoApplyingBusyRef = useRef(false);
-  const autoCreatedAssistantIdsRef = useRef<Set<string>>(new Set());
+  const autoDraftExtractedLenRef = useRef<Map<string, number>>(new Map());
+  const pendingAutoDraftPromptRef = useRef<string | null>(null);
+  const autoPatchExtractedLenRef = useRef<Map<string, number>>(new Map());
+  const pendingAutoPatchPromptRef = useRef<string | null>(null);
+  const pendingAutoPatchTargetRef = useRef<AutoPatchTargetFile | null>(null);
 
   const fileWorkspace = useFileWorkspace(projectId);
 
@@ -313,7 +372,6 @@ function CoCreatePageInner() {
     setError("");
     setPendingActions([]);
     setRecommendations([]);
-    setAgentUndoStack([]);
   }, []);
 
   const {
@@ -341,7 +399,30 @@ function CoCreatePageInner() {
 
   const pinnedFileIds = activeSession?.pinnedFileIds ?? [];
   const roundFileIds = activeSession?.roundFileIds ?? [];
-  const pipelinePreference = activeSession?.coCreatePipelinePreference ?? "auto";
+  const agentMode: CoCreateAgentMode = activeSession?.coCreateAgentMode ?? "agent";
+  const applyMode: CoCreateApplyMode = activeSession?.coCreateApplyMode ?? "auto";
+  const agentUndoStack = activeSession?.agentUndoStack ?? [];
+
+  const appendAgentUndoEntry = useCallback(
+    (entry: AgentUndoEntry) => {
+      const sessionId = activeIdRef.current;
+      if (!sessionId) return;
+      updateSession(sessionId, (session) => ({
+        ...session,
+        agentUndoStack: pushAgentUndoStack(session.agentUndoStack ?? [], entry),
+      }));
+      const updated = sessionsRef.current.find((session) => session.id === sessionId);
+      if (updated) {
+        queueSessionPatch(sessionId, sessionToPatchPayload(updated));
+      }
+      console.info("[co-create] undo 栈已追加", {
+        sessionId,
+        proposalId: entry.proposalId,
+        depth: updated?.agentUndoStack?.length ?? 0,
+      });
+    },
+    [queueSessionPatch, sessionsRef, updateSession],
+  );
 
   const persistFileRefs = useCallback(
     (nextPinned: string[], nextRound: string[]) => {
@@ -428,7 +509,30 @@ function CoCreatePageInner() {
         defaults.roundFileIds = [initialKey];
         defaults.pinnedFileIds = [];
       }
-      createSession(defaults);
+      const orphan = sessions.find(
+        (session) =>
+          session.sessionKind === "project_co_create" && !session.selectedProjectId?.trim(),
+      );
+      if (orphan) {
+        updateSession(orphan.id, (session) => ({
+          ...session,
+          ...defaults,
+          id: session.id,
+          title: session.messages.length > 0 ? session.title : (defaults.title ?? session.title),
+          messages: session.messages,
+          createdAt: session.createdAt,
+        }));
+        const updated = sessionsRef.current.find((session) => session.id === orphan.id);
+        if (updated) queueSessionPatch(orphan.id, sessionToPatchPayload(updated));
+        selectSession(orphan.id);
+        if (initialKey) {
+          persistFileRefs(defaults.pinnedFileIds ?? [], defaults.roundFileIds ?? []);
+          fileWorkspace.openFileTab(initialKey);
+        }
+        console.info("[co-create] 已绑定 bootstrap 会话到项目", { projectId, sessionId: orphan.id });
+      } else {
+        createSession(defaults);
+      }
     } else if (initialKey) {
       const target = sessions.find((s) => s.selectedProjectId === projectId);
       if (target) {
@@ -443,10 +547,13 @@ function CoCreatePageInner() {
     fileWorkspace,
     persistFileRefs,
     projectId,
+    queueSessionPatch,
     searchParams,
     selectSession,
     sessions,
     sessionsLoading,
+    sessionsRef,
+    updateSession,
   ]);
 
   useEffect(() => {
@@ -474,7 +581,12 @@ function CoCreatePageInner() {
   }, [activeSession, agentUndoStack.length, fileSaving, pendingActions, sessionsSyncError, streaming, undoingAgentChange]);
 
   const syncProposalStatusToSession = useCallback(
-    (proposalId: string, status: FileActionProposal["status"], removePending = false) => {
+    (
+      proposalId: string,
+      status: FileActionProposal["status"],
+      removePending = false,
+      patch?: { applyError?: string },
+    ) => {
       if (!activeSession) return;
       updateSession(activeSession.id, (session) => ({
         ...session,
@@ -485,7 +597,7 @@ function CoCreatePageInner() {
           message.fileActions?.length
             ? {
                 ...message,
-                fileActions: updateProposalStatus(proposalId, status, message.fileActions),
+                fileActions: updateProposalStatus(proposalId, status, message.fileActions, patch),
               }
             : message,
         ),
@@ -496,9 +608,28 @@ function CoCreatePageInner() {
 
   const handleFileActionsFromStream = useCallback(
     (sessionId: string, assistantId: string, raw: Array<Record<string, unknown>>) => {
-      const mapped = mapStreamActions(raw);
+      const assistantMessage = sessionsRef.current
+        .find((s) => s.id === sessionId)
+        ?.messages.find((m) => m.id === assistantId);
+      const assistantContent = assistantMessage?.content ?? "";
+      const mapped = mapStreamActions(raw).map((proposal) =>
+        proposal.type === "create"
+          ? normalizeStreamCreateProposal(proposal, assistantContent, extractAutoCreateDraftBody)
+          : normalizeStreamPatchProposal(
+              proposal,
+              assistantContent,
+              proposal.before ?? "",
+              extractAutoPatchBody,
+            ),
+      );
       if (mapped.length === 0) return;
-      setPendingActions((prev) => [...prev, ...mapped]);
+      setPendingActions((prev) => {
+        let next = prev;
+        for (const proposal of mapped) {
+          next = upsertFileActionProposal(next, proposal);
+        }
+        return next;
+      });
       updateSession(sessionId, (session) => ({
         ...session,
         pendingProposalIds: [
@@ -517,51 +648,74 @@ function CoCreatePageInner() {
   const enqueueAutoCreateDraftForAssistant = useCallback(
     (sessionId: string, assistantMessage: Message | undefined, prompt: string) => {
       if (!assistantMessage || assistantMessage.role !== "assistant") return false;
-      if (autoCreatedAssistantIdsRef.current.has(assistantMessage.id)) return false;
+
+      const streamFileActions = assistantMessage.fileActions?.filter((item) =>
+        isStreamFileActionProposal(item.proposalId),
+      );
+      if (hasActiveStreamFileActions(streamFileActions)) {
+        return false;
+      }
+
+      const extracted = extractAutoCreateDraftBody(assistantMessage.content);
       if (
-        !shouldAutoCreateDraftFromAssistant(
-          prompt,
-          assistantMessage.content,
-          Boolean(assistantMessage.fileActions?.length),
-        )
+        !shouldAutoCreateDraftFromAssistant(prompt, assistantMessage.content, false) ||
+        !isReadyForAutoCreateDraft(extracted, assistantMessage.content)
       ) {
         return false;
       }
 
-      const content = normalizeAutoCreateDraftContent(assistantMessage.content);
-      if (!content) return false;
+      const prevLen = autoDraftExtractedLenRef.current.get(assistantMessage.id) ?? 0;
+      if (extracted.length < prevLen + 80) return false;
 
-      const fileName = inferAutoCreateDraftFileName(prompt, content);
+      const proposalId = autoCreateFallbackProposalId(assistantMessage.id);
+      const existing = assistantMessage.fileActions?.find(
+        (item) => item.proposalId === proposalId && item.type === "create",
+      );
+      if (existing?.status === "applied" || existing?.status === "applying") return false;
+
+      const fileName = inferAutoCreateDraftFileName(prompt, assistantMessage.content);
       const proposal: FileActionProposal = {
         type: "create",
-        proposalId: `fallback-create:${assistantMessage.id}`,
+        proposalId,
         fileName,
         path: `/输出/${fileName}`,
-        content,
+        content: extracted,
         status: "proposed",
       };
 
-      autoCreatedAssistantIdsRef.current.add(assistantMessage.id);
-      setPendingActions((prev) =>
-        prev.some((item) => item.proposalId === proposal.proposalId) ? prev : [...prev, proposal],
-      );
+      autoDraftExtractedLenRef.current.set(assistantMessage.id, extracted.length);
+      if (existing && existing.type === "create" && existing.content !== extracted) {
+        autoApplyingProposalIdsRef.current.delete(proposalId);
+      }
+      if (existing?.status === "failed") {
+        autoApplyingProposalIdsRef.current.delete(proposalId);
+      }
+
+      setPendingActions((prev) => {
+        const others = prev.filter((item) => item.proposalId !== proposalId);
+        return [...others, proposal];
+      });
       updateSession(sessionId, (session) => ({
         ...session,
         pendingProposalIds: [
           ...new Set([...(session.pendingProposalIds ?? []), proposal.proposalId]),
         ],
-        messages: session.messages.map((message) =>
-          message.id === assistantMessage.id && !message.fileActions?.length
-            ? { ...message, fileActions: [proposal] }
-            : message,
-        ),
+        messages: session.messages.map((message) => {
+          if (message.id !== assistantMessage.id) return message;
+          const rest = (message.fileActions ?? []).filter(
+            (item) => item.proposalId !== proposalId,
+          );
+          return { ...message, fileActions: [...rest, proposal] };
+        }),
       }));
       const updated = sessionsRef.current.find((s) => s.id === sessionId);
       if (updated) queueSessionPatch(sessionId, sessionToPatchPayload(updated));
-      console.info("[co-create] 已为助手正文补充自动建稿提案", {
+      console.info("[co-create] 自动建稿提案已更新", {
         sessionId,
         assistantId: assistantMessage.id,
         fileName,
+        contentLength: extracted.length,
+        updated: Boolean(existing),
       });
       return true;
     },
@@ -569,16 +723,367 @@ function CoCreatePageInner() {
   );
 
   const maybeAutoCreateDraftFromLatestAssistant = useCallback(
-    (prompt: string) => {
+    (fallbackPrompt?: string) => {
       const sessionId = activeIdRef.current;
       if (!sessionId) return false;
       const session = sessionsRef.current.find((item) => item.id === sessionId);
       if (!session) return false;
       const latestAssistant = [...session.messages].reverse().find((message) => message.role === "assistant");
+      const prompt =
+        findLatestTurnUserPrompt(session.messages) || fallbackPrompt?.trim() || "";
+      if (!prompt) return false;
       return enqueueAutoCreateDraftForAssistant(sessionId, latestAssistant, prompt);
     },
     [activeIdRef, enqueueAutoCreateDraftForAssistant, sessionsRef],
   );
+
+  const enqueueAutoPatchForAssistant = useCallback(
+    (
+      sessionId: string,
+      assistantMessage: Message | undefined,
+      prompt: string,
+      beforeContent: string,
+      target: AutoPatchTargetFile,
+    ) => {
+      if (!assistantMessage || assistantMessage.role !== "assistant") return false;
+
+      const streamFileActions = assistantMessage.fileActions?.filter((item) =>
+        isStreamFileActionProposal(item.proposalId),
+      );
+      if (hasActiveStreamFileActions(streamFileActions)) {
+        return false;
+      }
+
+      const extracted = extractAutoPatchBody(assistantMessage.content);
+      if (
+        !shouldAutoPatchFromAssistant(prompt, assistantMessage.content, beforeContent, false) ||
+        !isReadyForAutoPatch(extracted, beforeContent, assistantMessage.content)
+      ) {
+        return false;
+      }
+
+      const prevLen = autoPatchExtractedLenRef.current.get(assistantMessage.id) ?? 0;
+      if (extracted.length < prevLen + 80) return false;
+
+      const proposalId = autoPatchFallbackProposalId(assistantMessage.id);
+      const existing = assistantMessage.fileActions?.find(
+        (item) => item.proposalId === proposalId && item.type === "patch",
+      );
+      if (existing?.status === "applied" || existing?.status === "applying") return false;
+
+      const proposal: FileActionProposal = {
+        type: "patch",
+        proposalId,
+        fileId: target.fileId,
+        fileKind: target.fileKind,
+        fileName: target.fileName,
+        before: beforeContent,
+        after: extracted,
+        editMode: "full",
+        summary: inferAutoPatchSummary(prompt),
+        status: "proposed",
+      };
+
+      autoPatchExtractedLenRef.current.set(assistantMessage.id, extracted.length);
+      if (existing && existing.type === "patch" && existing.after !== extracted) {
+        autoApplyingProposalIdsRef.current.delete(proposalId);
+      }
+      if (existing?.status === "failed") {
+        autoApplyingProposalIdsRef.current.delete(proposalId);
+      }
+
+      setPendingActions((prev) => {
+        const others = prev.filter((item) => item.proposalId !== proposalId);
+        return [...others, proposal];
+      });
+      updateSession(sessionId, (session) => ({
+        ...session,
+        pendingProposalIds: [
+          ...new Set([...(session.pendingProposalIds ?? []), proposal.proposalId]),
+        ],
+        messages: session.messages.map((message) => {
+          if (message.id !== assistantMessage.id) return message;
+          const rest = (message.fileActions ?? []).filter(
+            (item) => item.proposalId !== proposalId,
+          );
+          return { ...message, fileActions: [...rest, proposal] };
+        }),
+      }));
+      const updated = sessionsRef.current.find((s) => s.id === sessionId);
+      if (updated) queueSessionPatch(sessionId, sessionToPatchPayload(updated));
+      console.info("[co-create] 自动改写提案已更新", {
+        sessionId,
+        assistantId: assistantMessage.id,
+        fileName: target.fileName,
+        afterLength: extracted.length,
+        beforeLength: beforeContent.length,
+        updated: Boolean(existing),
+      });
+      return true;
+    },
+    [queueSessionPatch, sessionsRef, updateSession],
+  );
+
+  const maybeAutoPatchFromLatestAssistant = useCallback(
+    async (fallbackPrompt: string, target: AutoPatchTargetFile) => {
+      const sessionId = activeIdRef.current;
+      if (!sessionId) return false;
+      const session = sessionsRef.current.find((item) => item.id === sessionId);
+      if (!session) return false;
+      const latestAssistant = [...session.messages]
+        .reverse()
+        .find((message) => message.role === "assistant");
+      const prompt = findLatestTurnUserPrompt(session.messages) || fallbackPrompt.trim() || "";
+      if (!prompt) return false;
+      const before = await resolveFileBeforeContent(
+        projectId,
+        target,
+        fileWorkspace.activeFileKey,
+        fileWorkspace.previewDetail?.content,
+      );
+      return enqueueAutoPatchForAssistant(
+        sessionId,
+        latestAssistant,
+        prompt,
+        before,
+        target,
+      );
+    },
+    [
+      activeIdRef,
+      enqueueAutoPatchForAssistant,
+      fileWorkspace.activeFileKey,
+      fileWorkspace.previewDetail?.content,
+      projectId,
+      sessionsRef,
+    ],
+  );
+
+  const tryPendingAutoPatch = useCallback(() => {
+    let prompt = pendingAutoPatchPromptRef.current;
+    let target = pendingAutoPatchTargetRef.current;
+    const hasTargetFile = pinnedFileIds.length > 0 || roundFileIds.length > 0;
+
+    if (!prompt || !target) {
+      const sessionId = activeIdRef.current;
+      const session = sessionId
+        ? sessionsRef.current.find((item) => item.id === sessionId)
+        : undefined;
+      if (!session || !hasTargetFile) return;
+      const latestPrompt = findLatestTurnUserPrompt(session.messages);
+      target =
+        resolveAutoPatchTargetFile(
+          pinnedFileIds,
+          roundFileIds,
+          fileWorkspace.files,
+          fileWorkspace.tabLabels,
+        ) ?? target;
+      if (
+        latestPrompt &&
+        target &&
+        isRewritePrompt(latestPrompt, { hasTargetFile: true })
+      ) {
+        prompt = latestPrompt;
+        pendingAutoPatchPromptRef.current = prompt;
+        pendingAutoPatchTargetRef.current = target;
+        console.info("[co-create] 恢复未落库的改写轮次", { prompt: prompt.slice(0, 40) });
+      } else {
+        return;
+      }
+    }
+
+    void maybeAutoPatchFromLatestAssistant(prompt, target).then((patched) => {
+      if (patched) {
+        console.info("[co-create] 自动改写提案就绪", { prompt: prompt.slice(0, 40) });
+      }
+      const sessionId = activeIdRef.current;
+      const session = sessionId
+        ? sessionsRef.current.find((item) => item.id === sessionId)
+        : undefined;
+      const latestAssistant = session
+        ? [...session.messages].reverse().find((message) => message.role === "assistant")
+        : undefined;
+      const proposalId = latestAssistant
+        ? autoPatchFallbackProposalId(latestAssistant.id)
+        : "";
+      const applied = latestAssistant?.fileActions?.find(
+        (item) => item.proposalId === proposalId && item.status === "applied",
+      );
+      if (applied) {
+        pendingAutoPatchPromptRef.current = null;
+        pendingAutoPatchTargetRef.current = null;
+      }
+    });
+  }, [
+    activeIdRef,
+    fileWorkspace.files,
+    fileWorkspace.tabLabels,
+    maybeAutoPatchFromLatestAssistant,
+    pinnedFileIds,
+    roundFileIds,
+    sessionsRef,
+  ]);
+
+  const tryPendingAutoCreateDraft = useCallback(() => {
+    const prompt = pendingAutoDraftPromptRef.current;
+    if (!prompt) return;
+    const created = maybeAutoCreateDraftFromLatestAssistant(prompt);
+    if (created) {
+      console.info("[co-create] 自动建稿提案就绪", { prompt: prompt.slice(0, 40) });
+    }
+    const sessionId = activeIdRef.current;
+    const session = sessionId
+      ? sessionsRef.current.find((item) => item.id === sessionId)
+      : undefined;
+    const latestAssistant = session
+      ? [...session.messages].reverse().find((message) => message.role === "assistant")
+      : undefined;
+    const proposalId = latestAssistant
+      ? autoCreateFallbackProposalId(latestAssistant.id)
+      : "";
+    const applied = latestAssistant?.fileActions?.find(
+      (item) => item.proposalId === proposalId && item.status === "applied",
+    );
+    if (applied) {
+      pendingAutoDraftPromptRef.current = null;
+    }
+  }, [activeIdRef, maybeAutoCreateDraftFromLatestAssistant, sessionsRef]);
+
+  const latestAssistantContent = useMemo(() => {
+    const messages = activeSession?.messages ?? [];
+    return [...messages].reverse().find((message) => message.role === "assistant")?.content ?? "";
+  }, [activeSession?.messages]);
+
+  useEffect(() => {
+    if (streaming || preparingContext || !pendingAutoDraftPromptRef.current) return;
+    const timer = window.setTimeout(() => {
+      tryPendingAutoCreateDraft();
+    }, 1500);
+    return () => window.clearTimeout(timer);
+  }, [latestAssistantContent, preparingContext, streaming, tryPendingAutoCreateDraft]);
+
+  useEffect(() => {
+    if (streaming || preparingContext || !pendingAutoPatchPromptRef.current) return;
+    const timer = window.setTimeout(() => {
+      tryPendingAutoPatch();
+    }, 1500);
+    return () => window.clearTimeout(timer);
+  }, [latestAssistantContent, preparingContext, streaming, tryPendingAutoPatch]);
+
+  useEffect(() => {
+    if (streaming || preparingContext) return;
+    tryPendingAutoCreateDraft();
+    tryPendingAutoPatch();
+  }, [preparingContext, streaming, tryPendingAutoCreateDraft, tryPendingAutoPatch]);
+
+  useEffect(() => {
+    if (!activeId || streaming || !latestAssistantContent.trim()) return;
+    const session = sessionsRef.current.find((item) => item.id === activeId);
+    const latestAssistant = session
+      ? [...session.messages].reverse().find((message) => message.role === "assistant")
+      : undefined;
+    if (!latestAssistant) return;
+
+    setPendingActions((prev) => {
+      const reconciled = reconcileStreamCreateProposals(
+        prev,
+        latestAssistantContent,
+        extractAutoCreateDraftBody,
+      );
+      if (JSON.stringify(prev) === JSON.stringify(reconciled)) return prev;
+      for (const proposal of reconciled) {
+        if (proposal.type === "create" && proposal.status === "proposed") {
+          autoApplyingProposalIdsRef.current.delete(proposal.proposalId);
+        }
+      }
+      return reconciled;
+    });
+
+    const reconciledMessageActions = reconcileStreamCreateProposals(
+      latestAssistant.fileActions ?? [],
+      latestAssistantContent,
+      extractAutoCreateDraftBody,
+    );
+    if (
+      JSON.stringify(latestAssistant.fileActions ?? []) === JSON.stringify(reconciledMessageActions)
+    ) {
+      return;
+    }
+    updateSession(activeId, (item) => ({
+      ...item,
+      messages: item.messages.map((message) =>
+        message.id === latestAssistant.id
+          ? { ...message, fileActions: reconciledMessageActions }
+          : message,
+      ),
+    }));
+
+    const patchTarget =
+      pendingAutoPatchTargetRef.current ??
+      resolveAutoPatchTargetFile(
+        pinnedFileIds,
+        roundFileIds,
+        fileWorkspace.files,
+        fileWorkspace.tabLabels,
+      );
+    if (!patchTarget) return;
+
+    void resolveFileBeforeContent(
+      projectId,
+      patchTarget,
+      fileWorkspace.activeFileKey,
+      fileWorkspace.previewDetail?.content,
+    ).then((beforeContent) => {
+      setPendingActions((prev) => {
+        const reconciled = reconcileStreamPatchProposals(
+          prev,
+          latestAssistantContent,
+          beforeContent,
+          extractAutoPatchBody,
+        );
+        if (JSON.stringify(prev) === JSON.stringify(reconciled)) return prev;
+        for (const proposal of reconciled) {
+          if (proposal.type === "patch" && proposal.status === "proposed") {
+            autoApplyingProposalIdsRef.current.delete(proposal.proposalId);
+          }
+        }
+        return reconciled;
+      });
+
+      const reconciledPatchActions = reconcileStreamPatchProposals(
+        latestAssistant.fileActions ?? [],
+        latestAssistantContent,
+        beforeContent,
+        extractAutoPatchBody,
+      );
+      if (
+        JSON.stringify(latestAssistant.fileActions ?? []) !==
+        JSON.stringify(reconciledPatchActions)
+      ) {
+        updateSession(activeId, (item) => ({
+          ...item,
+          messages: item.messages.map((message) =>
+            message.id === latestAssistant.id
+              ? { ...message, fileActions: reconciledPatchActions }
+              : message,
+          ),
+        }));
+      }
+    });
+  }, [
+    activeId,
+    fileWorkspace.activeFileKey,
+    fileWorkspace.files,
+    fileWorkspace.previewDetail?.content,
+    fileWorkspace.tabLabels,
+    latestAssistantContent,
+    pinnedFileIds,
+    projectId,
+    roundFileIds,
+    sessionsRef,
+    streaming,
+    updateSession,
+  ]);
 
   const tasksExecuteUrl = apiV1("/tasks/execute");
   const chatApiBase = process.env.NEXT_PUBLIC_CHAT_API_URL?.trim() || apiV1("/chat/completions");
@@ -644,42 +1149,49 @@ function CoCreatePageInner() {
     return [...fromMessages, ...pendingActions];
   }, [activeSession?.messages, pendingActions]);
 
-  const draftPipeline = useMemo(
-    () => {
-      const autoPipeline = resolveCoCreatePipeline({
-        text: input,
-        pinnedFileCount: pinnedFileIds.length,
-        roundFileCount: roundFileIds.length,
-        regionBlockCount: regionBlocks.length,
-        hasPendingFileActions: pendingActions.some(
-          (proposal) => proposal.status === "applying" || proposal.status === "applied",
-        ),
-      });
-      return effectivePipelineFromPreference(pipelinePreference, autoPipeline);
-    },
-    [input, pendingActions, pinnedFileIds.length, pipelinePreference, regionBlocks.length, roundFileIds.length],
-  );
-
-  const handlePipelinePreferenceChange = useCallback(
-    (value: CoCreatePipelinePreference) => {
+  const handleAgentModeChange = useCallback(
+    (value: CoCreateAgentMode) => {
       if (!activeSession) return;
       updateSession(activeSession.id, (session) => ({
         ...session,
-        coCreatePipelinePreference: value,
+        coCreateAgentMode: value,
+        coCreateApplyMode: value === "ask" ? "review" : session.coCreateApplyMode ?? "auto",
       }));
       const updated = sessionsRef.current.find((session) => session.id === activeSession.id);
       if (updated) queueSessionPatch(activeSession.id, sessionToPatchPayload(updated));
-      if (!streaming) {
-        setActivePipeline(value === "auto" ? draftPipeline : value);
-      }
+      console.info("[co-create] Agent 模式切换", { mode: value });
     },
-    [activeSession, draftPipeline, queueSessionPatch, sessionsRef, streaming, updateSession],
+    [activeSession, queueSessionPatch, sessionsRef, updateSession],
   );
 
-  const activePendingPatch = useMemo(
-    () => findActivePatchProposal(fileWorkspace.activeFileKey, allPatchProposals),
-    [allPatchProposals, fileWorkspace.activeFileKey],
+  const handleApplyModeChange = useCallback(
+    (value: CoCreateApplyMode) => {
+      if (!activeSession) return;
+      updateSession(activeSession.id, (session) => ({
+        ...session,
+        coCreateApplyMode: value,
+      }));
+      const updated = sessionsRef.current.find((session) => session.id === activeSession.id);
+      if (updated) queueSessionPatch(activeSession.id, sessionToPatchPayload(updated));
+      console.info("[co-create] 应用模式切换", { mode: value });
+    },
+    [activeSession, queueSessionPatch, sessionsRef, updateSession],
   );
+
+  const activePendingPatch = useMemo(() => {
+    const proposal = findActivePatchProposal(fileWorkspace.activeFileKey, allPatchProposals);
+    if (!proposal) return null;
+    const before =
+      proposal.before?.trim() ||
+      fileWorkspace.previewDetail?.content ||
+      "";
+    const after = resolvePatchAfterFromProposal(proposal, before);
+    return {
+      ...proposal,
+      before,
+      after,
+    };
+  }, [allPatchProposals, fileWorkspace.activeFileKey, fileWorkspace.previewDetail?.content]);
 
   const handleSend = useCallback(async () => {
     const rawPrompt = input.trim();
@@ -698,6 +1210,7 @@ function CoCreatePageInner() {
     }
     const excerpts = regionBlocksToExcerpts(regionBlocks);
     const fullText = composeUserMessageForApi(userPrompt, excerpts);
+    const hasTargetFile = pinnedFileIds.length > 0 || roundFileIds.length > 0;
     const autoPipeline = resolveCoCreatePipeline({
       text: rawPrompt,
       pinnedFileCount: pinnedFileIds.length,
@@ -707,113 +1220,302 @@ function CoCreatePageInner() {
         (proposal) => proposal.status === "applying" || proposal.status === "applied",
       ),
     });
-    const nextPipeline = effectivePipelineFromPreference(pipelinePreference, autoPipeline);
-    const useFastPath = nextPipeline === "fast";
-    setActivePipeline(nextPipeline);
+    const execution = resolveExecutionFromAgentMode(agentMode, autoPipeline);
+
+    if (
+      pinnedFileIds.length === 0 &&
+      roundFileIds.length === 0 &&
+      rawPrompt.trim().length > 4
+    ) {
+      const excluded = new Set([...pinnedFileIds, ...roundFileIds]);
+      const recs = inferFileRecommendations(rawPrompt, fileWorkspace.files, excluded);
+      if (recs.length > 0) {
+        setRecommendations(recs);
+        console.info("[co-create] 推荐引用文件", { count: recs.length });
+      }
+    }
+
+    const regionInstruction = buildRegionAwarePatchInstructions(excerpts);
+    const modeInstruction = buildAgentModeInstructions(agentMode);
+    const documentSyncInstruction = buildDocumentSyncInstructions(rawPrompt);
+    const rewriteSyncInstruction = buildRewriteSyncInstructions(rawPrompt, hasTargetFile);
+    const presetAppend = [modeInstruction, regionInstruction, documentSyncInstruction, rewriteSyncInstruction]
+      .filter(Boolean)
+      .join("\n\n");
+
     setInput("");
     setRegionBlocks([]);
     await sendMessage(fullText, {
       userPrompt: userPrompt || undefined,
       regionExcerpts: excerpts.length > 0 ? excerpts : undefined,
-      useOrchestrationOverride: !useFastPath,
-      skipToolsContextBuild: useFastPath,
+      useOrchestrationOverride: execution.useOrchestration,
+      skipToolsContextBuild: execution.skipTools,
+      scenarioPresetInstructionsAppend: presetAppend || undefined,
     });
-    maybeAutoCreateDraftFromLatestAssistant(rawPrompt);
+    if (execution.allowAutoDraft && isDocumentGenerationPrompt(rawPrompt)) {
+      pendingAutoDraftPromptRef.current = rawPrompt;
+      tryPendingAutoCreateDraft();
+    }
+    if (execution.allowAutoDraft && isRewritePrompt(rawPrompt, { hasTargetFile })) {
+      const patchTarget = resolveAutoPatchTargetFile(
+        pinnedFileIds,
+        roundFileIds,
+        fileWorkspace.files,
+        fileWorkspace.tabLabels,
+      );
+      if (patchTarget) {
+        pendingAutoPatchPromptRef.current = rawPrompt;
+        pendingAutoPatchTargetRef.current = patchTarget;
+        tryPendingAutoPatch();
+      }
+    }
   }, [
+    agentMode,
+    fileWorkspace.files,
+    fileWorkspace.tabLabels,
     input,
-    maybeAutoCreateDraftFromLatestAssistant,
     pendingActions,
-    pinnedFileIds.length,
-    pipelinePreference,
+    pinnedFileIds,
     regionBlocks,
-    roundFileIds.length,
+    roundFileIds,
     sendMessage,
+    tryPendingAutoCreateDraft,
+    tryPendingAutoPatch,
   ]);
 
   const applyProposal = useCallback(
     async (
       proposal: FileActionProposal,
-      saveMode: "overwrite" | "new_version" | "copy" = "new_version",
+      saveMode: "overwrite" | "new_version" | "copy" = "overwrite",
     ) => {
       setPendingActions((prev) => updateProposalStatus(proposal.proposalId, "applying", prev));
       syncProposalStatusToSession(proposal.proposalId, "applying");
       setSaveState("saving");
+      const sessionForProposal = activeId
+        ? sessionsRef.current.find((item) => item.id === activeId)
+        : undefined;
+      const assistantContent = findAssistantContentForProposal(sessionForProposal, proposal.proposalId);
+      const latestProposal =
+        sessionForProposal?.messages
+          .flatMap((message) => message.fileActions ?? [])
+          .find((item) => item.proposalId === proposal.proposalId) ?? proposal;
       try {
         let undoEntry: AgentUndoEntry | null = null;
-        if (proposal.type === "patch") {
-          let previousContent = proposal.before ?? "";
+        let previousContent = "";
+        if (latestProposal.type === "patch") {
+          previousContent = latestProposal.before ?? "";
           if (!previousContent.trim()) {
-            const detail = await fetchProjectFileDetail(projectId, proposal.fileId, proposal.fileKind);
+            const detail = await fetchProjectFileDetail(
+              projectId,
+              latestProposal.fileId,
+              latestProposal.fileKind,
+            );
             previousContent = detail.content ?? "";
           }
           undoEntry = {
             type: "patch",
-            proposalId: proposal.proposalId,
-            fileId: proposal.fileId,
-            fileKind: proposal.fileKind,
-            fileName: proposal.fileName,
+            proposalId: latestProposal.proposalId,
+            fileId: latestProposal.fileId,
+            fileKind: latestProposal.fileKind,
+            fileName: latestProposal.fileName,
             previousContent,
           };
         }
+
+        let resolvedAfter = "";
         const action =
-          proposal.type === "create"
-            ? {
-                type: "create" as const,
-                file_name: proposal.fileName,
-                path: proposal.path,
-                content: proposal.content,
-              }
-            : {
-                type: "patch" as const,
-                target_file_id: proposal.fileId,
-                content: proposal.after,
-                file_name: proposal.fileName,
-                save_mode: saveMode,
-              };
+          latestProposal.type === "create"
+            ? (() => {
+                const content = resolveCreateActionContent(
+                  latestProposal.content,
+                  assistantContent,
+                  extractAutoCreateDraftBody,
+                );
+                if (!content.trim()) {
+                  throw new Error("创建文件内容不能为空，请重试或手动保存");
+                }
+                if (!isCreateProposalReadyForApply(latestProposal.content, assistantContent, extractAutoCreateDraftBody)) {
+                  throw new Error("文稿正文尚未就绪，请稍候或点击重试");
+                }
+                return {
+                  type: "create" as const,
+                  file_name: latestProposal.fileName,
+                  path: normalizeCreateFilePath(latestProposal.fileName, latestProposal.path),
+                  content,
+                };
+              })()
+            : (() => {
+                resolvedAfter = resolvePatchAfterFromProposal(latestProposal, previousContent);
+                const editMode = latestProposal.editMode ?? "full";
+                return {
+                  type: "patch" as const,
+                  target_file_id: latestProposal.fileId,
+                  target_kind: latestProposal.fileKind,
+                  file_name: latestProposal.fileName,
+                  save_mode: saveMode,
+                  edit_mode: editMode,
+                  content: resolvedAfter,
+                  after: resolvedAfter,
+                  ...(editMode === "search_replace"
+                    ? {
+                        old_string: latestProposal.oldString,
+                        new_string: latestProposal.newString,
+                        replace_all: latestProposal.replaceAll,
+                      }
+                    : {}),
+                  ...(editMode === "line_range"
+                    ? {
+                        start_line: latestProposal.startLine,
+                        end_line: latestProposal.endLine,
+                        new_text: latestProposal.newText ?? latestProposal.after,
+                      }
+                    : {}),
+                };
+              })();
         const result = await applyFileAction(projectId, {
           session_id: activeId ?? undefined,
-          proposal_id: proposal.proposalId,
+          proposal_id: latestProposal.proposalId,
           action,
         });
-        setPendingActions((prev) => updateProposalStatus(proposal.proposalId, "applied", prev));
-        syncProposalStatusToSession(proposal.proposalId, "applied", true);
+        setPendingActions((prev) =>
+          updateProposalStatus(latestProposal.proposalId, "applied", prev, { applyError: undefined }),
+        );
+        syncProposalStatusToSession(latestProposal.proposalId, "applied", true, { applyError: undefined });
         const fileKey =
-          proposal.type === "create"
+          latestProposal.type === "create"
             ? encodeProjectFileSelectValue(result.kind, result.file_id)
-            : encodeProjectFileSelectValue(proposal.fileKind, proposal.fileId);
-        fileWorkspace.openFileTab(fileKey);
-        if (proposal.type === "patch") {
-          fileWorkspace.patchTabContent(fileKey, proposal.after);
+            : encodeProjectFileSelectValue(latestProposal.fileKind, latestProposal.fileId);
+        if (latestProposal.type === "patch") {
+          undoEntry = {
+            type: "patch",
+            proposalId: latestProposal.proposalId,
+            fileId: latestProposal.fileId,
+            fileKind: latestProposal.fileKind,
+            fileName: latestProposal.fileName,
+            previousContent,
+          };
         } else {
           undoEntry = {
             type: "create",
-            proposalId: proposal.proposalId,
+            proposalId: latestProposal.proposalId,
             fileId: result.file_id,
-            fileName: proposal.fileName,
+            fileName: latestProposal.fileName,
           };
         }
-        await fileWorkspace.refreshFiles();
-        await fileWorkspace.reloadFileTab(fileKey);
-        if (undoEntry) {
-          setAgentUndoStack((prev) => [...prev, undoEntry]);
-        }
         setSaveState("saved");
+        console.info("[co-create] 文件应用成功", {
+          proposalId: latestProposal.proposalId,
+          type: latestProposal.type,
+          fileId: result.file_id,
+          contentLength:
+            latestProposal.type === "create"
+              ? action.content?.length ?? 0
+              : resolvedAfter.length,
+        });
+        try {
+          fileWorkspace.openFileTab(fileKey);
+          if (latestProposal.type === "patch") {
+            fileWorkspace.patchTabContent(fileKey, resolvedAfter || latestProposal.after);
+          }
+          await fileWorkspace.refreshFiles();
+          await fileWorkspace.reloadFileTab(fileKey);
+        } catch (postErr) {
+          console.warn("[co-create] 文件应用后刷新失败（文件已落库）", postErr);
+        }
+        appendAgentUndoEntry(undoEntry);
       } catch (err) {
-        console.warn("[co-create] 文件应用失败", err);
-        setPendingActions((prev) => updateProposalStatus(proposal.proposalId, "failed", prev));
-        syncProposalStatusToSession(proposal.proposalId, "failed");
+        const message = err instanceof Error ? err.message : String(err);
+        console.warn("[co-create] 文件应用失败", {
+          proposalId: proposal.proposalId,
+          type: proposal.type,
+          error: message,
+        });
+        setPendingActions((prev) =>
+          updateProposalStatus(proposal.proposalId, "failed", prev, { applyError: message }),
+        );
+        syncProposalStatusToSession(proposal.proposalId, "failed", false, { applyError: message });
         setSaveState("error");
+        autoApplyingProposalIdsRef.current.delete(proposal.proposalId);
+        if (
+          proposal.type === "create" &&
+          !isAutoCreateFallbackProposal(proposal.proposalId) &&
+          sessionForProposal
+        ) {
+          const prompt = findLatestTurnUserPrompt(sessionForProposal.messages);
+          if (prompt) {
+            pendingAutoDraftPromptRef.current = prompt;
+            queueMicrotask(() => tryPendingAutoCreateDraft());
+          }
+        }
+        if (
+          proposal.type === "patch" &&
+          !isAutoPatchFallbackProposal(proposal.proposalId) &&
+          sessionForProposal
+        ) {
+          const prompt = findLatestTurnUserPrompt(sessionForProposal.messages);
+          const target =
+            pendingAutoPatchTargetRef.current ??
+            resolveAutoPatchTargetFile(
+              pinnedFileIds,
+              roundFileIds,
+              fileWorkspace.files,
+              fileWorkspace.tabLabels,
+            ) ??
+            (proposal.type === "patch"
+              ? {
+                  fileKey: encodeProjectFileSelectValue(proposal.fileKind, proposal.fileId),
+                  fileId: proposal.fileId,
+                  fileKind: proposal.fileKind,
+                  fileName: proposal.fileName,
+                }
+              : null);
+          if (prompt && target) {
+            pendingAutoPatchPromptRef.current = prompt;
+            pendingAutoPatchTargetRef.current = target;
+            queueMicrotask(() => tryPendingAutoPatch());
+          }
+        }
       }
     },
-    [activeId, fileWorkspace, projectId, syncProposalStatusToSession],
+    [
+      activeId,
+      appendAgentUndoEntry,
+      fileWorkspace,
+      pinnedFileIds,
+      projectId,
+      roundFileIds,
+      syncProposalStatusToSession,
+      tryPendingAutoCreateDraft,
+      tryPendingAutoPatch,
+    ],
   );
 
   useEffect(() => {
+    if (applyMode === "review" || agentMode === "ask") return;
     if (autoApplyingBusyRef.current) return;
-    const nextProposal = pendingActions.find(
-      (proposal) =>
-        proposal.status === "proposed" && !autoApplyingProposalIdsRef.current.has(proposal.proposalId),
+    const session = activeId ? sessionsRef.current.find((item) => item.id === activeId) : undefined;
+    const merged = mergeFileActionProposals(
+      ...(session?.messages ?? []).map((message) => message.fileActions ?? []),
+      pendingActions,
     );
+    const nextProposal = merged.find((item) => {
+      if (item.status !== "proposed") return false;
+      if (autoApplyingProposalIdsRef.current.has(item.proposalId)) return false;
+      if (item.type === "create") {
+        const assistantContent = findAssistantContentForProposal(session, item.proposalId);
+        return isCreateProposalReadyForApply(
+          item.content,
+          assistantContent,
+          extractAutoCreateDraftBody,
+        );
+      }
+      if (item.type === "patch") {
+        const assistantContent = findAssistantContentForProposal(session, item.proposalId);
+        const before = item.before ?? "";
+        return isReadyForAutoPatch(item.after, before, assistantContent);
+      }
+      return true;
+    });
     if (!nextProposal) return;
     autoApplyingBusyRef.current = true;
     autoApplyingProposalIdsRef.current.add(nextProposal.proposalId);
@@ -823,10 +1525,15 @@ function CoCreatePageInner() {
         autoApplyingBusyRef.current = false;
       },
     );
-  }, [applyProposal, pendingActions]);
+  }, [activeId, agentMode, applyMode, applyProposal, pendingActions, sessionsRef]);
 
   const handleUndoLastAgentChange = useCallback(async () => {
-    const latest = agentUndoStack[agentUndoStack.length - 1];
+    const sessionId = activeIdRef.current;
+    const session = sessionId
+      ? sessionsRef.current.find((item) => item.id === sessionId)
+      : undefined;
+    const stack = session?.agentUndoStack ?? [];
+    const { popped: latest, next } = popAgentUndoStack(stack);
     if (!latest) return;
     setUndoingAgentChange(true);
     setSaveState("saving");
@@ -837,7 +1544,7 @@ function CoCreatePageInner() {
       } else {
         const fileKey = encodeProjectFileSelectValue(latest.fileKind, latest.fileId);
         await applyFileAction(projectId, {
-          session_id: activeId ?? undefined,
+          session_id: sessionId ?? undefined,
           proposal_id: crypto.randomUUID(),
           action: {
             type: "patch",
@@ -853,7 +1560,18 @@ function CoCreatePageInner() {
         await fileWorkspace.reloadFileTab(fileKey);
       }
       await fileWorkspace.refreshFiles();
-      setAgentUndoStack((prev) => prev.slice(0, -1));
+      if (sessionId) {
+        updateSession(sessionId, (item) => ({ ...item, agentUndoStack: next }));
+        const updated = sessionsRef.current.find((item) => item.id === sessionId);
+        if (updated) {
+          queueSessionPatch(sessionId, sessionToPatchPayload(updated));
+        }
+      }
+      console.info("[co-create] 已撤销 Agent 变更", {
+        sessionId,
+        proposalId: latest.proposalId,
+        remaining: next.length,
+      });
       setSaveState("saved");
     } catch (err) {
       console.warn("[co-create] 撤销 AI 修改失败", err);
@@ -861,7 +1579,14 @@ function CoCreatePageInner() {
     } finally {
       setUndoingAgentChange(false);
     }
-  }, [activeId, agentUndoStack, fileWorkspace, projectId]);
+  }, [
+    activeIdRef,
+    fileWorkspace,
+    projectId,
+    queueSessionPatch,
+    sessionsRef,
+    updateSession,
+  ]);
 
   const handleSaveFileContent = useCallback(
     async (fileKey: string, content: string) => {
@@ -963,12 +1688,15 @@ function CoCreatePageInner() {
     [queueSessionPatch, sessionsRef, updateSession],
   );
 
-  const latestAgentUndo = agentUndoStack[agentUndoStack.length - 1] ?? null;
-  const agentChangeSummary = latestAgentUndo
-    ? latestAgentUndo.type === "create"
-      ? `Agent 已创建 ${latestAgentUndo.fileName}，默认自动保存`
-      : `Agent 已修改 ${latestAgentUndo.fileName}，默认自动保存`
-    : "Agent 直改模式已开启，默认自动保存";
+  const pendingReviewCount = pendingActions.filter((p) => p.status === "proposed").length;
+  const agentChangeSummary = (() => {
+    const undoSummary = formatAgentUndoSummary(agentUndoStack, { applyMode, agentMode });
+    if (applyMode === "review" && pendingReviewCount > 0) {
+      return `审阅模式：${pendingReviewCount} 项变更待确认`;
+    }
+    return undoSummary;
+  })();
+  const showUndoControl = agentUndoStack.length > 0 && agentMode !== "ask";
 
   const renderMessageExtras = useCallback(
     (message: Message) => {
@@ -1053,7 +1781,8 @@ function CoCreatePageInner() {
         projectId={projectId}
         saveState={saveState}
         agentChangeSummary={agentChangeSummary}
-        onUndoAgentChange={latestAgentUndo ? () => void handleUndoLastAgentChange() : undefined}
+        onUndoAgentChange={showUndoControl ? () => void handleUndoLastAgentChange() : undefined}
+        undoButtonLabel={formatAgentUndoButtonLabel(agentUndoStack.length)}
         undoDisabled={undoingAgentChange}
         onToggleSessions={() => setSidebarOpen((v) => !v)}
         sessionsOpen={sidebarOpen}
@@ -1095,23 +1824,42 @@ function CoCreatePageInner() {
                 streamingPhase={streamingPhase}
                 renderAfterMessage={renderMessageExtras}
                 onQuickStart={(prompt) => {
+                  const hasTargetFile = pinnedFileIds.length > 0 || roundFileIds.length > 0;
                   const autoPipeline = resolveCoCreatePipeline({
                     text: prompt,
                     pinnedFileCount: pinnedFileIds.length,
                     roundFileCount: roundFileIds.length,
                     regionBlockCount: 0,
                   });
-                  const pipeline = effectivePipelineFromPreference(
-                    pipelinePreference,
-                    autoPipeline,
-                  );
-                  const useFastPath = pipeline === "fast";
-                  setActivePipeline(pipeline);
+                  const execution = resolveExecutionFromAgentMode(agentMode, autoPipeline);
                   void sendMessage(prompt, {
-                    useOrchestrationOverride: !useFastPath,
-                    skipToolsContextBuild: useFastPath,
+                    useOrchestrationOverride: execution.useOrchestration,
+                    skipToolsContextBuild: execution.skipTools,
+                    scenarioPresetInstructionsAppend: [
+                      buildAgentModeInstructions(agentMode),
+                      buildDocumentSyncInstructions(prompt),
+                      buildRewriteSyncInstructions(prompt, hasTargetFile),
+                    ]
+                      .filter(Boolean)
+                      .join("\n\n") || undefined,
                   }).then(() => {
-                    maybeAutoCreateDraftFromLatestAssistant(prompt);
+                    if (execution.allowAutoDraft && isDocumentGenerationPrompt(prompt)) {
+                      pendingAutoDraftPromptRef.current = prompt;
+                      tryPendingAutoCreateDraft();
+                    }
+                    if (execution.allowAutoDraft && isRewritePrompt(prompt, { hasTargetFile })) {
+                      const patchTarget = resolveAutoPatchTargetFile(
+                        pinnedFileIds,
+                        roundFileIds,
+                        fileWorkspace.files,
+                        fileWorkspace.tabLabels,
+                      );
+                      if (patchTarget) {
+                        pendingAutoPatchPromptRef.current = prompt;
+                        pendingAutoPatchTargetRef.current = patchTarget;
+                        tryPendingAutoPatch();
+                      }
+                    }
                   });
                 }}
                 quickStartDisabled={!activeSession || streaming}
@@ -1154,8 +1902,10 @@ function CoCreatePageInner() {
               streaming={streaming}
               onStop={() => abortRef.current?.abort()}
               hint="从最右栏选文件，在预览栏加入上下文"
-              pipelinePreference={pipelinePreference}
-              onPipelinePreferenceChange={handlePipelinePreferenceChange}
+              agentMode={agentMode}
+              onAgentModeChange={handleAgentModeChange}
+              applyMode={applyMode}
+              onApplyModeChange={handleApplyModeChange}
               pinnedFileIds={pinnedFileIds}
               roundFileIds={roundFileIds}
               files={fileWorkspace.files}
@@ -1164,6 +1914,7 @@ function CoCreatePageInner() {
               onRemoveRegionBlock={(id) =>
                 setRegionBlocks((prev) => prev.filter((b) => b.id !== id))
               }
+              onMentionFile={addToRound}
             />
           </div>
         }
@@ -1187,12 +1938,10 @@ function CoCreatePageInner() {
               pendingPatch={
                 activePendingPatch
                   ? {
-                      before:
-                        activePendingPatch.before ??
-                        fileWorkspace.previewDetail?.content ??
-                        "",
+                      before: activePendingPatch.before,
                       after: activePendingPatch.after,
                       summary: activePendingPatch.summary,
+                      editMode: activePendingPatch.editMode,
                     }
                   : null
               }

@@ -8,6 +8,9 @@ export type StreamingWaitHintOptions = {
 };
 
 export function buildStreamingWaitHint(options: StreamingWaitHintOptions): string {
+  if (options.phase === "co_create_draft") {
+    return "写稿模式：跳过预检索，Agent 将按需查库并生成正文";
+  }
   if (options.phase === "kb_prefetch") {
     if (options.includeProject) {
       return `Agent 正在检索${KB_LOADING_DISPLAY_NAME}、项目上下文与引用文件`;

@@ -33,6 +33,34 @@ def is_lightweight_chat_message(text: str) -> bool:
     return any(p.search(t) for p in _LIGHTWEIGHT_CHAT_PATTERNS)
 
 
+_CO_CREATE_DRAFT_VERB_RE = re.compile(
+    r"/生成新文件|生成|创建|新建|起草|撰写|写",
+    re.IGNORECASE,
+)
+_CO_CREATE_DRAFT_NOUN_RE = re.compile(
+    r"文稿|文档|稿件|报告|方案|文章|PRD|需求文档|汇报|总结|脚本|纪要|提案|计划|"
+    r"演讲稿|讲话稿|发言稿|讲稿|发布会稿|新闻稿|通稿|主持稿|稿",
+    re.IGNORECASE,
+)
+_CO_CREATE_DRAFT_SHORT_RE = re.compile(
+    r"(?:撰写|写|起草|生成).{0,32}稿",
+    re.IGNORECASE,
+)
+
+
+def should_skip_kb_prefetch_for_co_create_draft(text: str) -> bool:
+    """共创写稿：跳过阻塞式 KB 预检索，由 Agent 按需调用工具，降低首字等待。"""
+    t = (text or "").strip()
+    if not t:
+        return False
+    if t.startswith("/生成新文件"):
+        return True
+    compact = re.sub(r"\s+", "", t)
+    if _CO_CREATE_DRAFT_VERB_RE.search(compact) and _CO_CREATE_DRAFT_NOUN_RE.search(compact):
+        return True
+    return bool(_CO_CREATE_DRAFT_SHORT_RE.search(compact))
+
+
 def orchestration_mode() -> str:
     return os.getenv("HERMES_ORCHESTRATION_MODE", "prompt").strip().lower()
 
@@ -127,7 +155,11 @@ def _build_orchestration_guidance(
             [
                 "当任务涉及在项目内新建文稿、改写已有输出物或直接落成文件时，优先调用 `write_file` 或 `patch` 真正执行文件创建/编辑，不要只停留在口头建议。",
                 "若你执行了 `write_file` 或 `patch`，最终回复末尾必须追加一个 `tphermes_file_actions` JSON 代码块，用于将实际结果同步回 TPDHermes 的 OutputAsset。",
-                "该代码块格式为：```tphermes_file_actions {\"actions\":[...]} ```；create 动作至少包含 type/fileName/path/content，patch 动作在上下文已给出 output_id 时至少包含 type/fileId/fileKind=fileName/after。",
+                "该代码块格式为：```tphermes_file_actions {\"actions\":[...]} ```；create 动作至少包含 type、fileName、path、content。",
+                "create 的 path 必须为 `/输出/{fileName}` 形式的项目虚拟路径，禁止使用本机绝对路径（如 /Users/…）。",
+                "长文稿正文应写在回复正文中；tphermes_file_actions 内 content 须与正文一致且为合法 JSON，避免在 JSON 中塞入未转义超长正文导致截断。",
+                "patch 动作支持三种 editMode：full（整篇 after）、search_replace（oldString+newString，须唯一匹配）、line_range（startLine/endLine+newText，用于选段改写）。",
+                "当用户消息含文件选段引用时，必须使用 search_replace 或 line_range，禁止无关全文重写。",
                 "若本轮只是分析或问答，没有真实文件落地，则不要输出 `tphermes_file_actions`。",
             ]
         )

@@ -35,6 +35,7 @@ type SendMessageOptions = {
   regionExcerpts?: import("@/app/chat/chat-types").MessageRegionExcerpt[];
   useOrchestrationOverride?: boolean;
   skipToolsContextBuild?: boolean;
+  scenarioPresetInstructionsAppend?: string;
 };
 
 type UseChatExecutionOptions = {
@@ -299,6 +300,7 @@ export function useChatExecution(options: UseChatExecutionOptions) {
       priorSession,
       useOrchestrationOverride,
       fastPathEnabled,
+      scenarioPresetInstructionsAppend,
     }: RunAssistantStreamParams) => {
       const effectiveUseOrchestration = useOrchestrationOverride ?? useOrchestration;
       setStreaming(true);
@@ -461,6 +463,14 @@ export function useChatExecution(options: UseChatExecutionOptions) {
             body.task_input = { extra: extraParts.join("\n\n") };
           }
           if (scenarioPresetInstructions) body.scenario_preset_instructions = scenarioPresetInstructions;
+          if (scenarioPresetInstructionsAppend?.trim()) {
+            body.scenario_preset_instructions = [
+              body.scenario_preset_instructions,
+              scenarioPresetInstructionsAppend.trim(),
+            ]
+              .filter(Boolean)
+              .join("\n\n");
+          }
           if (scenarioOpeningHint) body.scenario_opening_hint = scenarioOpeningHint;
           if (coCreateSessionId) body.session_id = coCreateSessionId;
           if (projectFileIds?.length) body.project_file_ids = projectFileIds;
@@ -916,6 +926,7 @@ export function useChatExecution(options: UseChatExecutionOptions) {
       priorSession: sessionAfterUser,
       useOrchestrationOverride: effectiveUseOrchestration,
       fastPathEnabled,
+      scenarioPresetInstructionsAppend: sendOptions?.scenarioPresetInstructionsAppend,
     });
   }, [
     activeIdRef,

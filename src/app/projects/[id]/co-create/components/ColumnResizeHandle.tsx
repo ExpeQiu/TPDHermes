@@ -1,49 +1,68 @@
 "use client";
 
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useRef } from "react";
 
 type Props = {
   onDrag: (deltaX: number) => void;
   onDragEnd?: () => void;
+  onDragStart?: () => void;
 };
 
-export function ColumnResizeHandle({ onDrag, onDragEnd }: Props) {
+export function ColumnResizeHandle({ onDrag, onDragEnd, onDragStart }: Props) {
   const draggingRef = useRef(false);
+  const lastXRef = useRef(0);
 
-  const stopDrag = useCallback(() => {
-    if (!draggingRef.current) return;
-    draggingRef.current = false;
-    document.body.style.removeProperty("cursor");
-    document.body.style.removeProperty("user-select");
-    onDragEnd?.();
-  }, [onDragEnd]);
-
-  useEffect(() => {
-    const onMove = (event: MouseEvent) => {
+  const stopDrag = useCallback(
+    (pointerId?: number, target?: HTMLElement | null) => {
       if (!draggingRef.current) return;
-      onDrag(event.movementX);
-    };
-    window.addEventListener("mousemove", onMove);
-    window.addEventListener("mouseup", stopDrag);
-    return () => {
-      window.removeEventListener("mousemove", onMove);
-      window.removeEventListener("mouseup", stopDrag);
-    };
-  }, [onDrag, stopDrag]);
+      draggingRef.current = false;
+      document.body.style.removeProperty("cursor");
+      document.body.style.removeProperty("user-select");
+      if (target && pointerId != null && target.hasPointerCapture(pointerId)) {
+        target.releasePointerCapture(pointerId);
+      }
+      onDragEnd?.();
+    },
+    [onDragEnd],
+  );
 
   return (
     <div
       role="separator"
       aria-orientation="vertical"
       aria-label="调整栏宽"
-      onMouseDown={() => {
+      onPointerDown={(event) => {
+        if (event.button !== 0) return;
+        event.preventDefault();
+        event.stopPropagation();
         draggingRef.current = true;
+        lastXRef.current = event.clientX;
+        onDragStart?.();
+        event.currentTarget.setPointerCapture(event.pointerId);
         document.body.style.cursor = "col-resize";
         document.body.style.userSelect = "none";
       }}
-      className="group relative z-10 w-1 shrink-0 cursor-col-resize bg-slate-300/40 hover:bg-blue-500/35 active:bg-blue-500/50 dark:bg-slate-700/60"
+      onPointerMove={(event) => {
+        if (!draggingRef.current) return;
+        const delta = event.clientX - lastXRef.current;
+        lastXRef.current = event.clientX;
+        if (delta !== 0) onDrag(delta);
+      }}
+      onPointerUp={(event) => {
+        stopDrag(event.pointerId, event.currentTarget);
+      }}
+      onPointerCancel={(event) => {
+        stopDrag(event.pointerId, event.currentTarget);
+      }}
+      onLostPointerCapture={(event) => {
+        stopDrag(event.pointerId, event.currentTarget);
+      }}
+      className="group absolute top-0 left-0 z-30 h-full w-3 -translate-x-1/2 cursor-col-resize touch-none select-none hover:bg-blue-500/15 active:bg-blue-500/25"
     >
-      <div className="absolute inset-y-0 -left-1 -right-1" />
+      <span
+        aria-hidden
+        className="pointer-events-none absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-slate-300 group-hover:bg-blue-400 group-active:bg-blue-500 dark:bg-slate-600 dark:group-hover:bg-blue-400"
+      />
     </div>
   );
 }

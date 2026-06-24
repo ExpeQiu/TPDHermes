@@ -256,3 +256,130 @@ def test_archived_output_is_hidden_from_unified_files_and_context():
         context = client.get(f"/api/v1/projects/{project_id}/context", headers=headers)
         assert context.status_code == 200
         assert all(item["id"] != output_id for item in context.json()["recent_outputs"])
+
+
+def test_project_file_patch_search_replace_overwrite():
+    headers = {"X-User-ID": f"co_create_sr_{uuid.uuid4().hex[:8]}"}
+    with TestClient(app) as client:
+        proj = client.post(
+            "/api/v1/projects",
+            headers=headers,
+            json={"name": "局部替换项目", "status": "active"},
+        )
+        assert proj.status_code == 200
+        project_id = proj.json()["id"]
+
+        created = client.post(
+            f"/api/v1/projects/{project_id}/file-actions/apply",
+            headers=headers,
+            json={
+                "proposal_id": "create-sr",
+                "action": {
+                    "type": "create",
+                    "file_name": "局部.md",
+                    "path": "/",
+                    "content": "第一行\n目标段落\n第三行",
+                },
+            },
+        )
+        assert created.status_code == 200, created.text
+        file_id = created.json()["file_id"]
+
+        patched = client.post(
+            f"/api/v1/projects/{project_id}/file-actions/apply",
+            headers=headers,
+            json={
+                "proposal_id": "patch-sr",
+                "action": {
+                    "type": "patch",
+                    "target_file_id": file_id,
+                    "target_kind": "output",
+                    "file_name": "局部.md",
+                    "save_mode": "overwrite",
+                    "edit_mode": "search_replace",
+                    "old_string": "目标段落",
+                    "new_string": "已替换段落",
+                },
+            },
+        )
+        assert patched.status_code == 200, patched.text
+
+        detail = client.get(
+            f"/api/v1/projects/{project_id}/files/{file_id}?kind=output",
+            headers=headers,
+        )
+        assert detail.status_code == 200
+        assert detail.json()["content"] == "第一行\n已替换段落\n第三行"
+
+
+def test_project_file_patch_overwrite_archives_version_history():
+    """覆盖保存：原稿就地更新，旧内容归档为历史版本。"""
+    headers = {"X-User-ID": f"co_create_ow_{uuid.uuid4().hex[:8]}"}
+    with TestClient(app) as client:
+        proj = client.post(
+            "/api/v1/projects",
+            headers=headers,
+            json={"name": "覆盖版本项目", "status": "active"},
+        )
+        assert proj.status_code == 200
+        project_id = proj.json()["id"]
+
+        created = client.post(
+            f"/api/v1/projects/{project_id}/file-actions/apply",
+            headers=headers,
+            json={
+                "proposal_id": "create-ow",
+                "action": {
+                    "type": "create",
+                    "file_name": "覆盖稿.md",
+                    "path": "/输出",
+                    "content": "# 第一版正文",
+                },
+            },
+        )
+        assert created.status_code == 200, created.text
+        file_id = created.json()["file_id"]
+        assert created.json()["version"] == "1"
+
+        patched = client.post(
+            f"/api/v1/projects/{project_id}/file-actions/apply",
+            headers=headers,
+            json={
+                "proposal_id": "patch-ow",
+                "action": {
+                    "type": "patch",
+                    "target_file_id": file_id,
+                    "target_kind": "output",
+                    "file_name": "覆盖稿.md",
+                    "content": "# 第二版正文",
+                    "save_mode": "overwrite",
+                },
+            },
+        )
+        assert patched.status_code == 200, patched.text
+        body = patched.json()
+        assert body["file_id"] == file_id
+        assert body["version"] == "2"
+
+        detail = client.get(
+            f"/api/v1/projects/{project_id}/files/{file_id}?kind=output",
+            headers=headers,
+        )
+        assert detail.status_code == 200
+        assert detail.json()["content"] == "# 第二版正文"
+        assert detail.json()["version"] == "2"
+
+        versions = client.get(
+            f"/api/v1/projects/{project_id}/files/{file_id}/versions?kind=output",
+            headers=headers,
+        )
+        assert versions.status_code == 200
+        items = versions.json()["items"]
+        assert len(items) == 2
+        version_nums = {item["version"] for item in items}
+        assert version_nums == {"1", "2"}
+
+        files = client.get(f"/api/v1/projects/{project_id}/files", headers=headers)
+        assert files.status_code == 200
+        output_titles = [item["title"] for item in files.json()["items"] if item["kind"] == "output"]
+        assert output_titles.count("覆盖稿.md") == 1

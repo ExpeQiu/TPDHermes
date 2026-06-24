@@ -5,6 +5,8 @@ export type FileRefState = "unselected" | "round" | "pinned" | "ai_suggested";
 
 export type FileActionStatus = "proposed" | "applying" | "applied" | "rejected" | "failed";
 
+export type PatchEditMode = "full" | "search_replace" | "line_range";
+
 export type FileActionProposal =
   | {
       type: "create";
@@ -13,6 +15,8 @@ export type FileActionProposal =
       path: string;
       content: string;
       status: FileActionStatus;
+      /** 最近一次 apply 失败时的错误信息（便于排查与重试） */
+      applyError?: string;
     }
   | {
       type: "patch";
@@ -25,6 +29,15 @@ export type FileActionProposal =
       after: string;
       diff?: string;
       status: FileActionStatus;
+      editMode?: PatchEditMode;
+      oldString?: string;
+      newString?: string;
+      replaceAll?: boolean;
+      startLine?: number;
+      endLine?: number;
+      newText?: string;
+      /** 最近一次 apply 失败时的错误信息 */
+      applyError?: string;
     };
 
 export type FileRecommendation = {
@@ -38,6 +51,8 @@ export type FileRecommendation = {
 export type CoCreateSaveState = "idle" | "saving" | "saved" | "error" | "pending_apply";
 export type CoCreatePipeline = "fast" | "co_create" | "rewrite" | "research";
 export type CoCreatePipelinePreference = "auto" | CoCreatePipeline;
+
+export type { CoCreateAgentMode, CoCreateApplyMode } from "@/app/projects/[id]/co-create/co-create-agent-utils";
 
 export function coCreatePipelineMeta(pipeline: CoCreatePipeline): {
   label: string;

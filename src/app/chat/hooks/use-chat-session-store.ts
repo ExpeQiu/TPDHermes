@@ -23,6 +23,7 @@ import {
 } from "@/lib/chat-session-utils";
 
 import type { ChatSession, Message } from "@/app/chat/chat-types";
+import { parseAgentUndoStack } from "@/app/projects/[id]/co-create/co-create-agent-undo";
 
 type UseChatSessionStoreOptions = {
   scopeUserId: string;
@@ -97,14 +98,70 @@ function filterSessionsForNamespace(
   if (namespace === "co-create") {
     return sessions.filter((session) => isProjectCoCreateSession(session));
   }
-  return sessions;
+  return sessions.filter((session) => !isProjectCoCreateSession(session));
 }
 
 function filterSummariesForNamespace(
   summaries: ServerChatSessionSummary[],
   namespace: string,
 ): ServerChatSessionSummary[] {
-  return summaries;
+  if (namespace === "co-create") {
+    return summaries.filter((summary) => summary.sessionKind === "project_co_create");
+  }
+  return summaries.filter((summary) => summary.sessionKind !== "project_co_create");
+}
+
+function mergeSessionWithLocal(serverSession: ChatSession, localSession?: ChatSession): ChatSession {
+  if (!localSession) return serverSession;
+  const useLocalMessages = localSession.messages.length > serverSession.messages.length;
+  return {
+    ...localSession,
+    ...serverSession,
+    title: serverSession.title || localSession.title,
+    messages: useLocalMessages ? localSession.messages : serverSession.messages,
+    selectedProjectId: serverSession.selectedProjectId?.trim()
+      ? serverSession.selectedProjectId
+      : localSession.selectedProjectId,
+    pinnedFileIds:
+      (serverSession.pinnedFileIds?.length ?? 0) > 0
+        ? serverSession.pinnedFileIds
+        : localSession.pinnedFileIds,
+    roundFileIds:
+      (serverSession.roundFileIds?.length ?? 0) > 0
+        ? serverSession.roundFileIds
+        : localSession.roundFileIds,
+    agentUndoStack:
+      (serverSession.agentUndoStack?.length ?? 0) > 0
+        ? serverSession.agentUndoStack
+        : localSession.agentUndoStack,
+  };
+}
+
+function mergeLocalSessionsWithServer(
+  serverSessions: ChatSession[],
+  localSessions: ChatSession[],
+): ChatSession[] {
+  const localById = new Map(localSessions.map((session) => [session.id, session]));
+  const merged = serverSessions.map((session) =>
+    mergeSessionWithLocal(session, localById.get(session.id)),
+  );
+  const serverIds = new Set(serverSessions.map((session) => session.id));
+  for (const local of localSessions) {
+    if (!serverIds.has(local.id)) merged.push(local);
+  }
+  return merged;
+}
+
+function sessionsNeedingMessageSync(
+  merged: ChatSession[],
+  serverSessions: ChatSession[],
+): ChatSession[] {
+  const serverById = new Map(serverSessions.map((session) => [session.id, session]));
+  return merged.filter((session) => {
+    const server = serverById.get(session.id);
+    if (!server) return session.messages.length > 0;
+    return session.messages.length > server.messages.length;
+  });
 }
 
 export function sessionToPatchPayload(session: ChatSession): Record<string, unknown> {
@@ -135,6 +192,9 @@ export function sessionToPatchPayload(session: ChatSession): Record<string, unkn
     archived: session.archived ?? false,
     pendingProposalIds: session.pendingProposalIds ?? [],
     coCreatePipelinePreference: session.coCreatePipelinePreference ?? "auto",
+    coCreateAgentMode: session.coCreateAgentMode ?? "agent",
+    coCreateApplyMode: session.coCreateApplyMode ?? "auto",
+    agentUndoStack: session.agentUndoStack ?? [],
   };
 }
 
@@ -217,6 +277,25 @@ function serverSessionToClient(raw: Record<string, unknown>): ChatSession {
     pendingProposalIds: Array.isArray(raw.pendingProposalIds)
       ? (raw.pendingProposalIds as string[])
       : [],
+    coCreatePipelinePreference:
+      raw.coCreatePipelinePreference === "auto" ||
+      raw.coCreatePipelinePreference === "fast" ||
+      raw.coCreatePipelinePreference === "co_create" ||
+      raw.coCreatePipelinePreference === "rewrite" ||
+      raw.coCreatePipelinePreference === "research"
+        ? raw.coCreatePipelinePreference
+        : "auto",
+    coCreateAgentMode:
+      raw.coCreateAgentMode === "ask" ||
+      raw.coCreateAgentMode === "agent" ||
+      raw.coCreateAgentMode === "plan"
+        ? raw.coCreateAgentMode
+        : "agent",
+    coCreateApplyMode:
+      raw.coCreateApplyMode === "auto" || raw.coCreateApplyMode === "review"
+        ? raw.coCreateApplyMode
+        : "auto",
+    agentUndoStack: parseAgentUndoStack(raw.agentUndoStack),
   };
 }
 
@@ -473,7 +552,7 @@ export function useChatSessionStore({
       saveAndSet(next);
       if (activeIdRef.current === id) {
         setActiveId(next[0].id);
-        localStorage.setItem(chatActiveStorageKey(scopeUserId), next[0].id);
+        localStorage.setItem(chatActiveStorageKey(scopeUserId, storageNamespace), next[0].id);
       }
     },
     [createSession, saveAndSet, scopeUserId, storageNamespace],
@@ -543,6 +622,7 @@ export function useChatSessionStore({
           setSessions(normalized);
           setActiveId(active && normalized.find((session) => session.id === active) ? active : normalized[0].id);
         }
+        saveSessions(scopeUserId, sessionsRef.current, storageNamespace);
       };
 
       try {
@@ -581,7 +661,20 @@ export function useChatSessionStore({
             }
           }
           if (cancelled) return;
-          initFromSessions(filterSessionsForNamespace(clientSessions, storageNamespace));
+          const scopedServer = filterSessionsForNamespace(clientSessions, storageNamespace);
+          const merged = mergeLocalSessionsWithServer(scopedServer, localRaw);
+          for (const session of sessionsNeedingMessageSync(merged, scopedServer)) {
+            console.info("[chat] 本地消息比服务端新，补同步", {
+              session_id: session.id,
+              message_count: session.messages.length,
+            });
+            void syncChatSessionMessagesOnServer(session.id, {
+              messages: session.messages.map((message, index) => messageToSyncPayload(message, index)),
+            }).catch((err) => {
+              console.warn("[chat] 补同步消息失败", session.id, err);
+            });
+          }
+          initFromSessions(merged);
           return;
         }
         initFromSessions(localRaw);

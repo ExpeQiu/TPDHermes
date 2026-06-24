@@ -3,10 +3,34 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { act, renderHook, waitFor } from "@/test-utils/hook-test-utils";
 import {
   CO_CREATE_COLUMN_MIN,
+  fitWidthsToContainer,
   useCoCreateColumnWidths,
 } from "./use-co-create-column-widths";
 
 const STORAGE_KEY = "tphermes-co-create-column-widths-v2";
+
+describe("fitWidthsToContainer", () => {
+  it("scales columns to fill the container width", () => {
+    const fitted = fitWidthsToContainer(
+      { session: 224, message: 360, preview: 360, files: 256 },
+      1200,
+      true,
+    );
+    const total = fitted.session + fitted.message + fitted.preview + fitted.files;
+    expect(total).toBe(1200);
+  });
+
+  it("ignores session width when the sidebar is collapsed", () => {
+    const fitted = fitWidthsToContainer(
+      { session: 224, message: 360, preview: 360, files: 256 },
+      1000,
+      false,
+    );
+    const total = fitted.message + fitted.preview + fitted.files;
+    expect(total).toBe(1000);
+    expect(fitted.session).toBe(224);
+  });
+});
 
 describe("useCoCreateColumnWidths", () => {
   beforeEach(() => {
@@ -42,10 +66,10 @@ describe("useCoCreateColumnWidths", () => {
     localStorage.setItem(
       STORAGE_KEY,
       JSON.stringify({
-        session: 224,
+        session: 200,
         message: 360,
         preview: 360,
-        files: 256,
+        files: 240,
       }),
     );
 
@@ -67,10 +91,10 @@ describe("useCoCreateColumnWidths", () => {
     });
 
     expect(JSON.parse(localStorage.getItem(STORAGE_KEY) || "{}")).toMatchObject({
-      session: 224,
+      session: 200,
       message: 500,
       preview: CO_CREATE_COLUMN_MIN.preview,
-      files: 256,
+      files: 240,
     });
   });
 });

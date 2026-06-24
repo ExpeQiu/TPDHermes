@@ -81,8 +81,23 @@ def _load_model():
 
     name = embed_model_name()
     cache_root = _configure_embed_cache_env()
-    logger.info("loading sentence-transformers model=%s cache_dir=%s", name, cache_root)
-    return SentenceTransformer(name)
+    hf_endpoint = os.getenv("HF_ENDPOINT", "").strip()
+    if hf_endpoint:
+        os.environ.setdefault("HF_ENDPOINT", hf_endpoint)
+    logger.info(
+        "loading sentence-transformers model=%s cache_dir=%s hf_endpoint=%s",
+        name,
+        cache_root,
+        hf_endpoint or "default",
+    )
+    try:
+        return SentenceTransformer(name)
+    except Exception as exc:
+        logger.error("embedding model load failed model=%s err=%s", name, exc)
+        raise RuntimeError(
+            f"无法加载 Embedding 模型 {name}（网络或缓存问题）。"
+            "可设置 KB_EMBED_ENABLED=0 关闭向量检索，或配置 HF_ENDPOINT 镜像。"
+        ) from exc
 
 
 def embed_texts_sync(texts: Sequence[str]) -> list[list[float]]:

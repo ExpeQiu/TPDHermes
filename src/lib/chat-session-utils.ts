@@ -67,6 +67,8 @@ export function projectCoCreateSessionDefaults(projectId: string): Partial<ChatS
     archived: false,
     pendingProposalIds: [],
     coCreatePipelinePreference: "auto",
+    coCreateAgentMode: "agent",
+    coCreateApplyMode: "auto",
   };
 }
 

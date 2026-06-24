@@ -36,10 +36,10 @@ export function FileDiffModal({
         </div>
         <div className="flex shrink-0 flex-wrap gap-2 border-t border-slate-200 p-4 dark:border-slate-700">
           <button type="button" onClick={onApply} className="rounded-lg bg-blue-600 px-3 py-1.5 text-xs text-white">
-            应用修改
+            覆盖保存
           </button>
           <button type="button" onClick={onSaveVersion} className="rounded-lg border px-3 py-1.5 text-xs">
-            另存为新版本
+            另存为独立文件
           </button>
           <button type="button" onClick={onSaveCopy} className="rounded-lg border px-3 py-1.5 text-xs">
             另存为副本

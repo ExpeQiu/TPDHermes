@@ -7,8 +7,15 @@ import {
   buildStreamingWaitHint,
   isFirstAssistantTurn,
 } from "@/lib/streaming-wait-hint";
-import type { AssistantFileToolEvent, Message, MessageRegionExcerpt } from "@/app/chat/chat-types";
+import type { AssistantToolEvent, Message, MessageRegionExcerpt } from "@/app/chat/chat-types";
 import type { FileActionProposal } from "@/app/projects/[id]/co-create/co-create-types";
+import {
+  parseAgentPlanFromContent,
+  stripAgentPlanBlock,
+} from "@/app/projects/[id]/co-create/co-create-agent-utils";
+import { stripFileActionsBlock } from "@/app/projects/[id]/co-create/co-create-file-actions";
+import { AgentActivityTimeline } from "@/app/projects/[id]/co-create/components/AgentActivityTimeline";
+import { AgentPlanCard } from "@/app/projects/[id]/co-create/components/AgentPlanCard";
 import type { ReactNode } from "react";
 
 export const CO_CREATE_QUICK_ENTRIES = [
@@ -110,6 +117,17 @@ export function CoCreateMessageStream({
             message.role === "assistant"
               ? summarizeFileExecution(message.fileActions, message.toolEvents)
               : null;
+          const agentPlan =
+            message.agentPlan ??
+            (message.role === "assistant" ? parseAgentPlanFromContent(message.content) : null);
+          const displayContent = (() => {
+            if (message.role !== "assistant") return message.content;
+            let text = message.content;
+            if (parseAgentPlanFromContent(text)) {
+              text = stripAgentPlanBlock(text);
+            }
+            return stripFileActionsBlock(text);
+          })();
 
           return (
             <div
@@ -124,12 +142,22 @@ export function CoCreateMessageStream({
                 <UserMessageBubble message={message} />
               ) : (
                 <>
+                  {isStreamingAssistant ? (
+                    <AgentActivityTimeline
+                      phase={streamingPhase}
+                      toolEvents={message.toolEvents}
+                      streaming
+                    />
+                  ) : message.toolEvents?.length ? (
+                    <AgentActivityTimeline toolEvents={message.toolEvents} />
+                  ) : null}
+                  {agentPlan && !isStreamingAssistant ? <AgentPlanCard plan={agentPlan} /> : null}
                   {actionSummary && !isStreamingAssistant ? (
                     <AgentExecutionPanel summary={actionSummary} />
                   ) : null}
-                  {message.content ? (
+                  {displayContent ? (
                     <ChatMarkdownWithCitations
-                      content={message.content}
+                      content={displayContent}
                       citations={message.citations}
                       unresolvedCitationRefs={message.unresolvedCitationRefs}
                       streaming={isStreamingAssistant}
@@ -139,12 +167,11 @@ export function CoCreateMessageStream({
                       {actionSummary.fallbackText}
                     </p>
                   ) : null}
-                  {message.toolEvents?.length ? <FileToolEventCards events={message.toolEvents} /> : null}
-                  {isStreamingAssistant ? (
+                  {isStreamingAssistant && !displayContent?.trim() ? (
                     <StreamingWaitHint
                       text={buildStreamingWaitHint({
                         isFirstTurn: isFirstAssistantTurn(messages),
-                        includeProject: true,
+                        includeProject: !streamingPhase?.startsWith("co_create"),
                         phase: streamingPhase,
                       })}
                     />
@@ -161,14 +188,14 @@ export function CoCreateMessageStream({
 
 function summarizeFileExecution(
   actions?: FileActionProposal[],
-  toolEvents?: AssistantFileToolEvent[],
+  toolEvents?: AssistantToolEvent[],
 ) {
   if (!actions?.length && !toolEvents?.length) return null;
   if (actions?.length) return summarizeFileActions(actions);
   return summarizeToolEvents(toolEvents);
 }
 
-function summarizeToolEvents(events?: AssistantFileToolEvent[]) {
+function summarizeToolEvents(events?: AssistantToolEvent[]) {
   if (!events?.length) return null;
   const running = events.filter((event) => event.status === "running").length;
   const completed = events.filter((event) => event.status === "completed").length;
@@ -180,16 +207,16 @@ function summarizeToolEvents(events?: AssistantFileToolEvent[]) {
   if (running > 0) {
     return {
       tone: "working" as const,
-      title: `Agent 正在执行 ${running} 项文件编辑`,
-      detail: names ? `正在处理 ${names}。` : "正在创建或修改项目文稿。",
-      fallbackText: names ? `正在执行文件编辑：${names}` : "正在执行文件编辑。",
+      title: `Agent 正在执行 ${running} 项操作`,
+      detail: names ? `正在处理 ${names}。` : "正在调用工具。",
+      fallbackText: names ? `正在执行：${names}` : "正在执行工具调用。",
     };
   }
   return {
     tone: "success" as const,
-    title: "Agent 已完成文件编辑",
-    detail: names || `共完成 ${completed} 项文件编辑`,
-    fallbackText: names ? `已完成文件编辑：${names}` : "已完成文件编辑。",
+    title: "Agent 已完成工具调用",
+    detail: names || `共完成 ${completed} 项操作`,
+    fallbackText: names ? `已完成：${names}` : "已完成工具调用。",
   };
 }
 
@@ -251,38 +278,6 @@ function summarizeFileActions(actions?: FileActionProposal[]) {
     detail: names || "本轮包含文件操作。",
     fallbackText: names ? `文件操作已结束：${names}` : "文件操作已结束。",
   };
-}
-
-function FileToolEventCards({ events }: { events: AssistantFileToolEvent[] }) {
-  return (
-    <div className="mb-3 space-y-2">
-      {events.map((event) => {
-        const toneClass =
-          event.status === "completed"
-            ? "border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-800/60 dark:bg-emerald-950/30 dark:text-emerald-200"
-            : "border-blue-200 bg-blue-50 text-blue-800 dark:border-blue-800/60 dark:bg-blue-950/30 dark:text-blue-200";
-        const title =
-          event.toolName === "patch"
-            ? event.status === "completed"
-              ? "已完成文件修改"
-              : "正在修改文件"
-            : event.status === "completed"
-              ? "已完成文件写入"
-              : "正在写入文件";
-        return (
-          <div key={event.toolCallId} className={`rounded-xl border px-3 py-2 ${toneClass}`}>
-            <div className="flex items-center gap-2 text-xs font-semibold">
-              <span>{event.emoji || (event.toolName === "patch" ? "✎" : "↳")}</span>
-              <span>{title}</span>
-            </div>
-            <p className="mt-1 break-all text-xs opacity-90">
-              {event.path || event.label || event.toolName}
-            </p>
-          </div>
-        );
-      })}
-    </div>
-  );
 }
 
 function AgentExecutionPanel({

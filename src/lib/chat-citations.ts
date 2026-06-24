@@ -1,5 +1,5 @@
 import { isInternalSectionCollection } from "@/lib/kb-collection-catalog";
-import type { AssistantFileToolEvent } from "@/app/chat/chat-types";
+import type { AssistantToolEvent } from "@/app/chat/chat-types";
 
 export interface CitationSource {
   ref: number;
@@ -96,16 +96,30 @@ export interface TpHermesStreamMeta {
   kbPrefetchCount?: number;
   lightweight?: boolean;
   fileActions?: Array<Record<string, unknown>>;
-  toolEvents?: AssistantFileToolEvent[];
+  toolEvents?: AssistantToolEvent[];
 }
 
-function mapToolEventRow(raw: Record<string, unknown>): AssistantFileToolEvent | null {
-  const toolName = raw.tool_name ?? raw.toolName ?? raw.tool;
-  if (toolName !== "write_file" && toolName !== "patch") return null;
+const KNOWN_TOOL_NAMES = new Set([
+  "write_file",
+  "patch",
+  "kb_query",
+  "kb_get_entry",
+  "kb_list_collections",
+  "tavily_search",
+  "tavily_extract",
+  "workshop_generate",
+  "workshop_generate_from_kb",
+]);
+
+function mapToolEventRow(raw: Record<string, unknown>): AssistantToolEvent | null {
+  const toolNameRaw = raw.tool_name ?? raw.toolName ?? raw.tool;
+  if (typeof toolNameRaw !== "string" || !toolNameRaw.trim()) return null;
+  const toolName = toolNameRaw.trim();
+  if (!KNOWN_TOOL_NAMES.has(toolName)) return null;
   const toolCallId = raw.tool_call_id ?? raw.toolCallId;
   const status = raw.status;
   if (typeof toolCallId !== "string" || !toolCallId) return null;
-  if (status !== "running" && status !== "completed") return null;
+  if (status !== "running" && status !== "completed" && status !== "failed") return null;
   const path =
     typeof raw.path === "string"
       ? raw.path
@@ -119,6 +133,7 @@ function mapToolEventRow(raw: Record<string, unknown>): AssistantFileToolEvent |
     label: typeof raw.label === "string" ? raw.label : undefined,
     emoji: typeof raw.emoji === "string" ? raw.emoji : undefined,
     path,
+    summary: typeof raw.summary === "string" ? raw.summary : undefined,
   };
 }
 
@@ -222,7 +237,7 @@ export function parseTpHermesStreamMeta(data: string): TpHermesStreamMeta | null
         ? task.tool_events
             .filter((row): row is Record<string, unknown> => typeof row === "object" && row !== null)
             .map(mapToolEventRow)
-            .filter((row): row is AssistantFileToolEvent => row !== null)
+            .filter((row): row is AssistantToolEvent => row !== null)
         : undefined,
     };
   } catch {

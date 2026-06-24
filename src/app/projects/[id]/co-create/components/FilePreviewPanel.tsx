@@ -2,7 +2,9 @@
 
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent, type MouseEvent, type ReactNode } from "react";
 import { InlineTextDiff } from "@/app/projects/[id]/co-create/components/InlineTextDiff";
-import type { SelectionToChatPayload } from "@/app/projects/[id]/co-create/co-create-types";
+import type { PatchEditMode, SelectionToChatPayload } from "@/app/projects/[id]/co-create/co-create-types";
+import { patchEditModeLabel } from "@/app/projects/[id]/co-create/co-create-partial-patch";
+import { ProjectOutputContentBody } from "@/components/project-output-content";
 import type { ProjectFileDetail, ProjectFileVersionItem } from "@/lib/co-create-api";
 
 type ViewTab = "preview" | "edit" | "versions";
@@ -31,7 +33,12 @@ type Props = {
   onEditSelection?: (text: string) => void;
   onRewriteSelection?: (payload: SelectionToChatPayload) => void;
   /** 待确认的 AI 改写提案，预览区以 diff 高亮展示 */
-  pendingPatch?: { before: string; after: string; summary?: string } | null;
+  pendingPatch?: {
+    before: string;
+    after: string;
+    summary?: string;
+    editMode?: PatchEditMode;
+  } | null;
 };
 
 function getSelectionMeta(container: HTMLElement | null): SelectionToChatPayload | null {
@@ -104,6 +111,8 @@ export function FilePreviewPanel({
   const showPatchDiff = Boolean(pendingPatch && viewTab === "preview");
   const diffBefore = pendingPatch?.before ?? savedContent;
   const diffAfter = pendingPatch?.after ?? savedContent;
+  const focusedDiff =
+    pendingPatch?.editMode === "search_replace" || pendingPatch?.editMode === "line_range";
 
   const closeSelectionMenu = useCallback(() => setSelectionMenu(null), []);
 
@@ -270,7 +279,7 @@ export function FilePreviewPanel({
   }, [activeFileKey, canEdit, handleSave, isDirty, onSaveContent, saving, viewTab]);
 
   return (
-    <aside className="flex h-full min-h-0 flex-col overflow-hidden border-l border-slate-300 bg-slate-100 dark:border-slate-700 dark:bg-slate-900/40">
+    <aside className="flex h-full min-h-0 flex-col overflow-hidden bg-slate-100 dark:bg-slate-900/40">
       <div className="shrink-0 space-y-2 border-b border-slate-300 p-3 dark:border-slate-700">
         <p className="text-xs font-semibold text-slate-700 dark:text-slate-200">文件预览</p>
         {openTabKeys.length > 0 ? (
@@ -426,14 +435,26 @@ export function FilePreviewPanel({
                 <>
                   <div className="mb-2 rounded-md border border-amber-200 bg-amber-50 px-2 py-1 text-[10px] text-amber-800 dark:border-amber-800/60 dark:bg-amber-950/30 dark:text-amber-200">
                     AI 修改预览
+                    {pendingPatch?.editMode && pendingPatch.editMode !== "full"
+                      ? ` · ${patchEditModeLabel(pendingPatch.editMode)}`
+                      : ""}
                     {pendingPatch?.summary ? ` · ${pendingPatch.summary}` : ""}
                   </div>
-                  <InlineTextDiff before={diffBefore} after={diffAfter} showLegend />
+                  <InlineTextDiff
+                    before={diffBefore}
+                    after={diffAfter}
+                    showLegend
+                    focused={focusedDiff}
+                  />
                 </>
               ) : (
-                <pre className="select-text whitespace-pre-wrap break-words font-sans text-slate-800 dark:text-slate-200">
-                  {savedContent.slice(0, 8000) || "（无正文）"}
-                </pre>
+                <div className="select-text text-slate-800 dark:text-slate-200">
+                  <ProjectOutputContentBody
+                    content={savedContent || null}
+                    contentFormat={previewDetail?.content_format}
+                    loading={previewLoading}
+                  />
+                </div>
               )}
 
               {selectionMenu && viewTab === "preview" ? (

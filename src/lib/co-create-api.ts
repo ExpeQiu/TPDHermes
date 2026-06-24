@@ -37,10 +37,18 @@ export interface FileActionApplyRequest {
     type: "create" | "patch";
     file_name?: string;
     path?: string;
-    content: string;
+    content?: string;
     target_file_id?: string;
     target_kind?: ProjectFileKind;
     save_mode?: "overwrite" | "new_version" | "copy";
+    edit_mode?: "full" | "search_replace" | "line_range";
+    old_string?: string;
+    new_string?: string;
+    replace_all?: boolean;
+    start_line?: number;
+    end_line?: number;
+    new_text?: string;
+    after?: string;
   };
 }
 

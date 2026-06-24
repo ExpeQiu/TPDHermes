@@ -10,7 +10,6 @@ export type CoCreateColumnWidths = {
 };
 
 const STORAGE_KEY = "tphermes-co-create-column-widths-v2";
-const HANDLE_WIDTH = 4;
 
 export const CO_CREATE_COLUMN_MIN: CoCreateColumnWidths = {
   session: 160,
@@ -20,11 +19,21 @@ export const CO_CREATE_COLUMN_MIN: CoCreateColumnWidths = {
 };
 
 export const CO_CREATE_COLUMN_DEFAULT: CoCreateColumnWidths = {
-  session: 224,
+  session: 200,
   message: 360,
   preview: 360,
-  files: 256,
+  files: 240,
 };
+
+function visibleKeys(sidebarOpen: boolean): (keyof CoCreateColumnWidths)[] {
+  return sidebarOpen
+    ? ["session", "message", "preview", "files"]
+    : ["message", "preview", "files"];
+}
+
+function sumVisible(widths: CoCreateColumnWidths, sidebarOpen: boolean) {
+  return visibleKeys(sidebarOpen).reduce((total, key) => total + widths[key], 0);
+}
 
 function loadStoredWidths(): CoCreateColumnWidths | null {
   if (typeof window === "undefined") return null;
@@ -59,55 +68,135 @@ function saveWidths(widths: CoCreateColumnWidths) {
   }
 }
 
-function splitMiddleColumns(totalWidth: number): Pick<CoCreateColumnWidths, "message" | "preview"> {
-  const reserved =
-    CO_CREATE_COLUMN_DEFAULT.session +
-    CO_CREATE_COLUMN_DEFAULT.files +
-    HANDLE_WIDTH * 3;
-  const remainder = Math.max(
+function distributeDefaults(
+  available: number,
+  sidebarOpen: boolean,
+): CoCreateColumnWidths {
+  const session = sidebarOpen ? CO_CREATE_COLUMN_DEFAULT.session : 0;
+  const files = CO_CREATE_COLUMN_DEFAULT.files;
+  const middle = Math.max(
     CO_CREATE_COLUMN_MIN.message + CO_CREATE_COLUMN_MIN.preview,
-    totalWidth - reserved,
+    available - session - files,
   );
-  const message = Math.max(CO_CREATE_COLUMN_MIN.message, Math.floor(remainder / 2));
-  const preview = Math.max(CO_CREATE_COLUMN_MIN.preview, remainder - message);
-  return { message, preview };
+  const message = Math.max(CO_CREATE_COLUMN_MIN.message, Math.floor(middle / 2));
+  const preview = Math.max(CO_CREATE_COLUMN_MIN.preview, middle - message);
+  return {
+    session: sidebarOpen ? session : CO_CREATE_COLUMN_DEFAULT.session,
+    message,
+    preview,
+    files: Math.max(
+      CO_CREATE_COLUMN_MIN.files,
+      Math.min(files, available - session - message - preview),
+    ),
+  };
+}
+
+/** 将可见列宽总和对齐到容器可用宽度，同时尊重各列最小值 */
+export function fitWidthsToContainer(
+  widths: CoCreateColumnWidths,
+  containerWidth: number,
+  sidebarOpen: boolean,
+): CoCreateColumnWidths {
+  const keys = visibleKeys(sidebarOpen);
+  const minSum = keys.reduce((total, key) => total + CO_CREATE_COLUMN_MIN[key], 0);
+  const available = Math.max(minSum, containerWidth);
+
+  const currentSum = sumVisible(widths, sidebarOpen);
+  const next: CoCreateColumnWidths = { ...widths };
+
+  if (currentSum <= 0) {
+    const defaults = distributeDefaults(available, sidebarOpen);
+    if (!sidebarOpen) {
+      return { ...defaults, session: widths.session || CO_CREATE_COLUMN_DEFAULT.session };
+    }
+    return defaults;
+  }
+
+  if (currentSum === available) {
+    return next;
+  }
+
+  const scale = available / currentSum;
+  for (const key of keys) {
+    next[key] = Math.max(CO_CREATE_COLUMN_MIN[key], Math.round(widths[key] * scale));
+  }
+
+  let diff = available - sumVisible(next, sidebarOpen);
+  const flexKeys: (keyof CoCreateColumnWidths)[] = ["message", "preview"];
+  while (diff !== 0) {
+    const step = diff > 0 ? 1 : -1;
+    const target = flexKeys.find((key) => next[key] + step >= CO_CREATE_COLUMN_MIN[key]);
+    if (!target) break;
+    next[target] += step;
+    diff -= step;
+  }
+
+  return next;
 }
 
 export function useCoCreateColumnWidths(sidebarOpen: boolean) {
   const containerRef = useRef<HTMLDivElement>(null);
-  const initializedRef = useRef(false);
+  const draggingRef = useRef(false);
+  const sidebarOpenRef = useRef(sidebarOpen);
+  sidebarOpenRef.current = sidebarOpen;
+
   const [widths, setWidths] = useState(CO_CREATE_COLUMN_DEFAULT);
   const widthsRef = useRef(widths);
   widthsRef.current = widths;
 
-  useLayoutEffect(() => {
-    if (initializedRef.current) return;
+  const syncToContainer = useCallback((containerWidth: number, open = sidebarOpenRef.current) => {
+    if (containerWidth <= 0) return;
+    setWidths((prev) => fitWidthsToContainer(prev, containerWidth, open));
+  }, []);
 
-    const initFromContainer = () => {
-      const stored = loadStoredWidths();
-      if (stored) {
-        setWidths(stored);
-        initializedRef.current = true;
-        return true;
+  useLayoutEffect(() => {
+    const stored = loadStoredWidths();
+    const node = containerRef.current;
+
+    const init = () => {
+      const containerWidth = node?.clientWidth ?? 0;
+      const base = stored ?? CO_CREATE_COLUMN_DEFAULT;
+
+      if (containerWidth <= 0) {
+        if (stored) {
+          setWidths(stored);
+          return true;
+        }
+        return false;
       }
-      const total = containerRef.current?.clientWidth ?? 0;
-      if (total <= 0) return false;
-      const middle = splitMiddleColumns(total);
-      setWidths({
-        session: CO_CREATE_COLUMN_DEFAULT.session,
-        files: CO_CREATE_COLUMN_DEFAULT.files,
-        ...middle,
-      });
-      initializedRef.current = true;
+
+      setWidths(fitWidthsToContainer(base, containerWidth, sidebarOpenRef.current));
       return true;
     };
 
-    if (initFromContainer()) return;
-    const frame = requestAnimationFrame(() => {
-      initFromContainer();
+    if (!node) {
+      if (stored) setWidths(stored);
+      return;
+    }
+
+    let frame = 0;
+    if (!init()) {
+      frame = requestAnimationFrame(init);
+    }
+
+    const observer = new ResizeObserver((entries) => {
+      if (draggingRef.current) return;
+      const containerWidth = entries[0]?.contentRect.width ?? node.clientWidth;
+      syncToContainer(containerWidth);
     });
-    return () => cancelAnimationFrame(frame);
-  }, []);
+    observer.observe(node);
+
+    return () => {
+      if (frame) cancelAnimationFrame(frame);
+      observer.disconnect();
+    };
+  }, [syncToContainer]);
+
+  useLayoutEffect(() => {
+    const node = containerRef.current;
+    if (!node || draggingRef.current) return;
+    syncToContainer(node.clientWidth, sidebarOpen);
+  }, [sidebarOpen, syncToContainer]);
 
   const persistWidths = useCallback(() => {
     saveWidths(widthsRef.current);
@@ -141,5 +230,6 @@ export function useCoCreateColumnWidths(sidebarOpen: boolean) {
     sessionWidth,
     adjustPair,
     persistWidths,
+    draggingRef,
   };
 }

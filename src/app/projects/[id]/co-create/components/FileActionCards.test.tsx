@@ -84,9 +84,9 @@ describe("File action cards", () => {
     expect(container.textContent).toContain("Agent 已修改文件");
     expect(container.textContent).toContain("方案草稿.md");
     expect(container.textContent).toContain("补充执行摘要");
-    expect(container.textContent).toContain("已自动修改并保存");
-    expect(findByText(container, "应用修改")).toBeNull();
-    expect(findByText(container, "另存为新版本")).toBeNull();
+    expect(container.textContent).toContain("已覆盖原稿并记录版本历史");
+    expect(findByText(container, "覆盖保存")).toBeNull();
+    expect(findByText(container, "另存为独立文件")).toBeNull();
     expect(findByText(container, "另存为副本")).toBeNull();
     expect(findByText(container, "忽略")).toBeNull();
 
@@ -127,8 +127,8 @@ describe("File action cards", () => {
     );
 
     clickElement(findByText(container, "查看 Diff")!);
-    clickElement(findByText(container, "应用修改")!);
-    clickElement(findByText(container, "另存为新版本")!);
+    clickElement(findByText(container, "覆盖保存")!);
+    clickElement(findByText(container, "另存为独立文件")!);
     clickElement(findByText(container, "另存为副本")!);
     clickElement(findByText(container, "忽略")!);
 

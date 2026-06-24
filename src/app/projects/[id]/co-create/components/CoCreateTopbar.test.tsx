@@ -29,7 +29,7 @@ describe("CoCreateTopbar", () => {
     vi.clearAllMocks();
   });
 
-  it("renders project context, file references, save state, and navigation links", () => {
+  it("renders project context, file references, save state, and project navigation", () => {
     const onRemoveFileRef = vi.fn();
     const onToggleSessions = vi.fn();
     const onUndoAgentChange = vi.fn();
@@ -93,13 +93,11 @@ describe("CoCreateTopbar", () => {
     const toggleButton = findByText(container, "▶");
     const undoButton = findByText(container, "撤销");
     const projectLink = findByText(container, "← 项目") as HTMLAnchorElement | null;
-    const chatLink = findByText(container, "对话创作") as HTMLAnchorElement | null;
     const removeButtons = findAllByText(container, "×");
 
     expect(toggleButton).not.toBeNull();
     expect(undoButton).not.toBeNull();
     expect(projectLink?.getAttribute("href")).toBe("/projects/p-1");
-    expect(chatLink?.getAttribute("href")).toBe("/chat?project_id=p-1&new_chat=1");
     expect(removeButtons).toHaveLength(2);
 
     clickElement(toggleButton!);
