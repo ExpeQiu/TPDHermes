@@ -29,9 +29,10 @@ describe("CoCreateTopbar", () => {
     vi.clearAllMocks();
   });
 
-  it("renders project context, file references, save state, and project navigation", () => {
+  it("renders project context, file references, toolbar, save state, and project navigation", () => {
     const onRemoveFileRef = vi.fn();
     const onToggleSessions = vi.fn();
+    const onToggleFilesPanel = vi.fn();
     const onUndoAgentChange = vi.fn();
 
     const { container } = renderComponent(
@@ -41,8 +42,11 @@ describe("CoCreateTopbar", () => {
         saveState: "pending_apply",
         agentChangeSummary: "最近一次 AI 变更：补充了摘要段落",
         onUndoAgentChange,
+        undoCount: 2,
         onToggleSessions,
         sessionsOpen: false,
+        onToggleFilesPanel,
+        filesPanelOpen: true,
         projectContext: {
           project_id: "p-1",
           name: "Hermes 共创项目",
@@ -90,23 +94,27 @@ describe("CoCreateTopbar", () => {
     expect(container.textContent).toContain("Agent 正在应用");
     expect(container.textContent).toContain("最近一次 AI 变更：补充了摘要段落");
 
-    const toggleButton = findByText(container, "▶");
-    const undoButton = findByText(container, "撤销");
+    const undoButton = container.querySelector('button[aria-label^="撤销 Agent 变更"]');
+    const sessionToggle = container.querySelector('button[aria-label="显示会话栏"]');
+    const filesToggle = container.querySelector('button[aria-label="隐藏项目文件"]');
     const projectLink = findByText(container, "← 项目") as HTMLAnchorElement | null;
     const removeButtons = findAllByText(container, "×");
 
-    expect(toggleButton).not.toBeNull();
     expect(undoButton).not.toBeNull();
+    expect(sessionToggle).not.toBeNull();
+    expect(filesToggle).not.toBeNull();
     expect(projectLink?.getAttribute("href")).toBe("/projects/p-1");
     expect(removeButtons).toHaveLength(2);
 
-    clickElement(toggleButton!);
     clickElement(undoButton!);
+    clickElement(sessionToggle!);
+    clickElement(filesToggle!);
     clickElement(removeButtons[0]);
     clickElement(removeButtons[1]);
 
-    expect(onToggleSessions).toHaveBeenCalledTimes(1);
     expect(onUndoAgentChange).toHaveBeenCalledTimes(1);
+    expect(onToggleSessions).toHaveBeenCalledTimes(1);
+    expect(onToggleFilesPanel).toHaveBeenCalledTimes(1);
     expect(onRemoveFileRef).toHaveBeenNthCalledWith(1, "output:out-1", "pinned");
     expect(onRemoveFileRef).toHaveBeenNthCalledWith(2, "attachment:att-1", "round");
   });
@@ -118,6 +126,7 @@ describe("CoCreateTopbar", () => {
         projectId: "p-2",
         saveState: "saved",
         sessionsOpen: true,
+        filesPanelOpen: false,
         projectContext: null,
         outputCount: 0,
         pinnedFileIds: [],
@@ -125,6 +134,7 @@ describe("CoCreateTopbar", () => {
         files: [],
         onRemoveFileRef: () => {},
         onToggleSessions: () => {},
+        onToggleFilesPanel: () => {},
       }),
     );
 
@@ -132,6 +142,7 @@ describe("CoCreateTopbar", () => {
     expect(container.textContent).toContain("最近输出：0");
     expect(container.textContent).toContain("尚未引用文件");
     expect(container.textContent).toContain("已自动保存");
-    expect(container.textContent).toContain("◀");
+    expect(container.querySelector('button[aria-label="隐藏会话栏"]')).not.toBeNull();
+    expect(container.querySelector('button[aria-label="显示项目文件"]')).not.toBeNull();
   });
 });

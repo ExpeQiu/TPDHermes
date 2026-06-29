@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useEffect, useState } from "react";
 
 import { useUserAccess } from "@/lib/admin-access";
 import type { FeatureKey } from "@/lib/rbac";
@@ -15,8 +16,14 @@ export function FeaturePageGuard({
   pageTitle: string;
 }) {
   const { canAccess, ready } = useUserAccess();
+  const [mounted, setMounted] = useState(false);
 
-  if (!ready) {
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  // 避免 SSR 与客户端 localStorage 权限缓存不一致导致 hydration 报错
+  if (!mounted || !ready) {
     return (
       <main className="min-h-[40vh] flex items-center justify-center text-sm text-slate-500">
         正在校验访问权限…

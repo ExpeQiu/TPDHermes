@@ -11,13 +11,26 @@ def workshop_execution_mode() -> str:
     return "direct" if raw == "direct" else "agent"
 
 
-def workshop_agent_fallback_direct() -> bool:
-    return os.getenv("WORKSHOP_AGENT_FALLBACK_DIRECT", "").strip().lower() in (
+def workshop_agent_strict_no_fallback() -> bool:
+    """为 true 时 Agent 未命中 tool capture 即返回 424，不直连降级。"""
+    return os.getenv("WORKSHOP_AGENT_STRICT", "").strip().lower() in (
         "1",
         "true",
         "yes",
         "on",
     )
+
+
+def workshop_agent_fallback_direct() -> bool:
+    """
+    Agent 未调用 workshop 工具时是否直连 skill.generate 降级。
+
+    默认开启（与 chat 单技能白名单一致）；WORKSHOP_AGENT_STRICT=true 关闭降级。
+    """
+    if workshop_agent_strict_no_fallback():
+        return False
+    raw = os.getenv("WORKSHOP_AGENT_FALLBACK_DIRECT", "true").strip().lower()
+    return raw not in ("0", "false", "no", "off")
 
 
 def _stringify_content(value: Any) -> str:

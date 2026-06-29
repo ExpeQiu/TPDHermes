@@ -38,10 +38,14 @@ logging.basicConfig(
 logger = logging.getLogger("tpdx.hermes")
 
 # ── 全局 CORS origins（可从环境变量配置）─────────────────────
-ALLOWED_ORIGINS = os.getenv(
-    "CORS_ALLOWED_ORIGINS",
-    "http://localhost:3000,http://localhost:8080"
-).split(",")
+ALLOWED_ORIGINS = [
+    origin.strip()
+    for origin in os.getenv(
+        "CORS_ALLOWED_ORIGINS",
+        "http://localhost:3000,http://127.0.0.1:3000,http://localhost:8080",
+    ).split(",")
+    if origin.strip()
+]
 
 
 # ── 启动配置校验 ──────────────────────────────────────────

@@ -3,9 +3,16 @@ import { mergeApiHeadersAsync } from "./api-headers";
 /** 后端 API v1 前缀（与 FastAPI `backend/__init__.py` 一致） */
 export const API_V1 = "/api/v1";
 
+/** 未配置 NEXT_PUBLIC_API_URL 时：浏览器走同源 /api/v1（Next 代理），SSR 直连本机后端 */
 export function getPublicApiBase(): string {
-  const raw = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
-  return raw.replace(/\/$/, "");
+  const explicit = process.env.NEXT_PUBLIC_API_URL?.trim();
+  if (explicit) return explicit.replace(/\/$/, "");
+  if (typeof window !== "undefined") return "";
+  const internal =
+    process.env.API_PROXY_URL?.trim() ||
+    process.env.BACKEND_INTERNAL_URL?.trim() ||
+    "http://127.0.0.1:8000";
+  return internal.replace(/\/$/, "");
 }
 
 /** 拼接业务 API 绝对地址，例如 `apiV1("/projects/")` */
@@ -46,7 +53,7 @@ export async function readJson<T>(res: Response): Promise<T> {
 }
 
 export async function apiGet<T>(path: string): Promise<T> {
-  const res = await fetch(apiV1(path), await mergeApiHeadersAsync());
+  const res = await fetch(apiV1(path), await mergeApiHeadersAsync({ cache: "no-store" }));
   return readJson<T>(res);
 }
 

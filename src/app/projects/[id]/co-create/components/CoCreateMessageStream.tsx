@@ -14,47 +14,21 @@ import {
   stripAgentPlanBlock,
 } from "@/app/projects/[id]/co-create/co-create-agent-utils";
 import { stripFileActionsBlock } from "@/app/projects/[id]/co-create/co-create-file-actions";
+import { unwrapSkillAssistantMarkdown } from "@/lib/skill-output";
 import { AgentActivityTimeline } from "@/app/projects/[id]/co-create/components/AgentActivityTimeline";
 import { AgentPlanCard } from "@/app/projects/[id]/co-create/components/AgentPlanCard";
+import type { CoCreateQuickEntry } from "@/lib/co-create-quick-entries";
 import type { ReactNode } from "react";
-
-export const CO_CREATE_QUICK_ENTRIES = [
-  {
-    id: "five-look-three-define",
-    title: "五看三定挖掘技术亮点",
-    prompt:
-      "请基于当前项目上下文，用「五看三定」方法挖掘技术亮点：从行业、市场、用户、竞品、自我五个维度分析，明确技术定位、核心卖点与差异化价值，并输出结构化的技术亮点清单。",
-    accent: "from-blue-600 to-indigo-600",
-  },
-  {
-    id: "ip-matrix",
-    title: "推广IP矩阵",
-    prompt:
-      "请基于当前项目，生成技术推广 IP 矩阵：包含 Slogan、定位、愿景、体验、亮点、技术底座与车型/产品匹配，按七步法输出完整矩阵文档。",
-    accent: "from-violet-600 to-purple-600",
-  },
-  {
-    id: "benchmark",
-    title: "竞品对标",
-    prompt:
-      "请基于当前项目与技术背景，生成竞品对标分析：覆盖核心维度对比、优劣势研判与可借鉴要点，输出对标分析表。",
-    accent: "from-amber-600 to-orange-600",
-  },
-  {
-    id: "tech-speech",
-    title: "输出技术发布稿",
-    prompt:
-      "请基于当前项目上下文与已有资料，输出一版技术发布稿（含标题、导语、技术亮点、关键技术特性与用户价值阐述）。",
-    accent: "from-emerald-600 to-teal-600",
-  },
-] as const;
 
 type Props = {
   messages: Message[];
   streaming?: boolean;
   streamingPhase?: string;
   renderAfterMessage?: (message: Message) => ReactNode;
-  onQuickStart?: (prompt: string) => void;
+  quickEntries?: CoCreateQuickEntry[];
+  quickEntriesLoading?: boolean;
+  moreHref?: string;
+  onQuickStart?: (entry: CoCreateQuickEntry) => void;
   quickStartDisabled?: boolean;
 };
 
@@ -63,6 +37,9 @@ export function CoCreateMessageStream({
   streaming,
   streamingPhase,
   renderAfterMessage,
+  quickEntries = [],
+  quickEntriesLoading,
+  moreHref = "/create",
   onQuickStart,
   quickStartDisabled,
 }: Props) {
@@ -72,33 +49,45 @@ export function CoCreateMessageStream({
         <div className="flex items-center justify-between gap-3">
           <p className="text-xs uppercase tracking-[0.2em] text-slate-500">快捷创作入口</p>
           <Link
-            href="/workshop"
+            href={moreHref}
             className="shrink-0 rounded-md border border-slate-300 px-2.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-slate-600 transition hover:border-slate-400 hover:bg-slate-50 dark:border-slate-600 dark:text-slate-300 dark:hover:border-slate-500 dark:hover:bg-slate-800"
           >
             more
           </Link>
         </div>
-        <div className="mt-4 grid grid-cols-2 gap-3 lg:grid-cols-4">
-          {CO_CREATE_QUICK_ENTRIES.map((entry) => (
-            <button
-              key={entry.id}
-              type="button"
-              disabled={quickStartDisabled || !onQuickStart}
-              onClick={() => onQuickStart?.(entry.prompt)}
-              className="group flex h-full flex-col rounded-2xl border border-slate-300 bg-white p-4 text-left transition hover:-translate-y-0.5 hover:border-slate-400 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-700 dark:bg-slate-800 dark:hover:border-slate-600 dark:hover:bg-slate-800/80"
-            >
-              <div className="flex h-5 shrink-0 items-end">
-                <div
-                  className={`h-1 w-8 rounded-full bg-gradient-to-r ${entry.accent}`}
-                  aria-hidden
-                />
-              </div>
-              <p className="mt-3 min-h-[2.75rem] text-sm font-medium leading-snug text-slate-800 dark:text-slate-100">
-                {entry.title}
-              </p>
-            </button>
-          ))}
-        </div>
+        {quickEntriesLoading ? (
+          <p className="mt-4 text-sm text-slate-500">加载场景列表…</p>
+        ) : quickEntries.length === 0 ? (
+          <p className="mt-4 text-sm text-slate-500">
+            暂无可用场景，请前往
+            <Link href={moreHref} className="mx-1 text-blue-600 hover:underline dark:text-blue-400">
+              场景编排
+            </Link>
+            配置并发布。
+          </p>
+        ) : (
+          <div className="mt-4 grid grid-cols-2 gap-3 lg:grid-cols-4">
+            {quickEntries.map((entry) => (
+              <button
+                key={entry.id}
+                type="button"
+                disabled={quickStartDisabled || !onQuickStart}
+                onClick={() => onQuickStart?.(entry)}
+                className="group flex h-full flex-col rounded-2xl border border-slate-300 bg-white p-4 text-left transition hover:-translate-y-0.5 hover:border-slate-400 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-700 dark:bg-slate-800 dark:hover:border-slate-600 dark:hover:bg-slate-800/80"
+              >
+                <div className="flex h-5 shrink-0 items-end">
+                  <div
+                    className={`h-1 w-8 rounded-full bg-gradient-to-r ${entry.accent}`}
+                    aria-hidden
+                  />
+                </div>
+                <p className="mt-3 min-h-[2.75rem] text-sm font-medium leading-snug text-slate-800 dark:text-slate-100">
+                  {entry.title}
+                </p>
+              </button>
+            ))}
+          </div>
+        )}
       </div>
     );
   }
@@ -122,7 +111,7 @@ export function CoCreateMessageStream({
             (message.role === "assistant" ? parseAgentPlanFromContent(message.content) : null);
           const displayContent = (() => {
             if (message.role !== "assistant") return message.content;
-            let text = message.content;
+            let text = unwrapSkillAssistantMarkdown(message.content);
             if (parseAgentPlanFromContent(text)) {
               text = stripAgentPlanBlock(text);
             }
@@ -175,6 +164,16 @@ export function CoCreateMessageStream({
                         phase: streamingPhase,
                       })}
                     />
+                  ) : null}
+                  {!isStreamingAssistant &&
+                  message.role === "assistant" &&
+                  !displayContent?.trim() &&
+                  !actionSummary &&
+                  !agentPlan &&
+                  !(message.toolEvents?.length) ? (
+                    <p className="text-sm leading-relaxed text-slate-500 dark:text-slate-400">
+                      暂无回复内容。若长时间停留在此，请确认后端与 Hermes 上游已启动后重试。
+                    </p>
                   ) : null}
                 </>
               )}

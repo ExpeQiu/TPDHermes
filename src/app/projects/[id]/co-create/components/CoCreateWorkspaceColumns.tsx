@@ -6,10 +6,10 @@ import { ColumnResizeHandle } from "@/app/projects/[id]/co-create/components/Col
 import {
   useCoCreateColumnWidths,
   type CoCreateColumnWidths,
+  type CoCreatePanelVisibility,
 } from "@/app/projects/[id]/co-create/hooks/use-co-create-column-widths";
 
-type Props = {
-  sidebarOpen: boolean;
+type Props = CoCreatePanelVisibility & {
   session: ReactNode;
   message: ReactNode;
   preview: ReactNode;
@@ -18,13 +18,15 @@ type Props = {
 
 export function CoCreateWorkspaceColumns({
   sidebarOpen,
+  filesPanelOpen,
   session,
   message,
   preview,
   files,
 }: Props) {
-  const { containerRef, widths, sessionWidth, adjustPair, persistWidths, draggingRef } =
-    useCoCreateColumnWidths(sidebarOpen);
+  const visibility = { sidebarOpen, filesPanelOpen };
+  const { containerRef, widths, sessionWidth, filesWidth, adjustPair, persistWidths, draggingRef } =
+    useCoCreateColumnWidths(visibility);
 
   const bindResize = (left: keyof CoCreateColumnWidths, right: keyof CoCreateColumnWidths) => ({
     onDragStart: () => {
@@ -63,13 +65,15 @@ export function CoCreateWorkspaceColumns({
         <div className="h-full overflow-hidden">{preview}</div>
       </div>
 
-      <div
-        className="relative min-h-0 shrink-0"
-        style={{ width: widths.files }}
-      >
-        <ColumnResizeHandle {...bindResize("preview", "files")} />
-        <div className="h-full overflow-hidden">{files}</div>
-      </div>
+      {filesPanelOpen ? (
+        <div
+          className="relative min-h-0 shrink-0"
+          style={{ width: filesWidth }}
+        >
+          <ColumnResizeHandle {...bindResize("preview", "files")} />
+          <div className="h-full overflow-hidden">{files}</div>
+        </div>
+      ) : null}
     </div>
   );
 }

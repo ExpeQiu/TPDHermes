@@ -4,12 +4,15 @@ import { Suspense, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import AdminOnlyPageGuard from "@/components/admin-only-page-guard";
+import { SkillsScopePanel, isBindableScenarioSkill, type SkillScopeItem } from "@/components/skills/SkillsScopePanel";
 import { apiGet, apiFetch, apiDelete, readJson } from "@/lib/api";
 import { CONTENT_MAX_CLASS } from "@/lib/content-shell";
 import { SCENARIOS, type Scenario } from "@/lib/scenario-presets";
 import {
-  filterPublicKbCollections,
-  isPublicKbCollection,
+  filterBindableKbCollections,
+  isBindableKbCollection,
+} from "@/lib/kb-collection-catalog";
+import {
   kbCollectionLabel,
   scenarioStatusLabel,
   skillLabel,
@@ -32,7 +35,15 @@ import {
   pillBlue,
   pillEmerald,
 } from "@/lib/theme-text";
-import { SkillsScopePanel, type SkillScopeItem } from "@/components/skills/SkillsScopePanel";
+import {
+  CO_CREATE_QUICK_ENTRY_LIMIT,
+  CO_CREATE_QUICK_SCENARIOS_CHANGED,
+  coCreateQuickScenariosScopeId,
+  loadCoCreateQuickScenariosPrefs,
+  toggleCoCreateQuickScenario,
+  type CoCreateQuickScenariosPrefs,
+} from "@/lib/co-create-quick-scenarios-prefs";
+import { useEffectiveUserScopeId } from "@/lib/use-effective-user-scope-id";
 
 type SkillTemplateMeta = {
   id: string;
@@ -125,6 +136,7 @@ export default function CreatePage() {
 
 function CreatePageInner() {
   const searchParams = useSearchParams();
+  const scopeUserId = useEffectiveUserScopeId();
   const returnProjectId = searchParams?.get("return_project_id")?.trim() ?? "";
   const scenarioFromUrl = searchParams?.get("scenario")?.trim() ?? "";
 
@@ -137,7 +149,6 @@ function CreatePageInner() {
 
   const [sceneDescription, setSceneDescription] = useState("");
   const [resultDescription, setResultDescription] = useState("");
-  const [forceBindSkill, setForceBindSkill] = useState(false);
   const [forceBindKb, setForceBindKb] = useState(false);
   const [contractAllowedSkills, setContractAllowedSkills] = useState<string[]>([]);
   const [selectedKbKeys, setSelectedKbKeys] = useState<string[]>([]);
@@ -153,12 +164,16 @@ function CreatePageInner() {
   const [addBusy, setAddBusy] = useState(false);
   const [addError, setAddError] = useState("");
   const [deleteBusy, setDeleteBusy] = useState(false);
-  const [dismissedPresetIds, setDismissedPresetIds] = useState<Set<string>>(loadDismissedPresetIds);
+  const [dismissedPresetIds, setDismissedPresetIds] = useState<Set<string>>(() => new Set());
+  const [coCreateQuickPrefs, setCoCreateQuickPrefs] = useState<CoCreateQuickScenariosPrefs>({
+    scenarioIds: [],
+  });
+  const [quickEntryMessage, setQuickEntryMessage] = useState("");
 
   useEffect(() => {
     let cancelled = false;
     Promise.allSettled([
-      apiGet<{ collections: string[] }>("/kb/collections"),
+      apiGet<{ collections: string[] }>("/kb/collections?prefer_cache=1"),
       apiFetch("/skills/").then((res) => readJson<SkillScopeItem[]>(res)),
       apiGet<{ skills: SkillMetaRow[] }>("/ws/skills/metadata"),
     ]).then(([collectionsRes, skillsRes, metaRes]) => {
@@ -178,6 +193,10 @@ function CreatePageInner() {
   }, []);
 
   useEffect(() => {
+    setDismissedPresetIds(loadDismissedPresetIds());
+  }, []);
+
+  useEffect(() => {
     apiGet<ScenarioApiRow[]>("/scenarios/")
       .then(setRemoteList)
       .catch(() => setRemoteList([]));
@@ -188,36 +207,99 @@ function CreatePageInner() {
     setSelectedScenarioId(scenarioFromUrl);
   }, [scenarioFromUrl]);
 
+  useEffect(() => {
+    const loadPrefs = () => {
+      setCoCreateQuickPrefs(loadCoCreateQuickScenariosPrefs(coCreateQuickScenariosScopeId()));
+    };
+    loadPrefs();
+    window.addEventListener(CO_CREATE_QUICK_SCENARIOS_CHANGED, loadPrefs);
+    return () => window.removeEventListener(CO_CREATE_QUICK_SCENARIOS_CHANGED, loadPrefs);
+  }, [scopeUserId]);
+
+  const isCurrentQuickEntry = coCreateQuickPrefs.scenarioIds.includes(selectedScenarioId);
+
+  useEffect(() => {
+    setQuickEntryMessage("");
+  }, [selectedScenarioId]);
+
+  function handleToggleCoCreateQuickEntry() {
+    setQuickEntryMessage("");
+    const result = toggleCoCreateQuickScenario(
+      coCreateQuickScenariosScopeId(),
+      selectedScenarioId,
+    );
+    setCoCreateQuickPrefs(result.prefs);
+    if (result.action === "added") {
+      setQuickEntryMessage(`已加入共创快捷入口（${result.prefs.scenarioIds.length}/${CO_CREATE_QUICK_ENTRY_LIMIT}）`);
+      console.info("[create] 设定快捷创作入口", {
+        scenarioId: selectedScenarioId,
+        count: result.prefs.scenarioIds.length,
+      });
+      return;
+    }
+    if (result.action === "removed") {
+      setQuickEntryMessage("已从共创快捷入口移除");
+      console.info("[create] 取消快捷创作入口", { scenarioId: selectedScenarioId });
+      return;
+    }
+    setQuickEntryMessage(`最多设置 ${CO_CREATE_QUICK_ENTRY_LIMIT} 个快捷创作入口，请先取消其他场景`);
+  }
+
   const remoteById = useMemo(
     () => new Map(remoteList.map((r) => [r.id, r] as const)),
     [remoteList],
   );
 
-  const publicCollections = useMemo(
-    () => filterPublicKbCollections(collections),
+  const bindableCollections = useMemo(
+    () => filterBindableKbCollections(collections),
     [collections],
   );
 
   useEffect(() => {
     setSelectedKbKeys((prev) => {
-      const next = prev.filter((k) => publicCollections.includes(k));
-      return next.length === prev.length ? prev : next;
+      const next = prev.filter((k) => bindableCollections.includes(k));
+      if (next.length > 0) return next.length === prev.length ? prev : next;
+      if (forceBindKb && bindableCollections.length > 0) {
+        return bindableCollections.slice();
+      }
+      return next;
     });
-  }, [publicCollections]);
+  }, [bindableCollections, forceBindKb]);
 
   useEffect(() => {
-    const installed = new Set(installedSkills.map((s) => s.name));
+    const bindableNames = new Set(
+      installedSkills
+        .filter((s) => isBindableScenarioSkill(s, scopeUserId))
+        .map((s) => s.name),
+    );
     setContractAllowedSkills((prev) => {
-      const next = prev.filter((name) => installed.has(name));
+      const next = prev.filter((name) => bindableNames.has(name));
       return next.length === prev.length ? prev : next;
     });
-  }, [installedSkills]);
+  }, [installedSkills, scopeUserId]);
 
   useEffect(() => {
     if (loading) return;
     let cancelled = false;
-    const cols = publicCollections;
+    const cols = bindableCollections;
     const sid = selectedScenarioId;
+
+    const applyLocalScenario = () => {
+      const local = SCENARIOS.find((s) => s.id === sid);
+      setSceneDescription(local?.summary ?? "");
+      setResultDescription(local?.goal ?? "");
+      setForceBindKb(false);
+      setSelectedKbKeys([]);
+      setContractAllowedSkills([]);
+      setSelectedSkillTemplate("");
+    };
+
+    // 内置预设尚未入库时直接用本地种子，避免 GET /scenarios/{id} 404
+    if (!remoteById.has(sid)) {
+      setSaveMessage("");
+      applyLocalScenario();
+      return;
+    }
 
     (async () => {
       try {
@@ -232,27 +314,32 @@ function CreatePageInner() {
 
         const kp = row.knowledge_policy ?? {};
         const rawCols = Array.isArray(kp.collections) ? (kp.collections as string[]) : [];
-        const publicRawCols = filterPublicKbCollections(
+        const bindableRawCols = filterBindableKbCollections(
           rawCols.map((c) => String(c).trim()).filter(Boolean),
         );
         const modeK = typeof kp.mode === "string" ? kp.mode : "restricted";
-        const intersect = publicRawCols.filter((c) => cols.includes(c));
+        const intersect = bindableRawCols.filter((c) => cols.includes(c));
         const knowledgeOn =
           intersect.length > 0 ||
-          publicRawCols.length > 0 ||
+          bindableRawCols.length > 0 ||
           (modeK !== "off" && modeK !== "none" && modeK !== "disabled");
         setForceBindKb(knowledgeOn);
         if (intersect.length > 0) setSelectedKbKeys(intersect);
-        else if (publicRawCols.length > 0) setSelectedKbKeys(publicRawCols);
+        else if (bindableRawCols.length > 0) setSelectedKbKeys(bindableRawCols);
         else if (knowledgeOn && cols.length > 0) setSelectedKbKeys(cols.slice());
         else setSelectedKbKeys([]);
 
         const sp = row.skills_policy ?? {};
         const allowedRaw = Array.isArray(sp.allowed) ? (sp.allowed as unknown[]) : [];
         const allowedNorm = allowedRaw.map((x) => String(x).trim()).filter(Boolean);
-        const mode = typeof sp.mode === "string" ? sp.mode : "";
-        setForceBindSkill(mode === "allowed_list" || allowedNorm.length > 0);
-        setContractAllowedSkills(allowedNorm);
+        const bindableNames = new Set(
+          installedSkills
+            .filter((s) => isBindableScenarioSkill(s, scopeUserId))
+            .map((s) => s.name),
+        );
+        setContractAllowedSkills(
+          allowedNorm.filter((name) => bindableNames.has(name)).slice(0, 1),
+        );
 
         const op = row.output_policy ?? {};
         const skillName = typeof op.skill_name === "string" ? op.skill_name : "";
@@ -265,21 +352,14 @@ function CreatePageInner() {
 
       } catch {
         if (cancelled) return;
-        const local = SCENARIOS.find((s) => s.id === sid);
-        setSceneDescription(local?.summary ?? "");
-        setResultDescription(local?.goal ?? "");
-        setForceBindKb(false);
-        setSelectedKbKeys([]);
-        setForceBindSkill(false);
-        setContractAllowedSkills([]);
-        setSelectedSkillTemplate("");
+        applyLocalScenario();
       }
     })();
 
     return () => {
       cancelled = true;
     };
-  }, [selectedScenarioId, loading, publicCollections, remoteList]);
+  }, [selectedScenarioId, loading, bindableCollections, remoteList, installedSkills, scopeUserId]);
 
   const scenarioListItems = useMemo(
     () => buildScenarioListItems(remoteList, dismissedPresetIds),
@@ -302,8 +382,13 @@ function CreatePageInner() {
     [skillMeta],
   );
 
+  const bindableSkills = useMemo(
+    () => installedSkills.filter((s) => isBindableScenarioSkill(s, scopeUserId)),
+    [installedSkills, scopeUserId],
+  );
+
   const skillTemplateGroups = useMemo((): SkillTemplateGroup[] => {
-    if (!forceBindSkill || contractAllowedSkills.length === 0) return [];
+    if (contractAllowedSkills.length === 0) return [];
     const groups: SkillTemplateGroup[] = [];
     const seen = new Set<string>();
     for (const skillName of contractAllowedSkills) {
@@ -326,7 +411,7 @@ function CreatePageInner() {
       });
     }
     return groups;
-  }, [forceBindSkill, contractAllowedSkills, skillMeta]);
+  }, [contractAllowedSkills, skillMeta]);
 
   const skillTemplateOptions = useMemo(
     () => skillTemplateGroups.flatMap((group) => group.templates),
@@ -344,15 +429,20 @@ function CreatePageInner() {
   );
 
   useEffect(() => {
-    if (!selectedSkillTemplate) return;
-    if (!skillTemplateOptions.some((o) => o.value === selectedSkillTemplate)) {
-      setSelectedSkillTemplate("");
+    const boundSkill = contractAllowedSkills[0] ?? "";
+    if (!boundSkill) {
+      if (selectedSkillTemplate) setSelectedSkillTemplate("");
+      return;
     }
-  }, [skillTemplateOptions, selectedSkillTemplate]);
+    const optionsForSkill = skillTemplateOptions.filter((o) => o.skillName === boundSkill);
+    if (optionsForSkill.length === 0) return;
+    if (optionsForSkill.some((o) => o.value === selectedSkillTemplate)) return;
+    setSelectedSkillTemplate(optionsForSkill[0].value);
+  }, [contractAllowedSkills, skillTemplateOptions, selectedSkillTemplate]);
 
   const kbOrdered = useMemo(
-    () => publicCollections.filter((c) => selectedKbKeys.includes(c)),
-    [publicCollections, selectedKbKeys],
+    () => bindableCollections.filter((c) => selectedKbKeys.includes(c)),
+    [bindableCollections, selectedKbKeys],
   );
 
   const decodedTemplate = useMemo(
@@ -377,21 +467,41 @@ function CreatePageInner() {
   );
 
   function toggleKb(name: string) {
-    if (!forceBindKb || !isPublicKbCollection(name)) return;
-    setSelectedKbKeys((prev) => {
-      if (prev.includes(name)) {
-        if (prev.length <= 1) return prev;
-        return prev.filter((x) => x !== name);
-      }
-      return [...prev, name];
-    });
+    if (!forceBindKb || !isBindableKbCollection(name)) return;
+    setSelectedKbKeys((prev) =>
+      prev.includes(name) ? prev.filter((x) => x !== name) : [...prev, name],
+    );
+  }
+
+  function scenarioContractError(): string | null {
+    if (contractAllowedSkills.length === 0) {
+      return "须选择一个可绑定的技能";
+    }
+    if (contractAllowedSkills.length > 1) {
+      return "只能绑定一个技能";
+    }
+    const selected = contractAllowedSkills[0];
+    if (!bindableSkills.some((s) => s.name === selected)) {
+      return "所选技能不可用，请重新选择（公共技能须已发布全员，个人技能须为本人上传且已启用）";
+    }
+    if (forceBindKb && selectedKbKeys.length === 0) {
+      return "已启用知识库范围，请至少选择一个知识库";
+    }
+    return null;
   }
 
   function toggleSkill(name: string) {
-    if (!forceBindSkill) return;
-    setContractAllowedSkills((prev) =>
-      prev.includes(name) ? prev.filter((x) => x !== name) : [...prev, name],
-    );
+    if (!bindableSkills.some((s) => s.name === name)) return;
+    if (contractAllowedSkills[0] === name) {
+      setContractAllowedSkills([]);
+      return;
+    }
+    setContractAllowedSkills([name]);
+    const meta = skillMeta.find((m) => m.name === name);
+    const tpl = meta?.templates?.[0];
+    if (tpl) {
+      setSelectedSkillTemplate(encodeSkillTemplate(name, tpl.path));
+    }
   }
 
   function openAddScenarioModal() {
@@ -466,11 +576,11 @@ function CreatePageInner() {
     };
 
     const skills_policy = {
-      mode: forceBindSkill ? "allowed_list" : "agent_select",
-      allowed: forceBindSkill ? contractAllowedSkills : [],
-      preferred: forceBindSkill && contractAllowedSkills[0] ? [contractAllowedSkills[0]] : [],
+      mode: "allowed_list",
+      allowed: contractAllowedSkills,
+      preferred: contractAllowedSkills[0] ? [contractAllowedSkills[0]] : [],
       forbidden: [] as string[],
-      allow_agent_free_choice: !forceBindSkill,
+      allow_agent_free_choice: false,
     };
 
     const output_policy: Record<string, unknown> = {
@@ -526,6 +636,11 @@ function CreatePageInner() {
   }
 
   async function saveScenarioDraft() {
+    const contractErr = scenarioContractError();
+    if (contractErr) {
+      setSaveMessage(contractErr);
+      return;
+    }
     setSaveBusy(true);
     setSaveMessage("");
     try {
@@ -541,6 +656,11 @@ function CreatePageInner() {
   }
 
   async function publishScenario() {
+    const contractErr = scenarioContractError();
+    if (contractErr) {
+      setSaveMessage(contractErr);
+      return;
+    }
     setPublishBusy(true);
     setSaveMessage("");
     try {
@@ -573,37 +693,45 @@ function CreatePageInner() {
     setDeleteBusy(true);
     setSaveMessage("");
     try {
+      const deletedId = selectedScenarioId;
       const res = await apiDelete<{
         ok: boolean;
         name?: string;
         project_bindings_removed?: number;
-      }>(`/scenarios/${selectedScenarioId}`);
+      }>(`/scenarios/${deletedId}`);
       console.info("[create] 场景删除", {
-        scenario_id: selectedScenarioId,
+        scenario_id: deletedId,
         bindings: res.project_bindings_removed,
       });
-      const deletedId = selectedScenarioId;
-      const next = await apiGet<ScenarioApiRow[]>("/scenarios/");
-      setRemoteList(next);
-      setDismissedPresetIds((prev) => {
-        const merged = new Set(prev);
-        merged.add(deletedId);
-        if (typeof window !== "undefined") {
-          sessionStorage.setItem(DISMISSED_PRESETS_KEY, JSON.stringify([...merged]));
-        }
-        return merged;
-      });
-      const remoteIds = new Set(next.map((r) => r.id));
-      const remaining = buildScenarioListItems(next, new Set([...dismissedPresetIds, deletedId]));
-      if (!remoteIds.has(deletedId)) {
-        setSelectedScenarioId(remaining[0]?.id ?? DEFAULT_SCENARIO_ID);
+
+      const mergedDismissed = new Set([...dismissedPresetIds, deletedId]);
+      if (typeof window !== "undefined") {
+        sessionStorage.setItem(DISMISSED_PRESETS_KEY, JSON.stringify([...mergedDismissed]));
       }
+      setDismissedPresetIds(mergedDismissed);
+
+      const optimisticList = remoteList.filter((r) => r.id !== deletedId);
+      setRemoteList(optimisticList);
+
+      const remaining = buildScenarioListItems(optimisticList, mergedDismissed);
+      setSelectedScenarioId(remaining[0]?.id ?? DEFAULT_SCENARIO_ID);
+
+      void apiGet<ScenarioApiRow[]>("/scenarios/")
+        .then(setRemoteList)
+        .catch((err) => {
+          console.warn("[create] 删除后刷新场景列表失败", err);
+        });
+
       const removed = res.project_bindings_removed ?? 0;
-      setSaveMessage(
+      const sameNameLeft = optimisticList.filter((r) => r.name === row.name).length;
+      let msg =
         removed > 0
           ? `已删除「${res.name ?? row.name}」，并解除 ${removed} 处项目绑定`
-          : `已删除「${res.name ?? row.name}」`,
-      );
+          : `已删除「${res.name ?? row.name}」`;
+      if (sameNameLeft > 0) {
+        msg += `（仍有 ${sameNameLeft} 个同名场景，请按编码区分）`;
+      }
+      setSaveMessage(msg);
     } catch (e) {
       setSaveMessage(e instanceof Error ? e.message : "删除失败");
       console.warn("[create] 场景删除失败", e);
@@ -691,6 +819,9 @@ function CreatePageInner() {
                           className={`h-2 w-2 shrink-0 rounded-full ${active ? "bg-blue-400" : "bg-slate-600"}`}
                         />
                       </div>
+                      {remote?.code ? (
+                        <p className="mt-0.5 truncate font-mono text-[10px] text-slate-500">{remote.code}</p>
+                      ) : null}
                       <p className="mt-1 line-clamp-2 text-xs text-slate-400">{scenario.summary}</p>
                       <div className="mt-2 flex flex-wrap gap-2">
                         {remote ? (
@@ -741,25 +872,28 @@ function CreatePageInner() {
 
               <div className="space-y-2 text-sm">
                 <label className="flex items-center justify-between gap-3">
-                  <span className="text-slate-700 dark:text-slate-300">强制绑定知识库（可选）</span>
+                  <span className="text-slate-700 dark:text-slate-300">指定知识库</span>
                   <input
                     type="checkbox"
                     checked={forceBindKb}
                     onChange={(e) => {
                       setForceBindKb(e.target.checked);
                       if (!e.target.checked) setSelectedKbKeys([]);
-                      else setSelectedKbKeys(publicCollections.slice());
+                      else setSelectedKbKeys(bindableCollections.slice());
                     }}
-                    aria-label="强制绑定知识库"
+                    aria-label="指定知识库"
                   />
                 </label>
+                <p className="text-xs text-slate-500">
+                  可选一个或多个知识库，用于检索范围过滤；开启时默认全选，可取消不需要的项
+                </p>
                 <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-100/80 dark:bg-slate-950/60 p-4">
                 {forceBindKb ? (
-                  publicCollections.length === 0 ? (
-                    <p className="text-xs text-slate-500">暂无公共知识库集合</p>
+                  bindableCollections.length === 0 ? (
+                    <p className="text-xs text-slate-500">暂无可指定的知识库集合</p>
                   ) : (
                   <ul className="max-h-32 space-y-2 overflow-y-auto">
-                    {publicCollections.map((name) => (
+                    {bindableCollections.map((name) => (
                       <li key={name}>
                         <label className="flex items-center gap-2">
                           <input
@@ -774,51 +908,35 @@ function CreatePageInner() {
                   </ul>
                   )
                 ) : (
-                  <p className="text-xs text-slate-500">未开启时不限制知识集合</p>
+                  <p className="text-xs text-slate-500">未开启时不限制知识库检索范围</p>
                 )}
                 </div>
               </div>
 
               <div className="space-y-2 text-sm">
-                <label className="flex items-center justify-between gap-3">
-                  <span className="text-slate-700 dark:text-slate-300">强制绑定技能（可选）</span>
-                  <input
-                    type="checkbox"
-                    checked={forceBindSkill}
-                    onChange={(e) => {
-                      setForceBindSkill(e.target.checked);
-                      if (!e.target.checked) {
-                        setContractAllowedSkills([]);
-                        setSelectedSkillTemplate("");
-                      }
-                    }}
-                    aria-label="强制绑定技能"
-                  />
-                </label>
-                {forceBindSkill ? (
-                  <SkillsScopePanel
-                    skills={installedSkills}
-                    loading={loading}
-                    mode="select"
-                    selectedNames={contractAllowedSkills}
-                    onToggleSelect={toggleSkill}
-                    displayNameByName={skillDisplayByName}
-                  />
-                ) : (
-                  <div className="rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-200/60 dark:bg-slate-800/60 p-4">
-                    <p className="text-xs text-slate-500">未开启时由智能体按场景自选技能</p>
-                  </div>
-                )}
+                <p className="text-slate-700 dark:text-slate-300">绑定技能（必选）</p>
+                <p className="text-xs text-slate-500">
+                  须选择一个技能：公共技能须已发布全员；个人技能须为本人上传且已启用
+                </p>
+                <SkillsScopePanel
+                  skills={bindableSkills}
+                  loading={loading}
+                  mode="select"
+                  selectedNames={contractAllowedSkills}
+                  onToggleSelect={toggleSkill}
+                  displayNameByName={skillDisplayByName}
+                  emptyHint="暂无可绑定技能，请发布公共技能或上传并启用个人技能"
+                />
               </div>
 
               <label className="block space-y-2 text-sm">
                 <span className="text-slate-700 dark:text-slate-300">
-                  输出模版（来自上方已选绑定技能）
+                  输出模版（来自上方已绑定技能）
                 </span>
                 <select
                   value={selectedSkillTemplate}
                   onChange={(e) => setSelectedSkillTemplate(e.target.value)}
-                  disabled={!forceBindSkill || contractAllowedSkills.length === 0 || skillTemplateOptions.length === 0}
+                  disabled={contractAllowedSkills.length === 0 || skillTemplateOptions.length === 0}
                   className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-100 dark:bg-slate-950/70 px-4 py-3 text-sm outline-none focus:border-blue-500 disabled:opacity-50"
                 >
                   <option value="">不指定模版</option>
@@ -834,17 +952,15 @@ function CreatePageInner() {
                     ) : null,
                   )}
                 </select>
-                {!forceBindSkill ? (
-                  <p className="text-xs text-slate-500">请先开启「强制绑定技能」并在上方选择技能</p>
-                ) : contractAllowedSkills.length === 0 ? (
-                  <p className="text-xs text-slate-500">请先在上方选择要绑定的技能，模版选项将来自所选技能的 skill.json 配置</p>
+                {contractAllowedSkills.length === 0 ? (
+                  <p className="text-xs text-amber-400/90">请先在上方选择一个可绑定的技能</p>
                 ) : skillTemplateOptions.length === 0 ? (
                   <p className="text-xs text-amber-400/90">
                     已选技能「{boundSkillTitles}」未配置输出模版，请在技能包中补充 skill.json 的 template / templates 字段
                   </p>
                 ) : (
                   <p className="text-xs text-slate-500">
-                    可选模版来自已选绑定技能：{boundSkillTitles}
+                    可选模版来自已绑定技能：{boundSkillTitles}
                     {skillsWithoutTemplates.length > 0
                       ? `（${skillsWithoutTemplates.join("、")} 暂无模版）`
                       : ""}
@@ -891,29 +1007,25 @@ function CreatePageInner() {
                 <p className="text-xs text-slate-500">任务信息</p>
                 <div className="mt-3 space-y-4">
                   <div>
-                    <span className="text-slate-500">强制绑定技能（可选）</span>
-                    {forceBindSkill ? (
-                      contractAllowedSkills.length > 0 ? (
-                        <div className="mt-2 flex flex-wrap gap-2">
-                          {contractAllowedSkills.map((name) => (
-                            <span
-                              key={name}
-                              title={name}
-                              className={`rounded-full border px-2.5 py-1 text-xs ${chipBlueActive}`}
-                            >
-                              {skillLabel(name, skillDisplayByName.get(name))}
-                            </span>
-                          ))}
-                        </div>
-                      ) : (
-                        <p className="mt-1 text-xs text-amber-400/90">已开启但未选择技能</p>
-                      )
+                    <span className="text-slate-500">绑定技能（必选）</span>
+                    {contractAllowedSkills.length > 0 ? (
+                      <div className="mt-2 flex flex-wrap gap-2">
+                        {contractAllowedSkills.map((name) => (
+                          <span
+                            key={name}
+                            title={name}
+                            className={`rounded-full border px-2.5 py-1 text-xs ${chipBlueActive}`}
+                          >
+                            {skillLabel(name, skillDisplayByName.get(name))}
+                          </span>
+                        ))}
+                      </div>
                     ) : (
-                      <p className="mt-1 text-xs text-slate-500">未开启，由智能体按场景自选技能</p>
+                      <p className="mt-1 text-xs text-amber-400/90">未选择可绑定技能</p>
                     )}
                   </div>
                   <div>
-                    <span className="text-slate-500">强制绑定知识库（可选）</span>
+                    <span className="text-slate-500">指定知识库</span>
                     {forceBindKb ? (
                       kbOrdered.length > 0 ? (
                         <ul className="mt-2 max-h-28 space-y-1 overflow-y-auto text-xs text-slate-700 dark:text-slate-300">
@@ -924,10 +1036,10 @@ function CreatePageInner() {
                           ))}
                         </ul>
                       ) : (
-                        <p className="mt-1 text-xs text-amber-400/90">已开启但未选择集合</p>
+                        <p className="mt-1 text-xs text-amber-400/90">已启用但未选择知识库</p>
                       )
                     ) : (
-                      <p className="mt-1 text-xs text-slate-500">未开启，不限制知识集合</p>
+                      <p className="mt-1 text-xs text-slate-500">未启用，不限制知识库检索范围</p>
                     )}
                   </div>
                 </div>
@@ -962,7 +1074,8 @@ function CreatePageInner() {
               <button
                 type="button"
                 onClick={saveScenarioDraft}
-                disabled={saveBusy || publishBusy}
+                disabled={saveBusy || publishBusy || contractAllowedSkills.length !== 1}
+                title={contractAllowedSkills.length !== 1 ? "须选择一个可绑定的技能" : undefined}
                 className={`w-full rounded-2xl border py-3 text-sm disabled:opacity-50 ${btnEmeraldAction}`}
               >
                 {saveBusy ? "保存中…" : "场景保存"}
@@ -970,11 +1083,41 @@ function CreatePageInner() {
               <button
                 type="button"
                 onClick={() => void publishScenario()}
-                disabled={saveBusy || publishBusy}
+                disabled={saveBusy || publishBusy || contractAllowedSkills.length !== 1}
+                title={
+                  contractAllowedSkills.length !== 1
+                    ? "须选择一个可绑定的技能"
+                    : undefined
+                }
                 className={`w-full rounded-2xl border py-3 text-sm disabled:opacity-50 ${btnAmberAction}`}
               >
                 {publishBusy ? "发布中…" : "发布场景"}
               </button>
+              <button
+                type="button"
+                onClick={handleToggleCoCreateQuickEntry}
+                disabled={saveBusy || publishBusy}
+                className={`w-full rounded-2xl border py-3 text-sm disabled:opacity-50 ${
+                  isCurrentQuickEntry
+                    ? "border-emerald-500/50 bg-emerald-500/15 font-medium text-emerald-900 hover:bg-emerald-500/25 dark:text-emerald-100"
+                    : "border-blue-500/50 bg-blue-500/15 font-medium text-blue-900 hover:bg-blue-500/25 dark:text-blue-100"
+                }`}
+              >
+                {isCurrentQuickEntry ? "已设为快捷创作入口（点击取消）" : "设定为快捷创作入口"}
+              </button>
+              <p className="text-center text-xs text-slate-500">
+                共创页优先展示已设入口，最多 {CO_CREATE_QUICK_ENTRY_LIMIT} 个（
+                {coCreateQuickPrefs.scenarioIds.length}/{CO_CREATE_QUICK_ENTRY_LIMIT}）
+              </p>
+              {quickEntryMessage ? (
+                <p
+                  className={`text-center text-xs ${
+                    quickEntryMessage.includes("最多") ? "text-amber-700 dark:text-amber-300" : accentEmeraldSoft
+                  }`}
+                >
+                  {quickEntryMessage}
+                </p>
+              ) : null}
               {saveMessage ? (
                 <p
                   className={`text-center text-xs ${

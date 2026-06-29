@@ -350,9 +350,10 @@ async def _resolve_workshop_agent_output(
 
     if workshop_agent_fallback_direct():
         logger.warning(
-            "workshop agent capture miss run_id=%s fallback=direct skill=%s",
+            "workshop agent capture miss run_id=%s fallback=direct skill=%s sse_len=%s",
             run_id,
             skill_name,
+            len(sse_fallback),
         )
         try:
             direct_text = await _run_workshop_direct_text(skill_name, user_text, task_input)
@@ -376,10 +377,17 @@ async def _resolve_workshop_agent_output(
     raise HTTPException(status_code=424, detail=detail)
 
 
-def _chat_force_skill_mode(payload: OrchestrationPayload) -> bool:
+def _chat_force_skill_mode(
+    payload: OrchestrationPayload,
+    *,
+    chat_mode: str | None = None,
+) -> bool:
     """
     chat 入口仅在“显式单技能白名单”时强制要求命中 tool 调用。
+    共创 co_create（含快捷创作）须基于项目+场景走 Hermes 编排，禁止直连技能模板。
     """
+    if chat_mode == "co_create":
+        return False
     if payload.entrypoint != "chat":
         return False
     if payload.skills.allow_agent_free_choice:
@@ -397,6 +405,7 @@ async def _resolve_chat_skill_output(
     sse_fallback: str,
     user_text: str,
     task_input: TaskInputPayload | None,
+    chat_mode: str | None = None,
 ) -> tuple[str, bool, str, list[str] | None]:
     """
     chat 入口：
@@ -412,7 +421,7 @@ async def _resolve_chat_skill_output(
         used = allowed[:1] if allowed else None
         return captured_text, True, "agent_tool", used
 
-    if _chat_force_skill_mode(payload):
+    if _chat_force_skill_mode(payload, chat_mode=chat_mode):
         skill_name = allowed[0]
         logger.warning(
             "chat forced skill capture miss run_id=%s fallback=direct skill=%s",
@@ -747,7 +756,10 @@ async def execute_task(req: Request, task_req: TaskExecuteRequest, db: AsyncSess
         )
 
     # chat 入口：显式单技能白名单时直接执行技能，避免 agent 未调 tool 或超时。
-    if payload.entrypoint == "chat" and _chat_force_skill_mode(payload):
+    # 共创 co_create 走 Hermes 基于项目+场景编排，不在此短路。
+    if payload.entrypoint == "chat" and _chat_force_skill_mode(
+        payload, chat_mode=eff_request.chat_mode
+    ):
         forced_skill = payload.skills.allowed[0]
         logger.info(
             "chat forced skill direct run_id=%s skill=%s project_id=%s",
@@ -986,6 +998,7 @@ async def execute_task(req: Request, task_req: TaskExecuteRequest, db: AsyncSess
                     sse_fallback=text,
                     user_text=user_text,
                     task_input=eff_request.task_input,
+                    chat_mode=eff_request.chat_mode,
                 )
             except HTTPException as exc:
                 await mark_run_failed(db, run_id, str(exc.detail))
@@ -1267,6 +1280,7 @@ async def execute_task(req: Request, task_req: TaskExecuteRequest, db: AsyncSess
                     sse_fallback=full_text,
                     user_text=user_text,
                     task_input=eff_request.task_input,
+                    chat_mode=eff_request.chat_mode,
                 )
             except HTTPException as exc:
                 async with async_session_maker() as s:

@@ -66,3 +66,20 @@ export function sortInternalSectionCollections<T extends { name: string }>(
     (a, b) => (order.get(a.name) ?? 99) - (order.get(b.name) ?? 99),
   );
 }
+
+/** 场景编排可选绑定的 collection：public/internal 真源，排除 project.* 与联调测试集合 */
+export function isBindableKbCollection(name: string): boolean {
+  const key = name.trim();
+  if (!key) return false;
+  if (isKbCollectionHidden(key)) return false;
+  if (/^project\.[^.]+\.kb$/.test(key)) return false;
+  if (/\.test\.|\.smoke\b|remote_debug/.test(key)) return false;
+  const parts = key.split(".").filter(Boolean);
+  if (parts.length < 3) return false;
+  const scope = parts[0];
+  return scope === "public" || scope === "internal";
+}
+
+export function filterBindableKbCollections(collections: string[]): string[] {
+  return collections.filter(isBindableKbCollection);
+}

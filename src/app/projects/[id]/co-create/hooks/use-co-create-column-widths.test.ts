@@ -14,7 +14,7 @@ describe("fitWidthsToContainer", () => {
     const fitted = fitWidthsToContainer(
       { session: 224, message: 360, preview: 360, files: 256 },
       1200,
-      true,
+      { sidebarOpen: true, filesPanelOpen: true },
     );
     const total = fitted.session + fitted.message + fitted.preview + fitted.files;
     expect(total).toBe(1200);
@@ -24,11 +24,22 @@ describe("fitWidthsToContainer", () => {
     const fitted = fitWidthsToContainer(
       { session: 224, message: 360, preview: 360, files: 256 },
       1000,
-      false,
+      { sidebarOpen: false, filesPanelOpen: true },
     );
     const total = fitted.message + fitted.preview + fitted.files;
     expect(total).toBe(1000);
     expect(fitted.session).toBe(224);
+  });
+
+  it("ignores files width when the files panel is collapsed", () => {
+    const fitted = fitWidthsToContainer(
+      { session: 224, message: 360, preview: 360, files: 256 },
+      1000,
+      { sidebarOpen: true, filesPanelOpen: false },
+    );
+    const total = fitted.session + fitted.message + fitted.preview;
+    expect(total).toBe(1000);
+    expect(fitted.files).toBe(256);
   });
 });
 
@@ -49,17 +60,22 @@ describe("useCoCreateColumnWidths", () => {
     );
 
     const { result, rerender } = renderHook(
-      ({ sidebarOpen }: { sidebarOpen: boolean }) => useCoCreateColumnWidths(sidebarOpen),
-      { initialProps: { sidebarOpen: true } },
+      ({ visibility }: { visibility: { sidebarOpen: boolean; filesPanelOpen: boolean } }) =>
+        useCoCreateColumnWidths(visibility),
+      { initialProps: { visibility: { sidebarOpen: true, filesPanelOpen: true } } },
     );
 
     await waitFor(() => {
       expect(result.current.widths).toEqual(CO_CREATE_COLUMN_MIN);
     });
     expect(result.current.sessionWidth).toBe(CO_CREATE_COLUMN_MIN.session);
+    expect(result.current.filesWidth).toBe(CO_CREATE_COLUMN_MIN.files);
 
-    rerender({ sidebarOpen: false });
+    rerender({ visibility: { sidebarOpen: false, filesPanelOpen: true } });
     expect(result.current.sessionWidth).toBe(0);
+
+    rerender({ visibility: { sidebarOpen: false, filesPanelOpen: false } });
+    expect(result.current.filesWidth).toBe(0);
   });
 
   it("adjusts adjacent widths within bounds and persists the latest state", async () => {
@@ -73,7 +89,9 @@ describe("useCoCreateColumnWidths", () => {
       }),
     );
 
-    const { result } = renderHook(() => useCoCreateColumnWidths(true));
+    const { result } = renderHook(() =>
+      useCoCreateColumnWidths({ sidebarOpen: true, filesPanelOpen: true }),
+    );
 
     await waitFor(() => {
       expect(result.current.widths.message).toBe(360);

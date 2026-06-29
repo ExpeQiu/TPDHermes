@@ -11,12 +11,10 @@ import { CONTENT_MAX_CLASS } from "@/lib/content-shell";
 import {
   loadProjectQuickScenarios,
   quickScenariosScopeId,
-  resolveWorkshopScenarioId,
 } from "@/lib/project-quick-scenarios";
 import {
   buildScenarioListItems,
   countLocalTemplates,
-  isScenarioPublished,
   loadDismissedPresetIds,
   type ScenarioApiRow,
   type ScenarioListItem,
@@ -27,6 +25,14 @@ import {
   type ParsedScenarioSkills,
   type ScenarioSkillBinding,
 } from "@/lib/scenario-skills";
+import {
+  buildWorkshopTaskInput,
+  canSubmitWorkshop,
+  getWorkshopSubmitBlockReason,
+  isWorkshopSelectableScenario,
+  resolveWorkshopDefaultScenarioId,
+  sortWorkshopDisplayScenarios,
+} from "@/lib/workshop-page";
 import {
   deriveWorkshopArtifacts,
   formatFromOutputPolicy,
@@ -236,10 +242,10 @@ function WorkshopPageInner() {
     [boundScenarios],
   );
 
-  const isWorkshopSelectable = useCallback((item: ScenarioListItem): boolean => {
-    if (item.isLocalTemplate) return false;
-    return isScenarioPublished(item.remote);
-  }, []);
+  const isWorkshopSelectable = useCallback(
+    (item: ScenarioListItem): boolean => isWorkshopSelectableScenario(item),
+    [],
+  );
 
   const isWorkshopExecutable = isWorkshopSelectable;
 
@@ -315,17 +321,12 @@ function WorkshopPageInner() {
   );
 
   const workshopDisplayScenarios = useMemo(() => {
-    const published = scenarioListItems.filter((item) => isWorkshopSelectable(item));
-    return published.sort((a, b) => {
-      const aQuick = quickScenarioIdSet.has(a.id) ? 0 : 1;
-      const bQuick = quickScenarioIdSet.has(b.id) ? 0 : 1;
-      if (aQuick !== bQuick) return aQuick - bQuick;
-      const aBound = boundByScenarioId.has(a.id) ? 0 : 1;
-      const bBound = boundByScenarioId.has(b.id) ? 0 : 1;
-      if (aBound !== bBound) return aBound - bBound;
-      return a.title.localeCompare(b.title, "zh-CN");
-    });
-  }, [scenarioListItems, isWorkshopSelectable, quickScenarioIdSet, boundByScenarioId]);
+    return sortWorkshopDisplayScenarios(
+      scenarioListItems,
+      quickScenarioIdSet,
+      new Set(boundScenarios.map((b) => b.scenario_id)),
+    );
+  }, [scenarioListItems, quickScenarioIdSet, boundScenarios]);
 
   const workshopScenarioOptions = useMemo((): WorkshopScenarioOption[] => {
     return workshopDisplayScenarios.map((item) => {
@@ -353,31 +354,18 @@ function WorkshopPageInner() {
   ]);
 
   useEffect(() => {
-    if (!selectedProjectId || loadingBound) return;
-    if (workshopDisplayScenarios.length === 0) {
-      setSelectedScenarioId("");
-      return;
+    if (selectedProjectId && loadingBound) return;
+    const nextId = resolveWorkshopDefaultScenarioId({
+      displayScenarios: workshopDisplayScenarios,
+      selectedProjectId,
+      scenarioFromUrl,
+      currentScenarioId: selectedScenarioId,
+      projectQuickScenarios,
+      boundScenarios,
+    });
+    if (nextId !== selectedScenarioId) {
+      setSelectedScenarioId(nextId);
     }
-    const inDisplay = (id: string) => workshopDisplayScenarios.some((s) => s.id === id);
-
-    if (scenarioFromUrl && inDisplay(scenarioFromUrl)) {
-      setSelectedScenarioId(scenarioFromUrl);
-      return;
-    }
-    if (selectedScenarioId && inDisplay(selectedScenarioId)) {
-      return;
-    }
-    const quickDefault = resolveWorkshopScenarioId(projectQuickScenarios);
-    if (quickDefault && inDisplay(quickDefault)) {
-      setSelectedScenarioId(quickDefault);
-      return;
-    }
-    const def = boundScenarios.find((b) => b.enabled === 1 && b.is_default === 1);
-    if (def?.scenario_id && inDisplay(def.scenario_id)) {
-      setSelectedScenarioId(def.scenario_id);
-      return;
-    }
-    setSelectedScenarioId(workshopDisplayScenarios[0]?.id ?? "");
   }, [
     selectedProjectId,
     loadingBound,
@@ -386,7 +374,6 @@ function WorkshopPageInner() {
     selectedScenarioId,
     boundScenarios,
     projectQuickScenarios,
-    isWorkshopSelectable,
   ]);
 
   useEffect(() => {
@@ -487,6 +474,42 @@ function WorkshopPageInner() {
   }, [runSkillNames]);
 
   const selectedProject = projects.find((project) => project.id === selectedProjectId);
+
+  const submitBlockReason = useMemo(
+    () =>
+      getWorkshopSubmitBlockReason({
+        selectedProjectId,
+        selectedScenarioId,
+        loadingBound,
+        scenarioListItems,
+        loadingScenarioDetail,
+        hasScenarioDetail: Boolean(scenarioDetail),
+        runSkillNames,
+        selectedSkill,
+      }),
+    [
+      selectedProjectId,
+      selectedScenarioId,
+      loadingBound,
+      scenarioListItems,
+      loadingScenarioDetail,
+      scenarioDetail,
+      runSkillNames,
+      selectedSkill,
+    ],
+  );
+
+  const canSubmit = canSubmitWorkshop({
+    selectedProjectId,
+    selectedScenarioId,
+    loadingBound,
+    scenarioListItems,
+    loadingScenarioDetail,
+    hasScenarioDetail: Boolean(scenarioDetail),
+    runSkillNames,
+    selectedSkill,
+    genStatus,
+  });
 
   const derivedTaskTitle = useMemo(() => {
     const projectName = selectedProject?.name?.trim() || "项目";
@@ -682,8 +705,8 @@ function WorkshopPageInner() {
       alert("请先选择项目；场景输出需在项目上下文中执行。");
       return;
     }
-    if (!selectedScenarioId || loadingBound) {
-      alert("请等待场景列表加载完成并选择场景");
+    if (!selectedScenarioId || (selectedProjectId && loadingBound)) {
+      alert("请选择场景" + (selectedProjectId && loadingBound ? "（项目绑定加载中）" : ""));
       return;
     }
     const selectedItem = scenarioListItems.find((s) => s.id === selectedScenarioId);
@@ -730,21 +753,17 @@ function WorkshopPageInner() {
     abortRef.current = controller;
 
     const effTitle = taskTitleCustom.trim() || derivedTaskTitle;
-    const kwParts = taskKeywords
-      .split(/[,，]/)
-      .map((s) => s.trim())
-      .filter(Boolean);
-    const taskInput: TaskInputPayload = {
-      title: effTitle,
-      ...(taskBackground.trim() ? { background: taskBackground.trim() } : {}),
-      ...(taskObjective.trim() ? { objective: taskObjective.trim() } : {}),
-      ...(kwParts.length ? { keywords: kwParts } : {}),
-      ...(taskExtra.trim() ? { extra: taskExtra.trim() } : {}),
-      ...(taskTone.trim() ? { tone: taskTone.trim() } : {}),
-      ...(mode === "refine" && sourceMaterialPreview?.trim()
-        ? { source_material: sourceMaterialPreview }
-        : {}),
-    };
+    const taskInput: TaskInputPayload = buildWorkshopTaskInput({
+      taskTitleCustom,
+      derivedTaskTitle,
+      taskBackground,
+      taskObjective,
+      taskKeywords,
+      taskExtra,
+      taskTone,
+      mode,
+      sourceMaterialPreview,
+    });
 
     const body: TaskExecuteBody = {
       entrypoint: "workshop",
@@ -953,7 +972,7 @@ function WorkshopPageInner() {
           </div>
           <h1 className="mt-4 text-3xl font-bold sm:text-4xl">场景输出</h1>
           <p className="mt-2 max-w-2xl text-sm text-slate-400 sm:text-base">
-            先选择项目，再选择已发布场景执行输出；场景合同（知识 / 技能 / 输出策略）来自服务端。可在项目详情设置快捷场景作为默认推荐。
+            选择已发布场景执行输出；场景合同（知识 / 技能 / 输出策略）来自服务端。执行前需关联项目；选定项目后将优先推荐其快捷场景。
           </p>
         </div>
 
@@ -1031,27 +1050,20 @@ function WorkshopPageInner() {
                   <h2 className="mt-2 text-xl font-semibold">场景选择</h2>
                 </div>
                 <span className="text-xs text-slate-500">
-                  {!selectedProjectId
-                    ? "先选项目"
-                    : loadingScenarioDetail
-                      ? "加载场景中…"
-                      : "合同来自 GET /scenarios/{id}"}
+                  {loadingScenarioDetail
+                    ? "加载场景中…"
+                    : `服务端 ${remoteScenarios.length} · 内置模板 ${localTemplateCount}`}
                 </span>
               </div>
 
-              {!selectedProjectId ? (
-                <p className="mt-5 rounded-2xl border border-dashed border-slate-300 dark:border-slate-700 bg-slate-100/50 dark:bg-slate-950/30 px-4 py-6 text-center text-sm text-slate-500">
-                  请先选择项目；将展示全部已发布场景，并默认选中项目快捷场景。
-                </p>
-              ) : (
               <div className="mt-5 space-y-3 text-sm">
                 <div className="flex flex-wrap items-end justify-between gap-2">
                   <span className="text-slate-700 dark:text-slate-300">已发布场景（与场景编排同源）</span>
-                  <span className="text-xs text-slate-500">
-                    服务端 {remoteScenarios.length} · 内置模板 {localTemplateCount}
-                  </span>
+                  {!selectedProjectId ? (
+                    <span className="text-xs text-slate-500">选定项目后将标注快捷场景</span>
+                  ) : null}
                 </div>
-                {loadingBound ? (
+                {selectedProjectId && loadingBound ? (
                   <p className="rounded-2xl border border-dashed border-slate-300 dark:border-slate-700 bg-slate-100/50 dark:bg-slate-950/30 px-4 py-6 text-center text-sm text-slate-500">
                     加载项目绑定…
                   </p>
@@ -1112,7 +1124,7 @@ function WorkshopPageInner() {
                     })}
                   </div>
                 )}
-                {selectedProjectId && !loadingBound && workshopDisplayScenarios.length === 0 ? (
+                {!loadingBound && workshopDisplayScenarios.length === 0 ? (
                   <p className="text-xs text-amber-700 dark:text-amber-400/90">
                     暂无已发布场景。请先在{" "}
                     <Link href="/create" className="underline">
@@ -1122,7 +1134,6 @@ function WorkshopPageInner() {
                   </p>
                 ) : null}
               </div>
-              )}
 
               <div className="mt-6 border-t border-slate-200 dark:border-slate-800 pt-5">
                 <div className="mb-3 flex flex-wrap items-end justify-between gap-2">
@@ -1134,7 +1145,11 @@ function WorkshopPageInner() {
                   </div>
                   {scenarioDetail && !loadingScenarioDetail ? (
                     <Link
-                      href={`/create?return_project_id=${encodeURIComponent(selectedProjectId)}`}
+                      href={
+                        selectedProjectId
+                          ? `/create?return_project_id=${encodeURIComponent(selectedProjectId)}`
+                          : "/create"
+                      }
                       className="text-xs text-blue-400 hover:text-blue-300"
                     >
                       去场景编排调整 →
@@ -1164,12 +1179,12 @@ function WorkshopPageInner() {
               <p className="text-xs uppercase tracking-[0.2em] text-slate-500">{stepLabel(4)}</p>
               <h2 className="mt-2 text-xl font-semibold">任务信息</h2>
               <p className="mt-1 text-sm text-slate-500">
-                以下为本次任务输入，将并入编排与技能上下文；标题留空则使用自动摘要。
+                以下均为可选填，将并入编排与技能上下文；留空时标题自动使用「项目 · 场景 · 技能」摘要。
               </p>
 
               <div className="mt-4 grid grid-cols-1 gap-3">
                 <label className="block space-y-1.5 text-sm">
-                  <span className="text-slate-400">任务标题</span>
+                  <span className="text-slate-400">任务标题（可选）</span>
                   <input
                     type="text"
                     value={taskTitleCustom}
@@ -1179,7 +1194,7 @@ function WorkshopPageInner() {
                   />
                 </label>
                 <label className="block space-y-1.5 text-sm">
-                  <span className="text-slate-400">背景补充</span>
+                  <span className="text-slate-400">背景补充（可选）</span>
                   <textarea
                     value={taskBackground}
                     onChange={(e) => setTaskBackground(e.target.value)}
@@ -1189,7 +1204,7 @@ function WorkshopPageInner() {
                   />
                 </label>
                 <label className="block space-y-1.5 text-sm">
-                  <span className="text-slate-400">任务目标</span>
+                  <span className="text-slate-400">任务目标（可选）</span>
                   <textarea
                     value={taskObjective}
                     onChange={(e) => setTaskObjective(e.target.value)}
@@ -1199,7 +1214,7 @@ function WorkshopPageInner() {
                   />
                 </label>
                 <label className="block space-y-1.5 text-sm">
-                  <span className="text-slate-400">关键词</span>
+                  <span className="text-slate-400">关键词（可选）</span>
                   <input
                     type="text"
                     value={taskKeywords}
@@ -1209,7 +1224,7 @@ function WorkshopPageInner() {
                   />
                 </label>
                 <label className="block space-y-1.5 text-sm">
-                  <span className="text-slate-400">语气 / 风格</span>
+                  <span className="text-slate-400">语气 / 风格（可选）</span>
                   <input
                     type="text"
                     value={taskTone}
@@ -1219,7 +1234,7 @@ function WorkshopPageInner() {
                   />
                 </label>
                 <label className="block space-y-1.5 text-sm">
-                  <span className="text-slate-400">附加要求</span>
+                  <span className="text-slate-400">附加要求（可选）</span>
                   <textarea
                     value={taskExtra}
                     onChange={(e) => setTaskExtra(e.target.value)}
@@ -1299,15 +1314,23 @@ function WorkshopPageInner() {
               <button
                 type="button"
                 onClick={handleSubmit}
-                disabled={genStatus === "generating"}
+                disabled={!canSubmit}
                 className={`mt-5 w-full rounded-2xl px-5 py-3 text-sm font-medium transition ${
-                  genStatus === "generating"
+                  !canSubmit
                     ? "cursor-not-allowed bg-slate-300 dark:bg-slate-700 text-slate-500"
                     : "bg-blue-600 text-white hover:bg-blue-500"
                 }`}
               >
                 {genStatus === "generating" ? "执行中…" : mode === "refine" ? "开始优化" : "开始生成"}
               </button>
+              {submitBlockReason ? (
+                <p className="mt-2 text-center text-xs text-slate-500">{submitBlockReason}</p>
+              ) : (
+                <p className="mt-2 text-center text-xs text-slate-500">
+                  将关联项目「{selectedProject?.name ?? "—"}」与场景「
+                  {workshopScenarioOptions.find((o) => o.id === selectedScenarioId)?.name ?? "—"}」执行
+                </p>
+              )}
             </div>
 
             <section className="min-h-0 rounded-3xl border border-slate-200 dark:border-slate-800 bg-white/80 dark:bg-slate-900/50 p-6 xl:max-h-[calc(100vh-3rem)] xl:overflow-y-auto">

@@ -17,6 +17,7 @@ import {
   type TaskExecuteBody,
 } from "@/lib/chat-context";
 import { ensureDerivedUserId, getEffectiveUserIdSync } from "@/lib/user-id";
+import { formatApiError } from "@/lib/api";
 import { fetchRunKbSources, parseTpHermesStreamMeta } from "@/lib/chat-citations";
 
 import type {
@@ -36,6 +37,8 @@ type SendMessageOptions = {
   useOrchestrationOverride?: boolean;
   skipToolsContextBuild?: boolean;
   scenarioPresetInstructionsAppend?: string;
+  scenarioIdOverride?: string;
+  scenarioPresetInstructionsOverride?: string;
 };
 
 type UseChatExecutionOptions = {
@@ -98,6 +101,17 @@ type UseChatExecutionOptions = {
 
 function uuid() {
   return Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
+}
+
+function formatStreamErrorMessage(raw: string): string {
+  const httpMatch = raw.match(/^HTTP (\d+):\s*(.+)$/s);
+  if (!httpMatch) return raw;
+  const status = Number(httpMatch[1]);
+  const body = httpMatch[2]?.trim() ?? "";
+  if (status === 404 && body.includes("项目不存在")) {
+    return "项目不存在或当前账号无权访问，请确认已登录正确用户并刷新页面";
+  }
+  return formatApiError(status, body);
 }
 
 function parseSSEDataPayload(data: string): {
@@ -169,16 +183,15 @@ function parseSseBlock(block: string): { event: string; data: string } | null {
   return { event, data: dataLines.join("\n").trim() };
 }
 
-function parseHermesFileToolEvent(data: string): AssistantFileToolEvent | null {
+function parseHermesToolProgressEvent(data: string): AssistantFileToolEvent | null {
   if (!data) return null;
   try {
     const parsed = JSON.parse(data) as Record<string, unknown>;
-    const toolName = parsed.tool;
-    const toolCallId = parsed.toolCallId;
+    const toolName = typeof parsed.tool === "string" ? parsed.tool.trim() : "";
+    const toolCallId = typeof parsed.toolCallId === "string" ? parsed.toolCallId.trim() : "";
     const status = parsed.status;
-    if (toolName !== "write_file" && toolName !== "patch") return null;
-    if (typeof toolCallId !== "string" || !toolCallId) return null;
-    if (status !== "running" && status !== "completed") return null;
+    if (!toolName || !toolCallId) return null;
+    if (status !== "running" && status !== "completed" && status !== "failed") return null;
     const label = typeof parsed.label === "string" ? parsed.label.trim() : "";
     return {
       toolCallId,
@@ -191,6 +204,14 @@ function parseHermesFileToolEvent(data: string): AssistantFileToolEvent | null {
   } catch {
     return null;
   }
+}
+
+/** @deprecated 使用 parseHermesToolProgressEvent */
+function parseHermesFileToolEvent(data: string): AssistantFileToolEvent | null {
+  const event = parseHermesToolProgressEvent(data);
+  if (!event) return null;
+  if (event.toolName !== "write_file" && event.toolName !== "patch") return null;
+  return event;
 }
 
 function mergeAssistantToolEvents(
@@ -301,6 +322,8 @@ export function useChatExecution(options: UseChatExecutionOptions) {
       useOrchestrationOverride,
       fastPathEnabled,
       scenarioPresetInstructionsAppend,
+      scenarioIdOverride,
+      scenarioPresetInstructionsOverride,
     }: RunAssistantStreamParams) => {
       const effectiveUseOrchestration = useOrchestrationOverride ?? useOrchestration;
       setStreaming(true);
@@ -402,7 +425,10 @@ export function useChatExecution(options: UseChatExecutionOptions) {
               required_sections: qc.outputRequiredSections,
             };
           }
-          let scenarioPresetInstructions = priorSession?.scenarioPresetInstructions?.trim() ?? "";
+          let scenarioPresetInstructions =
+            scenarioPresetInstructionsOverride?.trim() ||
+            priorSession?.scenarioPresetInstructions?.trim() ||
+            "";
           let scenarioOpeningHint = priorSession?.scenarioOpeningHint?.trim() ?? "";
           if (!scenarioPresetInstructions) {
             const sys = priorSession?.messages.find(
@@ -439,7 +465,7 @@ export function useChatExecution(options: UseChatExecutionOptions) {
           const body: TaskExecuteBody = {
             entrypoint: "chat",
             project_id: includeProjectContext && selectedProjectId ? selectedProjectId : null,
-            scenario_id: scenarioFromUrl || "general",
+            scenario_id: scenarioIdOverride || scenarioFromUrl || "general",
             chat_mode: chatMode,
             user_message: text,
             stream: true,
@@ -502,7 +528,7 @@ export function useChatExecution(options: UseChatExecutionOptions) {
               const parsedBlock = parseSseBlock(block);
               if (!parsedBlock) continue;
               if (parsedBlock.event === "hermes.tool.progress") {
-                const toolEvent = parseHermesFileToolEvent(parsedBlock.data);
+                const toolEvent = parseHermesToolProgressEvent(parsedBlock.data);
                 if (toolEvent) applyToolEvent(toolEvent);
                 continue;
               }
@@ -527,7 +553,10 @@ export function useChatExecution(options: UseChatExecutionOptions) {
                     : session.linkedRunIds,
                   messages: session.messages.map((message) =>
                     message.id === assistantId
-                      ? applyStreamMetaToAssistantMessage(message, meta)
+                      ? {
+                          ...applyStreamMetaToAssistantMessage(message, meta),
+                          content: fullContent || message.content,
+                        }
                       : message,
                   ),
                 }));
@@ -561,7 +590,7 @@ export function useChatExecution(options: UseChatExecutionOptions) {
           if (buffer.trim()) {
             const parsedBlock = parseSseBlock(buffer);
             if (parsedBlock?.event === "hermes.tool.progress") {
-              const toolEvent = parseHermesFileToolEvent(parsedBlock.data);
+              const toolEvent = parseHermesToolProgressEvent(parsedBlock.data);
               if (toolEvent) applyToolEvent(toolEvent);
             } else if (parsedBlock) {
               const meta = parseTpHermesStreamMeta(parsedBlock.data);
@@ -584,7 +613,10 @@ export function useChatExecution(options: UseChatExecutionOptions) {
                     : session.linkedRunIds,
                   messages: session.messages.map((message) =>
                     message.id === assistantId
-                      ? applyStreamMetaToAssistantMessage(message, meta)
+                      ? {
+                          ...applyStreamMetaToAssistantMessage(message, meta),
+                          content: fullContent || message.content,
+                        }
                       : message,
                   ),
                 }));
@@ -603,6 +635,12 @@ export function useChatExecution(options: UseChatExecutionOptions) {
                 fullContent += part.content;
               }
             }
+          }
+
+          if (!fullContent.trim()) {
+            fullContent =
+              "（本轮未生成可见正文。Agent 可能仍在检索或仅执行了工具；请稍后重试，或检查 Hermes 上游是否正常。）";
+            console.warn("[chat] 流式结束但正文为空", { sessionId });
           }
 
           updateSession(sessionId, (session) => ({
@@ -689,7 +727,7 @@ export function useChatExecution(options: UseChatExecutionOptions) {
                 const parsedBlock = parseSseBlock(block);
                 if (!parsedBlock) continue;
                 if (parsedBlock.event === "hermes.tool.progress") {
-                  const toolEvent = parseHermesFileToolEvent(parsedBlock.data);
+                  const toolEvent = parseHermesToolProgressEvent(parsedBlock.data);
                   if (toolEvent) applyToolEvent(toolEvent);
                   continue;
                 }
@@ -717,7 +755,7 @@ export function useChatExecution(options: UseChatExecutionOptions) {
             if (buffer.trim()) {
               const parsedBlock = parseSseBlock(buffer);
               if (parsedBlock?.event === "hermes.tool.progress") {
-                const toolEvent = parseHermesFileToolEvent(parsedBlock.data);
+                const toolEvent = parseHermesToolProgressEvent(parsedBlock.data);
                 if (toolEvent) applyToolEvent(toolEvent);
               } else if (parsedBlock) {
                 const part = parseSSEDataPayload(parsedBlock.data);
@@ -745,13 +783,30 @@ export function useChatExecution(options: UseChatExecutionOptions) {
           }
         }
       } catch (sendError) {
-        if ((sendError as Error).name !== "AbortError") {
-          setError(`连接失败：${(sendError as Error).message}`);
+        if ((sendError as Error).name === "AbortError") {
           updateSession(sessionId, (session) => ({
             ...session,
-            messages: session.messages.filter((message) => message.id !== assistantId),
+            messages: session.messages.filter(
+              (message) => message.id !== assistantId || Boolean(message.content.trim()),
+            ),
           }));
           queueMessageSync(sessionId, [], [assistantId], 0);
+        } else {
+          const errMsg = formatStreamErrorMessage((sendError as Error).message);
+          setError(`连接失败：${errMsg}`);
+          console.warn("[chat] 流式请求失败", { sessionId, err: sendError });
+          updateSession(sessionId, (session) => ({
+            ...session,
+            messages: session.messages.map((message) =>
+              message.id === assistantId
+                ? { ...message, content: `**生成失败**：${errMsg}` }
+                : message,
+            ),
+          }));
+          const failedAssistant = sessionsRef.current
+            .find((session) => session.id === sessionId)
+            ?.messages.find((message) => message.id === assistantId);
+          if (failedAssistant) queueMessageSync(sessionId, [failedAssistant], [], 0);
         }
       } finally {
         void flushSessionToServer(sessionId, "stream_complete").catch((err) => {
@@ -904,6 +959,9 @@ export function useChatExecution(options: UseChatExecutionOptions) {
       const messages = [...session.messages, userMsg];
       const isFirstUser = !session.messages.some((message) => message.role === "user");
       const next: ChatSession = { ...session, messages };
+      if (sendOptions?.scenarioPresetInstructionsOverride?.trim()) {
+        next.scenarioPresetInstructions = sendOptions.scenarioPresetInstructionsOverride.trim();
+      }
       if (isFirstUser && isPlaceholderSessionTitle(session.title)) {
         next.title = condenseTopicTitle(sendOptions?.userPrompt?.trim() || text);
       }
@@ -917,16 +975,29 @@ export function useChatExecution(options: UseChatExecutionOptions) {
     setInput("");
 
     const sessionAfterUser = sessionsRef.current.find((session) => session.id === sessionId);
-    if (!sessionAfterUser) return;
+    if (!sessionAfterUser) {
+      console.warn("[chat] sendMessage 会话已丢失，跳过流式生成", { sessionId });
+      return;
+    }
+
+    const sessionForStream =
+      sendOptions?.scenarioPresetInstructionsOverride?.trim() && sessionAfterUser
+        ? {
+            ...sessionAfterUser,
+            scenarioPresetInstructions: sendOptions.scenarioPresetInstructionsOverride.trim(),
+          }
+        : sessionAfterUser;
 
     await runAssistantStream({
       sessionId,
       text,
       orchestrationPriorMessages: priorMessages,
-      priorSession: sessionAfterUser,
+      priorSession: sessionForStream,
       useOrchestrationOverride: effectiveUseOrchestration,
       fastPathEnabled,
       scenarioPresetInstructionsAppend: sendOptions?.scenarioPresetInstructionsAppend,
+      scenarioIdOverride: sendOptions?.scenarioIdOverride,
+      scenarioPresetInstructionsOverride: sendOptions?.scenarioPresetInstructionsOverride,
     });
   }, [
     activeIdRef,

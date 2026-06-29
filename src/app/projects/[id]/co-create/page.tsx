@@ -5,6 +5,29 @@ import { useParams, useSearchParams } from "next/navigation";
 
 import { apiGet, apiV1 } from "@/lib/api";
 import {
+  buildCoCreateQuickStartPlan,
+  type CoCreateQuickStartScenarioDetail,
+} from "@/app/projects/[id]/co-create/co-create-quick-start";
+import {
+  buildCoCreateQuickEntries,
+  type CoCreateQuickEntry,
+} from "@/lib/co-create-quick-entries";
+import {
+  CO_CREATE_QUICK_SCENARIOS_CHANGED,
+  coCreateQuickScenariosScopeId,
+  loadCoCreateQuickScenariosPrefs,
+  type CoCreateQuickScenariosPrefs,
+} from "@/lib/co-create-quick-scenarios-prefs";
+import {
+  loadProjectQuickScenarios,
+  quickScenariosScopeId,
+} from "@/lib/project-quick-scenarios";
+import {
+  buildScenarioListItems,
+  loadDismissedPresetIds,
+  type ScenarioApiRow,
+} from "@/lib/scenario-list";
+import {
   decodeProjectFileSelectValue,
   encodeProjectFileSelectValue,
   fetchChatBootstrap,
@@ -22,6 +45,7 @@ import {
   projectCoCreateSessionDefaults,
 } from "@/lib/chat-session-utils";
 import { useEffectiveUserScopeId } from "@/lib/use-effective-user-scope-id";
+import { ensureDerivedUserId } from "@/lib/user-id";
 import type { Message } from "@/app/chat/chat-types";
 import { useChatExecution } from "@/app/chat/hooks/use-chat-execution";
 import {
@@ -50,7 +74,6 @@ import {
 } from "@/app/projects/[id]/co-create/co-create-agent-utils";
 import {
   type AgentUndoEntry,
-  formatAgentUndoButtonLabel,
   formatAgentUndoSummary,
   popAgentUndoStack,
   pushAgentUndoStack,
@@ -90,10 +113,13 @@ import {
   extractAutoCreateDraftBody,
   findLatestTurnUserPrompt,
   inferAutoCreateDraftFileName,
+  inferQuickCreateOutputFileName,
   isAutoCreateFallbackProposal,
   isDocumentGenerationPrompt,
   isReadyForAutoCreateDraft,
+  isReadyForQuickStartAutoCreateDraft,
   shouldAutoCreateDraftFromAssistant,
+  shouldQuickStartAutoCreateDraft,
 } from "@/app/projects/[id]/co-create/co-create-auto-draft";
 import {
   hasActiveStreamFileActions,
@@ -337,6 +363,7 @@ function CoCreatePageInner() {
   const [streamingPhase, setStreamingPhase] = useState("");
   const [error, setError] = useState("");
   const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [filesPanelOpen, setFilesPanelOpen] = useState(true);
   const [saveState, setSaveState] = useState<
     "idle" | "saving" | "saved" | "error" | "pending_apply"
   >("idle");
@@ -347,6 +374,11 @@ function CoCreatePageInner() {
   );
   const [fileSaving, setFileSaving] = useState(false);
   const [undoingAgentChange, setUndoingAgentChange] = useState(false);
+  const [remoteScenarios, setRemoteScenarios] = useState<ScenarioApiRow[]>([]);
+  const [quickScenariosLoading, setQuickScenariosLoading] = useState(true);
+  const [dismissedPresetIds] = useState(loadDismissedPresetIds);
+  const [globalCoCreateQuickPrefs, setGlobalCoCreateQuickPrefs] =
+    useState<CoCreateQuickScenariosPrefs>({ scenarioIds: [] });
 
   const abortRef = useRef<AbortController | null>(null);
   const firstTokenMetricsRef = useRef({ count: 0, totalMs: 0 });
@@ -355,6 +387,7 @@ function CoCreatePageInner() {
   const autoApplyingBusyRef = useRef(false);
   const autoDraftExtractedLenRef = useRef<Map<string, number>>(new Map());
   const pendingAutoDraftPromptRef = useRef<string | null>(null);
+  const pendingQuickEntryTitleRef = useRef<string | null>(null);
   const autoPatchExtractedLenRef = useRef<Map<string, number>>(new Map());
   const pendingAutoPatchPromptRef = useRef<string | null>(null);
   const pendingAutoPatchTargetRef = useRef<AutoPatchTargetFile | null>(null);
@@ -487,6 +520,66 @@ function CoCreatePageInner() {
         setSkills(data.skills);
       })
       .catch(() => {});
+  }, [projectId]);
+
+  useEffect(() => {
+    let cancelled = false;
+    setQuickScenariosLoading(true);
+    apiGet<ScenarioApiRow[]>("/scenarios/")
+      .then((rows) => {
+        if (!cancelled) setRemoteScenarios(rows);
+      })
+      .catch((err) => {
+        if (process.env.NODE_ENV === "development") {
+          console.warn("[co-create] 场景列表加载失败", err);
+        }
+        if (!cancelled) setRemoteScenarios([]);
+      })
+      .finally(() => {
+        if (!cancelled) setQuickScenariosLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    const loadPrefs = () => {
+      setGlobalCoCreateQuickPrefs(loadCoCreateQuickScenariosPrefs(coCreateQuickScenariosScopeId()));
+    };
+    loadPrefs();
+    window.addEventListener(CO_CREATE_QUICK_SCENARIOS_CHANGED, loadPrefs);
+    window.addEventListener("focus", loadPrefs);
+    return () => {
+      window.removeEventListener(CO_CREATE_QUICK_SCENARIOS_CHANGED, loadPrefs);
+      window.removeEventListener("focus", loadPrefs);
+    };
+  }, [scopeUserId]);
+
+  const scenarioListItems = useMemo(
+    () => buildScenarioListItems(remoteScenarios, dismissedPresetIds),
+    [remoteScenarios, dismissedPresetIds],
+  );
+
+  const projectQuickScenarios = useMemo(
+    () => loadProjectQuickScenarios(quickScenariosScopeId(), projectId),
+    [projectId, scopeUserId],
+  );
+
+  const coCreateQuickEntries = useMemo(
+    () =>
+      buildCoCreateQuickEntries(scenarioListItems, {
+        globalQuickPrefs: globalCoCreateQuickPrefs,
+        projectQuickPrefs: projectQuickScenarios,
+      }),
+    [scenarioListItems, globalCoCreateQuickPrefs, projectQuickScenarios],
+  );
+
+  const coCreateMoreHref = useMemo(() => {
+    const params = new URLSearchParams();
+    if (projectId) params.set("return_project_id", projectId);
+    const qs = params.toString();
+    return qs ? `/create?${qs}` : "/create";
   }, [projectId]);
 
   useEffect(() => {
@@ -656,11 +749,23 @@ function CoCreatePageInner() {
         return false;
       }
 
+      const quickEntryTitle = pendingQuickEntryTitleRef.current?.trim() || "";
+      const useQuickStart = Boolean(quickEntryTitle);
+
       const extracted = extractAutoCreateDraftBody(assistantMessage.content);
-      if (
-        !shouldAutoCreateDraftFromAssistant(prompt, assistantMessage.content, false) ||
-        !isReadyForAutoCreateDraft(extracted, assistantMessage.content)
-      ) {
+      const readyForDraft = useQuickStart
+        ? isReadyForQuickStartAutoCreateDraft(extracted, assistantMessage.content)
+        : isReadyForAutoCreateDraft(extracted, assistantMessage.content);
+      const shouldCreate = useQuickStart
+        ? shouldQuickStartAutoCreateDraft(
+            quickEntryTitle,
+            prompt,
+            assistantMessage.content,
+            false,
+          )
+        : shouldAutoCreateDraftFromAssistant(prompt, assistantMessage.content, false);
+
+      if (!shouldCreate || !readyForDraft) {
         return false;
       }
 
@@ -673,7 +778,9 @@ function CoCreatePageInner() {
       );
       if (existing?.status === "applied" || existing?.status === "applying") return false;
 
-      const fileName = inferAutoCreateDraftFileName(prompt, assistantMessage.content);
+      const fileName = useQuickStart
+        ? inferQuickCreateOutputFileName(quickEntryTitle, prompt, assistantMessage.content)
+        : inferAutoCreateDraftFileName(prompt, assistantMessage.content);
       const proposal: FileActionProposal = {
         type: "create",
         proposalId,
@@ -714,6 +821,7 @@ function CoCreatePageInner() {
         sessionId,
         assistantId: assistantMessage.id,
         fileName,
+        quickEntryTitle: quickEntryTitle || undefined,
         contentLength: extracted.length,
         updated: Boolean(existing),
       });
@@ -946,6 +1054,7 @@ function CoCreatePageInner() {
     );
     if (applied) {
       pendingAutoDraftPromptRef.current = null;
+      pendingQuickEntryTitleRef.current = null;
     }
   }, [activeIdRef, maybeAutoCreateDraftFromLatestAssistant, sessionsRef]);
 
@@ -1282,6 +1391,80 @@ function CoCreatePageInner() {
     tryPendingAutoCreateDraft,
     tryPendingAutoPatch,
   ]);
+
+  const handleQuickStart = useCallback(
+    async (entry: CoCreateQuickEntry) => {
+      try {
+        await ensureDerivedUserId();
+      } catch (err) {
+        console.warn("[co-create] 用户 ID 派生失败，继续尝试发送", err);
+      }
+
+      let scenarioDetail: CoCreateQuickStartScenarioDetail | null = null;
+      try {
+        scenarioDetail = await apiGet(`/scenarios/${entry.scenarioId}`);
+      } catch (err) {
+        if (process.env.NODE_ENV === "development") {
+          console.warn("[co-create] 场景详情加载失败，使用列表缓存", {
+            scenarioId: entry.scenarioId,
+            err,
+          });
+        }
+      }
+
+      const plan = buildCoCreateQuickStartPlan({
+        entry,
+        scenarioDetail,
+        agentMode,
+        pinnedFileCount: pinnedFileIds.length,
+        roundFileCount: roundFileIds.length,
+      });
+
+      console.info("[co-create] 快捷场景启动", {
+        scenarioId: entry.scenarioId,
+        title: entry.title,
+        shouldTryAutoCreateDraft: plan.shouldTryAutoCreateDraft,
+        shouldTryAutoPatch: plan.shouldTryAutoPatch,
+      });
+
+      await sendMessage(plan.prompt, {
+        useOrchestrationOverride: plan.useOrchestration,
+        skipToolsContextBuild: plan.skipTools,
+        scenarioIdOverride: plan.scenarioId,
+        scenarioPresetInstructionsOverride: plan.scenarioPresetInstructions,
+        scenarioPresetInstructionsAppend: plan.scenarioPresetInstructionsAppend,
+      });
+
+      if (plan.shouldTryAutoCreateDraft) {
+        pendingAutoDraftPromptRef.current = plan.prompt;
+        pendingQuickEntryTitleRef.current = plan.outputEntryTitle;
+        tryPendingAutoCreateDraft();
+      }
+      if (plan.shouldTryAutoPatch) {
+        const patchTarget = resolveAutoPatchTargetFile(
+          pinnedFileIds,
+          roundFileIds,
+          fileWorkspace.files,
+          fileWorkspace.tabLabels,
+        );
+        if (patchTarget) {
+          pendingAutoPatchPromptRef.current = plan.prompt;
+          pendingAutoPatchTargetRef.current = patchTarget;
+          tryPendingAutoPatch();
+        }
+      }
+    },
+    [
+      agentMode,
+      fileWorkspace.files,
+      fileWorkspace.tabLabels,
+      pinnedFileIds,
+      roundFileIds,
+      sendMessage,
+      tryPendingAutoCreateDraft,
+      tryPendingAutoPatch,
+    ],
+  );
 
   const applyProposal = useCallback(
     async (
@@ -1782,10 +1965,12 @@ function CoCreatePageInner() {
         saveState={saveState}
         agentChangeSummary={agentChangeSummary}
         onUndoAgentChange={showUndoControl ? () => void handleUndoLastAgentChange() : undefined}
-        undoButtonLabel={formatAgentUndoButtonLabel(agentUndoStack.length)}
+        undoCount={agentUndoStack.length}
         undoDisabled={undoingAgentChange}
         onToggleSessions={() => setSidebarOpen((v) => !v)}
         sessionsOpen={sidebarOpen}
+        onToggleFilesPanel={() => setFilesPanelOpen((v) => !v)}
+        filesPanelOpen={filesPanelOpen}
         projectContext={projectContext}
         outputCount={fileWorkspace.files.filter((f) => f.kind === "output").length}
         pinnedFileIds={pinnedFileIds}
@@ -1796,6 +1981,7 @@ function CoCreatePageInner() {
 
       <CoCreateWorkspaceColumns
         sidebarOpen={sidebarOpen}
+        filesPanelOpen={filesPanelOpen}
         session={
           <SessionSidebar
             sessions={sessions}
@@ -1823,44 +2009,11 @@ function CoCreatePageInner() {
                 streaming={streaming}
                 streamingPhase={streamingPhase}
                 renderAfterMessage={renderMessageExtras}
-                onQuickStart={(prompt) => {
-                  const hasTargetFile = pinnedFileIds.length > 0 || roundFileIds.length > 0;
-                  const autoPipeline = resolveCoCreatePipeline({
-                    text: prompt,
-                    pinnedFileCount: pinnedFileIds.length,
-                    roundFileCount: roundFileIds.length,
-                    regionBlockCount: 0,
-                  });
-                  const execution = resolveExecutionFromAgentMode(agentMode, autoPipeline);
-                  void sendMessage(prompt, {
-                    useOrchestrationOverride: execution.useOrchestration,
-                    skipToolsContextBuild: execution.skipTools,
-                    scenarioPresetInstructionsAppend: [
-                      buildAgentModeInstructions(agentMode),
-                      buildDocumentSyncInstructions(prompt),
-                      buildRewriteSyncInstructions(prompt, hasTargetFile),
-                    ]
-                      .filter(Boolean)
-                      .join("\n\n") || undefined,
-                  }).then(() => {
-                    if (execution.allowAutoDraft && isDocumentGenerationPrompt(prompt)) {
-                      pendingAutoDraftPromptRef.current = prompt;
-                      tryPendingAutoCreateDraft();
-                    }
-                    if (execution.allowAutoDraft && isRewritePrompt(prompt, { hasTargetFile })) {
-                      const patchTarget = resolveAutoPatchTargetFile(
-                        pinnedFileIds,
-                        roundFileIds,
-                        fileWorkspace.files,
-                        fileWorkspace.tabLabels,
-                      );
-                      if (patchTarget) {
-                        pendingAutoPatchPromptRef.current = prompt;
-                        pendingAutoPatchTargetRef.current = patchTarget;
-                        tryPendingAutoPatch();
-                      }
-                    }
-                  });
+                quickEntries={coCreateQuickEntries}
+                quickEntriesLoading={quickScenariosLoading}
+                moreHref={coCreateMoreHref}
+                onQuickStart={(entry) => {
+                  void handleQuickStart(entry);
                 }}
                 quickStartDisabled={!activeSession || streaming}
               />

@@ -25,14 +25,24 @@ export const CO_CREATE_COLUMN_DEFAULT: CoCreateColumnWidths = {
   files: 240,
 };
 
-function visibleKeys(sidebarOpen: boolean): (keyof CoCreateColumnWidths)[] {
-  return sidebarOpen
-    ? ["session", "message", "preview", "files"]
-    : ["message", "preview", "files"];
+export type CoCreatePanelVisibility = {
+  sidebarOpen: boolean;
+  filesPanelOpen: boolean;
+};
+
+function visibleKeys({
+  sidebarOpen,
+  filesPanelOpen,
+}: CoCreatePanelVisibility): (keyof CoCreateColumnWidths)[] {
+  const keys: (keyof CoCreateColumnWidths)[] = [];
+  if (sidebarOpen) keys.push("session");
+  keys.push("message", "preview");
+  if (filesPanelOpen) keys.push("files");
+  return keys;
 }
 
-function sumVisible(widths: CoCreateColumnWidths, sidebarOpen: boolean) {
-  return visibleKeys(sidebarOpen).reduce((total, key) => total + widths[key], 0);
+function sumVisible(widths: CoCreateColumnWidths, visibility: CoCreatePanelVisibility) {
+  return visibleKeys(visibility).reduce((total, key) => total + widths[key], 0);
 }
 
 function loadStoredWidths(): CoCreateColumnWidths | null {
@@ -70,10 +80,11 @@ function saveWidths(widths: CoCreateColumnWidths) {
 
 function distributeDefaults(
   available: number,
-  sidebarOpen: boolean,
+  visibility: CoCreatePanelVisibility,
 ): CoCreateColumnWidths {
+  const { sidebarOpen, filesPanelOpen } = visibility;
   const session = sidebarOpen ? CO_CREATE_COLUMN_DEFAULT.session : 0;
-  const files = CO_CREATE_COLUMN_DEFAULT.files;
+  const files = filesPanelOpen ? CO_CREATE_COLUMN_DEFAULT.files : 0;
   const middle = Math.max(
     CO_CREATE_COLUMN_MIN.message + CO_CREATE_COLUMN_MIN.preview,
     available - session - files,
@@ -84,10 +95,12 @@ function distributeDefaults(
     session: sidebarOpen ? session : CO_CREATE_COLUMN_DEFAULT.session,
     message,
     preview,
-    files: Math.max(
-      CO_CREATE_COLUMN_MIN.files,
-      Math.min(files, available - session - message - preview),
-    ),
+    files: filesPanelOpen
+      ? Math.max(
+          CO_CREATE_COLUMN_MIN.files,
+          Math.min(CO_CREATE_COLUMN_DEFAULT.files, available - session - message - preview),
+        )
+      : CO_CREATE_COLUMN_DEFAULT.files,
   };
 }
 
@@ -95,21 +108,26 @@ function distributeDefaults(
 export function fitWidthsToContainer(
   widths: CoCreateColumnWidths,
   containerWidth: number,
-  sidebarOpen: boolean,
+  visibility: CoCreatePanelVisibility,
 ): CoCreateColumnWidths {
-  const keys = visibleKeys(sidebarOpen);
+  const keys = visibleKeys(visibility);
   const minSum = keys.reduce((total, key) => total + CO_CREATE_COLUMN_MIN[key], 0);
   const available = Math.max(minSum, containerWidth);
 
-  const currentSum = sumVisible(widths, sidebarOpen);
+  const currentSum = sumVisible(widths, visibility);
   const next: CoCreateColumnWidths = { ...widths };
 
   if (currentSum <= 0) {
-    const defaults = distributeDefaults(available, sidebarOpen);
-    if (!sidebarOpen) {
-      return { ...defaults, session: widths.session || CO_CREATE_COLUMN_DEFAULT.session };
-    }
-    return defaults;
+    const defaults = distributeDefaults(available, visibility);
+    return {
+      ...defaults,
+      ...(!visibility.sidebarOpen
+        ? { session: widths.session || CO_CREATE_COLUMN_DEFAULT.session }
+        : {}),
+      ...(!visibility.filesPanelOpen
+        ? { files: widths.files || CO_CREATE_COLUMN_DEFAULT.files }
+        : {}),
+    };
   }
 
   if (currentSum === available) {
@@ -121,7 +139,7 @@ export function fitWidthsToContainer(
     next[key] = Math.max(CO_CREATE_COLUMN_MIN[key], Math.round(widths[key] * scale));
   }
 
-  let diff = available - sumVisible(next, sidebarOpen);
+  let diff = available - sumVisible(next, visibility);
   const flexKeys: (keyof CoCreateColumnWidths)[] = ["message", "preview"];
   while (diff !== 0) {
     const step = diff > 0 ? 1 : -1;
@@ -134,20 +152,23 @@ export function fitWidthsToContainer(
   return next;
 }
 
-export function useCoCreateColumnWidths(sidebarOpen: boolean) {
+export function useCoCreateColumnWidths(visibility: CoCreatePanelVisibility) {
   const containerRef = useRef<HTMLDivElement>(null);
   const draggingRef = useRef(false);
-  const sidebarOpenRef = useRef(sidebarOpen);
-  sidebarOpenRef.current = sidebarOpen;
+  const visibilityRef = useRef(visibility);
+  visibilityRef.current = visibility;
 
   const [widths, setWidths] = useState(CO_CREATE_COLUMN_DEFAULT);
   const widthsRef = useRef(widths);
   widthsRef.current = widths;
 
-  const syncToContainer = useCallback((containerWidth: number, open = sidebarOpenRef.current) => {
-    if (containerWidth <= 0) return;
-    setWidths((prev) => fitWidthsToContainer(prev, containerWidth, open));
-  }, []);
+  const syncToContainer = useCallback(
+    (containerWidth: number, nextVisibility = visibilityRef.current) => {
+      if (containerWidth <= 0) return;
+      setWidths((prev) => fitWidthsToContainer(prev, containerWidth, nextVisibility));
+    },
+    [],
+  );
 
   useLayoutEffect(() => {
     const stored = loadStoredWidths();
@@ -165,7 +186,7 @@ export function useCoCreateColumnWidths(sidebarOpen: boolean) {
         return false;
       }
 
-      setWidths(fitWidthsToContainer(base, containerWidth, sidebarOpenRef.current));
+      setWidths(fitWidthsToContainer(base, containerWidth, visibilityRef.current));
       return true;
     };
 
@@ -195,8 +216,8 @@ export function useCoCreateColumnWidths(sidebarOpen: boolean) {
   useLayoutEffect(() => {
     const node = containerRef.current;
     if (!node || draggingRef.current) return;
-    syncToContainer(node.clientWidth, sidebarOpen);
-  }, [sidebarOpen, syncToContainer]);
+    syncToContainer(node.clientWidth, visibility);
+  }, [visibility.sidebarOpen, visibility.filesPanelOpen, syncToContainer]);
 
   const persistWidths = useCallback(() => {
     saveWidths(widthsRef.current);
@@ -222,12 +243,14 @@ export function useCoCreateColumnWidths(sidebarOpen: boolean) {
     [],
   );
 
-  const sessionWidth = sidebarOpen ? widths.session : 0;
+  const sessionWidth = visibility.sidebarOpen ? widths.session : 0;
+  const filesWidth = visibility.filesPanelOpen ? widths.files : 0;
 
   return {
     containerRef,
     widths,
     sessionWidth,
+    filesWidth,
     adjustPair,
     persistWidths,
     draggingRef,

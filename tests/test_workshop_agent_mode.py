@@ -120,6 +120,7 @@ async def test_tool_capture_requires_explicit_run_id_and_does_not_cross_runs():
 
 def test_workshop_agent_mode_forwards_to_upstream(monkeypatch):
     monkeypatch.setenv("WORKSHOP_EXECUTION_MODE", "agent")
+    monkeypatch.delenv("WORKSHOP_AGENT_STRICT", raising=False)
     calls: list[dict] = []
 
     class FakeResp:
@@ -165,12 +166,64 @@ def test_workshop_agent_mode_forwards_to_upstream(monkeypatch):
                 "overrides": {"skills": {"allowed": [iname]}},
             },
         )
-    assert r.status_code == 424, r.text
+    assert r.status_code == 200, r.text
+    body = r.json()
     assert calls, "应转发至 Hermes upstream"
+    assert body.get("execution_mode") == "direct"
+    assert body.get("tool_capture_hit") is False
     body = calls[0]["json"]
     assert body is not None
     sys_msg = body["messages"][0]["content"]
     assert "tphermes_run_id=" in sys_msg or "结果工坊强制流程" in sys_msg
+
+
+def test_workshop_agent_mode_strict_returns_424_without_capture(monkeypatch):
+    monkeypatch.setenv("WORKSHOP_EXECUTION_MODE", "agent")
+    monkeypatch.setenv("WORKSHOP_AGENT_STRICT", "true")
+
+    class FakeResp:
+        status_code = 200
+
+        def json(self):
+            return {"choices": [{"message": {"content": "agent summary"}}]}
+
+    class FakeClient:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return None
+
+        async def post(self, url, json=None, headers=None, **_kwargs):
+            return FakeResp()
+
+    monkeypatch.setattr("backend.routes.tasks._chat_client", lambda timeout: FakeClient())
+
+    with TestClient(app) as client:
+        pr = client.post("/api/v1/projects/", json={"name": "agent严格模式项目"}).json()
+        pid = pr["id"]
+        client.post(
+            f"/api/v1/projects/{pid}/scenarios",
+            json={"scenario_id": "general", "scenario_version": "1.0.0", "is_default": True},
+        )
+        iname = "hello_skill"
+        client.delete(f"/api/v1/skills/{iname}")
+        assert client.post(
+            "/api/v1/skills/",
+            json={"name": iname, "description": "t", "source": "local"},
+        ).status_code == 200
+
+        r = client.post(
+            "/api/v1/tasks/execute",
+            json={
+                "entrypoint": "workshop",
+                "project_id": pid,
+                "user_message": json.dumps({"name": "StrictUser"}),
+                "stream": False,
+                "overrides": {"skills": {"allowed": [iname]}},
+            },
+        )
+    assert r.status_code == 424, r.text
 
 
 def test_workshop_agent_mode_uses_tool_capture(monkeypatch):

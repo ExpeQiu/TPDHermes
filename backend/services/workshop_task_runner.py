@@ -13,8 +13,25 @@ logger = logging.getLogger("tpdx.hermes")
 
 
 def _skill_result_to_text(result: Any) -> str:
+    """将 skill.generate 返回值转为用户可见正文（优先 content 字段，避免整段 JSON）。"""
     if isinstance(result, str):
+        stripped = result.strip()
+        if stripped.startswith("{") and stripped.endswith("}"):
+            try:
+                parsed = json.loads(stripped)
+                if isinstance(parsed, dict):
+                    return _skill_result_to_text(parsed)
+            except json.JSONDecodeError:
+                pass
         return result
+    if isinstance(result, dict):
+        content = result.get("content")
+        if isinstance(content, str) and content.strip():
+            body = content.strip()
+            title = result.get("title")
+            if isinstance(title, str) and title.strip() and not body.lstrip().startswith("#"):
+                return f"# {title.strip()}\n\n{body}"
+            return body
     try:
         return json.dumps(result, ensure_ascii=False, indent=2)
     except TypeError:

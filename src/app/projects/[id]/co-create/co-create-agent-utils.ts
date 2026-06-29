@@ -238,6 +238,7 @@ export const TOOL_EVENT_LABELS: Record<string, { label: string; emoji: string }>
   write_file: { label: "写入文件", emoji: "↳" },
   patch: { label: "修改文件", emoji: "✎" },
   kb_query: { label: "检索知识库", emoji: "⌕" },
+  search_files: { label: "检索项目文件", emoji: "🔎" },
   kb_get_entry: { label: "读取知识条目", emoji: "📄" },
   kb_list_collections: { label: "列出知识库", emoji: "📚" },
   tavily_search: { label: "联网搜索", emoji: "🌐" },

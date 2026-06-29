@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import type { CoCreateSaveState } from "@/app/projects/[id]/co-create/co-create-types";
+import { CoCreateTopbarToolbar } from "@/app/projects/[id]/co-create/components/CoCreateTopbarToolbar";
 import { FileReferenceBar } from "@/app/projects/[id]/co-create/components/FileReferenceBar";
 import { ProjectContextBar } from "@/app/projects/[id]/co-create/components/ProjectContextBar";
 import type { ProjectContextResponse } from "@/lib/chat-context";
@@ -13,10 +14,12 @@ type Props = {
   saveState: CoCreateSaveState;
   agentChangeSummary?: string | null;
   onUndoAgentChange?: () => void;
-  undoButtonLabel?: string;
+  undoCount?: number;
   undoDisabled?: boolean;
   onToggleSessions?: () => void;
   sessionsOpen?: boolean;
+  onToggleFilesPanel?: () => void;
+  filesPanelOpen?: boolean;
   projectContext: ProjectContextResponse | null;
   outputCount: number;
   pinnedFileIds: string[];
@@ -39,10 +42,12 @@ export function CoCreateTopbar({
   saveState,
   agentChangeSummary,
   onUndoAgentChange,
-  undoButtonLabel = "撤销",
+  undoCount = 0,
   undoDisabled,
   onToggleSessions,
   sessionsOpen,
+  onToggleFilesPanel,
+  filesPanelOpen,
   projectContext,
   outputCount,
   pinnedFileIds,
@@ -53,15 +58,6 @@ export function CoCreateTopbar({
   return (
     <header className="shrink-0 border-b border-slate-300 bg-slate-200/80 px-4 py-2.5 dark:border-slate-700 dark:bg-slate-800/80">
       <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
-        {onToggleSessions ? (
-          <button
-            type="button"
-            onClick={onToggleSessions}
-            className="text-sm text-slate-500 transition hover:text-slate-900 dark:hover:text-white lg:hidden"
-          >
-            {sessionsOpen ? "◀" : "▶"}
-          </button>
-        ) : null}
         <Link
           href={`/projects/${projectId}`}
           className="shrink-0 text-sm text-slate-500 transition hover:text-slate-900 dark:hover:text-white"
@@ -89,19 +85,18 @@ export function CoCreateTopbar({
             <span className="truncate text-[11px] text-slate-500 dark:text-slate-300">
               {agentChangeSummary}
             </span>
-            {onUndoAgentChange ? (
-              <button
-                type="button"
-                disabled={undoDisabled}
-                onClick={onUndoAgentChange}
-                className="rounded-md border border-slate-300 px-2 py-0.5 text-[11px] text-slate-600 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-600 dark:text-slate-300 dark:hover:bg-slate-700"
-              >
-                {undoButtonLabel}
-              </button>
-            ) : null}
           </>
         ) : null}
         <div className="min-w-0 flex-1" />
+        <CoCreateTopbarToolbar
+          undoCount={undoCount}
+          undoDisabled={undoDisabled}
+          onUndo={onUndoAgentChange}
+          sessionsOpen={sessionsOpen}
+          onToggleSessions={onToggleSessions}
+          filesPanelOpen={filesPanelOpen}
+          onToggleFilesPanel={onToggleFilesPanel}
+        />
         <span
           className={`shrink-0 rounded-full px-2.5 py-1 text-[11px] ${
             saveState === "pending_apply"

@@ -1,12 +1,13 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { apiGet, apiPut } from "@/lib/api";
-import { useUserAccess } from "@/lib/admin-access";
 import { CONTENT_MAX_CLASS } from "@/lib/content-shell";
 import { projectRoleBadgeClass, projectRoleLabel } from "@/lib/rbac";
 import { projectStatusLabel } from "@/lib/ui-labels";
+import { useEffectiveUserScopeId } from "@/lib/use-effective-user-scope-id";
+import { resolveCoCreateNavHref } from "@/lib/workflow-nav";
 
 interface Project {
   id: string;
@@ -39,7 +40,11 @@ function formatDate(value: string | null | undefined) {
 }
 
 export default function ProjectsPage() {
-  const { canAccess } = useUserAccess();
+  const scopeUserId = useEffectiveUserScopeId();
+  const coCreateHref = useMemo(
+    () => resolveCoCreateNavHref(scopeUserId),
+    [scopeUserId],
+  );
   const [projects, setProjects] = useState<Project[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -96,6 +101,13 @@ export default function ProjectsPage() {
                   compact
                 />
                 <ActionCard
+                  href={coCreateHref}
+                  title="项目共创"
+                  desc=""
+                  accent="from-indigo-600 to-violet-600"
+                  compact
+                />
+                <ActionCard
                   href="/chat"
                   title="对话创作"
                   desc=""
@@ -109,15 +121,6 @@ export default function ProjectsPage() {
                   accent="from-amber-600 to-orange-600"
                   compact
                 />
-                {canAccess("create") ? (
-                  <ActionCard
-                    href="/create"
-                    title="场景编排"
-                    desc=""
-                    accent="from-sky-600 to-blue-500"
-                    compact
-                  />
-                ) : null}
               </div>
             </div>
           </aside>

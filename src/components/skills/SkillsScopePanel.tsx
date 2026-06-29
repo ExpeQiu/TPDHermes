@@ -12,6 +12,24 @@ export type SkillScopeItem = {
   owner_id?: string;
 };
 
+/** 已发布公共技能：已启用且 owner_id 为空（全员/工作区可见） */
+export function isPublishedSkill(skill: SkillScopeItem): boolean {
+  if (!skill.enabled) return false;
+  return !(skill.owner_id && String(skill.owner_id).trim());
+}
+
+/** 场景编排可绑定：公共已发布技能，或当前用户本人的已启用个人技能 */
+export function isBindableScenarioSkill(
+  skill: SkillScopeItem,
+  viewerUserId?: string,
+): boolean {
+  if (!skill.enabled) return false;
+  const owner = (skill.owner_id ?? "").trim();
+  if (!owner) return true;
+  const viewer = (viewerUserId ?? "").trim();
+  return viewer.length > 0 && owner === viewer;
+}
+
 type SkillsScopePanelProps = {
   skills: SkillScopeItem[];
   loading?: boolean;

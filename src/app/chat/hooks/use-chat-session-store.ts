@@ -503,6 +503,7 @@ export function useChatSessionStore({
       };
       const next = [session, ...sessionsRef.current];
       saveAndSet(next);
+      activeIdRef.current = session.id;
       setActiveId(session.id);
       localStorage.setItem(chatActiveStorageKey(scopeUserId, storageNamespace), session.id);
       if (scopeUserId) {
@@ -523,6 +524,7 @@ export function useChatSessionStore({
 
   const selectSession = useCallback(
     (id: string) => {
+      activeIdRef.current = id;
       setActiveId(id);
       localStorage.setItem(chatActiveStorageKey(scopeUserId, storageNamespace), id);
       const existing = sessionsRef.current.find((session) => session.id === id);

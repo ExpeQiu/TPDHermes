@@ -34,7 +34,7 @@ def is_lightweight_chat_message(text: str) -> bool:
 
 
 _CO_CREATE_DRAFT_VERB_RE = re.compile(
-    r"/生成新文件|生成|创建|新建|起草|撰写|写",
+    r"/生成新文件|生成|创建|新建|起草|撰写|写|输出",
     re.IGNORECASE,
 )
 _CO_CREATE_DRAFT_NOUN_RE = re.compile(
@@ -54,6 +54,8 @@ def should_skip_kb_prefetch_for_co_create_draft(text: str) -> bool:
     if not t:
         return False
     if t.startswith("/生成新文件"):
+        return True
+    if t.startswith("请基于当前项目上下文"):
         return True
     compact = re.sub(r"\s+", "", t)
     if _CO_CREATE_DRAFT_VERB_RE.search(compact) and _CO_CREATE_DRAFT_NOUN_RE.search(compact):

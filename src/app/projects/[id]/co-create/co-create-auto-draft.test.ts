@@ -4,10 +4,13 @@ import {
   buildDocumentSyncInstructions,
   extractAutoCreateDraftBody,
   inferAutoCreateDraftFileName,
+  inferQuickCreateOutputFileName,
   isDocumentGenerationPrompt,
   isReadyForAutoCreateDraft,
   normalizeAutoCreateDraftContent,
   shouldAutoCreateDraftFromAssistant,
+  shouldQuickStartAutoCreateDraft,
+  buildQuickStartOutputSyncInstructions,
 } from "@/app/projects/[id]/co-create/co-create-auto-draft";
 
 describe("co-create-auto-draft", () => {
@@ -69,8 +72,40 @@ describe("co-create-auto-draft", () => {
 
   it("builds document sync instructions for generation prompts", () => {
     expect(isDocumentGenerationPrompt("撰写一篇吉利超充技术发布会稿")).toBe(true);
+    expect(
+      isDocumentGenerationPrompt("请基于当前项目上下文，输出一版可用于外部沟通的技术方案说明。"),
+    ).toBe(true);
     const text = buildDocumentSyncInstructions("撰写一篇演讲稿");
     expect(text).toContain("tphermes_file_actions");
     expect(buildDocumentSyncInstructions("今天天气怎么样")).toBe("");
+  });
+
+  it("unwraps skill JSON envelope before extracting draft body", () => {
+    const raw = JSON.stringify({
+      skill: "tech_trend_skill",
+      content: "# 技术方向趋势研判\n\n" + "正文段落。\n".repeat(40),
+    });
+    const body = extractAutoCreateDraftBody(raw);
+    expect(body).toMatch(/^# 技术方向趋势研判/);
+    expect(shouldQuickStartAutoCreateDraft("技术方案说明", "输出技术方案", raw)).toBe(true);
+  });
+
+  it("prefers quick entry title for output file name", () => {
+    expect(
+      inferQuickCreateOutputFileName(
+        "技术方案说明",
+        "请输出技术方案说明",
+        "# 技术方向趋势研判\n正文",
+      ),
+    ).toBe("技术方案说明.md");
+  });
+
+  it("builds quick start output sync instructions with standard path", () => {
+    const text = buildQuickStartOutputSyncInstructions(
+      "技术方案说明",
+      "请基于当前项目上下文，输出一版技术方案说明。",
+    );
+    expect(text).toContain("【快捷创作标准输出】");
+    expect(text).toContain("/输出/技术方案说明.md");
   });
 });

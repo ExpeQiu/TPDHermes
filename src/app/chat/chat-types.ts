@@ -95,4 +95,6 @@ export type RunAssistantStreamParams = {
   useOrchestrationOverride?: boolean;
   fastPathEnabled?: boolean;
   scenarioPresetInstructionsAppend?: string;
+  scenarioIdOverride?: string;
+  scenarioPresetInstructionsOverride?: string;
 };
