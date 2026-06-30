@@ -15,7 +15,6 @@ import { useRouter, useSearchParams } from "next/navigation";
 
 import { apiV1 } from "@/lib/api";
 import {
-  ALL_PROJECT_FILES_SELECT_VALUE,
   ChatInit,
   ChatMode,
   ChatTransportConfig,
@@ -53,14 +52,12 @@ type FirstTokenMetrics = { count: number; totalMs: number };
 import {
   condenseTopicTitle,
   getSessionHistoryCategory,
+  isChatConversationStarted,
   isPlaceholderSessionTitle,
   isProjectCoCreateSession,
-  projectCoCreateSessionDefaults,
-  SESSION_HISTORY_TABS,
   titleFromSession,
   type SessionHistoryCategory,
 } from "@/lib/chat-session-utils";
-import { resolveCoCreateNavHref } from "@/lib/workflow-nav";
 
 const CHAT_INIT_KEY = "tphermes-chat-init";
 
@@ -72,10 +69,14 @@ function useAutoScroll(depend: string) {
   return ref;
 }
 
+/** 从项目入口进入对话创作：绑定项目上下文，但不走项目共创会话类型 */
 function projectChatSessionDefaults(projectId: string): Partial<ChatSession> {
   return {
-    ...projectCoCreateSessionDefaults(projectId),
-    selectedFileId: ALL_PROJECT_FILES_SELECT_VALUE,
+    selectedProjectId: projectId,
+    includeProjectContext: true,
+    includeFileContext: false,
+    chatMode: "co_create",
+    title: "对话创作",
   };
 }
 
@@ -132,7 +133,7 @@ function ChatPageInner() {
   const [preparingContext, setPreparingContext] = useState(false);
   const [error, setError] = useState("");
   const [sidebarOpen, setSidebarOpen] = useState(true);
-  const [historyTab, setHistoryTab] = useState<SessionHistoryCategory>("chat");
+  const [boundaryPanelOpen, setBoundaryPanelOpen] = useState(true);
   const [projects, setProjects] = useState<ProjectRecord[]>([]);
   const [collections, setCollections] = useState<string[]>([]);
   const [skills, setSkills] = useState<string[]>([]);
@@ -232,7 +233,7 @@ function ChatPageInner() {
     return grouped;
   }, [sessions]);
 
-  const sidebarSessions = sessionsByCategory[historyTab];
+  const sidebarSessions = sessionsByCategory.chat;
 
   const workspaceSession = useMemo(() => {
     if (!activeSession || isProjectCoCreateSession(activeSession)) return undefined;
@@ -465,6 +466,12 @@ function ChatPageInner() {
       return;
     }
     createSession(projectChatSessionDefaults(projectFromUrl));
+    setSelectedProjectId(projectFromUrl);
+    setIncludeProjectContext(true);
+    setIncludeFileContext(false);
+    if (process.env.NODE_ENV === "development") {
+      console.info("[chat] 项目入口新建对话", { project_id: projectFromUrl });
+    }
     chatProjectEntryAppliedRef.current = true;
     const params = new URLSearchParams(searchParams?.toString() ?? "");
     params.delete("new_chat");
@@ -817,6 +824,7 @@ function ChatPageInner() {
     setRewriteGoal,
     contextSummary,
     bootstrapWarnings,
+    projectContextLocked: isChatConversationStarted(workspaceSession),
   };
 
   return (
@@ -829,44 +837,14 @@ function ChatPageInner() {
         <div className="flex shrink-0 items-center justify-between border-b border-slate-300 p-4 dark:border-slate-700">
           <div>
             <span className="text-sm font-semibold text-slate-700 dark:text-slate-300">历史记录</span>
-            <p className="mt-0.5 text-[10px] text-slate-500">对话 · 场景 · 输出</p>
+            <p className="mt-0.5 text-[10px] text-slate-500">对话</p>
           </div>
-          {historyTab === "co_create" ? (
-            <Link
-              href={resolveCoCreateNavHref(scopeUserId)}
-              className="rounded-lg bg-blue-600 px-3 py-1.5 text-xs text-white transition hover:bg-blue-500"
-            >
-              + 项目共创
-            </Link>
-          ) : (
-            <button
-              onClick={() => createSession()}
-              className="rounded-lg bg-blue-600 px-3 py-1.5 text-xs text-white transition hover:bg-blue-500"
-            >
-              + 新对话
-            </button>
-          )}
-        </div>
-
-        <div className="flex shrink-0 flex-wrap gap-1 border-b border-slate-300 px-3 py-2 dark:border-slate-700">
-          {SESSION_HISTORY_TABS.map((tab) => {
-            const count = sessionsByCategory[tab.id].length;
-            return (
-              <button
-                key={tab.id}
-                type="button"
-                onClick={() => setHistoryTab(tab.id)}
-                className={`rounded-md px-2 py-0.5 text-[10px] ${
-                  historyTab === tab.id
-                    ? "bg-blue-600 text-white"
-                    : "bg-slate-300/60 text-slate-600 dark:bg-slate-700 dark:text-slate-300"
-                }`}
-              >
-                {tab.label}
-                {count > 0 ? ` (${count})` : ""}
-              </button>
-            );
-          })}
+          <button
+            onClick={() => createSession()}
+            className="rounded-lg bg-blue-600 px-3 py-1.5 text-xs text-white transition hover:bg-blue-500"
+          >
+            + 新对话
+          </button>
         </div>
 
         {sessionsLoading ? <p className="px-4 py-6 text-xs text-slate-500">加载历史记录…</p> : null}
@@ -879,11 +857,7 @@ function ChatPageInner() {
         <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
           {sidebarSessions.length === 0 && !sessionsLoading ? (
             <p className="px-4 py-6 text-xs leading-relaxed text-slate-500">
-              {historyTab === "co_create"
-                ? "暂无项目共创记录。可从项目页进入共创工作台。"
-                : historyTab === "scenario"
-                  ? "暂无场景会话。"
-                  : "暂无对话记录，点击「+ 新对话」开始。"}
+              暂无对话记录，点击「+ 新对话」开始。
             </p>
           ) : null}
           {sidebarSessions.map((session) => (
@@ -891,7 +865,7 @@ function ChatPageInner() {
               key={session.id}
               onClick={() => handleHistorySessionClick(session)}
               className={`group flex cursor-pointer items-center gap-2 border-b border-slate-300 px-4 py-3 transition dark:border-slate-700/50 ${
-                session.id === activeId && historyTab !== "co_create"
+                session.id === activeId
                   ? "bg-slate-300/70 text-slate-900 dark:bg-slate-700/70 dark:text-white"
                   : "text-slate-400 hover:bg-slate-300/40 hover:text-slate-900 dark:bg-slate-700/40 dark:hover:text-white"
               }`}
@@ -906,9 +880,18 @@ function ChatPageInner() {
               <button
                 onClick={(e) => {
                   e.stopPropagation();
+                  const sessionTitle = titleFromSession(session);
+                  if (
+                    !confirm(
+                      `确定删除对话「${sessionTitle}」？删除后无法恢复。`,
+                    )
+                  ) {
+                    return;
+                  }
                   deleteSession(session.id);
                 }}
                 className="text-xs text-slate-500 opacity-0 transition group-hover:opacity-100 hover:text-red-400"
+                aria-label={`删除对话：${titleFromSession(session)}`}
               >
                 ✕
               </button>
@@ -935,6 +918,15 @@ function ChatPageInner() {
             <h1 className="flex-1 truncate text-sm font-semibold text-slate-900 dark:text-white">
               {titleFromSession(workspaceSession)}
             </h1>
+            {!boundaryPanelOpen ? (
+              <button
+                type="button"
+                onClick={() => setBoundaryPanelOpen(true)}
+                className="hidden text-xs text-slate-400 transition hover:text-slate-900 lg:inline-flex dark:hover:text-white"
+              >
+                创作边界 ▶
+              </button>
+            ) : null}
             {(preparingContext || streaming) && (
               <span className="flex items-center gap-1.5 text-xs text-blue-400">
                 <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-blue-400" />
@@ -1042,9 +1034,22 @@ function ChatPageInner() {
           </div>
         </div>
 
-        <aside className="hidden h-full min-h-0 w-[min(22rem,32vw)] max-w-sm shrink-0 flex-col overflow-hidden border-l border-slate-300 bg-slate-200/40 dark:border-slate-700 dark:bg-slate-800/40 lg:flex">
-          <div className="shrink-0 border-b border-slate-300 px-3 py-2 text-xs font-medium uppercase tracking-[0.16em] text-slate-500 dark:border-slate-700/80">
-            创作边界
+        <aside
+          className={`${
+            boundaryPanelOpen ? "w-[min(22rem,32vw)] max-w-sm border-l" : "w-0 border-l-0"
+          } hidden h-full min-h-0 shrink-0 flex-col overflow-hidden border-slate-300 bg-slate-200/40 transition-all dark:border-slate-700 dark:bg-slate-800/40 lg:flex`}
+        >
+          <div className="flex shrink-0 items-center justify-between border-b border-slate-300 px-3 py-2 dark:border-slate-700/80">
+            <span className="text-xs font-medium uppercase tracking-[0.16em] text-slate-500">
+              创作边界
+            </span>
+            <button
+              type="button"
+              onClick={() => setBoundaryPanelOpen(false)}
+              className="text-xs text-slate-500 transition hover:text-slate-800 dark:hover:text-slate-200"
+            >
+              隐藏
+            </button>
           </div>
           <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-3">
             <ChatTaskBoundaryPanel model={boundaryModel} />

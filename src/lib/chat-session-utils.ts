@@ -21,6 +21,13 @@ export function firstUserMessageContent(session: ChatSession): string | null {
   return text || null;
 }
 
+/** 会话已出现用户消息，视为多轮对话进行中 */
+export function isChatConversationStarted(
+  session: Pick<ChatSession, "messages"> | undefined,
+): boolean {
+  return Boolean(session?.messages.some((m) => m.role === "user"));
+}
+
 export function isPlaceholderSessionTitle(title: string): boolean {
   return PLACEHOLDER_SESSION_TITLES.has(title.trim());
 }

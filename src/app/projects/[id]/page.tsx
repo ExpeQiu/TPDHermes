@@ -20,6 +20,8 @@ import {
   scenarioStatusLabel,
 } from "@/lib/ui-labels";
 import { trackUsage } from "@/lib/usage-tracker";
+import { useUserAccess } from "@/lib/admin-access";
+import { isSystemAdminRole } from "@/lib/user-admin";
 import ProjectMembersPanel from "@/components/projects/ProjectMembersPanel";
 import { ProjectOutputContentBody } from "@/components/project-output-content";
 
@@ -125,20 +127,6 @@ function buildOutputChatRefineLink(
   const scenario = output.scenario_id?.trim();
   if (scenario) params.set("scenario", scenario);
   return `/chat?${params.toString()}`;
-}
-
-function buildOutputWorkshopRefineLink(
-  projectId: string,
-  output: Pick<ProjectOutput, "id" | "scenario_id">,
-): string {
-  const params = new URLSearchParams({
-    project_id: projectId,
-    output_id: output.id,
-    mode: "refine",
-  });
-  const scenario = output.scenario_id?.trim();
-  if (scenario) params.set("scenario_id", scenario);
-  return `/workshop?${params.toString()}`;
 }
 
 function mapVisibleOutputs(rows: ApiOutputRow[]): ProjectOutput[] {
@@ -270,18 +258,16 @@ function ProjectOutputDetailPanel({
   outputGovernBusy,
   onCopy,
   onClose,
-  onApprove,
   onArchive,
 }: {
   output: ProjectOutput;
   outputFullContent: string | null;
   outputDetailLoading: boolean;
   copied: boolean;
-  outputActionLinks: { chat: string; workshop: string; coCreate: string } | null;
+  outputActionLinks: { chat: string; coCreate: string } | null;
   outputGovernBusy: boolean;
   onCopy: () => void;
   onClose: () => void;
-  onApprove: () => void;
   onArchive: () => void;
 }) {
   const displayContent = outputFullContent ?? output.content;
@@ -350,24 +336,8 @@ function ProjectOutputDetailPanel({
               >
                 对话优化
               </Link>
-              <Link
-                href={outputActionLinks.workshop}
-                className="min-w-[8rem] flex-1 rounded-lg bg-blue-600 px-4 py-2 text-center text-sm font-medium transition hover:bg-blue-500"
-              >
-                二次创作
-              </Link>
             </>
           ) : null}
-          <button
-            type="button"
-            onClick={onApprove}
-            disabled={
-              outputGovernBusy || output.status === "approved" || output.status === "archived"
-            }
-            className="rounded-lg border border-emerald-300 bg-emerald-50 px-4 py-2 text-sm font-medium text-emerald-900 transition hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-40 dark:border-emerald-600/50 dark:bg-emerald-500/15 dark:text-emerald-100 dark:hover:bg-emerald-500/25"
-          >
-            采纳
-          </button>
           <button
             type="button"
             onClick={onArchive}
@@ -521,6 +491,7 @@ export default function ProjectDetailPage() {
   const { id } = useParams();
   const [project, setProject] = useState<Project | null>(null);
   const [outputs, setOutputs] = useState<ProjectOutput[]>([]);
+  const [outputsLoadError, setOutputsLoadError] = useState<string | null>(null);
   const [runs, setRuns] = useState<ApiRunRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -550,6 +521,11 @@ export default function ProjectDetailPage() {
   });
 
   const scopeUserId = useEffectiveUserScopeId();
+  const { access } = useUserAccess();
+  const canViewRuns = useMemo(
+    () => isSystemAdminRole(access?.platform_role),
+    [access?.platform_role],
+  );
   const [boundScenarios, setBoundScenarios] = useState<ProjectBoundScenario[]>([]);
   const [boundLoading, setBoundLoading] = useState(false);
   const [quickDraft, setQuickDraft] = useState<ProjectQuickScenarios>({
@@ -581,12 +557,19 @@ export default function ProjectDetailPage() {
 
   const refreshOutputs = useCallback(async (): Promise<ProjectOutput[]> => {
     if (!id) return [];
-    const outRows = await apiGet<ApiOutputRow[]>(`/projects/${String(id)}/outputs`).catch(
-      () => [] as ApiOutputRow[],
-    );
-    const mapped = mapVisibleOutputs(outRows);
-    setOutputs(mapped);
-    return mapped;
+    try {
+      const outRows = await apiGet<ApiOutputRow[]>(`/projects/${String(id)}/outputs`);
+      setOutputsLoadError(null);
+      const mapped = mapVisibleOutputs(outRows);
+      setOutputs(mapped);
+      return mapped;
+    } catch (e: unknown) {
+      const message = e instanceof Error ? e.message : String(e);
+      console.warn("[projects] outputs refresh failed", { projectId: id, error: message });
+      setOutputsLoadError(message);
+      setOutputs([]);
+      return [];
+    }
   }, [id]);
 
   useEffect(() => {
@@ -620,6 +603,12 @@ export default function ProjectDetailPage() {
   }, [id, refreshBoundScenarios]);
 
   useEffect(() => {
+    if (!canViewRuns && activeTab === "runs") {
+      setActiveTab("info");
+    }
+  }, [canViewRuns, activeTab]);
+
+  useEffect(() => {
     if (!id) return;
     trackUsage({
       eventName: "project_detail_view",
@@ -628,22 +617,29 @@ export default function ProjectDetailPage() {
       projectId: String(id),
     });
     let cancelled = false;
+    let outputsFetchFailed = false;
     setLoading(true);
     setError(null);
+    setOutputsLoadError(null);
     Promise.all([
       apiGet<Project>(`/projects/${String(id)}`),
-      apiGet<ApiOutputRow[]>(`/projects/${String(id)}/outputs`).catch(() => [] as ApiOutputRow[]),
-      apiGet<ApiRunRow[]>(`/projects/${String(id)}/runs`).catch(() => [] as ApiRunRow[]),
+      apiGet<ApiOutputRow[]>(`/projects/${String(id)}/outputs`).catch((e: unknown) => {
+        outputsFetchFailed = true;
+        const message = e instanceof Error ? e.message : String(e);
+        console.warn("[projects] outputs load failed", { projectId: id, error: message });
+        if (!cancelled) setOutputsLoadError(message);
+        return [] as ApiOutputRow[];
+      }),
       apiGet<ApiAttachmentRow[]>(`/projects/${String(id)}/attachments`).catch(
         () => [] as ApiAttachmentRow[],
       ),
     ])
-      .then(([proj, outRows, runRows, attachRows]) => {
+      .then(([proj, outRows, attachRows]) => {
         if (!cancelled) {
           setProject(proj);
           setOutputs(mapVisibleOutputs(outRows));
-          setRuns(runRows);
           setAttachments(attachRows);
+          if (!outputsFetchFailed) setOutputsLoadError(null);
         }
       })
       .catch((e: Error) => {
@@ -656,6 +652,24 @@ export default function ProjectDetailPage() {
       cancelled = true;
     };
   }, [id]);
+
+  useEffect(() => {
+    if (!id || !canViewRuns) {
+      setRuns([]);
+      return;
+    }
+    let cancelled = false;
+    apiGet<ApiRunRow[]>(`/projects/${String(id)}/runs`)
+      .then((runRows) => {
+        if (!cancelled) setRuns(runRows);
+      })
+      .catch(() => {
+        if (!cancelled) setRuns([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [id, canViewRuns]);
 
   useEffect(() => {
     if (!id || !selectedOutput) {
@@ -699,32 +713,6 @@ export default function ProjectDetailPage() {
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     });
-  };
-
-  const handleApproveProjectOutput = async () => {
-    if (!id || !selectedOutput) return;
-    trackUsage({
-      eventName: "project_output_approve_click",
-      feature: "projects_outputs",
-      action: "approve_click",
-      projectId: String(id),
-      properties: { output_id: selectedOutput.id },
-    });
-    setOutputGovernBusy(true);
-    try {
-      const res = await apiFetch(`/projects/${String(id)}/outputs/${selectedOutput.id}/approve`, {
-        method: "POST",
-      });
-      await readJson(res);
-      const mapped = await refreshOutputs();
-      const next = mapped.find((o) => o.id === selectedOutput.id);
-      if (next) setSelectedOutput(next);
-      console.info("[project] 输出已采纳", { project_id: id, output_id: selectedOutput.id });
-    } catch (e) {
-      alert(e instanceof Error ? e.message : "采纳失败");
-    } finally {
-      setOutputGovernBusy(false);
-    }
   };
 
   const handleArchiveProjectOutput = async () => {
@@ -961,7 +949,6 @@ export default function ProjectDetailPage() {
     const projectId = String(id);
     return {
       chat: buildOutputChatRefineLink(projectId, selectedOutput),
-      workshop: buildOutputWorkshopRefineLink(projectId, selectedOutput),
       coCreate: buildOutputCoCreateLink(projectId, selectedOutput.id),
     };
   }, [id, selectedOutput]);
@@ -1031,7 +1018,9 @@ export default function ProjectDetailPage() {
                 { key: "info", label: "控制台" },
                 { key: "members", label: "项目成员" },
                 { key: "outputs", label: "输出沉淀", badge: outputs.length },
-                { key: "runs", label: "执行记录", badge: runs.length },
+                ...(canViewRuns
+                  ? [{ key: "runs" as const, label: "执行记录", badge: runs.length }]
+                  : []),
                 { key: "feedback", label: "用户反馈" },
               ].map((tab) => (
                 <button
@@ -1288,12 +1277,25 @@ export default function ProjectDetailPage() {
                   />
                 </div>
 
+                {outputsLoadError ? (
+                  <div className="rounded-2xl border border-amber-400/60 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-600/50 dark:bg-amber-950/40 dark:text-amber-200">
+                    <p className="font-medium">输出列表加载失败</p>
+                    <p className="mt-1 text-xs leading-relaxed opacity-90">{outputsLoadError}</p>
+                  </div>
+                ) : null}
+
                 {outputs.length === 0 ? (
                   <div className="py-16 text-center text-slate-500">
                     <p className="mb-3 text-4xl">📝</p>
                     <p>暂无输出记录</p>
+                    <p className="mx-auto mt-3 max-w-md text-xs leading-relaxed text-slate-600 dark:text-slate-400">
+                      对话创作不会自动写入此处，需在助手消息上点击「存入项目」；场景输出 / 工坊执行成功后会自动沉淀为文件类输出；项目共创中 Agent
+                      创建的文件也会出现在此。已归档的输出不在列表中显示。
+                    </p>
                     <Link
-                      href={`/workshop?project_id=${id}`} className="mt-2 inline-block text-sm text-blue-400 hover:text-blue-300">
+                      href={`/workshop?project_id=${id}`}
+                      className="mt-4 inline-block text-sm text-blue-400 hover:text-blue-300"
+                    >
                       前往输出工坊生成 →
                     </Link>
                   </div>
@@ -1357,7 +1359,6 @@ export default function ProjectDetailPage() {
                           outputGovernBusy={outputGovernBusy}
                           onCopy={() => handleCopy(outputFullContent ?? selectedOutput.content)}
                           onClose={() => setSelectedOutput(null)}
-                          onApprove={() => void handleApproveProjectOutput()}
                           onArchive={() => void handleArchiveProjectOutput()}
                         />
                       ) : (
@@ -1375,7 +1376,7 @@ export default function ProjectDetailPage() {
               </div>
             )}
 
-            {activeTab === "runs" && (
+            {canViewRuns && activeTab === "runs" && (
               <div className="space-y-3">
                 {runs.length === 0 ? (
                   <div className="py-16 text-center text-slate-500">

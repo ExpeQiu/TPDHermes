@@ -22,6 +22,7 @@ from pydantic import BaseModel
 from backend.schemas.orchestration import TaskExecuteRequest, TaskExecuteOverrides
 from backend.services.orchestration_service import assemble_payload
 from backend.services.project_access import list_visible_project_filter, project_owner_id, require_project_for_user
+from backend.services.rbac import require_system_admin
 from backend.services.project_member_service import (
     ensure_owner_membership,
     get_project_role,
@@ -628,6 +629,7 @@ async def list_project_runs(
     limit: int = 100,
     db: AsyncSession = Depends(get_db),
     effective_uid: str = Depends(get_effective_user_id),
+    _admin_role: str = Depends(require_system_admin()),
 ):
     await require_project_for_user(db, project_id, effective_uid)
     query = select(OrchestrationRun).where(OrchestrationRun.project_id == project_id)

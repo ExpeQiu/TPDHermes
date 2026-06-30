@@ -40,6 +40,8 @@ export type ChatTaskBoundaryModel = {
   setRewriteGoal: (v: string) => void;
   contextSummary: string[];
   bootstrapWarnings: string[];
+  /** 多轮对话进行中时锁定项目绑定，禁止中途切换 */
+  projectContextLocked: boolean;
 };
 
 export function ChatTaskBoundaryPanel({ model }: { model: ChatTaskBoundaryModel }) {
@@ -70,6 +72,7 @@ export function ChatTaskBoundaryPanel({ model }: { model: ChatTaskBoundaryModel 
     setRewriteGoal,
     contextSummary,
     bootstrapWarnings,
+    projectContextLocked,
   } = model;
 
   const fileSelectDisabled =
@@ -150,12 +153,18 @@ export function ChatTaskBoundaryPanel({ model }: { model: ChatTaskBoundaryModel 
             </div>
           ) : null}
           <div className="mt-3">
+            {projectContextLocked ? (
+              <p className="mb-2 text-xs text-slate-500">
+                对话进行中不可修改项目绑定，请新建对话后调整。
+              </p>
+            ) : null}
             {chatMode !== "doc_optimize" ? (
               <div className="mb-2 flex items-center justify-between">
                 <label className="text-xs text-slate-400">携带项目</label>
                 <input
                   type="checkbox"
                   checked={includeProjectContext}
+                  disabled={projectContextLocked}
                   onChange={(e) => setIncludeProjectContext(e.target.checked)}
                 />
               </div>
@@ -164,8 +173,9 @@ export function ChatTaskBoundaryPanel({ model }: { model: ChatTaskBoundaryModel 
             )}
             <select
               value={selectedProjectId}
+              disabled={projectContextLocked}
               onChange={(e) => setSelectedProjectId(e.target.value)}
-              className={`w-full rounded-lg border bg-slate-200 px-3 py-2 text-sm text-slate-900 dark:bg-slate-800 dark:text-white ${
+              className={`w-full rounded-lg border bg-slate-200 px-3 py-2 text-sm text-slate-900 disabled:cursor-not-allowed disabled:opacity-60 dark:bg-slate-800 dark:text-white ${
                 chatMode === "doc_optimize" && !selectedProjectId
                   ? "border-amber-400 dark:border-amber-600"
                   : "border-slate-300 dark:border-slate-700"

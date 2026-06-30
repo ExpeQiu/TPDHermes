@@ -17,6 +17,13 @@ const entries = [
     eyebrow: "项目",
   },
   {
+    href: "/projects?entry=co-create",
+    title: "项目共创",
+    desc: "基于项目文件的 Agent 协同工作台，需从项目内进入",
+    accent: "from-indigo-600 to-violet-700",
+    eyebrow: "共创",
+  },
+  {
     href: "/chat",
     title: "对话创作",
     desc: "基于项目的开放式多轮协作",
@@ -29,13 +36,6 @@ const entries = [
     desc: "在项目内按已绑定场景生成与沉淀结果",
     accent: "from-slate-600 to-slate-800",
     eyebrow: "工坊",
-  },
-  {
-    href: "/projects?entry=co-create",
-    title: "项目共创",
-    desc: "基于项目文件的 Agent 协同工作台，需从项目内进入",
-    accent: "from-indigo-600 to-violet-700",
-    eyebrow: "共创",
   },
   {
     href: "/create",
@@ -92,16 +92,16 @@ export default function Home() {
               进入项目管理
             </Link>
             <Link
+              href="/projects?entry=co-create"
+              className="inline-flex min-w-40 items-center justify-center rounded-xl border border-slate-300 dark:border-slate-700 bg-white/90 dark:bg-slate-900/60 px-5 py-3 text-sm font-medium text-slate-800 dark:text-slate-200 transition hover:border-slate-300 dark:border-slate-600 hover:bg-slate-200 dark:hover:bg-slate-900"
+            >
+              项目共创
+            </Link>
+            <Link
               href="/chat"
               className="inline-flex min-w-40 items-center justify-center rounded-xl border border-slate-300 dark:border-slate-700 bg-white/90 dark:bg-slate-900/60 px-5 py-3 text-sm font-medium text-slate-800 dark:text-slate-200 transition hover:border-slate-300 dark:border-slate-600 hover:bg-slate-200 dark:hover:bg-slate-900"
             >
               对话创作
-            </Link>
-            <Link
-              href="/workshop"
-              className="inline-flex min-w-40 items-center justify-center rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-100/70 dark:bg-slate-950/50 px-5 py-3 text-sm font-medium text-slate-700 dark:text-slate-300 transition hover:border-slate-300 dark:border-slate-600 hover:bg-slate-200/80 dark:hover:bg-slate-900/80"
-            >
-              场景输出
             </Link>
           </div>
         </header>
