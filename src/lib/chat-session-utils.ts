@@ -1,4 +1,4 @@
-import type { ChatSession } from "@/app/chat/chat-types";
+import type { ChatSession, Message } from "@/app/chat/chat-types";
 import { inferSessionKind } from "@/lib/chat-sessions-api";
 
 export type SessionHistoryCategory = "chat" | "scenario" | "co_create";
@@ -14,11 +14,19 @@ export const SESSION_HISTORY_TABS: {
 
 export const PLACEHOLDER_SESSION_TITLES = new Set(["新对话", "对话创作", "新共创"]);
 
+export function userMessageTextForTitle(
+  message: Pick<Message, "content" | "userPrompt">,
+): string | null {
+  const prompt = message.userPrompt?.trim();
+  if (prompt) return prompt;
+  const text = message.content.trim();
+  return text || null;
+}
+
 export function firstUserMessageContent(session: ChatSession): string | null {
   const msg = session.messages.find((m) => m.role === "user");
   if (!msg) return null;
-  const text = msg.content.trim();
-  return text || null;
+  return userMessageTextForTitle(msg);
 }
 
 /** 会话已出现用户消息，视为多轮对话进行中 */
@@ -38,11 +46,15 @@ export function condenseTopicTitle(text: string, maxLen = 16): string {
   s = firstLine;
   const prefixPatterns = [
     /^请?(帮我|帮忙|协助)?/u,
+    /^请/u,
     /^我想(了解|咨询|问|知道|写|做)?/u,
     /^能否/u,
     /^可以(吗|么)?/u,
     /^关于/u,
     /^请问/u,
+    /^基于当前项目上下文[，,:：\s]*/u,
+    /^请?基于当前引用的文件[，,:：\s]*/u,
+    /^请?基于当前项目[，,:：\s]*/u,
   ];
   for (const re of prefixPatterns) {
     const next = s.replace(re, "").trim();

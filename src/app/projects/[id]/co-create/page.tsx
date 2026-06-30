@@ -43,6 +43,7 @@ import {
 } from "@/lib/co-create-api";
 import {
   projectCoCreateSessionDefaults,
+  titleFromSession,
 } from "@/lib/chat-session-utils";
 import { parseCoCreateNewCommand } from "@/app/projects/[id]/co-create/co-create-slash-commands";
 import { useEffectiveUserScopeId } from "@/lib/use-effective-user-scope-id";
@@ -89,6 +90,7 @@ import { CoCreateComposer } from "@/app/projects/[id]/co-create/components/CoCre
 import { CoCreateMessageStream } from "@/app/projects/[id]/co-create/components/CoCreateMessageStream";
 import { CoCreateTopbar } from "@/app/projects/[id]/co-create/components/CoCreateTopbar";
 import { FileCreateCard } from "@/app/projects/[id]/co-create/components/FileCreateCard";
+import { UpdateToOutputDialog } from "@/app/projects/[id]/co-create/components/UpdateToOutputDialog";
 import { FileDiffModal } from "@/app/projects/[id]/co-create/components/FileDiffModal";
 import { FilePatchCard } from "@/app/projects/[id]/co-create/components/FilePatchCard";
 import { FileRecommendationCard } from "@/app/projects/[id]/co-create/components/FileRecommendationCard";
@@ -372,6 +374,9 @@ function CoCreatePageInner() {
   const [diffProposal, setDiffProposal] = useState<Extract<FileActionProposal, { type: "patch" }> | null>(
     null,
   );
+  const [updateToCreateProposal, setUpdateToCreateProposal] = useState<
+    Extract<FileActionProposal, { type: "create" }> | null
+  >(null);
   const [fileSaving, setFileSaving] = useState(false);
   const [undoingAgentChange, setUndoingAgentChange] = useState(false);
   const [remoteScenarios, setRemoteScenarios] = useState<ScenarioApiRow[]>([]);
@@ -593,6 +598,20 @@ function CoCreatePageInner() {
     const qs = params.toString();
     return qs ? `/create?${qs}` : "/create";
   }, [projectId]);
+
+  const outputFiles = useMemo(
+    () => fileWorkspace.files.filter((file) => file.kind === "output"),
+    [fileWorkspace.files],
+  );
+
+  useEffect(() => {
+    if (!activeSession?.messages.some((message) => message.role === "user")) return;
+    const nextTitle = titleFromSession(activeSession, "新共创");
+    if (isPlaceholderFromStore(nextTitle) || nextTitle === activeSession.title) return;
+    updateSession(activeSession.id, (session) => ({ ...session, title: nextTitle }));
+    const updated = sessionsRef.current.find((item) => item.id === activeSession.id);
+    if (updated) queueSessionPatch(activeSession.id, { title: updated.title });
+  }, [activeSession, queueSessionPatch, sessionsRef, updateSession]);
 
   useEffect(() => {
     if (sessionsLoading || !projectId || entryAppliedRef.current) return;
@@ -1494,6 +1513,7 @@ function CoCreatePageInner() {
       });
 
       await sendMessage(plan.prompt, {
+        userPrompt: plan.outputEntryTitle.trim() || entry.title.trim() || undefined,
         useOrchestrationOverride: plan.useOrchestration,
         skipToolsContextBuild: plan.skipTools,
         scenarioIdOverride: plan.scenarioId,
@@ -1536,6 +1556,7 @@ function CoCreatePageInner() {
     async (
       proposal: FileActionProposal,
       saveMode: "overwrite" | "new_version" | "copy" = "overwrite",
+      createOverwriteTarget?: { outputId: string; fileName: string },
     ) => {
       setPendingActions((prev) => updateProposalStatus(proposal.proposalId, "applying", prev));
       syncProposalStatusToSession(proposal.proposalId, "applying");
@@ -1572,8 +1593,10 @@ function CoCreatePageInner() {
         }
 
         let resolvedAfter = "";
+        const createOverwrite =
+          latestProposal.type === "create" && Boolean(createOverwriteTarget?.outputId);
         const action =
-          latestProposal.type === "create"
+          latestProposal.type === "create" && !createOverwrite
             ? (() => {
                 const content = resolveCreateActionContent(
                   latestProposal.content,
@@ -1593,6 +1616,37 @@ function CoCreatePageInner() {
                   content,
                 };
               })()
+            : latestProposal.type === "create" && createOverwrite && createOverwriteTarget
+              ? (() => {
+                  const content = resolveCreateActionContent(
+                    latestProposal.content,
+                    assistantContent,
+                    extractAutoCreateDraftBody,
+                  );
+                  if (!content.trim()) {
+                    throw new Error("更新内容不能为空，请重试");
+                  }
+                  if (
+                    !isCreateProposalReadyForApply(
+                      latestProposal.content,
+                      assistantContent,
+                      extractAutoCreateDraftBody,
+                    )
+                  ) {
+                    throw new Error("文稿正文尚未就绪，请稍候或点击重试");
+                  }
+                  resolvedAfter = content;
+                  return {
+                    type: "patch" as const,
+                    target_file_id: createOverwriteTarget.outputId,
+                    target_kind: "output" as const,
+                    file_name: createOverwriteTarget.fileName,
+                    save_mode: "overwrite" as const,
+                    edit_mode: "full" as const,
+                    content,
+                    after: content,
+                  };
+                })()
             : (() => {
                 resolvedAfter = resolvePatchAfterFromProposal(latestProposal, previousContent);
                 const editMode = latestProposal.editMode ?? "full";
@@ -1621,6 +1675,24 @@ function CoCreatePageInner() {
                     : {}),
                 };
               })();
+        if (createOverwrite && createOverwriteTarget) {
+          previousContent =
+            (
+              await fetchProjectFileDetail(
+                projectId,
+                createOverwriteTarget.outputId,
+                "output",
+              )
+            ).content ?? "";
+          undoEntry = {
+            type: "patch",
+            proposalId: latestProposal.proposalId,
+            fileId: createOverwriteTarget.outputId,
+            fileKind: "output",
+            fileName: createOverwriteTarget.fileName,
+            previousContent,
+          };
+        }
         const result = await applyFileAction(projectId, {
           session_id: activeId ?? undefined,
           proposal_id: latestProposal.proposalId,
@@ -1649,16 +1721,18 @@ function CoCreatePageInner() {
           }));
         }
         const fileKey =
-          latestProposal.type === "create"
-            ? encodeProjectFileSelectValue(result.kind, result.file_id)
-            : encodeProjectFileSelectValue(latestProposal.fileKind, latestProposal.fileId);
-        if (latestProposal.type === "patch") {
-          undoEntry = {
+          createOverwrite && createOverwriteTarget
+            ? encodeProjectFileSelectValue("output", createOverwriteTarget.outputId)
+            : latestProposal.type === "create"
+              ? encodeProjectFileSelectValue(result.kind, result.file_id)
+              : encodeProjectFileSelectValue(latestProposal.fileKind, latestProposal.fileId);
+        if (latestProposal.type === "patch" || createOverwrite) {
+          undoEntry = undoEntry ?? {
             type: "patch",
             proposalId: latestProposal.proposalId,
-            fileId: latestProposal.fileId,
-            fileKind: latestProposal.fileKind,
-            fileName: latestProposal.fileName,
+            fileId: createOverwriteTarget?.outputId ?? (latestProposal.type === "patch" ? latestProposal.fileId : ""),
+            fileKind: "output",
+            fileName: createOverwriteTarget?.fileName ?? (latestProposal.type === "patch" ? latestProposal.fileName : ""),
             previousContent,
           };
         } else {
@@ -1673,7 +1747,8 @@ function CoCreatePageInner() {
         console.info("[co-create] 文件应用成功", {
           proposalId: latestProposal.proposalId,
           type: latestProposal.type,
-          fileId: result.file_id,
+          mode: createOverwrite ? "create_overwrite_output" : latestProposal.type,
+          fileId: createOverwriteTarget?.outputId ?? result.file_id,
           contentLength:
             latestProposal.type === "create"
               ? action.content?.length ?? 0
@@ -1681,8 +1756,8 @@ function CoCreatePageInner() {
         });
         try {
           fileWorkspace.openFileTab(fileKey);
-          if (latestProposal.type === "patch") {
-            fileWorkspace.patchTabContent(fileKey, resolvedAfter || latestProposal.after);
+          if (latestProposal.type === "patch" || createOverwrite) {
+            fileWorkspace.patchTabContent(fileKey, resolvedAfter || (latestProposal.type === "patch" ? latestProposal.after : ""));
           }
           await fileWorkspace.refreshFiles();
           await fileWorkspace.reloadFileTab(fileKey);
@@ -1961,6 +2036,28 @@ function CoCreatePageInner() {
   })();
   const showUndoControl = agentUndoStack.length > 0 && agentMode !== "ask";
 
+  const rejectCreateProposal = useCallback((proposalId: string) => {
+    setPendingActions((prev) =>
+      prev.map((p) =>
+        p.proposalId === proposalId ? { ...p, status: "rejected" as const } : p,
+      ),
+    );
+  }, []);
+
+  const renderCreateFileCard = useCallback(
+    (proposal: Extract<FileActionProposal, { type: "create" }>) => (
+      <FileCreateCard
+        key={proposal.proposalId}
+        proposal={proposal}
+        onCreateNew={() => void applyProposal(proposal)}
+        onUpdateTo={() => setUpdateToCreateProposal(proposal)}
+        onCancel={() => rejectCreateProposal(proposal.proposalId)}
+        updateToDisabled={outputFiles.length === 0}
+      />
+    ),
+    [applyProposal, outputFiles.length, rejectCreateProposal],
+  );
+
   const messageHasCreateForTarget = useCallback(
     (targetKey: string) =>
       (activeSession?.messages ?? []).some((message) =>
@@ -1996,32 +2093,7 @@ function CoCreatePageInner() {
           />
           {actions.map((proposal) =>
             proposal.type === "create" ? (
-              <FileCreateCard
-                key={proposal.proposalId}
-                proposal={proposal}
-                onCreate={() => void applyProposal(proposal)}
-                onEdit={() => {
-                  const edited = window.prompt("编辑文件内容", proposal.content);
-                  if (edited != null) {
-                    setPendingActions((prev) =>
-                      prev.map((p) =>
-                        p.proposalId === proposal.proposalId && p.type === "create"
-                          ? { ...p, content: edited }
-                          : p,
-                      ),
-                    );
-                  }
-                }}
-                onCancel={() =>
-                  setPendingActions((prev) =>
-                    prev.map((p) =>
-                      p.proposalId === proposal.proposalId
-                        ? { ...p, status: "rejected" as const }
-                        : p,
-                    ),
-                  )
-                }
-              />
+              renderCreateFileCard(proposal)
             ) : (
               <FilePatchCard
                 key={proposal.proposalId}
@@ -2045,7 +2117,7 @@ function CoCreatePageInner() {
         </>
       );
     },
-    [addToRound, applyProposal, pinFile, recommendations],
+    [addToRound, applyProposal, pinFile, recommendations, renderCreateFileCard],
   );
 
   if (!projectId) {
@@ -2129,13 +2201,7 @@ function CoCreatePageInner() {
                 )
                 .map((proposal) =>
                   proposal.type === "create" ? (
-                    <FileCreateCard
-                      key={proposal.proposalId}
-                      proposal={proposal}
-                      onCreate={() => void applyProposal(proposal)}
-                      onEdit={() => {}}
-                      onCancel={() => {}}
-                    />
+                    renderCreateFileCard(proposal)
                   ) : (
                     <FilePatchCard
                       key={proposal.proposalId}
@@ -2224,6 +2290,27 @@ function CoCreatePageInner() {
             onRefresh={() => void fileWorkspace.refreshFiles()}
           />
         }
+      />
+
+      <UpdateToOutputDialog
+        open={Boolean(updateToCreateProposal)}
+        fileName={updateToCreateProposal?.fileName ?? ""}
+        outputs={outputFiles}
+        onClose={() => setUpdateToCreateProposal(null)}
+        onSelect={(file) => {
+          if (!updateToCreateProposal) return;
+          void applyProposal(updateToCreateProposal, "overwrite", {
+            outputId: file.id,
+            fileName: file.title,
+          });
+          setUpdateToCreateProposal(null);
+          setFilesPanelOpen(true);
+          console.info("[co-create] 创建提案已更新到输出物", {
+            proposalId: updateToCreateProposal.proposalId,
+            outputId: file.id,
+            fileName: file.title,
+          });
+        }}
       />
 
       <FileDiffModal

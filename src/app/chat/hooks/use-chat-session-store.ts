@@ -18,6 +18,7 @@ import type { QuickCreateFlowOverrides } from "@/lib/chat-context";
 
 import {
   condenseTopicTitle,
+  firstUserMessageContent,
   isPlaceholderSessionTitle,
   isProjectCoCreateSession,
 } from "@/lib/chat-session-utils";
@@ -56,13 +57,6 @@ function saveSessions(scopeUserId: string, sessions: ChatSession[], namespace = 
 
 function uuid() {
   return Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
-}
-
-function firstUserMessageContent(session: ChatSession): string | null {
-  const msg = session.messages.find((m) => m.role === "user");
-  if (!msg) return null;
-  const text = msg.content.trim();
-  return text || null;
 }
 
 function normalizeSessionsPlaceholders(sessions: ChatSession[]): ChatSession[] {

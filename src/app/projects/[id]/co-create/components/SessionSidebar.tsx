@@ -80,7 +80,7 @@ export function SessionSidebar({
               <div className="flex items-start gap-2">
                 <span className="text-xs">📁</span>
                 <div className="min-w-0 flex-1">
-                  <span className="block truncate text-sm font-medium">
+                  <span className="block truncate text-sm">
                     {titleFromSession(session, "新共创")}
                   </span>
                   <div className="mt-0.5 flex items-center justify-between gap-1">

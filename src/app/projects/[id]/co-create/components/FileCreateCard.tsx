@@ -5,12 +5,19 @@ import { isAutoCreateFallbackProposal } from "@/app/projects/[id]/co-create/co-c
 
 type Props = {
   proposal: Extract<FileActionProposal, { type: "create" }>;
-  onCreate: () => void;
-  onEdit: () => void;
+  onCreateNew: () => void;
+  onUpdateTo: () => void;
   onCancel: () => void;
+  updateToDisabled?: boolean;
 };
 
-export function FileCreateCard({ proposal, onCreate, onEdit, onCancel }: Props) {
+export function FileCreateCard({
+  proposal,
+  onCreateNew,
+  onUpdateTo,
+  onCancel,
+  updateToDisabled,
+}: Props) {
   const applied = proposal.status === "applied";
   const applying = proposal.status === "applying";
   const failed = proposal.status === "failed";
@@ -41,18 +48,13 @@ export function FileCreateCard({ proposal, onCreate, onEdit, onCancel }: Props) 
                 : "创建文件提案"}
       </p>
       <p className="mt-1 text-sm font-medium">{proposal.fileName}</p>
-      <p className="text-xs text-slate-500">路径：{proposal.path}</p>
-      <pre className="mt-2 max-h-40 overflow-y-auto rounded-lg bg-white/80 p-2 text-xs dark:bg-slate-900/60">
-        {proposal.content.slice(0, 1200)}
-        {proposal.content.length > 1200 ? "…" : ""}
-      </pre>
       {applied ? (
         <p className="mt-3 text-xs text-emerald-700 dark:text-emerald-200">
-          已自动创建并保存，可在顶部撤销最近一次 AI 变更。
+          已保存至输出物，可在顶部撤销最近一次 AI 变更。
         </p>
       ) : applying ? (
         <p className="mt-3 text-xs text-emerald-700 dark:text-emerald-200">
-          正在把生成结果写入项目文件区…
+          正在写入项目输出物…
         </p>
       ) : rejected ? (
         <p className="mt-3 text-xs text-slate-500 dark:text-slate-400">该创建提案已忽略。</p>
@@ -60,22 +62,32 @@ export function FileCreateCard({ proposal, onCreate, onEdit, onCancel }: Props) 
         <p className="mt-3 text-xs text-rose-700 dark:text-rose-300">失败原因：{proposal.applyError}</p>
       ) : null}
       {!applied && !applying && !rejected ? (
-        <div className="mt-3 flex flex-wrap gap-2">
-          <button
-            type="button"
-            disabled={applying}
-            onClick={onCreate}
-            className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs text-white hover:bg-emerald-500 disabled:opacity-50"
-          >
-            {failed ? "重试创建" : "创建文件"}
-          </button>
-          <button type="button" onClick={onEdit} className="rounded-lg border px-3 py-1.5 text-xs">
-            编辑后创建
-          </button>
-          <button type="button" onClick={onCancel} className="rounded-lg px-3 py-1.5 text-xs text-slate-500">
-            取消
-          </button>
-        </div>
+        <>
+          <p className="mt-2 text-[10px] leading-relaxed text-slate-500">
+            「创建新文件」保存至右侧输出物；「更新到」覆盖已有输出物文件。
+          </p>
+          <div className="mt-3 flex flex-wrap gap-2">
+            <button
+              type="button"
+              disabled={applying}
+              onClick={onCreateNew}
+              className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs text-white hover:bg-emerald-500 disabled:opacity-50"
+            >
+              {failed ? "重试创建新文件" : "创建新文件"}
+            </button>
+            <button
+              type="button"
+              disabled={applying || updateToDisabled}
+              onClick={onUpdateTo}
+              className="rounded-lg border px-3 py-1.5 text-xs disabled:opacity-50"
+            >
+              更新到
+            </button>
+            <button type="button" onClick={onCancel} className="rounded-lg px-3 py-1.5 text-xs text-slate-500">
+              取消
+            </button>
+          </div>
+        </>
       ) : null}
     </div>
   );
