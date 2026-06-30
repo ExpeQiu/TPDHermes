@@ -1648,6 +1648,9 @@ function CoCreatePageInner() {
                   };
                 })()
             : (() => {
+                if (latestProposal.type !== "patch") {
+                  throw new Error("无法应用该文件操作");
+                }
                 resolvedAfter = resolvePatchAfterFromProposal(latestProposal, previousContent);
                 const editMode = latestProposal.editMode ?? "full";
                 return {

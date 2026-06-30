@@ -127,7 +127,7 @@ export function ProjectFilesPanel({
         </div>
       </div>
 
-      <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
+      <div className="min-h-0 flex-1 space-y-0.5 overflow-y-auto overscroll-contain p-1">
         {loading ? (
           <p className="p-4 text-xs text-slate-500">加载文件…</p>
         ) : filtered.length === 0 ? (
@@ -148,7 +148,7 @@ export function ProjectFilesPanel({
                   e.currentTarget.focus({ preventScroll: true });
                   onSelectPreview(fileKey);
                 }}
-                className={`flex w-full items-start gap-2 border-b border-slate-200 px-3 py-2 text-left text-xs transition dark:border-slate-800 ${
+                className={`flex w-full items-start gap-2 rounded-md px-2 py-2 text-left text-xs no-underline transition ${
                   isActive
                     ? "bg-blue-50 dark:bg-blue-950/30"
                     : isOpen
