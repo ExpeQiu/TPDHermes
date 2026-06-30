@@ -1,17 +1,19 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState, type ChangeEvent } from "react";
 import {
   decodeProjectFileSelectValue,
   encodeProjectFileSelectValue,
   type ProjectFileKind,
 } from "@/lib/chat-context";
+import { uploadProjectAttachment } from "@/lib/co-create-api";
 import type { ProjectFileItem } from "@/lib/co-create-api";
 import type { FileRefState } from "@/app/projects/[id]/co-create/co-create-types";
 
 type FilterKind = "all" | "output" | "attachment";
 
 type Props = {
+  projectId: string;
   files: ProjectFileItem[];
   loading: boolean;
   openTabKeys: string[];
@@ -36,6 +38,7 @@ const refBadge: Record<FileRefState, string> = {
 };
 
 export function ProjectFilesPanel({
+  projectId,
   files,
   loading,
   openTabKeys,
@@ -47,6 +50,31 @@ export function ProjectFilesPanel({
 }: Props) {
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState<FilterKind>("all");
+  const [uploading, setUploading] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const handlePickAttachment = () => {
+    setUploadError(null);
+    fileInputRef.current?.click();
+  };
+
+  const handleAttachmentFileChange = async (e: ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file || !projectId) return;
+    setUploading(true);
+    setUploadError(null);
+    try {
+      await uploadProjectAttachment(projectId, file);
+      onRefresh();
+    } catch (err) {
+      setUploadError(err instanceof Error ? err.message : "上传失败");
+      console.warn("[co-create] 附件上传失败", { projectId, err });
+    } finally {
+      setUploading(false);
+    }
+  };
 
   const filtered = useMemo(() => {
     let list = files;
@@ -150,6 +178,26 @@ export function ProjectFilesPanel({
             );
           })
         )}
+      </div>
+
+      <div className="shrink-0 border-t border-slate-300 p-3 dark:border-slate-700">
+        <input
+          ref={fileInputRef}
+          type="file"
+          className="hidden"
+          onChange={(e) => void handleAttachmentFileChange(e)}
+        />
+        <button
+          type="button"
+          onClick={handlePickAttachment}
+          disabled={uploading || !projectId}
+          className="w-full rounded-xl border border-blue-300 bg-blue-50 px-3 py-2 text-xs font-medium text-blue-800 transition hover:border-blue-400 hover:bg-blue-100 disabled:opacity-50 dark:border-blue-500/40 dark:bg-blue-500/10 dark:text-blue-200 dark:hover:bg-blue-500/20"
+        >
+          {uploading ? "上传中…" : "上传附件"}
+        </button>
+        {uploadError ? (
+          <p className="mt-2 text-[10px] leading-relaxed text-red-500">{uploadError}</p>
+        ) : null}
       </div>
     </aside>
   );

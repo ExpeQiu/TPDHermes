@@ -1,4 +1,4 @@
-import { apiGet, apiPost } from "@/lib/api";
+import { apiFetch, apiGet, apiPost, readJson } from "@/lib/api";
 import type { ProjectFileKind } from "@/lib/chat-context";
 import type { FileActionProposal } from "@/app/projects/[id]/co-create/co-create-types";
 
@@ -97,6 +97,22 @@ export async function archiveProjectOutput(
   outputId: string,
 ): Promise<ProjectFileDetail> {
   return apiPost<ProjectFileDetail>(`/projects/${projectId}/outputs/${outputId}/archive`, {});
+}
+
+/** 上传项目附件（与项目详情页「上传附件」一致） */
+export async function uploadProjectAttachment(projectId: string, file: File): Promise<void> {
+  const fd = new FormData();
+  fd.append("file", file);
+  const res = await apiFetch(`/projects/${projectId}/attachments`, {
+    method: "POST",
+    body: fd,
+  });
+  await readJson(res);
+  console.info("[co-create] 项目附件已上传", {
+    projectId,
+    fileName: file.name,
+    size: file.size,
+  });
 }
 
 export function parseFileActionsFromContent(content: string): FileActionProposal[] {

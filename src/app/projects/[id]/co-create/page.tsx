@@ -2213,6 +2213,7 @@ function CoCreatePageInner() {
         }
         files={
           <ProjectFilesPanel
+            projectId={projectId}
             files={fileWorkspace.files}
             loading={fileWorkspace.loading}
             openTabKeys={fileWorkspace.openTabKeys}

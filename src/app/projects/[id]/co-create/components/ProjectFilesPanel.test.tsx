@@ -10,15 +10,29 @@ import {
 } from "@/test-utils/component-test-utils";
 import { ProjectFilesPanel } from "./ProjectFilesPanel";
 
+vi.mock("@/lib/co-create-api", async () => {
+  const actual = (await vi.importActual("@/lib/co-create-api")) as typeof import("@/lib/co-create-api");
+  return {
+    ...actual,
+    uploadProjectAttachment: vi.fn(),
+  };
+});
+
+import { uploadProjectAttachment } from "@/lib/co-create-api";
+
+const uploadProjectAttachmentMock = vi.mocked(uploadProjectAttachment);
+
 describe("ProjectFilesPanel", () => {
   afterEach(() => {
     cleanupDom();
     vi.clearAllMocks();
+    uploadProjectAttachmentMock.mockReset();
   });
 
   it("renders loading state and empty state", () => {
     const loadingView = renderComponent(
       React.createElement(ProjectFilesPanel, {
+        projectId: "project-1",
         files: [],
         loading: true,
         openTabKeys: [],
@@ -35,6 +49,7 @@ describe("ProjectFilesPanel", () => {
 
     const emptyView = renderComponent(
       React.createElement(ProjectFilesPanel, {
+        projectId: "project-1",
         files: [],
         loading: false,
         openTabKeys: [],
@@ -56,6 +71,7 @@ describe("ProjectFilesPanel", () => {
 
     const { container } = renderComponent(
       React.createElement(ProjectFilesPanel, {
+        projectId: "project-1",
         files: [
           {
             id: "out-1",
@@ -114,11 +130,43 @@ describe("ProjectFilesPanel", () => {
     expect(onSelectPreview).toHaveBeenCalledWith("output:out-1");
   });
 
+  it("uploads attachment and refreshes file list", async () => {
+    uploadProjectAttachmentMock.mockResolvedValue(undefined);
+    const onRefresh = vi.fn();
+
+    const { container } = renderComponent(
+      React.createElement(ProjectFilesPanel, {
+        projectId: "project-1",
+        files: [],
+        loading: false,
+        openTabKeys: [],
+        activeFileKey: null,
+        pinnedFileIds: [],
+        roundFileIds: [],
+        onSelectPreview: () => {},
+        onRefresh,
+      }),
+    );
+
+    const input = container.querySelector('input[type="file"]') as HTMLInputElement;
+    expect(input).not.toBeNull();
+
+    const file = new File(["brief"], "brief.txt", { type: "text/plain" });
+    Object.defineProperty(input, "files", { value: [file], configurable: true });
+    input.dispatchEvent(new Event("change", { bubbles: true }));
+
+    await vi.waitFor(() => {
+      expect(uploadProjectAttachmentMock).toHaveBeenCalledWith("project-1", file);
+      expect(onRefresh).toHaveBeenCalled();
+    });
+  });
+
   it("filters to output files only and allows selecting attachments in all mode", () => {
     const onSelectPreview = vi.fn();
 
     const { container } = renderComponent(
       React.createElement(ProjectFilesPanel, {
+        projectId: "project-1",
         files: [
           {
             id: "out-1",
