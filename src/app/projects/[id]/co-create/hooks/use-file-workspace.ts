@@ -25,6 +25,13 @@ export function useFileWorkspace(projectId: string) {
   const [openTabKeys, setOpenTabKeys] = useState<string[]>([]);
   const [activeFileKey, setActiveFileKey] = useState<string | null>(null);
   const [tabCache, setTabCache] = useState<Record<string, FileTabCache>>({});
+  useEffect(() => {
+    setOpenTabKeys([]);
+    setActiveFileKey(null);
+    setTabCache({});
+    loadingKeysRef.current.clear();
+  }, [projectId]);
+
   const refreshFiles = useCallback(async () => {
     if (!projectId) return;
     setLoading(true);

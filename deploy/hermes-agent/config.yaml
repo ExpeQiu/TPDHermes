@@ -45,6 +45,14 @@ approvals:
 security:
   tirith_enabled: false
 
+compression:
+  enabled: true
+  threshold: 0.80
+
+memory:
+  memory_char_limit: 10000
+  user_char_limit: 5000
+
 display:
   tool_progress: all
   interim_assistant_messages: true
@@ -53,3 +61,16 @@ platforms:
   feishu:
     extra:
       require_mention: false
+
+# Tool loop guardrails — same_tool_failure 连续失败时强制终止而非仅警告
+tool_loop_guardrails:
+  warnings_enabled: true
+  hard_stop_enabled: true
+  warn_after:
+    exact_failure: 2
+    same_tool_failure: 3
+    idempotent_no_progress: 2
+  hard_stop_after:
+    exact_failure: 4
+    same_tool_failure: 5
+    idempotent_no_progress: 4

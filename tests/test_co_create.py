@@ -168,6 +168,65 @@ def test_project_file_patch_creates_new_version_and_versions_endpoint():
         assert {item["id"] for item in items} == {original_file_id, patched_body["file_id"]}
 
 
+def test_project_file_create_upserts_same_title():
+    headers = {"X-User-ID": f"co_create_upsert_{uuid.uuid4().hex[:8]}"}
+    with TestClient(app) as client:
+        proj = client.post(
+            "/api/v1/projects",
+            headers=headers,
+            json={"name": "共创 upsert 项目", "status": "active"},
+        )
+        assert proj.status_code == 200
+        project_id = proj.json()["id"]
+
+        first = client.post(
+            f"/api/v1/projects/{project_id}/file-actions/apply",
+            headers=headers,
+            json={
+                "proposal_id": "create-first",
+                "action": {
+                    "type": "create",
+                    "file_name": "营销推广文案.md",
+                    "path": "/输出/营销推广文案.md",
+                    "content": "# 第一版",
+                },
+            },
+        )
+        assert first.status_code == 200, first.text
+        first_id = first.json()["file_id"]
+
+        second = client.post(
+            f"/api/v1/projects/{project_id}/file-actions/apply",
+            headers=headers,
+            json={
+                "proposal_id": "create-second",
+                "action": {
+                    "type": "create",
+                    "file_name": "营销推广文案.md",
+                    "path": "/输出/营销推广文案.md",
+                    "content": "# 第二版",
+                },
+            },
+        )
+        assert second.status_code == 200, second.text
+        second_body = second.json()
+        assert second_body["file_id"] == first_id
+        assert second_body["version"] == "2"
+
+        files = client.get(f"/api/v1/projects/{project_id}/files", headers=headers)
+        assert files.status_code == 200
+        outputs = [item for item in files.json()["items"] if item["kind"] == "output"]
+        marketing = [item for item in outputs if item["title"] == "营销推广文案.md"]
+        assert len(marketing) == 1
+
+        detail = client.get(
+            f"/api/v1/projects/{project_id}/files/{first_id}?kind=output",
+            headers=headers,
+        )
+        assert detail.status_code == 200
+        assert detail.json()["content"] == "# 第二版"
+
+
 def test_attachment_is_visible_in_unified_files_and_project_context():
     headers = {"X-User-ID": f"co_create_attachment_{uuid.uuid4().hex[:8]}"}
     with TestClient(app) as client:

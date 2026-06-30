@@ -3,10 +3,12 @@ import { describe, expect, it } from "vitest";
 import { extractAutoCreateDraftBody } from "@/app/projects/[id]/co-create/co-create-auto-draft";
 import { extractAutoPatchBody } from "@/app/projects/[id]/co-create/co-create-auto-patch";
 import {
+  dedupeCreateProposals,
   isCreateProposalReadyForApply,
   normalizeCreateFilePath,
   normalizeStreamCreateProposal,
   normalizeStreamPatchProposal,
+  prunePendingCreatesForAssistantMessage,
   reconcileStreamCreateProposals,
   reconcileStreamPatchProposals,
   resolveCreateActionContent,
@@ -147,5 +149,66 @@ describe("co-create-file-actions", () => {
     expect(reconciled[0]?.status).toBe("proposed");
     expect(reconciled[0]?.type === "patch" && reconciled[0].after.length).toBeGreaterThan(80);
     expect(reconciled[0]?.type === "patch" && reconciled[0].applyError).toBeUndefined();
+  });
+
+  it("dedupeCreateProposals 同路径仅保留 stream 提案", () => {
+    const deduped = dedupeCreateProposals([
+      {
+        type: "create",
+        proposalId: "fallback-create:assistant-1",
+        fileName: "营销推广文案.md",
+        path: "/输出/营销推广文案.md",
+        content: "fallback",
+        status: "proposed",
+      },
+      {
+        type: "create",
+        proposalId: "stream-1",
+        fileName: "营销推广文案.md",
+        path: "/输出/营销推广文案.md",
+        content: "stream",
+        status: "proposed",
+      },
+    ]);
+    expect(deduped).toHaveLength(1);
+    expect(deduped[0]?.proposalId).toBe("stream-1");
+  });
+
+  it("prunePendingCreatesForAssistantMessage 清理同轮 fallback 与重复 create", () => {
+    const pruned = prunePendingCreatesForAssistantMessage(
+      [
+        {
+          type: "create",
+          proposalId: "fallback-create:assistant-1",
+          fileName: "营销推广文案.md",
+          path: "/输出/营销推广文案.md",
+          content: "fallback",
+          status: "proposed",
+        },
+        {
+          type: "patch",
+          proposalId: "patch-1",
+          fileId: "f1",
+          fileKind: "output",
+          fileName: "稿.md",
+          before: "a",
+          after: "b",
+          status: "proposed",
+        },
+      ],
+      "assistant-1",
+      [
+        {
+          type: "create",
+          proposalId: "stream-1",
+          fileName: "营销推广文案.md",
+          path: "/输出/营销推广文案.md",
+          content: "stream",
+          status: "proposed",
+        },
+      ],
+    );
+    expect(pruned.some((item) => item.proposalId === "fallback-create:assistant-1")).toBe(false);
+    expect(pruned.some((item) => item.proposalId === "patch-1")).toBe(true);
   });
 });

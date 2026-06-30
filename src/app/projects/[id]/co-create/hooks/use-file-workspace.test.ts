@@ -163,4 +163,46 @@ describe("useFileWorkspace", () => {
     expect(result.current.openTabKeys).toEqual(["output:out-1"]);
     expect(result.current.activeFileKey).toBe("output:out-1");
   });
+
+  it("clears open tabs when projectId changes", async () => {
+    apiMocks.fetchProjectFilesUnified.mockResolvedValue([
+      {
+        id: "out-1",
+        kind: "output",
+        title: "方案草稿.md",
+        path: "/输出/方案草稿.md",
+        file_type: "markdown",
+      },
+    ]);
+    apiMocks.fetchProjectFileDetail.mockResolvedValue({
+      id: "out-1",
+      kind: "output",
+      title: "方案草稿.md",
+      path: "/输出/方案草稿.md",
+      file_type: "markdown",
+      content: "# 第一版",
+      content_format: "markdown",
+      version: "1",
+    });
+    apiMocks.fetchProjectFileVersions.mockResolvedValue([]);
+
+    const { result, rerender } = renderHook(
+      ({ projectId }: { projectId: string }) => useFileWorkspace(projectId),
+      { initialProps: { projectId: "project-1" } },
+    );
+
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    act(() => {
+      result.current.openFileTab("output:out-1");
+    });
+
+    await waitFor(() => expect(result.current.activeFileKey).toBe("output:out-1"));
+
+    rerender({ projectId: "project-2" });
+
+    await waitFor(() => expect(result.current.openTabKeys).toEqual([]));
+    expect(result.current.activeFileKey).toBeNull();
+    expect(apiMocks.fetchProjectFilesUnified).toHaveBeenCalledWith("project-2");
+  });
 });

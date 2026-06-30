@@ -122,13 +122,16 @@ import {
   shouldQuickStartAutoCreateDraft,
 } from "@/app/projects/[id]/co-create/co-create-auto-draft";
 import {
+  dedupeCreateProposals,
   hasActiveStreamFileActions,
+  hasResolvedCreateForAssistant,
   isCreateProposalReadyForApply,
   isStreamFileActionProposal,
   mergeFileActionProposals,
   normalizeCreateFilePath,
   normalizeStreamCreateProposal,
   normalizeStreamPatchProposal,
+  prunePendingCreatesForAssistantMessage,
   reconcileStreamCreateProposals,
   reconcileStreamPatchProposals,
   resolveCreateActionContent,
@@ -709,21 +712,31 @@ function CoCreatePageInner() {
             ),
       );
       if (mapped.length === 0) return;
+      const mergedForAssistant = dedupeCreateProposals(mapped);
       setPendingActions((prev) => {
-        let next = prev;
-        for (const proposal of mapped) {
+        const pruned = prunePendingCreatesForAssistantMessage(prev, assistantId, mergedForAssistant);
+        let next = pruned;
+        for (const proposal of mergedForAssistant) {
           next = upsertFileActionProposal(next, proposal);
         }
-        return next;
+        return dedupeCreateProposals(next);
       });
       updateSession(sessionId, (session) => ({
         ...session,
         pendingProposalIds: [
-          ...new Set([...(session.pendingProposalIds ?? []), ...mapped.map((m) => m.proposalId)]),
+          ...new Set([
+            ...(session.pendingProposalIds ?? []),
+            ...mergedForAssistant.map((m) => m.proposalId),
+          ]),
         ],
-        messages: session.messages.map((m) =>
-          m.id === assistantId ? { ...m, fileActions: mapped } : m,
-        ),
+        messages: session.messages.map((m) => {
+          if (m.id !== assistantId) return m;
+          const keptPatches = (m.fileActions ?? []).filter((item) => item.type === "patch");
+          return {
+            ...m,
+            fileActions: dedupeCreateProposals([...keptPatches, ...mergedForAssistant]),
+          };
+        }),
       }));
       const updated = sessionsRef.current.find((s) => s.id === sessionId);
       if (updated) queueSessionPatch(sessionId, sessionToPatchPayload(updated));
@@ -734,6 +747,10 @@ function CoCreatePageInner() {
   const enqueueAutoCreateDraftForAssistant = useCallback(
     (sessionId: string, assistantMessage: Message | undefined, prompt: string) => {
       if (!assistantMessage || assistantMessage.role !== "assistant") return false;
+
+      if (hasResolvedCreateForAssistant(assistantMessage.fileActions)) {
+        return false;
+      }
 
       const streamFileActions = assistantMessage.fileActions?.filter((item) =>
         isStreamFileActionProposal(item.proposalId),
@@ -1615,7 +1632,10 @@ function CoCreatePageInner() {
         if (
           proposal.type === "create" &&
           !isAutoCreateFallbackProposal(proposal.proposalId) &&
-          sessionForProposal
+          sessionForProposal &&
+          !hasResolvedCreateForAssistant(
+            sessionForProposal.messages.flatMap((message) => message.fileActions ?? []),
+          )
         ) {
           const prompt = findLatestTurnUserPrompt(sessionForProposal.messages);
           if (prompt) {

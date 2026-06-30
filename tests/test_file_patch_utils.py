@@ -4,6 +4,7 @@ import pytest
 
 from backend.services.file_action_service import (
     normalize_create_file_path,
+    normalize_output_title,
     parse_file_actions_from_content,
 )
 from backend.services.file_patch_utils import (
@@ -55,6 +56,11 @@ def test_resolve_patch_content_line_range():
 def test_normalize_create_file_path():
     assert normalize_create_file_path("稿.md", "/Users/expeqiu/稿.md") == "/输出/稿.md"
     assert normalize_create_file_path("稿.md", "/输出/稿.md") == "/输出/稿.md"
+
+
+def test_normalize_output_title():
+    assert normalize_output_title("营销推广文案") == "营销推广文案.md"
+    assert normalize_output_title("稿.md") == "稿.md"
 
 
 def test_parse_file_actions_normalizes_path():

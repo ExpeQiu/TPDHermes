@@ -110,6 +110,32 @@ def _parse_version_num(raw: str | None) -> int:
         return 1
 
 
+def normalize_output_title(file_name: str) -> str:
+    """create 落库 title 规范化，便于同项目同名 upsert。"""
+    title = (file_name or "新文件.md").strip() or "新文件.md"
+    if not title.lower().endswith(".md"):
+        title = f"{title}.md"
+    return title
+
+
+async def find_active_output_by_title(
+    db: AsyncSession,
+    project_id: str,
+    file_name: str,
+) -> OutputAsset | None:
+    title = normalize_output_title(file_name)
+    q = await db.execute(
+        select(OutputAsset)
+        .where(
+            OutputAsset.project_id == project_id,
+            OutputAsset.status != "archived",
+            OutputAsset.title == title,
+        )
+        .order_by(OutputAsset.updated_at.desc())
+    )
+    return q.scalars().first()
+
+
 def _build_output_row(
     prev: OutputAsset,
     *,
@@ -244,7 +270,25 @@ async def apply_file_action(
         content = str(action.get("content") or "").strip()
         if not content:
             raise ValueError("创建文件内容不能为空")
-        title = str(action.get("file_name") or action.get("fileName") or "新文件.md").strip()
+        title = normalize_output_title(str(action.get("file_name") or action.get("fileName") or "新文件.md"))
+        existing = await find_active_output_by_title(db, project_id, title)
+        if existing:
+            logger.info(
+                "[file-actions] create upsert project_id=%s title=%s output_id=%s proposal_id=%s",
+                project_id,
+                title,
+                existing.id,
+                proposal_id,
+            )
+            return await _persist_patched_output(
+                db,
+                prev=existing,
+                project_id=project_id,
+                content=content,
+                action={"save_mode": "overwrite", "file_name": title},
+                effective_uid=effective_uid,
+                now=now,
+            )
         row = OutputAsset(
             id=str(uuid.uuid4()),
             project_id=project_id,
@@ -262,6 +306,13 @@ async def apply_file_action(
         await db.commit()
         persisted = await _reload_output_after_commit(db, row_id)
         schedule_ingest_output(persisted.id)
+        logger.info(
+            "[file-actions] create insert project_id=%s title=%s output_id=%s proposal_id=%s",
+            project_id,
+            title,
+            persisted.id,
+            proposal_id,
+        )
         return {"ok": True, "file_id": persisted.id, "kind": "output", "version": persisted.version}
 
     if action_type == "patch":

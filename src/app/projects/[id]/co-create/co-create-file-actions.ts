@@ -121,7 +121,96 @@ export function mergeFileActionProposals(
       map.set(item.proposalId, item);
     }
   }
-  return [...map.values()];
+  return dedupeCreateProposals([...map.values()]);
+}
+
+/** create 落库目标键：同项目虚拟路径 /输出/{fileName} */
+export function createProposalTargetKey(proposal: FileActionProposal): string | null {
+  if (proposal.type !== "create") return null;
+  return normalizeCreateFilePath(proposal.fileName, proposal.path).toLowerCase();
+}
+
+const CREATE_STATUS_RANK: Record<FileActionProposal["status"], number> = {
+  applied: 4,
+  applying: 3,
+  proposed: 2,
+  failed: 1,
+  rejected: 0,
+};
+
+/** 同一落库目标仅保留一条 create 提案（stream 优先于 fallback） */
+export function dedupeCreateProposals(proposals: FileActionProposal[]): FileActionProposal[] {
+  const byTarget = new Map<string, FileActionProposal>();
+  const others: FileActionProposal[] = [];
+
+  for (const proposal of proposals) {
+    if (proposal.type !== "create") {
+      others.push(proposal);
+      continue;
+    }
+    const key = createProposalTargetKey(proposal) ?? proposal.proposalId;
+    const prev = byTarget.get(key);
+    if (!prev) {
+      byTarget.set(key, proposal);
+      continue;
+    }
+    const prevIsFallback = isAutoCreateFallbackProposal(prev.proposalId);
+    const nextIsFallback = isAutoCreateFallbackProposal(proposal.proposalId);
+    if (prevIsFallback && !nextIsFallback) {
+      byTarget.set(key, proposal);
+      continue;
+    }
+    if (!prevIsFallback && nextIsFallback) {
+      continue;
+    }
+    const prevRank = CREATE_STATUS_RANK[prev.status] ?? 0;
+    const nextRank = CREATE_STATUS_RANK[proposal.status] ?? 0;
+    if (nextRank > prevRank) {
+      byTarget.set(key, proposal);
+    }
+  }
+
+  return [...others, ...byTarget.values()];
+}
+
+/** stream file_actions 到达时，清理同轮 pending 中的重复 create / fallback */
+export function prunePendingCreatesForAssistantMessage(
+  pending: FileActionProposal[],
+  assistantId: string,
+  incoming: FileActionProposal[],
+): FileActionProposal[] {
+  const incomingIds = new Set(incoming.map((item) => item.proposalId));
+  const incomingCreateTargets = new Set(
+    incoming
+      .filter((item) => item.type === "create")
+      .map((item) => createProposalTargetKey(item))
+      .filter((key): key is string => Boolean(key)),
+  );
+  const fallbackId = `fallback-create:${assistantId}`;
+
+  return pending.filter((item) => {
+    if (incomingIds.has(item.proposalId)) return true;
+    if (item.type !== "create") return true;
+    if (item.proposalId === fallbackId) {
+      return !incoming.some((next) => next.type === "create");
+    }
+    const target = createProposalTargetKey(item);
+    if (target && incomingCreateTargets.has(target)) return false;
+    return true;
+  });
+}
+
+/** 本轮 assistant 是否已有 create 正在或已经落库 */
+export function hasResolvedCreateForAssistant(
+  actions: FileActionProposal[] | undefined,
+): boolean {
+  return (
+    actions?.some(
+      (item) =>
+        item.type === "create" &&
+        (item.status === "applied" || item.status === "applying"),
+    ) ?? false
+  );
 }
 
 /** 助手正文变长后，重新规范化 stream create 并在就绪时把 failed 重置为 proposed */
