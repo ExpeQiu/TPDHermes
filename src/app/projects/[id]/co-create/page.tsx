@@ -136,13 +136,6 @@ import {
 } from "@/app/projects/[id]/co-create/co-create-file-actions";
 import { useFileWorkspace } from "@/app/projects/[id]/co-create/hooks/use-file-workspace";
 
-export {
-  extractAutoCreateDraftBody,
-  inferAutoCreateDraftFileName,
-  normalizeAutoCreateDraftContent,
-  shouldAutoCreateDraftFromAssistant,
-} from "@/app/projects/[id]/co-create/co-create-auto-draft";
-
 function decodeFileIds(keys: string[]): string[] {
   return keys
     .map((k) => decodeProjectFileSelectValue(k)?.id)

@@ -3,11 +3,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { waitFor } from "@/test-utils/hook-test-utils";
 import { cleanupDom, renderComponent } from "@/test-utils/component-test-utils";
-import CoCreatePage, {
+import {
   inferAutoCreateDraftFileName,
   normalizeAutoCreateDraftContent,
   shouldAutoCreateDraftFromAssistant,
-} from "./page";
+} from "./co-create-auto-draft";
+import CoCreatePage from "./page";
 
 const mocks = vi.hoisted(() => ({
   nav: {

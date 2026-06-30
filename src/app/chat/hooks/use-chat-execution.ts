@@ -104,7 +104,7 @@ function uuid() {
 }
 
 function formatStreamErrorMessage(raw: string): string {
-  const httpMatch = raw.match(/^HTTP (\d+):\s*(.+)$/s);
+  const httpMatch = raw.match(/^HTTP (\d+):\s*([\s\S]+)$/);
   if (!httpMatch) return raw;
   const status = Number(httpMatch[1]);
   const body = httpMatch[2]?.trim() ?? "";
