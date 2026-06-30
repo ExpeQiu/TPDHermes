@@ -44,6 +44,7 @@ import {
 import {
   projectCoCreateSessionDefaults,
 } from "@/lib/chat-session-utils";
+import { parseCoCreateNewCommand } from "@/app/projects/[id]/co-create/co-create-slash-commands";
 import { useEffectiveUserScopeId } from "@/lib/use-effective-user-scope-id";
 import { ensureDerivedUserId } from "@/lib/user-id";
 import type { Message } from "@/app/chat/chat-types";
@@ -122,6 +123,7 @@ import {
   shouldQuickStartAutoCreateDraft,
 } from "@/app/projects/[id]/co-create/co-create-auto-draft";
 import {
+  createProposalTargetKey,
   dedupeCreateProposals,
   hasActiveStreamFileActions,
   hasResolvedCreateForAssistant,
@@ -134,7 +136,9 @@ import {
   prunePendingCreatesForAssistantMessage,
   reconcileStreamCreateProposals,
   reconcileStreamPatchProposals,
+  rejectSiblingCreateProposals,
   resolveCreateActionContent,
+  selectVisibleCreateProposals,
   upsertFileActionProposal,
 } from "@/app/projects/[id]/co-create/co-create-file-actions";
 import { useFileWorkspace } from "@/app/projects/[id]/co-create/hooks/use-file-workspace";
@@ -401,6 +405,18 @@ function CoCreatePageInner() {
     setError("");
     setPendingActions([]);
     setRecommendations([]);
+  }, []);
+
+  const resetComposerContext = useCallback(() => {
+    setInput("");
+    setRegionBlocks([]);
+    setDiffProposal(null);
+    pendingAutoDraftPromptRef.current = null;
+    pendingAutoPatchPromptRef.current = null;
+    pendingAutoPatchTargetRef.current = null;
+    pendingQuickEntryTitleRef.current = null;
+    autoDraftExtractedLenRef.current.clear();
+    autoPatchExtractedLenRef.current.clear();
   }, []);
 
   const {
@@ -822,7 +838,10 @@ function CoCreatePageInner() {
           const rest = (message.fileActions ?? []).filter(
             (item) => item.proposalId !== proposalId,
           );
-          return { ...message, fileActions: [...rest, proposal] };
+          return {
+            ...message,
+            fileActions: dedupeCreateProposals([...rest, proposal]),
+          };
         }),
       }));
       const updated = sessionsRef.current.find((s) => s.id === sessionId);
@@ -1312,8 +1331,44 @@ function CoCreatePageInner() {
     };
   }, [allPatchProposals, fileWorkspace.activeFileKey, fileWorkspace.previewDetail?.content]);
 
+  const handleStartNewSession = useCallback(
+    (options?: { title?: string }) => {
+      if (streaming) {
+        abortRef.current?.abort();
+        setStreaming(false);
+        setPreparingContext(false);
+        setStreamingPhase("");
+      }
+      resetComposerContext();
+      resetTransient();
+      fileWorkspace.resetWorkspace();
+      const defaults = {
+        ...projectCoCreateSessionDefaults(projectId),
+        ...(options?.title?.trim() ? { title: options.title.trim() } : {}),
+      };
+      createSession(defaults);
+      console.info("[co-create] /new 新建会话", {
+        projectId,
+        title: options?.title?.trim() || null,
+      });
+    },
+    [
+      createSession,
+      fileWorkspace,
+      projectId,
+      resetComposerContext,
+      resetTransient,
+      streaming,
+    ],
+  );
+
   const handleSend = useCallback(async () => {
     const rawPrompt = input.trim();
+    const newCommand = parseCoCreateNewCommand(rawPrompt);
+    if (newCommand && regionBlocks.length === 0) {
+      handleStartNewSession(newCommand);
+      return;
+    }
     let userPrompt = rawPrompt;
     if (!userPrompt && regionBlocks.length === 0) return;
     if (userPrompt.startsWith("/生成新文件")) {
@@ -1400,6 +1455,7 @@ function CoCreatePageInner() {
     sendMessage,
     tryPendingAutoCreateDraft,
     tryPendingAutoPatch,
+    handleStartNewSession,
   ]);
 
   const handleQuickStart = useCallback(
@@ -1571,9 +1627,27 @@ function CoCreatePageInner() {
           action,
         });
         setPendingActions((prev) =>
-          updateProposalStatus(latestProposal.proposalId, "applied", prev, { applyError: undefined }),
+          rejectSiblingCreateProposals(
+            updateProposalStatus(latestProposal.proposalId, "applied", prev, {
+              applyError: undefined,
+            }),
+            latestProposal.proposalId,
+          ),
         );
-        syncProposalStatusToSession(latestProposal.proposalId, "applied", true, { applyError: undefined });
+        syncProposalStatusToSession(latestProposal.proposalId, "applied", true, {
+          applyError: undefined,
+        });
+        if (activeId && latestProposal.type === "create") {
+          updateSession(activeId, (session) => ({
+            ...session,
+            messages: session.messages.map((message) => ({
+              ...message,
+              fileActions: message.fileActions?.length
+                ? rejectSiblingCreateProposals(message.fileActions, latestProposal.proposalId)
+                : message.fileActions,
+            })),
+          }));
+        }
         const fileKey =
           latestProposal.type === "create"
             ? encodeProjectFileSelectValue(result.kind, result.file_id)
@@ -1683,6 +1757,7 @@ function CoCreatePageInner() {
       syncProposalStatusToSession,
       tryPendingAutoCreateDraft,
       tryPendingAutoPatch,
+      updateSession,
     ],
   );
 
@@ -1698,12 +1773,8 @@ function CoCreatePageInner() {
       if (item.status !== "proposed") return false;
       if (autoApplyingProposalIdsRef.current.has(item.proposalId)) return false;
       if (item.type === "create") {
-        const assistantContent = findAssistantContentForProposal(session, item.proposalId);
-        return isCreateProposalReadyForApply(
-          item.content,
-          assistantContent,
-          extractAutoCreateDraftBody,
-        );
+        // 创建文件需用户确认，避免与 fallback 提案重复展示
+        return false;
       }
       if (item.type === "patch") {
         const assistantContent = findAssistantContentForProposal(session, item.proposalId);
@@ -1862,10 +1933,6 @@ function CoCreatePageInner() {
     [addToRound, appendRegionBlock, fileWorkspace.activeFileKey],
   );
 
-  const handleCreateSession = useCallback(() => {
-    createSession(projectCoCreateSessionDefaults(projectId));
-  }, [createSession, projectId]);
-
   const handleRenameSession = useCallback(
     (id: string, title: string) => {
       updateSession(id, (s) => ({ ...s, title }));
@@ -1894,9 +1961,24 @@ function CoCreatePageInner() {
   })();
   const showUndoControl = agentUndoStack.length > 0 && agentMode !== "ask";
 
+  const messageHasCreateForTarget = useCallback(
+    (targetKey: string) =>
+      (activeSession?.messages ?? []).some((message) =>
+        (message.fileActions ?? []).some(
+          (item) =>
+            item.type === "create" &&
+            item.status !== "rejected" &&
+            createProposalTargetKey(item) === targetKey,
+        ),
+      ),
+    [activeSession?.messages],
+  );
+
   const renderMessageExtras = useCallback(
     (message: Message) => {
-      const actions = (message.fileActions ?? []).filter((proposal) => proposal.status !== "rejected");
+      const actions = selectVisibleCreateProposals(
+        (message.fileActions ?? []).filter((proposal) => proposal.status !== "rejected"),
+      );
       const recs = message.fileRecommendations ?? recommendations;
       return (
         <>
@@ -2003,7 +2085,7 @@ function CoCreatePageInner() {
             syncError={sessionsSyncError}
             projectId={projectId}
             onSelect={selectSession}
-            onCreate={handleCreateSession}
+            onCreate={handleStartNewSession}
             onDelete={deleteSession}
             onRename={handleRenameSession}
             onArchive={handleArchiveSession}
@@ -2036,6 +2118,13 @@ function CoCreatePageInner() {
                     p.status !== "rejected" &&
                     !activeSession?.messages.some((m) =>
                       m.fileActions?.some((fa) => fa.proposalId === p.proposalId),
+                    ) &&
+                    !(
+                      p.type === "create" &&
+                      (() => {
+                        const target = createProposalTargetKey(p);
+                        return target ? messageHasCreateForTarget(target) : false;
+                      })()
                     ),
                 )
                 .map((proposal) =>

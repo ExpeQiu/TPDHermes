@@ -173,6 +173,63 @@ export function dedupeCreateProposals(proposals: FileActionProposal[]): FileActi
   return [...others, ...byTarget.values()];
 }
 
+const CREATE_DISPLAY_RANK: Record<FileActionProposal["status"], number> = {
+  proposed: 5,
+  failed: 4,
+  applying: 3,
+  applied: 2,
+  rejected: 0,
+};
+
+/** 展示用：同路径 create 仅保留一条，优先待用户确认的 proposed */
+export function selectVisibleCreateProposals(
+  proposals: FileActionProposal[],
+): FileActionProposal[] {
+  const byTarget = new Map<string, FileActionProposal>();
+  const others: FileActionProposal[] = [];
+
+  for (const proposal of proposals) {
+    if (proposal.type !== "create") {
+      others.push(proposal);
+      continue;
+    }
+    const key = createProposalTargetKey(proposal) ?? proposal.proposalId;
+    const prev = byTarget.get(key);
+    if (!prev) {
+      byTarget.set(key, proposal);
+      continue;
+    }
+    const prevRank = CREATE_DISPLAY_RANK[prev.status] ?? 0;
+    const nextRank = CREATE_DISPLAY_RANK[proposal.status] ?? 0;
+    if (nextRank >= prevRank) {
+      byTarget.set(key, proposal);
+    }
+  }
+
+  return [...others, ...byTarget.values()];
+}
+
+/** 用户确认落库后，同路径其余 create 提案标记为 rejected */
+export function rejectSiblingCreateProposals(
+  proposals: FileActionProposal[],
+  appliedProposalId: string,
+): FileActionProposal[] {
+  const applied = proposals.find((item) => item.proposalId === appliedProposalId);
+  if (!applied || applied.type !== "create") return proposals;
+  const target = createProposalTargetKey(applied);
+  if (!target) return proposals;
+  return proposals.map((item) => {
+    if (
+      item.type === "create" &&
+      item.proposalId !== appliedProposalId &&
+      createProposalTargetKey(item) === target
+    ) {
+      return { ...item, status: "rejected" as const };
+    }
+    return item;
+  });
+}
+
 /** stream file_actions 到达时，清理同轮 pending 中的重复 create / fallback */
 export function prunePendingCreatesForAssistantMessage(
   pending: FileActionProposal[],

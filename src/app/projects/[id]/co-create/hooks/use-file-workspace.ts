@@ -119,6 +119,14 @@ export function useFileWorkspace(projectId: string) {
     setActiveFileKey(fileKey);
   }, []);
 
+  const resetWorkspace = useCallback(() => {
+    setOpenTabKeys([]);
+    setActiveFileKey(null);
+    setTabCache({});
+    loadingKeysRef.current.clear();
+    console.info("[co-create] 文件工作区已重置");
+  }, []);
+
   const patchTabContent = useCallback((fileKey: string, content: string) => {
     setTabCache((prev) => {
       const cached = prev[fileKey];
@@ -205,5 +213,6 @@ export function useFileWorkspace(projectId: string) {
     refreshFiles,
     patchTabContent,
     reloadFileTab,
+    resetWorkspace,
   };
 }

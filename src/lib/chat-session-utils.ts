@@ -64,9 +64,10 @@ export function titleFromSession(session: ChatSession | undefined, fallback = "�
 
 export function projectCoCreateSessionDefaults(projectId: string): Partial<ChatSession> {
   return {
+    title: "新共创",
     selectedProjectId: projectId,
     includeProjectContext: true,
-    includeFileContext: true,
+    includeFileContext: false,
     chatMode: "co_create",
     sessionKind: "project_co_create",
     pinnedFileIds: [],

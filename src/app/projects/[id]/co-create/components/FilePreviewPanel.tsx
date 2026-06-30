@@ -41,13 +41,20 @@ type Props = {
   } | null;
 };
 
-function getSelectionMeta(container: HTMLElement | null): SelectionToChatPayload | null {
+function getSelectionRange(container: HTMLElement | null): Range | null {
   if (!container) return null;
   const sel = window.getSelection();
   if (!sel || sel.isCollapsed || sel.rangeCount === 0) return null;
   const range = sel.getRangeAt(0);
   if (!container.contains(range.commonAncestorContainer)) return null;
-  const text = sel.toString().trim();
+  return range;
+}
+
+function getSelectionMeta(container: HTMLElement | null): SelectionToChatPayload | null {
+  if (!container) return null;
+  const range = getSelectionRange(container);
+  if (!range) return null;
+  const text = range.toString().trim();
   if (!text) return null;
 
   const preRange = document.createRange();
@@ -65,17 +72,45 @@ function getSelectionInContainer(container: HTMLElement | null): string {
   return getSelectionMeta(container)?.text ?? "";
 }
 
-function selectionMenuPosition(
+export function selectionMenuPosition(
   container: HTMLElement,
   clientX: number,
   clientY: number,
+  range?: Range | null,
 ): { x: number; y: number } {
-  const rect = container.getBoundingClientRect();
-  const menuW = 220;
-  const menuH = 88;
-  const x = Math.min(Math.max(clientX - rect.left, 8), rect.width - menuW - 8);
-  const y = Math.min(Math.max(clientY - rect.top, 8), rect.height - menuH - 8);
-  return { x, y };
+  const containerRect = container.getBoundingClientRect();
+  const menuW = 176;
+  const menuH = 140;
+  const gap = 8;
+
+  let anchorX = clientX;
+  let anchorY = clientY + gap;
+  let selRect: DOMRect | null = null;
+
+  if (range) {
+    selRect = range.getBoundingClientRect();
+    if (selRect.width > 0 || selRect.height > 0) {
+      anchorX = selRect.left + selRect.width / 2;
+      anchorY = selRect.bottom + gap;
+    }
+  }
+
+  let x = anchorX - containerRect.left + container.scrollLeft - menuW / 2;
+  let y = anchorY - containerRect.top + container.scrollTop;
+
+  if (selRect) {
+    const visibleBottom = container.scrollTop + container.clientHeight;
+    if (y + menuH > visibleBottom - gap) {
+      y = selRect.top - containerRect.top + container.scrollTop - menuH - gap;
+    }
+  }
+
+  const maxX = Math.max(container.scrollWidth - menuW - gap, gap);
+  const maxY = Math.max(container.scrollHeight - menuH - gap, gap);
+  return {
+    x: Math.min(Math.max(x, gap), maxX),
+    y: Math.min(Math.max(y, gap), maxY),
+  };
 }
 
 export function FilePreviewPanel({
@@ -117,10 +152,10 @@ export function FilePreviewPanel({
   const closeSelectionMenu = useCallback(() => setSelectionMenu(null), []);
 
   const openSelectionMenu = useCallback(
-    (payload: SelectionToChatPayload, clientX: number, clientY: number) => {
+    (payload: SelectionToChatPayload, clientX: number, clientY: number, range?: Range | null) => {
       const container = previewRef.current;
       if (!container) return;
-      const { x, y } = selectionMenuPosition(container, clientX, clientY);
+      const { x, y } = selectionMenuPosition(container, clientX, clientY, range);
       setSelectionMenu({ ...payload, x, y });
     },
     [],
@@ -181,22 +216,26 @@ export function FilePreviewPanel({
 
   const handlePreviewMouseUp = (e: MouseEvent<HTMLDivElement>) => {
     if (e.button !== 0) return;
-    const meta = getSelectionMeta(previewRef.current);
+    const container = previewRef.current;
+    const range = getSelectionRange(container);
+    const meta = getSelectionMeta(container);
     if (!meta) {
       closeSelectionMenu();
       return;
     }
-    openSelectionMenu(meta, e.clientX, e.clientY);
+    openSelectionMenu(meta, e.clientX, e.clientY, range);
   };
 
   const handlePreviewContextMenu = (e: MouseEvent<HTMLDivElement>) => {
     e.preventDefault();
-    const meta = getSelectionMeta(previewRef.current);
+    const container = previewRef.current;
+    const range = getSelectionRange(container);
+    const meta = getSelectionMeta(container);
     if (!meta) {
       closeSelectionMenu();
       return;
     }
-    openSelectionMenu(meta, e.clientX, e.clientY);
+    openSelectionMenu(meta, e.clientX, e.clientY, range);
   };
 
   const handleCopySelection = async (text: string) => {

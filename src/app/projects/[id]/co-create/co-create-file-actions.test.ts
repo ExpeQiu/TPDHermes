@@ -4,6 +4,7 @@ import { extractAutoCreateDraftBody } from "@/app/projects/[id]/co-create/co-cre
 import { extractAutoPatchBody } from "@/app/projects/[id]/co-create/co-create-auto-patch";
 import {
   dedupeCreateProposals,
+  selectVisibleCreateProposals,
   isCreateProposalReadyForApply,
   normalizeCreateFilePath,
   normalizeStreamCreateProposal,
@@ -149,6 +150,30 @@ describe("co-create-file-actions", () => {
     expect(reconciled[0]?.status).toBe("proposed");
     expect(reconciled[0]?.type === "patch" && reconciled[0].after.length).toBeGreaterThan(80);
     expect(reconciled[0]?.type === "patch" && reconciled[0].applyError).toBeUndefined();
+  });
+
+  it("selectVisibleCreateProposals 同路径优先展示待确认 proposed", () => {
+    const visible = selectVisibleCreateProposals([
+      {
+        type: "create",
+        proposalId: "stream-1",
+        fileName: "营销推广文案.md",
+        path: "/输出/营销推广文案.md",
+        content: "stream",
+        status: "applied",
+      },
+      {
+        type: "create",
+        proposalId: "fallback-create:assistant-1",
+        fileName: "营销推广文案.md",
+        path: "/输出/营销推广文案.md",
+        content: "fallback",
+        status: "proposed",
+      },
+    ]);
+    expect(visible).toHaveLength(1);
+    expect(visible[0]?.proposalId).toBe("fallback-create:assistant-1");
+    expect(visible[0]?.status).toBe("proposed");
   });
 
   it("dedupeCreateProposals 同路径仅保留 stream 提案", () => {
