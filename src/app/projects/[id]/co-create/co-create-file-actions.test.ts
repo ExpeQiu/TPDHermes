@@ -64,6 +64,24 @@ describe("co-create-file-actions", () => {
     expect(normalized.content.length).toBeGreaterThan(80);
   });
 
+  it("normalizeStreamCreateProposal 在已有同名输出物时追加后缀", () => {
+    const normalized = normalizeStreamCreateProposal(
+      {
+        type: "create",
+        proposalId: "p1",
+        fileName: "通用对话.md",
+        path: "/输出/通用对话.md",
+        content: "正文".repeat(40),
+        status: "proposed",
+      },
+      "",
+      (content) => content,
+      ["通用对话", "通用对话.md"],
+    );
+    expect(normalized.fileName).toBe("通用对话-2.md");
+    expect(normalized.path).toBe("/输出/通用对话-2.md");
+  });
+
   it("reconcileStreamCreateProposals 在正文就绪后将 failed 重置为 proposed", () => {
     const assistant = "吉利超充技术发布会演讲稿\n" + "正文段落。\n".repeat(40);
     const reconciled = reconcileStreamCreateProposals(

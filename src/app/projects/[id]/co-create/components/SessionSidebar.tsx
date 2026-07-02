@@ -1,8 +1,13 @@
 "use client";
 
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import type { ChatSession } from "@/app/chat/chat-types";
+import { ConfirmDialog } from "@/components/confirm-dialog";
 import { isProjectCoCreateSession, titleFromSession } from "@/lib/chat-session-utils";
+
+type PendingConfirm =
+  | { kind: "archive"; sessionId: string; sessionTitle: string }
+  | { kind: "delete"; sessionId: string; sessionTitle: string };
 
 type Props = {
   sessions: ChatSession[];
@@ -29,6 +34,8 @@ export function SessionSidebar({
   onRename,
   onArchive,
 }: Props) {
+  const [pendingConfirm, setPendingConfirm] = useState<PendingConfirm | null>(null);
+
   const filtered = sessions.filter(
     (s) =>
       !s.archived &&
@@ -37,6 +44,7 @@ export function SessionSidebar({
   );
 
   return (
+    <>
     <aside className="flex h-full min-h-0 flex-col overflow-hidden border-r border-slate-300 bg-slate-200 dark:border-slate-700 dark:bg-slate-800">
       <div className="flex shrink-0 items-center justify-between border-b border-slate-300 p-4 dark:border-slate-700">
         <div>
@@ -64,6 +72,7 @@ export function SessionSidebar({
           </p>
         ) : null}
         {filtered.map((session) => {
+          const sessionTitle = titleFromSession(session, "新共创");
           const fileCount =
             new Set([...(session.roundFileIds ?? []), ...(session.pinnedFileIds ?? [])]).size;
           const pending = (session.pendingProposalIds ?? []).length;
@@ -80,9 +89,7 @@ export function SessionSidebar({
               <div className="flex items-start gap-2">
                 <span className="text-xs">📁</span>
                 <div className="min-w-0 flex-1">
-                  <span className="block truncate text-sm">
-                    {titleFromSession(session, "新共创")}
-                  </span>
+                  <span className="block truncate text-sm">{sessionTitle}</span>
                   <div className="mt-0.5 flex items-center justify-between gap-1">
                     <span className="truncate text-[10px] text-slate-500">
                       文件 {fileCount} 个
@@ -104,9 +111,14 @@ export function SessionSidebar({
                       <button
                         type="button"
                         title="归档"
+                        aria-label={`归档会话：${sessionTitle}`}
                         onClick={(e) => {
                           e.stopPropagation();
-                          onArchive(session.id);
+                          setPendingConfirm({
+                            kind: "archive",
+                            sessionId: session.id,
+                            sessionTitle,
+                          });
                         }}
                         className="rounded p-0.5 text-slate-500 hover:bg-slate-300/60 hover:text-amber-600 dark:hover:bg-slate-600/60"
                       >
@@ -115,9 +127,14 @@ export function SessionSidebar({
                       <button
                         type="button"
                         title="删除"
+                        aria-label={`删除会话：${sessionTitle}`}
                         onClick={(e) => {
                           e.stopPropagation();
-                          onDelete(session.id);
+                          setPendingConfirm({
+                            kind: "delete",
+                            sessionId: session.id,
+                            sessionTitle,
+                          });
                         }}
                         className="rounded p-0.5 text-slate-500 hover:bg-slate-300/60 hover:text-red-500 dark:hover:bg-slate-600/60"
                       >
@@ -132,6 +149,38 @@ export function SessionSidebar({
         })}
       </div>
     </aside>
+    <ConfirmDialog
+      open={pendingConfirm?.kind === "archive"}
+      title="归档共创会话"
+      description={
+        pendingConfirm?.kind === "archive"
+          ? `确定归档「${pendingConfirm.sessionTitle}」？\n会话将从列表中隐藏，已保存的项目文件不受影响。`
+          : ""
+      }
+      confirmLabel="归档"
+      onCancel={() => setPendingConfirm(null)}
+      onConfirm={() => {
+        if (pendingConfirm?.kind === "archive") onArchive(pendingConfirm.sessionId);
+        setPendingConfirm(null);
+      }}
+    />
+    <ConfirmDialog
+      open={pendingConfirm?.kind === "delete"}
+      title="删除共创会话"
+      description={
+        pendingConfirm?.kind === "delete"
+          ? `确定删除「${pendingConfirm.sessionTitle}」？\n对话记录将被永久删除，已保存的项目文件不受影响。`
+          : ""
+      }
+      confirmLabel="删除"
+      destructive
+      onCancel={() => setPendingConfirm(null)}
+      onConfirm={() => {
+        if (pendingConfirm?.kind === "delete") onDelete(pendingConfirm.sessionId);
+        setPendingConfirm(null);
+      }}
+    />
+    </>
   );
 }
 

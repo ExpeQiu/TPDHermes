@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException, Depends, UploadFile, File, Request
+from fastapi import APIRouter, HTTPException, Depends, UploadFile, File, Request, Query
 from fastapi.responses import FileResponse
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -58,6 +58,66 @@ def _attachments_root() -> Path:
 def _safe_original_filename(name: str | None) -> str:
     base = (name or "unnamed").replace("\\", "_").replace("/", "_").strip() or "unnamed"
     return base[-200:] if len(base) > 200 else base
+
+
+def _ocr_error_detail(code: str) -> str:
+    mapping = {
+        "ocr_disabled": "图片 OCR 功能已关闭",
+        "ocr_upstream_not_configured": "OCR 服务未配置，请设置 HERMES_CHAT_API_URL",
+        "empty_image": "图片内容为空",
+        "image_too_large": "图片过大，无法 OCR",
+    }
+    if code in mapping:
+        return mapping[code]
+    if code.startswith("ocr_upstream_http_"):
+        return f"OCR 服务返回错误（{code.split('_')[-1]}）"
+    if code.startswith("ocr_upstream_error:"):
+        return "OCR 服务不可用，请稍后重试"
+    return f"图片 OCR 失败：{code}"
+
+
+async def _prepare_attachment_payload(
+    *,
+    content: bytes,
+    filename: str | None,
+    content_type: str | None,
+    ocr: bool,
+) -> tuple[bytes, str, str | None]:
+    from backend.services.image_ocr import (
+        ImageOcrError,
+        image_md_filename,
+        image_ocr_enabled,
+        is_image_attachment,
+        ocr_image_to_markdown,
+    )
+
+    safe_name = _safe_original_filename(filename)
+    ct = (content_type or "").strip() or None
+    if not ocr or not is_image_attachment(safe_name, ct):
+        return content, safe_name, ct
+    if not image_ocr_enabled():
+        raise HTTPException(status_code=503, detail=_ocr_error_detail("ocr_disabled"))
+    try:
+        md_body = await ocr_image_to_markdown(
+            content,
+            content_type=ct or "image/png",
+            filename=safe_name,
+        )
+    except ImageOcrError as exc:
+        logger.warning(
+            "project_attachment ocr failed name=%s err=%s",
+            safe_name,
+            exc,
+        )
+        raise HTTPException(status_code=422, detail=_ocr_error_detail(str(exc))) from exc
+    md_name = _safe_original_filename(image_md_filename(safe_name))
+    logger.info(
+        "project_attachment ocr converted name=%s -> %s chars=%s",
+        safe_name,
+        md_name,
+        len(md_body),
+    )
+    return md_body.encode("utf-8"), md_name, "text/markdown"
 
 
 async def _seed_default_scenario_bindings(db: AsyncSession, project_id: str) -> None:
@@ -711,12 +771,13 @@ async def list_project_attachments(
 async def upload_project_attachment(
     project_id: str,
     file: UploadFile = File(...),
+    ocr: bool = Query(False, description="图片 OCR 后保存为 Markdown 附件"),
     db: AsyncSession = Depends(get_db),
     effective_uid: str = Depends(get_effective_user_id),
 ):
     await require_project_for_user(db, project_id, effective_uid, min_perm="write")
-    content = await file.read()
-    size = len(content)
+    raw_content = await file.read()
+    size = len(raw_content)
     if size == 0:
         raise HTTPException(status_code=400, detail="空文件不可上传")
     if size > _MAX_ATTACHMENT_BYTES:
@@ -724,8 +785,14 @@ async def upload_project_attachment(
             status_code=413,
             detail=f"文件超过上限 {_MAX_ATTACHMENT_BYTES // (1024 * 1024)} MB",
         )
+    content, safe_name, content_type = await _prepare_attachment_payload(
+        content=raw_content,
+        filename=file.filename,
+        content_type=file.content_type,
+        ocr=ocr,
+    )
+    size = len(content)
     aid = str(uuid.uuid4())
-    safe_name = _safe_original_filename(file.filename)
     rel = f"{project_id}/{aid}_{safe_name}"
     root = _attachments_root()
     dest = root / project_id / f"{aid}_{safe_name}"
@@ -736,7 +803,7 @@ async def upload_project_attachment(
         id=aid,
         project_id=project_id,
         original_filename=safe_name,
-        content_type=file.content_type,
+        content_type=content_type or file.content_type,
         size_bytes=size,
         stored_path=rel,
         created_at=now,
@@ -745,11 +812,12 @@ async def upload_project_attachment(
     await db.commit()
     await db.refresh(row)
     logger.info(
-        "project_attachment uploaded project=%s id=%s name=%s size=%s",
+        "project_attachment uploaded project=%s id=%s name=%s size=%s ocr=%s",
         project_id,
         aid,
         safe_name,
         size,
+        ocr,
     )
     schedule_ingest_attachment(aid)
     return AttachmentListItem(

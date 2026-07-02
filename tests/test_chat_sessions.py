@@ -173,3 +173,44 @@ def test_chat_sessions_isolated_by_user():
         assert "A" in titles_a
         assert "B" in titles_b
         assert "B" not in titles_a
+
+
+def test_chat_session_message_sync_rejects_other_users_session():
+    sid = f"sync-cross-{uuid.uuid4().hex[:8]}"
+    with TestClient(app) as client:
+        created = client.post(
+            "/api/v1/chat/sessions",
+            headers={"X-User-ID": "owner_user"},
+            json={"id": sid, "title": "owner session", "messages": []},
+        )
+        assert created.status_code == 200
+
+        denied = client.post(
+            f"/api/v1/chat/sessions/{sid}/messages/sync",
+            headers={"X-User-ID": "other_user"},
+            json={
+                "messages": [{"id": "m1", "role": "user", "content": "hello", "sortIndex": 0}],
+                "removedMessageIds": [],
+            },
+        )
+        assert denied.status_code == 404
+
+
+def test_chat_session_message_sync_auto_creates_missing_session():
+    sid = f"sync-new-{uuid.uuid4().hex[:8]}"
+    msg_id = f"m1-{uuid.uuid4().hex[:8]}"
+    headers = {"X-User-ID": f"auto_create_{uuid.uuid4().hex[:8]}"}
+    with TestClient(app) as client:
+        synced = client.post(
+            f"/api/v1/chat/sessions/{sid}/messages/sync",
+            headers=headers,
+            json={
+                "messages": [{"id": msg_id, "role": "user", "content": "hello", "sortIndex": 0}],
+                "removedMessageIds": [],
+            },
+        )
+        assert synced.status_code == 200
+        body = synced.json()
+        assert body["stats"]["created"] == 1
+        assert body["session"]["id"] == sid
+        assert body["session"]["messages"][-1]["content"] == "hello"

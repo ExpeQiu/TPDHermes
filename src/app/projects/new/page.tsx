@@ -1,12 +1,21 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { apiFetch, readJson } from "@/lib/api";
 import { CONTENT_MAX_CLASS } from "@/lib/content-shell";
+import { uploadProjectAttachment } from "@/lib/co-create-api";
+import { trackUsage } from "@/lib/usage-tracker";
+
+function formatFileSize(bytes: number) {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
 
 export default function NewProjectPage() {
   const router = useRouter();
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const [form, setForm] = useState({
     name: "",
     background: "",
@@ -17,6 +26,8 @@ export default function NewProjectPage() {
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
+  const [pendingFiles, setPendingFiles] = useState<File[]>([]);
+  const [attachmentUploading, setAttachmentUploading] = useState(false);
 
   const validate = () => {
     const errs: Record<string, string> = {};
@@ -54,13 +65,72 @@ export default function NewProjectPage() {
           constraints,
         }),
       });
-      await readJson(res);
+      const created = await readJson<{ id: string }>(res);
+      if (pendingFiles.length > 0) {
+        setAttachmentUploading(true);
+        const failed: string[] = [];
+        for (const file of pendingFiles) {
+          try {
+            await uploadProjectAttachment(created.id, file);
+            trackUsage({
+              eventName: "project_attachment_upload",
+              feature: "projects_attachments",
+              action: "upload",
+              projectId: created.id,
+              properties: { file_name: file.name, size: file.size },
+            });
+          } catch (uploadErr) {
+            failed.push(file.name);
+            console.warn("[new-project] 附件上传失败", {
+              projectId: created.id,
+              fileName: file.name,
+              err: uploadErr,
+            });
+          }
+        }
+        setAttachmentUploading(false);
+        if (failed.length > 0) {
+          setSubmitError(
+            `项目已创建，但以下附件上传失败：${failed.join("、")}。可在项目详情页重试。`,
+          );
+          setSubmitting(false);
+          router.push(`/projects/${created.id}`);
+          return;
+        }
+      }
       setSubmitting(false);
       router.push("/projects");
     } catch (err) {
       setSubmitError((err as Error).message);
       setSubmitting(false);
+      setAttachmentUploading(false);
     }
+  };
+
+  const handlePickAttachment = () => {
+    trackUsage({
+      eventName: "project_attachment_pick_click",
+      feature: "projects_attachments",
+      action: "pick_click",
+    });
+    fileInputRef.current?.click();
+  };
+
+  const handleAttachmentFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    trackUsage({
+      eventName: "project_attachment_upload",
+      feature: "projects_attachments",
+      action: "upload",
+      properties: { file_name: file.name, size: file.size, staged: true },
+    });
+    setPendingFiles((prev) => [...prev, file]);
+  };
+
+  const handleRemovePendingFile = (index: number) => {
+    setPendingFiles((prev) => prev.filter((_, i) => i !== index));
   };
 
   const inputCls =
@@ -159,19 +229,69 @@ export default function NewProjectPage() {
             />
           </div>
 
+          {pendingFiles.length > 0 ? (
+            <div>
+              <p className="mb-2 text-sm font-medium text-slate-700 dark:text-slate-300">
+                待上传附件（{pendingFiles.length}）
+              </p>
+              <ul className="space-y-2">
+                {pendingFiles.map((file, index) => (
+                  <li
+                    key={`${file.name}-${file.size}-${index}`}
+                    className="flex items-center justify-between gap-2 rounded-lg border border-slate-300 bg-white/90 px-3 py-2 text-sm dark:border-slate-600 dark:bg-slate-800/60"
+                  >
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate font-medium text-slate-900 dark:text-slate-100" title={file.name}>
+                        {file.name}
+                      </p>
+                      <p className="text-xs text-slate-500">{formatFileSize(file.size)}</p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => handleRemovePendingFile(index)}
+                      disabled={submitting || attachmentUploading}
+                      className="shrink-0 rounded-lg border border-red-300 bg-red-50 px-2.5 py-1 text-xs text-red-900 transition hover:bg-red-100 disabled:opacity-50 dark:border-red-900/50 dark:bg-transparent dark:text-red-300 dark:hover:bg-red-950/40"
+                    >
+                      删除
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
+
           {/* 提交按钮 */}
-          <div className="flex gap-3 pt-2">
+          <div className="flex flex-wrap gap-3 pt-2">
             <button
               type="submit"
-              disabled={submitting}
+              disabled={submitting || attachmentUploading}
               className="px-6 py-2.5 bg-blue-600 rounded-lg hover:bg-blue-500 transition disabled:opacity-50 disabled:cursor-not-allowed font-medium"
             >
-              {submitting ? "创建中..." : "创建项目"}
+              {submitting
+                ? attachmentUploading
+                  ? "上传附件中..."
+                  : "创建中..."
+                : "创建项目"}
+            </button>
+            <input
+              ref={fileInputRef}
+              type="file"
+              className="hidden"
+              onChange={handleAttachmentFileChange}
+            />
+            <button
+              type="button"
+              onClick={handlePickAttachment}
+              disabled={submitting || attachmentUploading}
+              className="rounded-xl border border-blue-300 bg-blue-50 px-4 py-2.5 text-sm font-medium text-blue-800 transition hover:border-blue-400 hover:bg-blue-100 disabled:opacity-50 dark:border-blue-500/40 dark:bg-blue-500/10 dark:text-blue-200 dark:hover:bg-blue-500/20"
+            >
+              {attachmentUploading ? "上传中…" : "上传附件"}
             </button>
             <button
               type="button"
               onClick={() => router.back()}
-              className="px-6 py-2.5 bg-slate-300 dark:bg-slate-700 rounded-lg hover:bg-slate-600 transition font-medium"
+              disabled={submitting || attachmentUploading}
+              className="px-6 py-2.5 bg-slate-300 dark:bg-slate-700 rounded-lg hover:bg-slate-600 transition font-medium disabled:opacity-50"
             >
               取消
             </button>

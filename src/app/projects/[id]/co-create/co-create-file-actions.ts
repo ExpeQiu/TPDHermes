@@ -2,6 +2,7 @@
 
 import { isAutoCreateFallbackProposal } from "@/app/projects/[id]/co-create/co-create-auto-draft";
 import { isAutoPatchFallbackProposal } from "@/app/projects/[id]/co-create/co-create-auto-patch";
+import { resolveUniqueOutputFileName } from "@/app/projects/[id]/co-create/co-create-output-naming";
 import type { FileActionProposal } from "@/app/projects/[id]/co-create/co-create-types";
 
 export const CREATE_APPLY_MIN_CONTENT_LEN = 80;
@@ -61,12 +62,14 @@ export function normalizeStreamCreateProposal(
   proposal: Extract<FileActionProposal, { type: "create" }>,
   assistantContent: string,
   extractBody: (content: string) => string,
+  existingTitles: readonly string[] = [],
 ): Extract<FileActionProposal, { type: "create" }> {
-  const fileName = proposal.fileName || "自动创建文稿.md";
+  const rawName = proposal.fileName || "自动创建文稿.md";
+  const fileName = resolveUniqueOutputFileName(rawName, existingTitles);
   return {
     ...proposal,
     fileName,
-    path: normalizeCreateFilePath(fileName, proposal.path),
+    path: `/输出/${fileName}`,
     content: resolveCreateActionContent(proposal.content, assistantContent, extractBody),
   };
 }
@@ -275,6 +278,7 @@ export function reconcileStreamCreateProposals(
   proposals: FileActionProposal[],
   assistantContent: string,
   extractBody: (content: string) => string,
+  existingTitles: readonly string[] = [],
 ): FileActionProposal[] {
   return proposals.map((proposal) => {
     if (proposal.type !== "create" || isAutoCreateFallbackProposal(proposal.proposalId)) {
@@ -287,7 +291,12 @@ export function reconcileStreamCreateProposals(
     ) {
       return proposal;
     }
-    const normalized = normalizeStreamCreateProposal(proposal, assistantContent, extractBody);
+    const normalized = normalizeStreamCreateProposal(
+      proposal,
+      assistantContent,
+      extractBody,
+      existingTitles,
+    );
     const ready = isCreateProposalReadyForApply(
       normalized.content,
       assistantContent,

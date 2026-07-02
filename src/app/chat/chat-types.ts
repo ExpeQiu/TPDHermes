@@ -83,6 +83,7 @@ export interface ChatSession {
   coCreatePipelinePreference?: CoCreatePipelinePreference;
   coCreateAgentMode?: import("@/app/projects/[id]/co-create/co-create-types").CoCreateAgentMode;
   coCreateApplyMode?: import("@/app/projects/[id]/co-create/co-create-types").CoCreateApplyMode;
+  coCreatePlanPhase?: import("@/app/projects/[id]/co-create/co-create-types").CoCreatePlanPhase;
   /** 共创：Agent 文件变更撤销栈（持久化到 context_json） */
   agentUndoStack?: import("@/app/projects/[id]/co-create/co-create-agent-undo").AgentUndoEntry[];
 }

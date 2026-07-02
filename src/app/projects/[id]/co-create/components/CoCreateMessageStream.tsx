@@ -30,6 +30,9 @@ type Props = {
   moreHref?: string;
   onQuickStart?: (entry: CoCreateQuickEntry) => void;
   quickStartDisabled?: boolean;
+  planAwaitingConfirm?: boolean;
+  onConfirmPlan?: () => void;
+  planConfirmDisabled?: boolean;
 };
 
 export function CoCreateMessageStream({
@@ -42,6 +45,9 @@ export function CoCreateMessageStream({
   moreHref = "/create",
   onQuickStart,
   quickStartDisabled,
+  planAwaitingConfirm,
+  onConfirmPlan,
+  planConfirmDisabled,
 }: Props) {
   if (messages.length === 0 && !streaming) {
     return (
@@ -109,6 +115,11 @@ export function CoCreateMessageStream({
           const agentPlan =
             message.agentPlan ??
             (message.role === "assistant" ? parseAgentPlanFromContent(message.content) : null);
+          const isLatestAssistantWithPlan =
+            message.role === "assistant" &&
+            index === visibleMessages.length - 1 &&
+            Boolean(agentPlan) &&
+            !isStreamingAssistant;
           const displayContent = (() => {
             if (message.role !== "assistant") return message.content;
             let text = unwrapSkillAssistantMarkdown(message.content);
@@ -140,7 +151,14 @@ export function CoCreateMessageStream({
                   ) : message.toolEvents?.length ? (
                     <AgentActivityTimeline toolEvents={message.toolEvents} />
                   ) : null}
-                  {agentPlan && !isStreamingAssistant ? <AgentPlanCard plan={agentPlan} /> : null}
+                  {agentPlan && !isStreamingAssistant ? (
+                    <AgentPlanCard
+                      plan={agentPlan}
+                      awaitingConfirm={planAwaitingConfirm && isLatestAssistantWithPlan}
+                      onConfirm={onConfirmPlan}
+                      confirmDisabled={planConfirmDisabled}
+                    />
+                  ) : null}
                   {actionSummary && !isStreamingAssistant ? (
                     <AgentExecutionPanel summary={actionSummary} />
                   ) : null}

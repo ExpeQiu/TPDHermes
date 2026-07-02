@@ -10,6 +10,7 @@ logger = logging.getLogger("tpdx.hermes.document_extract")
 _TEXT_SUFFIXES = {".txt", ".md", ".markdown", ".csv", ".json"}
 _PDF_SUFFIXES = {".pdf"}
 _DOCX_SUFFIXES = {".docx"}
+_IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".tif", ".tiff"}
 
 
 class DocumentExtractError(Exception):
@@ -39,6 +40,9 @@ def extract_to_markdown(path: Path, *, content_type: str | None = None) -> str:
 
     if suf in _DOCX_SUFFIXES or "wordprocessingml" in ct:
         return _extract_docx(path)
+
+    if suf in _IMAGE_SUFFIXES or ct.startswith("image/"):
+        return _extract_image(path, content_type=content_type)
 
     raise DocumentExtractError(f"unsupported_format:{suf or ct or 'unknown'}")
 
@@ -97,3 +101,12 @@ def _extract_docx(path: Path) -> str:
     if not body:
         raise DocumentExtractError("docx_empty_text")
     return body
+
+
+def _extract_image(path: Path, *, content_type: str | None = None) -> str:
+    from backend.services.image_ocr import ImageOcrError, ocr_image_file_sync
+
+    try:
+        return ocr_image_file_sync(path, content_type=content_type)
+    except ImageOcrError as e:
+        raise DocumentExtractError(f"image_ocr_failed:{e}") from e

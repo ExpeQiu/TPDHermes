@@ -72,7 +72,10 @@ import {
 import {
   buildAgentModeInstructions,
   inferFileRecommendations,
+  isPlanConfirmPrompt,
+  parseAgentPlanFromContent,
   resolveExecutionFromAgentMode,
+  type AgentPlan,
 } from "@/app/projects/[id]/co-create/co-create-agent-utils";
 import {
   type AgentUndoEntry,
@@ -366,6 +369,7 @@ function CoCreatePageInner() {
   const [error, setError] = useState("");
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [filesPanelOpen, setFilesPanelOpen] = useState(true);
+  const [previewMaximized, setPreviewMaximized] = useState(false);
   const [saveState, setSaveState] = useState<
     "idle" | "saving" | "saved" | "error" | "pending_apply"
   >("idle");
@@ -451,7 +455,74 @@ function CoCreatePageInner() {
   const roundFileIds = activeSession?.roundFileIds ?? [];
   const agentMode: CoCreateAgentMode = activeSession?.coCreateAgentMode ?? "agent";
   const applyMode: CoCreateApplyMode = activeSession?.coCreateApplyMode ?? "auto";
+  const planPhase = activeSession?.coCreatePlanPhase ?? "idle";
   const agentUndoStack = activeSession?.agentUndoStack ?? [];
+
+  const latestConfirmedPlan = useMemo((): AgentPlan | null => {
+    const messages = activeSession?.messages ?? [];
+    for (let i = messages.length - 1; i >= 0; i -= 1) {
+      const message = messages[i];
+      if (message.role !== "assistant") continue;
+      return (
+        message.agentPlan ?? parseAgentPlanFromContent(message.content)
+      );
+    }
+    return null;
+  }, [activeSession?.messages]);
+
+  useEffect(() => {
+    if (streaming || preparingContext || agentMode !== "plan" || !activeId) return;
+    const phase = activeSession?.coCreatePlanPhase ?? "idle";
+    if (phase === "executing") return;
+
+    const messages = activeSession?.messages ?? [];
+    const latestAssistant = [...messages].reverse().find((m) => m.role === "assistant");
+    if (!latestAssistant?.content.trim()) return;
+
+    const plan = latestAssistant.agentPlan ?? parseAgentPlanFromContent(latestAssistant.content);
+    if (!plan) return;
+
+    const needsPlanAttach = !latestAssistant.agentPlan;
+    const needsPhase = phase !== "awaiting_confirm";
+
+    if (!needsPlanAttach && !needsPhase) return;
+
+    updateSession(activeId, (session) => ({
+      ...session,
+      coCreatePlanPhase: "awaiting_confirm",
+      messages: session.messages.map((message) =>
+        message.id === latestAssistant.id
+          ? { ...message, agentPlan: plan }
+          : message,
+      ),
+    }));
+    const updated = sessionsRef.current.find((session) => session.id === activeId);
+    if (updated) queueSessionPatch(activeId, sessionToPatchPayload(updated));
+    console.info("[co-create] Plan 计划已就绪，等待确认", { stepCount: plan.steps.length });
+  }, [
+    activeId,
+    activeSession?.coCreatePlanPhase,
+    activeSession?.messages,
+    agentMode,
+    preparingContext,
+    queueSessionPatch,
+    sessionsRef,
+    streaming,
+    updateSession,
+  ]);
+
+  const persistPlanPhase = useCallback(
+    (phase: import("@/app/projects/[id]/co-create/co-create-agent-utils").CoCreatePlanPhase) => {
+      if (!activeSession) return;
+      updateSession(activeSession.id, (session) => ({
+        ...session,
+        coCreatePlanPhase: phase,
+      }));
+      const updated = sessionsRef.current.find((session) => session.id === activeSession.id);
+      if (updated) queueSessionPatch(activeSession.id, sessionToPatchPayload(updated));
+    },
+    [activeSession, queueSessionPatch, sessionsRef, updateSession],
+  );
 
   const appendAgentUndoEntry = useCallback(
     (entry: AgentUndoEntry) => {
@@ -603,6 +674,10 @@ function CoCreatePageInner() {
     () => fileWorkspace.files.filter((file) => file.kind === "output"),
     [fileWorkspace.files],
   );
+  const existingOutputTitles = useMemo(
+    () => outputFiles.map((file) => file.title),
+    [outputFiles],
+  );
 
   useEffect(() => {
     if (!activeSession?.messages.some((message) => message.role === "user")) return;
@@ -738,7 +813,12 @@ function CoCreatePageInner() {
       const assistantContent = assistantMessage?.content ?? "";
       const mapped = mapStreamActions(raw).map((proposal) =>
         proposal.type === "create"
-          ? normalizeStreamCreateProposal(proposal, assistantContent, extractAutoCreateDraftBody)
+          ? normalizeStreamCreateProposal(
+              proposal,
+              assistantContent,
+              extractAutoCreateDraftBody,
+              existingOutputTitles,
+            )
           : normalizeStreamPatchProposal(
               proposal,
               assistantContent,
@@ -776,7 +856,7 @@ function CoCreatePageInner() {
       const updated = sessionsRef.current.find((s) => s.id === sessionId);
       if (updated) queueSessionPatch(sessionId, sessionToPatchPayload(updated));
     },
-    [queueSessionPatch, sessionsRef, updateSession],
+    [existingOutputTitles, queueSessionPatch, sessionsRef, updateSession],
   );
 
   const enqueueAutoCreateDraftForAssistant = useCallback(
@@ -824,8 +904,13 @@ function CoCreatePageInner() {
       if (existing?.status === "applied" || existing?.status === "applying") return false;
 
       const fileName = useQuickStart
-        ? inferQuickCreateOutputFileName(quickEntryTitle, prompt, assistantMessage.content)
-        : inferAutoCreateDraftFileName(prompt, assistantMessage.content);
+        ? inferQuickCreateOutputFileName(
+            quickEntryTitle,
+            prompt,
+            assistantMessage.content,
+            existingOutputTitles,
+          )
+        : inferAutoCreateDraftFileName(prompt, assistantMessage.content, existingOutputTitles);
       const proposal: FileActionProposal = {
         type: "create",
         proposalId,
@@ -875,7 +960,7 @@ function CoCreatePageInner() {
       });
       return true;
     },
-    [queueSessionPatch, sessionsRef, updateSession],
+    [existingOutputTitles, queueSessionPatch, sessionsRef, updateSession],
   );
 
   const maybeAutoCreateDraftFromLatestAssistant = useCallback(
@@ -1146,6 +1231,7 @@ function CoCreatePageInner() {
         prev,
         latestAssistantContent,
         extractAutoCreateDraftBody,
+        existingOutputTitles,
       );
       if (JSON.stringify(prev) === JSON.stringify(reconciled)) return prev;
       for (const proposal of reconciled) {
@@ -1160,6 +1246,7 @@ function CoCreatePageInner() {
       latestAssistant.fileActions ?? [],
       latestAssistantContent,
       extractAutoCreateDraftBody,
+      existingOutputTitles,
     );
     if (
       JSON.stringify(latestAssistant.fileActions ?? []) === JSON.stringify(reconciledMessageActions)
@@ -1229,6 +1316,7 @@ function CoCreatePageInner() {
     });
   }, [
     activeId,
+    existingOutputTitles,
     fileWorkspace.activeFileKey,
     fileWorkspace.files,
     fileWorkspace.previewDetail?.content,
@@ -1266,7 +1354,7 @@ function CoCreatePageInner() {
     includeFileContext: roundFileIds.length > 0 || pinnedFileIds.length > 0,
     includeKnowledgeContext: false,
     includeProjectContext: true,
-    includeSkillsContext: false,
+    includeSkillsContext: agentMode === "plan",
     selectedCollection: collections[0] ?? "",
     selectedFileId: roundFileIds[0] ?? pinnedFileIds[0] ?? "",
     selectedProjectId: projectId,
@@ -1313,9 +1401,10 @@ function CoCreatePageInner() {
         ...session,
         coCreateAgentMode: value,
         coCreateApplyMode: value === "ask" ? "review" : session.coCreateApplyMode ?? "auto",
+        coCreatePlanPhase: value === "plan" ? session.coCreatePlanPhase ?? "idle" : "idle",
       }));
       const updated = sessionsRef.current.find((session) => session.id === activeSession.id);
-      if (updated) queueSessionPatch(activeSession.id, sessionToPatchPayload(updated));
+      if (updated) queueSessionPatch(activeSession.id, sessionToPatchPayload(updated), 0);
       console.info("[co-create] Agent 模式切换", { mode: value });
     },
     [activeSession, queueSessionPatch, sessionsRef, updateSession],
@@ -1381,101 +1470,168 @@ function CoCreatePageInner() {
     ],
   );
 
-  const handleSend = useCallback(async () => {
-    const rawPrompt = input.trim();
-    const newCommand = parseCoCreateNewCommand(rawPrompt);
-    if (newCommand && regionBlocks.length === 0) {
-      handleStartNewSession(newCommand);
-      return;
-    }
-    let userPrompt = rawPrompt;
-    if (!userPrompt && regionBlocks.length === 0) return;
-    if (userPrompt.startsWith("/生成新文件")) {
-      userPrompt = userPrompt.replace(
-        /^\/生成新文件\s*/,
-        "请基于当前项目上下文，生成一个新文件并给出完整内容。",
-      );
-    } else if (userPrompt.startsWith("/改写当前文件")) {
-      userPrompt = userPrompt.replace(
-        /^\/改写当前文件\s*/,
-        "请基于当前引用的文件，按以下要求改写：",
-      );
-    }
-    const excerpts = regionBlocksToExcerpts(regionBlocks);
-    const fullText = composeUserMessageForApi(userPrompt, excerpts);
-    const hasTargetFile = pinnedFileIds.length > 0 || roundFileIds.length > 0;
-    const autoPipeline = resolveCoCreatePipeline({
-      text: rawPrompt,
-      pinnedFileCount: pinnedFileIds.length,
-      roundFileCount: roundFileIds.length,
-      regionBlockCount: regionBlocks.length,
-      hasPendingFileActions: pendingActions.some(
-        (proposal) => proposal.status === "applying" || proposal.status === "applied",
-      ),
-    });
-    const execution = resolveExecutionFromAgentMode(agentMode, autoPipeline);
-
-    if (
-      pinnedFileIds.length === 0 &&
-      roundFileIds.length === 0 &&
-      rawPrompt.trim().length > 4
-    ) {
-      const excluded = new Set([...pinnedFileIds, ...roundFileIds]);
-      const recs = inferFileRecommendations(rawPrompt, fileWorkspace.files, excluded);
-      if (recs.length > 0) {
-        setRecommendations(recs);
-        console.info("[co-create] 推荐引用文件", { count: recs.length });
+  const handleSend = useCallback(
+    async (overridePrompt?: string) => {
+      const rawPrompt = (overridePrompt ?? input).trim();
+      const newCommand = parseCoCreateNewCommand(rawPrompt);
+      if (newCommand && regionBlocks.length === 0) {
+        handleStartNewSession(newCommand);
+        return;
       }
-    }
-
-    const regionInstruction = buildRegionAwarePatchInstructions(excerpts);
-    const modeInstruction = buildAgentModeInstructions(agentMode);
-    const documentSyncInstruction = buildDocumentSyncInstructions(rawPrompt);
-    const rewriteSyncInstruction = buildRewriteSyncInstructions(rawPrompt, hasTargetFile);
-    const presetAppend = [modeInstruction, regionInstruction, documentSyncInstruction, rewriteSyncInstruction]
-      .filter(Boolean)
-      .join("\n\n");
-
-    setInput("");
-    setRegionBlocks([]);
-    await sendMessage(fullText, {
-      userPrompt: userPrompt || undefined,
-      regionExcerpts: excerpts.length > 0 ? excerpts : undefined,
-      useOrchestrationOverride: execution.useOrchestration,
-      skipToolsContextBuild: execution.skipTools,
-      scenarioPresetInstructionsAppend: presetAppend || undefined,
-    });
-    if (execution.allowAutoDraft && isDocumentGenerationPrompt(rawPrompt)) {
-      pendingAutoDraftPromptRef.current = rawPrompt;
-      tryPendingAutoCreateDraft();
-    }
-    if (execution.allowAutoDraft && isRewritePrompt(rawPrompt, { hasTargetFile })) {
-      const patchTarget = resolveAutoPatchTargetFile(
-        pinnedFileIds,
-        roundFileIds,
-        fileWorkspace.files,
-        fileWorkspace.tabLabels,
-      );
-      if (patchTarget) {
-        pendingAutoPatchPromptRef.current = rawPrompt;
-        pendingAutoPatchTargetRef.current = patchTarget;
-        tryPendingAutoPatch();
+      let userPrompt = rawPrompt;
+      if (!userPrompt && regionBlocks.length === 0) return;
+      if (userPrompt.startsWith("/生成新文件")) {
+        userPrompt = userPrompt.replace(
+          /^\/生成新文件\s*/,
+          "请基于当前项目上下文，生成一个新文件并给出完整内容。",
+        );
+      } else if (userPrompt.startsWith("/改写当前文件")) {
+        userPrompt = userPrompt.replace(
+          /^\/改写当前文件\s*/,
+          "请基于当前引用的文件，按以下要求改写：",
+        );
       }
-    }
-  }, [
-    agentMode,
-    fileWorkspace.files,
-    fileWorkspace.tabLabels,
-    input,
-    pendingActions,
-    pinnedFileIds,
-    regionBlocks,
-    roundFileIds,
-    sendMessage,
-    tryPendingAutoCreateDraft,
-    tryPendingAutoPatch,
-    handleStartNewSession,
-  ]);
+      const excerpts = regionBlocksToExcerpts(regionBlocks);
+      const fullText = composeUserMessageForApi(userPrompt, excerpts);
+      const hasTargetFile = pinnedFileIds.length > 0 || roundFileIds.length > 0;
+      const autoPipeline = resolveCoCreatePipeline({
+        text: rawPrompt,
+        pinnedFileCount: pinnedFileIds.length,
+        roundFileCount: roundFileIds.length,
+        regionBlockCount: regionBlocks.length,
+        hasPendingFileActions: pendingActions.some(
+          (proposal) => proposal.status === "applying" || proposal.status === "applied",
+        ),
+      });
+      const execution = resolveExecutionFromAgentMode(agentMode, autoPipeline);
+
+      const planConfirm = agentMode === "plan" && isPlanConfirmPrompt(rawPrompt);
+      const planInstructionPhase = (() => {
+        if (agentMode !== "plan") return undefined;
+        if (planConfirm || planPhase === "executing") return "executing" as const;
+        if (planPhase === "awaiting_confirm") return "revising" as const;
+        return "planning" as const;
+      })();
+
+      if (planConfirm) {
+        persistPlanPhase("executing");
+        console.info("[co-create] Plan 用户确认，进入执行阶段");
+      }
+
+      if (
+        pinnedFileIds.length === 0 &&
+        roundFileIds.length === 0 &&
+        rawPrompt.trim().length > 4
+      ) {
+        const excluded = new Set([...pinnedFileIds, ...roundFileIds]);
+        const recs = inferFileRecommendations(rawPrompt, fileWorkspace.files, excluded);
+        if (recs.length > 0) {
+          setRecommendations(recs);
+          console.info("[co-create] 推荐引用文件", { count: recs.length });
+        }
+      }
+
+      const regionInstruction = buildRegionAwarePatchInstructions(excerpts);
+      const modeInstruction = buildAgentModeInstructions(agentMode, {
+        planPhase: planInstructionPhase,
+        availableSkills: skills,
+        confirmedPlan: planConfirm || planPhase === "executing" ? latestConfirmedPlan : null,
+      });
+      const documentSyncInstruction = buildDocumentSyncInstructions(
+        rawPrompt,
+        existingOutputTitles,
+      );
+      const rewriteSyncInstruction = buildRewriteSyncInstructions(rawPrompt, hasTargetFile);
+      const presetAppend = [
+        modeInstruction,
+        regionInstruction,
+        documentSyncInstruction,
+        rewriteSyncInstruction,
+      ]
+        .filter(Boolean)
+        .join("\n\n");
+
+      if (!overridePrompt) {
+        setInput("");
+      }
+      setRegionBlocks([]);
+      const planAllowsAutoDraft =
+        execution.allowAutoDraft &&
+        agentMode === "plan" &&
+        (planConfirm || planPhase === "executing");
+
+      await sendMessage(fullText, {
+        userPrompt: userPrompt || undefined,
+        regionExcerpts: excerpts.length > 0 ? excerpts : undefined,
+        useOrchestrationOverride: execution.useOrchestration,
+        skipToolsContextBuild: execution.skipTools,
+        scenarioPresetInstructionsAppend: presetAppend || undefined,
+      });
+      if (planAllowsAutoDraft && isDocumentGenerationPrompt(rawPrompt)) {
+        pendingAutoDraftPromptRef.current = rawPrompt;
+        tryPendingAutoCreateDraft();
+      }
+      if (planAllowsAutoDraft && isRewritePrompt(rawPrompt, { hasTargetFile })) {
+        const patchTarget = resolveAutoPatchTargetFile(
+          pinnedFileIds,
+          roundFileIds,
+          fileWorkspace.files,
+          fileWorkspace.tabLabels,
+        );
+        if (patchTarget) {
+          pendingAutoPatchPromptRef.current = rawPrompt;
+          pendingAutoPatchTargetRef.current = patchTarget;
+          tryPendingAutoPatch();
+        }
+      } else if (
+        execution.allowAutoDraft &&
+        agentMode !== "plan" &&
+        isDocumentGenerationPrompt(rawPrompt)
+      ) {
+        pendingAutoDraftPromptRef.current = rawPrompt;
+        tryPendingAutoCreateDraft();
+      } else if (
+        execution.allowAutoDraft &&
+        agentMode !== "plan" &&
+        isRewritePrompt(rawPrompt, { hasTargetFile })
+      ) {
+        const patchTarget = resolveAutoPatchTargetFile(
+          pinnedFileIds,
+          roundFileIds,
+          fileWorkspace.files,
+          fileWorkspace.tabLabels,
+        );
+        if (patchTarget) {
+          pendingAutoPatchPromptRef.current = rawPrompt;
+          pendingAutoPatchTargetRef.current = patchTarget;
+          tryPendingAutoPatch();
+        }
+      }
+    },
+    [
+      agentMode,
+      existingOutputTitles,
+      fileWorkspace.files,
+      fileWorkspace.tabLabels,
+      input,
+      latestConfirmedPlan,
+      pendingActions,
+      persistPlanPhase,
+      pinnedFileIds,
+      planPhase,
+      regionBlocks,
+      roundFileIds,
+      sendMessage,
+      skills,
+      tryPendingAutoCreateDraft,
+      tryPendingAutoPatch,
+      handleStartNewSession,
+    ],
+  );
+
+  const handleConfirmPlanExecution = useCallback(() => {
+    void handleSend("开始执行");
+  }, [handleSend]);
 
   const handleQuickStart = useCallback(
     async (entry: CoCreateQuickEntry) => {
@@ -1503,6 +1659,8 @@ function CoCreatePageInner() {
         agentMode,
         pinnedFileCount: pinnedFileIds.length,
         roundFileCount: roundFileIds.length,
+        availableSkills: skills,
+        existingOutputTitles,
       });
 
       console.info("[co-create] 快捷场景启动", {
@@ -1542,6 +1700,7 @@ function CoCreatePageInner() {
     },
     [
       agentMode,
+      existingOutputTitles,
       fileWorkspace.files,
       fileWorkspace.tabLabels,
       pinnedFileIds,
@@ -1841,6 +2000,7 @@ function CoCreatePageInner() {
 
   useEffect(() => {
     if (applyMode === "review" || agentMode === "ask") return;
+    if (agentMode === "plan" && planPhase !== "executing") return;
     if (autoApplyingBusyRef.current) return;
     const session = activeId ? sessionsRef.current.find((item) => item.id === activeId) : undefined;
     const merged = mergeFileActionProposals(
@@ -1870,7 +2030,7 @@ function CoCreatePageInner() {
         autoApplyingBusyRef.current = false;
       },
     );
-  }, [activeId, agentMode, applyMode, applyProposal, pendingActions, sessionsRef]);
+  }, [activeId, agentMode, applyMode, applyProposal, pendingActions, planPhase, sessionsRef]);
 
   const handleUndoLastAgentChange = useCallback(async () => {
     const sessionId = activeIdRef.current;
@@ -2152,6 +2312,7 @@ function CoCreatePageInner() {
       <CoCreateWorkspaceColumns
         sidebarOpen={sidebarOpen}
         filesPanelOpen={filesPanelOpen}
+        previewMaximized={previewMaximized}
         session={
           <SessionSidebar
             sessions={sessions}
@@ -2186,6 +2347,9 @@ function CoCreatePageInner() {
                   void handleQuickStart(entry);
                 }}
                 quickStartDisabled={!activeSession || streaming}
+                planAwaitingConfirm={agentMode === "plan" && planPhase === "awaiting_confirm"}
+                onConfirmPlan={() => void handleConfirmPlanExecution()}
+                planConfirmDisabled={!activeSession || streaming}
               />
               {pendingActions
                 .filter(
@@ -2230,6 +2394,7 @@ function CoCreatePageInner() {
               onAgentModeChange={handleAgentModeChange}
               applyMode={applyMode}
               onApplyModeChange={handleApplyModeChange}
+              planPhase={planPhase}
               pinnedFileIds={pinnedFileIds}
               roundFileIds={roundFileIds}
               files={fileWorkspace.files}
@@ -2245,6 +2410,7 @@ function CoCreatePageInner() {
         preview={
           <div className="h-full min-h-0 overflow-hidden border-r border-slate-300 dark:border-slate-700">
             <FilePreviewPanel
+              projectId={projectId}
               openTabKeys={fileWorkspace.openTabKeys}
               activeFileKey={fileWorkspace.activeFileKey}
               tabLabels={fileWorkspace.tabLabels}
@@ -2276,6 +2442,14 @@ function CoCreatePageInner() {
               onAskModify={(key) => {
                 addToRound(key);
                 setInput("/改写当前文件 ");
+              }}
+              previewMaximized={previewMaximized}
+              onTogglePreviewMaximize={() => {
+                setPreviewMaximized((v) => {
+                  const next = !v;
+                  console.info("[co-create] 文件预览窗口", next ? "最大化" : "还原");
+                  return next;
+                });
               }}
             />
           </div>

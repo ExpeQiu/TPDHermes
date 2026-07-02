@@ -614,9 +614,16 @@ export function formatProjectContextForTaskInput(ctx: ProjectContextResponse): s
   }
   const stats = ctx.kb_stats;
   if (stats?.collection) {
-    lines.push(
-      `项目知识库 collection=${stats.collection}（已索引：附件 ${stats.attachments_indexed} 份，输出 ${stats.outputs_indexed} 篇）；请按需 kb_query 检索，勿假设 prompt 含全文。`,
-    );
+    const indexedTotal = (stats.attachments_indexed ?? 0) + (stats.outputs_indexed ?? 0);
+    if (indexedTotal === 0) {
+      lines.push(
+        `项目知识库 collection=${stats.collection}（当前无已索引附件/输出）；请基于项目背景作答，并检索公共知识库与 tavily_search 联网补充，勿因项目库为空而拒答。`,
+      );
+    } else {
+      lines.push(
+        `项目知识库 collection=${stats.collection}（已索引：附件 ${stats.attachments_indexed} 份，输出 ${stats.outputs_indexed} 篇）；请按需 kb_query 检索，勿假设 prompt 含全文。`,
+      );
+    }
   }
   return lines.join("\n");
 }

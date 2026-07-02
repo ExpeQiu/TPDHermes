@@ -502,12 +502,14 @@ export default function ProjectDetailPage() {
   const [outputDetailLoading, setOutputDetailLoading] = useState(false);
   const [attachments, setAttachments] = useState<ApiAttachmentRow[]>([]);
   const [attachmentUploading, setAttachmentUploading] = useState(false);
+  const [attachmentOcrUploading, setAttachmentOcrUploading] = useState(false);
   const [attachmentError, setAttachmentError] = useState<string | null>(null);
   const [pasteTextOpen, setPasteTextOpen] = useState(false);
   const [pasteTextContent, setPasteTextContent] = useState("");
   const [pasteTextSaving, setPasteTextSaving] = useState(false);
   const [outputGovernBusy, setOutputGovernBusy] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const imageOcrInputRef = useRef<HTMLInputElement>(null);
   const [editOpen, setEditOpen] = useState(false);
   const [editSaving, setEditSaving] = useState(false);
   const [editError, setEditError] = useState<string | null>(null);
@@ -740,11 +742,12 @@ export default function ProjectDetailPage() {
     }
   };
 
-  const uploadAttachmentFile = async (file: File) => {
+  const uploadAttachmentFile = async (file: File, options?: { ocr?: boolean }) => {
     if (!id) return;
     const fd = new FormData();
     fd.append("file", file);
-    const res = await apiFetch(`/projects/${String(id)}/attachments`, {
+    const query = options?.ocr ? "?ocr=true" : "";
+    const res = await apiFetch(`/projects/${String(id)}/attachments${query}`, {
       method: "POST",
       body: fd,
     });
@@ -782,6 +785,43 @@ export default function ProjectDetailPage() {
       setAttachmentError(err instanceof Error ? err.message : "上传失败");
     } finally {
       setAttachmentUploading(false);
+    }
+  };
+
+  const handlePickImageOcr = () => {
+    trackUsage({
+      eventName: "project_attachment_ocr_pick_click",
+      feature: "projects_attachments",
+      action: "ocr_pick_click",
+      projectId: id ? String(id) : undefined,
+    });
+    setAttachmentError(null);
+    imageOcrInputRef.current?.click();
+  };
+
+  const handleImageOcrFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file || !id) return;
+    trackUsage({
+      eventName: "project_attachment_ocr_upload",
+      feature: "projects_attachments",
+      action: "ocr_upload",
+      projectId: String(id),
+      properties: { file_name: file.name, size: file.size },
+    });
+    setAttachmentOcrUploading(true);
+    setAttachmentError(null);
+    try {
+      await uploadAttachmentFile(file, { ocr: true });
+      console.info("[project] 图片 OCR 已保存为 Markdown 附件", {
+        project_id: id,
+        file_name: file.name,
+      });
+    } catch (err) {
+      setAttachmentError(err instanceof Error ? err.message : "图片 OCR 失败");
+    } finally {
+      setAttachmentOcrUploading(false);
     }
   };
 
@@ -1130,7 +1170,7 @@ export default function ProjectDetailPage() {
                         <p className="text-xs uppercase tracking-[0.2em] text-slate-500">项目文件</p>
                         <h2 className="mt-2 text-xl font-semibold text-slate-900 dark:text-white">项目文件</h2>
                         <p className="mt-1 text-xs text-slate-500">
-                          上传需求说明、素材等，供编排与协作时参考。
+                          上传需求说明、素材等；图片可用「图片 OCR」快速转为 Markdown 文字入库。
                         </p>
                       </div>
                       <div className="flex shrink-0 flex-wrap items-stretch justify-end gap-2">
@@ -1140,18 +1180,33 @@ export default function ProjectDetailPage() {
                           className="hidden"
                           onChange={handleAttachmentFileChange}
                         />
+                        <input
+                          ref={imageOcrInputRef}
+                          type="file"
+                          accept="image/*"
+                          className="hidden"
+                          onChange={handleImageOcrFileChange}
+                        />
                         <button
                           type="button"
                           onClick={openPasteTextModal}
-                          disabled={attachmentUploading}
+                          disabled={attachmentUploading || attachmentOcrUploading}
                           className="rounded-xl border border-slate-300 bg-white/90 px-4 py-2 text-sm font-medium text-slate-800 transition hover:border-slate-400 hover:bg-slate-100 disabled:opacity-50 dark:border-slate-600 dark:bg-slate-900/60 dark:text-slate-200 dark:hover:bg-slate-800"
                         >
                           粘贴说明文字
                         </button>
                         <button
                           type="button"
+                          onClick={handlePickImageOcr}
+                          disabled={attachmentUploading || attachmentOcrUploading}
+                          className="rounded-xl border border-violet-300 bg-violet-50 px-4 py-2 text-sm font-medium text-violet-800 transition hover:border-violet-400 hover:bg-violet-100 disabled:opacity-50 dark:border-violet-500/40 dark:bg-violet-500/10 dark:text-violet-200 dark:hover:bg-violet-500/20"
+                        >
+                          {attachmentOcrUploading ? "识别中…" : "图片 OCR"}
+                        </button>
+                        <button
+                          type="button"
                           onClick={handlePickAttachment}
-                          disabled={attachmentUploading}
+                          disabled={attachmentUploading || attachmentOcrUploading}
                           className="rounded-xl border border-blue-300 bg-blue-50 px-4 py-2 text-sm font-medium text-blue-800 transition hover:border-blue-400 hover:bg-blue-100 disabled:opacity-50 dark:border-blue-500/40 dark:bg-blue-500/10 dark:text-blue-200 dark:hover:bg-blue-500/20"
                         >
                           {attachmentUploading ? "上传中…" : "上传附件"}

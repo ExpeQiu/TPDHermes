@@ -92,14 +92,7 @@ export async function bulkUpsertChatSessions(
 export function inferSessionKind(session: Record<string, unknown>): ChatSessionKind {
   const explicit = session.sessionKind;
   if (explicit === "project_co_create") return "project_co_create";
-  if (
-    session.chatMode === "co_create" &&
-    session.includeFileContext &&
-    typeof session.selectedProjectId === "string" &&
-    session.selectedProjectId.trim()
-  ) {
-    return "project_co_create";
-  }
+  if (explicit === "scenario" || explicit === "chat") return explicit;
   if (session.scenarioPresetInstructions || session.quickCreateOverrides || session.taskEntrySummary) {
     return "scenario";
   }

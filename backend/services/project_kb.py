@@ -7,10 +7,13 @@ import logging
 import os
 from datetime import datetime
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from backend.models.output_asset import OutputAsset
+from backend.models.project_attachment import ProjectAttachment
 from backend.models.project_config import ProjectConfig
+from backend.services.kb_contract import KB_AUTHORITATIVE_COLLECTIONS
 
 logger = logging.getLogger("tpdx.hermes.project_kb")
 
@@ -47,6 +50,54 @@ def attachment_doc_id(attachment_id: str) -> str:
 
 def output_doc_id(output_id: str) -> str:
     return f"out_{output_id}"
+
+
+# /chat 绑定项目但项目 KB 无索引时，补充的公共检索范围
+CHAT_KB_FALLBACK_COLLECTIONS: tuple[str, ...] = (
+    *sorted(KB_AUTHORITATIVE_COLLECTIONS),
+    "public.structured_tech.geely_tech",
+)
+
+
+def merge_chat_kb_fallback_collections(collections: list[str]) -> list[str]:
+    """项目 KB 为空时 union 公共知识库集合（去重保序）。"""
+    out: list[str] = []
+    seen: set[str] = set()
+    for c in [*collections, *CHAT_KB_FALLBACK_COLLECTIONS]:
+        s = str(c or "").strip()
+        if s and s not in seen:
+            seen.add(s)
+            out.append(s)
+    return out
+
+
+async def count_project_kb_indexed(db: AsyncSession, project_id: str) -> int:
+    """统计项目内已入库 KB 的附件与输出物数量。"""
+    pid = str(project_id or "").strip()
+    if not pid:
+        return 0
+    att_count = (
+        await db.execute(
+            select(func.count())
+            .select_from(ProjectAttachment)
+            .where(
+                ProjectAttachment.project_id == pid,
+                ProjectAttachment.ingest_status == "ingested",
+            )
+        )
+    ).scalar_one()
+    out_count = (
+        await db.execute(
+            select(func.count())
+            .select_from(OutputAsset)
+            .where(
+                OutputAsset.project_id == pid,
+                OutputAsset.status != "archived",
+                OutputAsset.kb_ingest_status == "ingested",
+            )
+        )
+    ).scalar_one()
+    return int(att_count or 0) + int(out_count or 0)
 
 
 def merge_project_kb_collections(collections: list[str], project_id: str | None) -> list[str]:

@@ -8,6 +8,9 @@ import { encodeProjectFileSelectValue } from "@/lib/chat-context";
 /** Cursor 式创作模式：Ask 只读 / Agent 全工具 / Plan 先规划后执行 */
 export type CoCreateAgentMode = "ask" | "agent" | "plan";
 
+/** Plan 模式对话阶段：规划 → 待确认 → 执行 */
+export type CoCreatePlanPhase = "idle" | "awaiting_confirm" | "executing";
+
 /** 文件变更应用策略：自动写回 vs 人工审阅 */
 export type CoCreateApplyMode = "auto" | "review";
 
@@ -15,6 +18,8 @@ export type AgentPlanStep = {
   id: string;
   title: string;
   detail?: string;
+  /** 建议调用的 workshop skill 名；无合适技能时为 agent */
+  skill?: string;
   status?: "pending" | "in_progress" | "done";
 };
 
@@ -43,7 +48,7 @@ export function coCreateAgentModeMeta(mode: CoCreateAgentMode): {
     case "plan":
       return {
         label: "Plan",
-        description: "先输出计划再执行，偏向深度检索与分析",
+        description: "对话式先规划后执行，每步绑定 Skill 并产出文件",
         badgeClassName:
           "border-violet-200 bg-violet-50 text-violet-700 dark:border-violet-800/70 dark:bg-violet-950/40 dark:text-violet-200",
       };
@@ -58,19 +63,67 @@ export function coCreateAgentModeMeta(mode: CoCreateAgentMode): {
   }
 }
 
-export function buildAgentModeInstructions(mode: CoCreateAgentMode): string {
+export type PlanModeInstructionContext = {
+  planPhase?: CoCreatePlanPhase | "planning" | "revising";
+  availableSkills?: string[];
+  confirmedPlan?: AgentPlan | null;
+};
+
+const PLAN_CONFIRM_RE =
+  /^(确认(执行|计划)?|开始执行|按计划执行|执行计划|继续执行|ok|go|yes)$/i;
+
+export function isPlanConfirmPrompt(text: string): boolean {
+  return PLAN_CONFIRM_RE.test(text.trim());
+}
+
+function formatSkillsHint(skills: string[]): string {
+  const list = skills.map((s) => s.trim()).filter(Boolean).slice(0, 24);
+  if (list.length === 0) {
+    return "当前无预置技能列表，步骤 skill 可填 agent，执行时按需调用 workshop_generate 等工具。";
+  }
+  return `可用技能（每步须从中选取最匹配的一项，无合适时填 agent）：${list.join("、")}。`;
+}
+
+function buildPlanPlanningInstructions(ctx: PlanModeInstructionContext): string {
+  const revising = ctx.planPhase === "revising";
+  return [
+    revising
+      ? "【Plan 规划模式·修订计划】根据用户反馈更新计划，本轮仍不执行写文件。"
+      : "【Plan 规划模式·规划阶段】本轮仅输出可执行计划，禁止 write_file/patch，禁止 tphermes_file_actions。",
+    "回复须包含 ```tphermes_plan {\"title\":\"...\",\"steps\":[{\"id\":\"1\",\"title\":\"...\",\"detail\":\"...\",\"skill\":\"技能名\"}]} ``` JSON（steps 3–6 项，每项含 skill）。",
+    formatSkillsHint(ctx.availableSkills ?? []),
+    "计划末尾用 1–2 句说明各步 skill 与预期产出，并提示用户：确认后回复「开始执行」，或输入修改意见。",
+  ].join(" ");
+}
+
+function buildPlanExecutionInstructions(ctx: PlanModeInstructionContext): string {
+  const planJson = ctx.confirmedPlan?.raw ?? JSON.stringify(ctx.confirmedPlan ?? {}, null, 2);
+  return [
+    "【Plan 规划模式·执行阶段】用户已确认计划，按步骤逐步执行并产出结果。",
+    "每步优先调用对应 skill 的 workshop_generate / workshop_generate_from_kb；必要时 kb_query、tavily_search。",
+    "涉及文件落地时使用 write_file/patch 并输出 tphermes_file_actions，沉淀至 /输出/；引用标注 [^N]。",
+    "每完成一步在 steps 中标注 status=done；全部完成后汇总产出路径。",
+    `已确认计划：\n\`\`\`tphermes_plan\n${planJson}\n\`\`\``,
+  ].join(" ");
+}
+
+export function buildAgentModeInstructions(
+  mode: CoCreateAgentMode,
+  ctx: PlanModeInstructionContext = {},
+): string {
   switch (mode) {
     case "ask":
       return [
         "【Ask 只读模式】本轮仅做分析、检索与问答，禁止调用 write_file、patch，禁止输出 tphermes_file_actions。",
         "可正常使用 kb_query、kb_get_entry、tavily_search 等检索工具，并在正文标注 [^N] 引用。",
       ].join(" ");
-    case "plan":
-      return [
-        "【Plan 规划模式】先给出可执行计划，再开始创作。",
-        "回复开头须包含 ```tphermes_plan {\"title\":\"...\",\"steps\":[{\"id\":\"1\",\"title\":\"...\",\"detail\":\"...\"}]} ``` JSON 代码块（steps 3-6 项）。",
-        "计划输出后，按步骤执行：每完成一步可在 steps 中标注 status=done，涉及文件落地时照常 write_file/patch 并输出 tphermes_file_actions。",
-      ].join(" ");
+    case "plan": {
+      const phase = ctx.planPhase ?? "planning";
+      if (phase === "executing") {
+        return buildPlanExecutionInstructions(ctx);
+      }
+      return buildPlanPlanningInstructions(ctx);
+    }
     case "agent":
     default:
       return "";
@@ -131,10 +184,12 @@ export function parseAgentPlanFromContent(content: string): AgentPlan | null {
           const title = String(item.title || item.name || "").trim();
           if (!title) return null;
           const status = item.status;
+          const skillRaw = item.skill ?? item.skill_name ?? item.skillName;
           return {
             id: String(item.id ?? index + 1),
             title,
             detail: typeof item.detail === "string" ? item.detail : undefined,
+            skill: typeof skillRaw === "string" && skillRaw.trim() ? skillRaw.trim() : undefined,
             status:
               status === "done" || status === "in_progress" || status === "pending"
                 ? status

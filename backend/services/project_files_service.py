@@ -15,20 +15,21 @@ from backend.models.project_attachment import ProjectAttachment
 
 logger = logging.getLogger("tpdx.hermes.project_files")
 
-ATTACHMENTS_ROOT_ENV = "PROJECT_ATTACHMENTS_ROOT"
+ATTACHMENTS_ROOT_ENV = "PROJECT_UPLOAD_DIR"
 REFERENCED_OUTPUT_MAX_CHARS = max(800, int(os.getenv("CO_CREATE_REF_OUTPUT_MAX_CHARS", "4000")))
 REFERENCED_ATTACHMENT_MAX_CHARS = max(
     400, int(os.getenv("CO_CREATE_REF_ATTACHMENT_MAX_CHARS", "2000"))
 )
 REFERENCED_TOTAL_MAX_CHARS = max(2000, int(os.getenv("CO_CREATE_REF_TOTAL_MAX_CHARS", "12000")))
 REFERENCED_FILE_LIMIT = max(1, int(os.getenv("CO_CREATE_REF_FILE_LIMIT", "4")))
+ATTACHMENT_PREVIEW_MAX_CHARS = 50_000
 
 
 def _attachments_root() -> Path:
-    import os
-
-    raw = os.getenv(ATTACHMENTS_ROOT_ENV, "data/project_attachments")
-    return Path(raw)
+    override = os.getenv(ATTACHMENTS_ROOT_ENV, "").strip()
+    if override:
+        return Path(override).expanduser().resolve()
+    return (Path(__file__).resolve().parent.parent / "data" / "project_uploads").resolve()
 
 
 def _guess_file_type(name: str, content_format: str | None = None) -> str:
@@ -58,6 +59,39 @@ def _output_path(title: str | None) -> str:
 
 def _attachment_path(filename: str) -> str:
     return f"/附件/{filename}"
+
+
+def _read_attachment_preview_content(path: Path, *, content_type: str | None) -> tuple[str, str]:
+    """将附件抽取为可预览文本，返回 (content, content_format)。"""
+    from backend.services.document_extract import DocumentExtractError, extract_to_markdown
+
+    if not path.is_file():
+        logger.warning("[project-files] attachment preview file missing path=%s", path)
+        return "（附件文件不存在或已被删除，请重新上传。）", "text"
+
+    try:
+        text = (extract_to_markdown(path, content_type=content_type) or "").strip()
+    except DocumentExtractError as exc:
+        err = str(exc)
+        logger.warning("[project-files] attachment preview extract failed path=%s err=%s", path, err)
+        if err.startswith("unsupported_format"):
+            suffix = path.suffix or "此格式"
+            return f"（暂不支持在线预览 {suffix} 文件，请下载原文件查看。）", "text"
+        if err == "pymupdf_not_installed":
+            return "（PDF 预览依赖未安装，请联系管理员。）", "text"
+        if err == "python_docx_not_installed":
+            return "（Word 预览依赖未安装，请联系管理员。）", "text"
+        return f"（预览失败：{err}，请下载原文件查看。）", "text"
+
+    if not text:
+        return "（文件为空或无法提取可读文本。）", "text"
+
+    if len(text) > ATTACHMENT_PREVIEW_MAX_CHARS:
+        text = text[:ATTACHMENT_PREVIEW_MAX_CHARS] + "\n\n…（预览已截断）"
+
+    suffix = path.suffix.lower()
+    content_format = "markdown" if suffix in {".md", ".markdown", ".pdf", ".docx"} else "text"
+    return text, content_format
 
 
 async def list_project_files(db: AsyncSession, project_id: str) -> list[dict]:
@@ -147,13 +181,11 @@ async def get_project_file_detail(
         row = q.scalar_one_or_none()
         if not row:
             return None
-        content = ""
         path = _attachments_root() / (row.stored_path or "")
-        if path.is_file() and path.suffix.lower() in (".md", ".txt", ".json", ".markdown"):
-            try:
-                content = path.read_text(encoding="utf-8", errors="replace")[:50000]
-            except OSError as exc:
-                logger.warning("[project-files] read attachment failed id=%s err=%s", file_id, exc)
+        content, content_format = _read_attachment_preview_content(
+            path,
+            content_type=row.content_type,
+        )
         return {
             "id": row.id,
             "kind": "attachment",
@@ -162,7 +194,7 @@ async def get_project_file_detail(
             "file_type": _guess_file_type(row.original_filename or ""),
             "status": row.ingest_status,
             "content": content,
-            "content_format": "text",
+            "content_format": content_format,
             "updated_at": row.created_at,
             "version": None,
         }

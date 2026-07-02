@@ -5,7 +5,7 @@ import { InlineTextDiff } from "@/app/projects/[id]/co-create/components/InlineT
 import type { PatchEditMode, SelectionToChatPayload } from "@/app/projects/[id]/co-create/co-create-types";
 import { patchEditModeLabel } from "@/app/projects/[id]/co-create/co-create-partial-patch";
 import { ProjectOutputContentBody } from "@/components/project-output-content";
-import type { ProjectFileDetail, ProjectFileVersionItem } from "@/lib/co-create-api";
+import { fetchProjectFileDetail, type ProjectFileDetail, type ProjectFileVersionItem } from "@/lib/co-create-api";
 
 type ViewTab = "preview" | "edit" | "versions";
 
@@ -15,6 +15,7 @@ type SelectionMenuState = SelectionToChatPayload & {
 };
 
 type Props = {
+  projectId: string;
   openTabKeys: string[];
   activeFileKey: string | null;
   tabLabels: Record<string, string>;
@@ -39,6 +40,8 @@ type Props = {
     summary?: string;
     editMode?: PatchEditMode;
   } | null;
+  previewMaximized?: boolean;
+  onTogglePreviewMaximize?: () => void;
 };
 
 function getSelectionRange(container: HTMLElement | null): Range | null {
@@ -114,6 +117,7 @@ export function selectionMenuPosition(
 }
 
 export function FilePreviewPanel({
+  projectId,
   openTabKeys,
   activeFileKey,
   tabLabels,
@@ -132,11 +136,18 @@ export function FilePreviewPanel({
   onEditSelection,
   onRewriteSelection,
   pendingPatch,
+  previewMaximized = false,
+  onTogglePreviewMaximize,
 }: Props) {
   const [viewTab, setViewTab] = useState<ViewTab>("preview");
   const [editDraft, setEditDraft] = useState("");
   const [saveError, setSaveError] = useState<string | null>(null);
   const [selectionMenu, setSelectionMenu] = useState<SelectionMenuState | null>(null);
+  const [selectedVersion, setSelectedVersion] = useState<ProjectFileVersionItem | null>(null);
+  const [versionDetailLoading, setVersionDetailLoading] = useState(false);
+  const [versionDetailError, setVersionDetailError] = useState<string | null>(null);
+  const [versionDetailContent, setVersionDetailContent] = useState<string | null>(null);
+  const [versionDetailFormat, setVersionDetailFormat] = useState<string | null>(null);
   const previewRef = useRef<HTMLDivElement>(null);
   const autoSaveTimerRef = useRef<number | null>(null);
 
@@ -165,7 +176,22 @@ export function FilePreviewPanel({
     setViewTab("preview");
     setSaveError(null);
     closeSelectionMenu();
+    setSelectedVersion(null);
+    setVersionDetailLoading(false);
+    setVersionDetailError(null);
+    setVersionDetailContent(null);
+    setVersionDetailFormat(null);
   }, [activeFileKey, closeSelectionMenu]);
+
+  useEffect(() => {
+    if (viewTab !== "versions") {
+      setSelectedVersion(null);
+      setVersionDetailLoading(false);
+      setVersionDetailError(null);
+      setVersionDetailContent(null);
+      setVersionDetailFormat(null);
+    }
+  }, [viewTab]);
 
   useEffect(() => {
     setEditDraft(savedContent);
@@ -271,6 +297,45 @@ export function FilePreviewPanel({
       endLine: selectionMenu.endLine,
     });
     closeSelectionMenu();
+  };
+
+  const handleSelectVersion = useCallback(
+    async (version: ProjectFileVersionItem) => {
+      setSelectedVersion(version);
+      setVersionDetailLoading(true);
+      setVersionDetailError(null);
+      setVersionDetailContent(null);
+      setVersionDetailFormat(null);
+      try {
+        const detail = await fetchProjectFileDetail(projectId, version.id, "output");
+        setVersionDetailContent(detail.content ?? "");
+        setVersionDetailFormat(detail.content_format ?? null);
+        console.info("[co-create] 版本详情已加载", {
+          projectId,
+          versionId: version.id,
+          version: version.version,
+        });
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "加载失败";
+        setVersionDetailError(message);
+        console.warn("[co-create] 版本详情加载失败", {
+          projectId,
+          versionId: version.id,
+          err,
+        });
+      } finally {
+        setVersionDetailLoading(false);
+      }
+    },
+    [projectId],
+  );
+
+  const handleBackToVersionList = () => {
+    setSelectedVersion(null);
+    setVersionDetailLoading(false);
+    setVersionDetailError(null);
+    setVersionDetailContent(null);
+    setVersionDetailFormat(null);
   };
 
   const handleSave = useCallback(async () => {
@@ -379,6 +444,15 @@ export function FilePreviewPanel({
             <ActionBtn label="AI 解读" onClick={() => onAskInterpret(activeFileKey)} />
             <ActionBtn label="AI 修改" onClick={() => onAskModify(activeFileKey)} />
             <div className="ml-auto flex items-center gap-1">
+              {onTogglePreviewMaximize ? (
+                <ViewTabBtn
+                  active={previewMaximized}
+                  label={previewMaximized ? "还原窗口" : "最大化预览"}
+                  onClick={onTogglePreviewMaximize}
+                >
+                  {previewMaximized ? <WindowRestoreIcon /> : <WindowMaximizeIcon />}
+                </ViewTabBtn>
+              ) : null}
               <ViewTabBtn
                 active={viewTab === "preview"}
                 label="预览"
@@ -456,16 +530,53 @@ export function FilePreviewPanel({
               {previewLoading ? (
                 <p className="text-slate-500">加载预览…</p>
               ) : viewTab === "versions" ? (
-                versions.length === 0 ? (
+                selectedVersion ? (
+                  <div className="space-y-3">
+                    <button
+                      type="button"
+                      onClick={handleBackToVersionList}
+                      className="text-[10px] font-medium text-blue-600 transition hover:text-blue-500 dark:text-blue-400 dark:hover:text-blue-300"
+                    >
+                      ← 返回版本列表
+                    </button>
+                    <div>
+                      <p className="font-medium text-slate-900 dark:text-slate-100">
+                        v{selectedVersion.version} · {selectedVersion.title ?? "未命名"}
+                      </p>
+                      <p className="text-[10px] text-slate-500">
+                        {selectedVersion.updated_at ?? selectedVersion.created_at}
+                      </p>
+                    </div>
+                    {versionDetailLoading ? (
+                      <p className="text-slate-500">加载版本内容…</p>
+                    ) : versionDetailError ? (
+                      <p className="text-red-500">{versionDetailError}</p>
+                    ) : (
+                      <div className="select-text text-slate-800 dark:text-slate-200">
+                        <ProjectOutputContentBody
+                          content={versionDetailContent}
+                          contentFormat={versionDetailFormat}
+                          loading={false}
+                        />
+                      </div>
+                    )}
+                  </div>
+                ) : versions.length === 0 ? (
                   <p className="text-slate-500">暂无版本历史</p>
                 ) : (
                   <ul className="space-y-2">
                     {versions.map((v) => (
-                      <li key={v.id} className="rounded border border-slate-200 p-2 dark:border-slate-700">
-                        <p className="font-medium">
-                          v{v.version} · {v.title ?? "未命名"}
-                        </p>
-                        <p className="text-[10px] text-slate-500">{v.updated_at ?? v.created_at}</p>
+                      <li key={v.id}>
+                        <button
+                          type="button"
+                          onClick={() => void handleSelectVersion(v)}
+                          className="w-full rounded border border-slate-200 p-2 text-left transition hover:border-blue-300 hover:bg-blue-50/60 dark:border-slate-700 dark:hover:border-blue-500/40 dark:hover:bg-blue-950/20"
+                        >
+                          <p className="font-medium">
+                            v{v.version} · {v.title ?? "未命名"}
+                          </p>
+                          <p className="text-[10px] text-slate-500">{v.updated_at ?? v.created_at}</p>
+                        </button>
                       </li>
                     ))}
                   </ul>
@@ -612,6 +723,43 @@ function HistoryIcon() {
       <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
       <path d="M3 3v5h5" />
       <path d="M12 7v5l3 3" />
+    </svg>
+  );
+}
+
+function WindowMaximizeIcon() {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      className="h-3.5 w-3.5"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <rect x="3" y="3" width="18" height="18" rx="2" />
+    </svg>
+  );
+}
+
+function WindowRestoreIcon() {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      className="h-3.5 w-3.5"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <path d="M8 3v3a2 2 0 0 1-2 2H3" />
+      <path d="M21 8h-3a2 2 0 0 1-2-2V3" />
+      <path d="M3 16v3a2 2 0 0 0 2 2h3" />
+      <path d="M16 21h3a2 2 0 0 0 2-2v-3" />
     </svg>
   );
 }

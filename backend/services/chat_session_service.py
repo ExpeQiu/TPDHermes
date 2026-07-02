@@ -52,12 +52,8 @@ def infer_session_kind(context: dict[str, Any]) -> str:
     explicit = context.get("sessionKind")
     if explicit == SESSION_KIND_CO_CREATE:
         return SESSION_KIND_CO_CREATE
-    if (
-        context.get("chatMode") == "co_create"
-        and context.get("includeFileContext")
-        and str(context.get("selectedProjectId") or "").strip()
-    ):
-        return SESSION_KIND_CO_CREATE
+    if explicit in (SESSION_KIND_CHAT, SESSION_KIND_SCENARIO):
+        return explicit
     if context.get("scenarioPresetInstructions") or context.get("quickCreateOverrides"):
         return SESSION_KIND_SCENARIO
     if context.get("taskEntrySummary"):
@@ -168,6 +164,12 @@ async def get_session_for_user(
         )
     ).scalar_one_or_none()
     return row
+
+
+async def get_session_by_id(db: AsyncSession, session_id: str) -> ChatSessionRecord | None:
+    return (
+        await db.execute(select(ChatSessionRecord).where(ChatSessionRecord.id == session_id))
+    ).scalar_one_or_none()
 
 
 async def get_session_detail_for_user(
@@ -330,7 +332,30 @@ async def sync_session_messages_for_user(
 ) -> dict[str, Any] | None:
     row = await get_session_for_user(db, session_id=session_id, user_id=user_id)
     if row is None:
-        return None
+        existing = await get_session_by_id(db, session_id)
+        if existing is not None:
+            logger.warning(
+                "chat_session message_sync denied session_id=%s owner=%s caller=%s",
+                session_id,
+                (existing.user_id or "")[:24],
+                user_id[:24],
+            )
+            return None
+        # 本地会话先于服务端创建时，补建空壳再同步消息（避免 messages/sync 404）
+        title = "新对话"
+        if messages:
+            first = next((m for m in messages if str(m.get("role") or "") == "user"), None)
+            if first and str(first.get("content") or "").strip():
+                title = str(first.get("content") or "")[:40].strip() or title
+        await upsert_session_for_user(
+            db,
+            session_id=session_id,
+            user_id=user_id,
+            payload={"id": session_id, "title": title, "messages": []},
+        )
+        row = await get_session_for_user(db, session_id=session_id, user_id=user_id)
+        if row is None:
+            return None
     stats = await _sync_messages(
         db,
         session_id,
@@ -431,7 +456,6 @@ async def _sync_messages(
     existing_rows = (
         await db.execute(
             select(ChatMessageRecord).where(
-                ChatMessageRecord.session_id == session_id,
                 ChatMessageRecord.id.in_(incoming_ids or [""]),
             )
         )
@@ -456,6 +480,9 @@ async def _sync_messages(
             created += 1
             continue
         changed = False
+        if existing.session_id != session_id:
+            existing.session_id = session_id
+            changed = True
         if existing.role != item["role"]:
             existing.role = item["role"]
             changed = True

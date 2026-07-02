@@ -11,6 +11,10 @@ import {
   isDocumentGenerationPrompt,
 } from "@/app/projects/[id]/co-create/co-create-auto-draft";
 import {
+  buildExistingOutputNamesHint,
+  resolveUniqueOutputFileName,
+} from "@/app/projects/[id]/co-create/co-create-output-naming";
+import {
   buildRewriteSyncInstructions,
   isRewritePrompt,
 } from "@/app/projects/[id]/co-create/co-create-auto-patch";
@@ -37,12 +41,15 @@ export function buildQuickStartScenarioContractInstructions(
   entryTitle: string,
   prompt: string,
   scenarioDetail?: CoCreateQuickStartScenarioDetail | null,
+  existingTitles: readonly string[] = [],
 ): string {
   const title = entryTitle.trim();
   const goal = scenarioDetail?.goal?.trim();
   const sections = normStringList(scenarioDetail?.output_policy?.required_sections);
   const mustTemplate = scenarioDetail?.output_policy?.must_follow_template === true;
-  const fileName = title ? (title.endsWith(".md") ? title : `${title}.md`) : "标准输出物.md";
+  const fileName = title
+    ? resolveUniqueOutputFileName(title, existingTitles)
+    : resolveUniqueOutputFileName("标准输出物", existingTitles);
 
   const lines = [
     "【快捷创作·项目场景输出】本任务须基于当前项目上下文与已绑定场景合同执行，禁止输出与场景无关的通用模板稿。",
@@ -52,9 +59,13 @@ export function buildQuickStartScenarioContractInstructions(
     mustTemplate ? "须遵循场景绑定的输出模版结构与语气。" : "",
     `完成后将标准输出物沉淀为 /输出/${fileName}（与场景入口一致）。`,
     "可调用 kb_query、workshop_generate_from_kb、write_file 等工具；引用项目事实时标注 [^N]。",
+    buildExistingOutputNamesHint(existingTitles),
   ].filter(Boolean);
 
-  return [buildQuickStartOutputSyncInstructions(title, prompt), lines.join(" ")].join("\n\n");
+  return [
+    buildQuickStartOutputSyncInstructions(title, prompt, existingTitles),
+    lines.join(" "),
+  ].join("\n\n");
 }
 
 function resolveQuickStartExecution(
@@ -77,6 +88,8 @@ export type CoCreateQuickStartInput = {
   agentMode: CoCreateAgentMode;
   pinnedFileCount: number;
   roundFileCount: number;
+  availableSkills?: string[];
+  existingOutputTitles?: string[];
 };
 
 export type CoCreateQuickStartPlan = {
@@ -135,8 +148,16 @@ export function buildCoCreateQuickStartPlan(
   const execution = resolveQuickStartExecution(input.agentMode, pipeline);
 
   const scenarioPresetInstructionsAppend = [
-    buildAgentModeInstructions(input.agentMode),
-    buildQuickStartScenarioContractInstructions(input.entry.title, prompt, input.scenarioDetail),
+    buildAgentModeInstructions(input.agentMode, {
+      planPhase: input.agentMode === "plan" ? "planning" : undefined,
+      availableSkills: input.availableSkills,
+    }),
+    buildQuickStartScenarioContractInstructions(
+      input.entry.title,
+      prompt,
+      input.scenarioDetail,
+      input.existingOutputTitles ?? [],
+    ),
     buildRewriteSyncInstructions(prompt, hasTargetFile),
   ]
     .filter(Boolean)

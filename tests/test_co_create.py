@@ -227,6 +227,57 @@ def test_project_file_create_upserts_same_title():
         assert detail.json()["content"] == "# 第二版"
 
 
+def test_project_file_create_upserts_title_stem_without_md_suffix():
+    headers = {"X-User-ID": f"co_create_stem_{uuid.uuid4().hex[:8]}"}
+    with TestClient(app) as client:
+        proj = client.post(
+            "/api/v1/projects",
+            headers=headers,
+            json={"name": "共创 stem 项目", "status": "active"},
+        )
+        assert proj.status_code == 200
+        project_id = proj.json()["id"]
+
+        first = client.post(
+            f"/api/v1/projects/{project_id}/file-actions/apply",
+            headers=headers,
+            json={
+                "proposal_id": "create-stem-first",
+                "action": {
+                    "type": "create",
+                    "file_name": "通用对话",
+                    "path": "/输出/通用对话",
+                    "content": "# 第一版",
+                },
+            },
+        )
+        assert first.status_code == 200, first.text
+        first_id = first.json()["file_id"]
+
+        second = client.post(
+            f"/api/v1/projects/{project_id}/file-actions/apply",
+            headers=headers,
+            json={
+                "proposal_id": "create-stem-second",
+                "action": {
+                    "type": "create",
+                    "file_name": "通用对话.md",
+                    "path": "/输出/通用对话.md",
+                    "content": "# 第二版",
+                },
+            },
+        )
+        assert second.status_code == 200, second.text
+        assert second.json()["file_id"] == first_id
+
+        files = client.get(f"/api/v1/projects/{project_id}/files", headers=headers)
+        assert files.status_code == 200
+        outputs = [item for item in files.json()["items"] if item["kind"] == "output"]
+        assert len(outputs) == 1
+        assert outputs[0]["title"] == "通用对话.md"
+        assert outputs[0]["id"] == first_id
+
+
 def test_attachment_is_visible_in_unified_files_and_project_context():
     headers = {"X-User-ID": f"co_create_attachment_{uuid.uuid4().hex[:8]}"}
     with TestClient(app) as client:
@@ -265,6 +316,35 @@ def test_attachment_is_visible_in_unified_files_and_project_context():
         context_body = context.json()
         assert any(item["id"] == attachment_id for item in context_body["attachments"])
         assert context_body["kb_stats"]["attachments_indexed"] == 0
+
+
+def test_attachment_markdown_preview():
+    headers = {"X-User-ID": f"co_create_md_{uuid.uuid4().hex[:8]}"}
+    with TestClient(app) as client:
+        proj = client.post(
+            "/api/v1/projects",
+            headers=headers,
+            json={"name": "附件预览项目", "status": "active"},
+        )
+        assert proj.status_code == 200
+        project_id = proj.json()["id"]
+
+        uploaded = client.post(
+            f"/api/v1/projects/{project_id}/attachments",
+            headers=headers,
+            files={"file": ("report.md", b"# Title\n\nPreview body", "text/markdown")},
+        )
+        assert uploaded.status_code == 200, uploaded.text
+        attachment_id = uploaded.json()["id"]
+
+        detail = client.get(
+            f"/api/v1/projects/{project_id}/files/{attachment_id}?kind=attachment",
+            headers=headers,
+        )
+        assert detail.status_code == 200, detail.text
+        body = detail.json()
+        assert "Preview body" in body["content"]
+        assert body["content_format"] == "markdown"
 
 
 def test_archived_output_is_hidden_from_unified_files_and_context():

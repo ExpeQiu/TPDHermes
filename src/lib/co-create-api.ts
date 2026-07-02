@@ -100,10 +100,15 @@ export async function archiveProjectOutput(
 }
 
 /** 上传项目附件（与项目详情页「上传附件」一致） */
-export async function uploadProjectAttachment(projectId: string, file: File): Promise<void> {
+export async function uploadProjectAttachment(
+  projectId: string,
+  file: File,
+  options?: { ocr?: boolean },
+): Promise<void> {
   const fd = new FormData();
   fd.append("file", file);
-  const res = await apiFetch(`/projects/${projectId}/attachments`, {
+  const query = options?.ocr ? "?ocr=true" : "";
+  const res = await apiFetch(`/projects/${projectId}/attachments${query}`, {
     method: "POST",
     body: fd,
   });
@@ -112,6 +117,7 @@ export async function uploadProjectAttachment(projectId: string, file: File): Pr
     projectId,
     fileName: file.name,
     size: file.size,
+    ocr: Boolean(options?.ocr),
   });
 }
 

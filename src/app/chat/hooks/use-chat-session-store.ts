@@ -12,6 +12,7 @@ import {
   patchChatSessionOnServer,
   syncChatSessionMessagesOnServer,
   upsertChatSessionOnServer,
+  bulkUpsertChatSessions,
   type ServerChatSessionSummary,
 } from "@/lib/chat-sessions-api";
 import type { QuickCreateFlowOverrides } from "@/lib/chat-context";
@@ -128,6 +129,12 @@ function mergeSessionWithLocal(serverSession: ChatSession, localSession?: ChatSe
       (serverSession.agentUndoStack?.length ?? 0) > 0
         ? serverSession.agentUndoStack
         : localSession.agentUndoStack,
+    // 共创 UI 偏好以本地为准，避免 hydrate 覆盖用户刚切换的 Ask/Plan 等模式
+    coCreateAgentMode: localSession.coCreateAgentMode ?? serverSession.coCreateAgentMode,
+    coCreateApplyMode: localSession.coCreateApplyMode ?? serverSession.coCreateApplyMode,
+    coCreatePlanPhase: localSession.coCreatePlanPhase ?? serverSession.coCreatePlanPhase,
+    coCreatePipelinePreference:
+      localSession.coCreatePipelinePreference ?? serverSession.coCreatePipelinePreference,
   };
 }
 
@@ -188,6 +195,7 @@ export function sessionToPatchPayload(session: ChatSession): Record<string, unkn
     coCreatePipelinePreference: session.coCreatePipelinePreference ?? "auto",
     coCreateAgentMode: session.coCreateAgentMode ?? "agent",
     coCreateApplyMode: session.coCreateApplyMode ?? "auto",
+    coCreatePlanPhase: session.coCreatePlanPhase ?? "idle",
     agentUndoStack: session.agentUndoStack ?? [],
   };
 }
@@ -289,6 +297,12 @@ function serverSessionToClient(raw: Record<string, unknown>): ChatSession {
       raw.coCreateApplyMode === "auto" || raw.coCreateApplyMode === "review"
         ? raw.coCreateApplyMode
         : "auto",
+    coCreatePlanPhase:
+      raw.coCreatePlanPhase === "idle" ||
+      raw.coCreatePlanPhase === "awaiting_confirm" ||
+      raw.coCreatePlanPhase === "executing"
+        ? raw.coCreatePlanPhase
+        : "idle",
     agentUndoStack: parseAgentUndoStack(raw.agentUndoStack),
   };
 }
@@ -494,6 +508,11 @@ export function useChatSessionStore({
         roundFileIds: defaults?.roundFileIds ?? [],
         archived: defaults?.archived ?? false,
         pendingProposalIds: defaults?.pendingProposalIds ?? [],
+        coCreateAgentMode: defaults?.coCreateAgentMode,
+        coCreateApplyMode: defaults?.coCreateApplyMode,
+        coCreatePlanPhase: defaults?.coCreatePlanPhase,
+        coCreatePipelinePreference: defaults?.coCreatePipelinePreference,
+        agentUndoStack: defaults?.agentUndoStack ?? [],
       };
       const next = [session, ...sessionsRef.current];
       saveAndSet(next);
@@ -526,7 +545,7 @@ export function useChatSessionStore({
         void hydrateSessionDetail(id).then((full) => {
           if (!full) return;
           const next = sessionsRef.current.map((session) =>
-            session.id === id ? full : session,
+            session.id === id ? mergeSessionWithLocal(full, session) : session,
           );
           saveAndSet(next);
         });
@@ -659,6 +678,13 @@ export function useChatSessionStore({
           if (cancelled) return;
           const scopedServer = filterSessionsForNamespace(clientSessions, storageNamespace);
           const merged = mergeLocalSessionsWithServer(scopedServer, localRaw);
+          const serverById = new Map(scopedServer.map((session) => [session.id, session]));
+          const localOnly = merged.filter(
+            (session) => !serverById.has(session.id) && session.messages.length >= 0,
+          );
+          if (localOnly.length > 0) {
+            await bulkUpsertChatSessions(localOnly.map((session) => sessionToServerPayload(session)));
+          }
           for (const session of sessionsNeedingMessageSync(merged, scopedServer)) {
             console.info("[chat] 本地消息比服务端新，补同步", {
               session_id: session.id,

@@ -52,7 +52,7 @@ export type CoCreateSaveState = "idle" | "saving" | "saved" | "error" | "pending
 export type CoCreatePipeline = "fast" | "co_create" | "rewrite" | "research";
 export type CoCreatePipelinePreference = "auto" | CoCreatePipeline;
 
-export type { CoCreateAgentMode, CoCreateApplyMode } from "@/app/projects/[id]/co-create/co-create-agent-utils";
+export type { CoCreateAgentMode, CoCreateApplyMode, CoCreatePlanPhase } from "@/app/projects/[id]/co-create/co-create-agent-utils";
 
 export function coCreatePipelineMeta(pipeline: CoCreatePipeline): {
   label: string;

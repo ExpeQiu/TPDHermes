@@ -24,6 +24,7 @@ type Props = {
   onAgentModeChange: (value: CoCreateAgentMode) => void;
   applyMode: CoCreateApplyMode;
   onApplyModeChange: (value: CoCreateApplyMode) => void;
+  planPhase?: import("@/app/projects/[id]/co-create/co-create-agent-utils").CoCreatePlanPhase;
   pinnedFileIds?: string[];
   roundFileIds?: string[];
   files?: ProjectFileItem[];
@@ -52,6 +53,7 @@ export function CoCreateComposer({
   onAgentModeChange,
   applyMode,
   onApplyModeChange,
+  planPhase = "idle",
   pinnedFileIds = [],
   roundFileIds = [],
   files = [],
@@ -166,6 +168,12 @@ export function CoCreateComposer({
   };
 
   const showApplyToggle = agentMode !== "ask";
+  const planComposerHint =
+    agentMode === "plan" && planPhase === "awaiting_confirm"
+      ? "确认计划请回复「开始执行」，或输入修改意见"
+      : agentMode === "plan"
+        ? "描述目标，Agent 将先输出分步计划（含 Skill）"
+        : undefined;
 
   return (
     <div className="shrink-0 px-3 pb-3 pt-2">
@@ -239,9 +247,10 @@ export function CoCreateComposer({
                 )
               }
               placeholder={
-                refCount > 0
+                planComposerHint ??
+                (refCount > 0
                   ? "描述你的创作需求… 输入 @ 引用文件，回车发送"
-                  : (hint ?? "描述你的创作需求… 支持 /生成新文件 /改写当前文件，输入 @ 引用文件")
+                  : (hint ?? "描述你的创作需求… 支持 /生成新文件 /改写当前文件，输入 @ 引用文件"))
               }
             rows={1}
             disabled={disabled || streaming}

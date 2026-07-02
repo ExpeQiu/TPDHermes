@@ -11,6 +11,7 @@ from typing import Any
 
 from backend.schemas.orchestration import OrchestrationPayload, TaskInputPayload
 from backend.services.kb_contract import KB_AUTHORITATIVE_COLLECTIONS
+from backend.services.project_kb import is_project_kb_collection
 
 ORCHESTRATION_MARKER_BEGIN = "<<<ORCHESTRATION_JSON_BEGIN>>>"
 ORCHESTRATION_MARKER_END = "<<<ORCHESTRATION_JSON_END>>>"
@@ -123,6 +124,17 @@ def _build_orchestration_guidance(
             + ", ".join(knowledge_collections)
             + "。"
         )
+        project_cols = [c for c in knowledge_collections if is_project_kb_collection(c)]
+        public_cols = [c for c in knowledge_collections if not is_project_kb_collection(c)]
+        if payload.entrypoint == "chat" and payload.project.id != "none" and project_cols and public_cols:
+            lines.extend(
+                [
+                    f"项目知识库 {project_cols[0]} 可能暂无索引：先 kb_query 项目 collection；"
+                    "若 count=0 或无相关内容，必须继续检索公共知识库集合并调用 tavily_search 联网补充，"
+                    "勿因项目库为空而拒绝回答。",
+                    "公共检索结果与互联网来源仅作补充，与项目/真源冲突时以项目背景与真源集合为准。",
+                ]
+            )
 
     if candidate_skills:
         lines.append(

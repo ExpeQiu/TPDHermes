@@ -118,22 +118,46 @@ def normalize_output_title(file_name: str) -> str:
     return title
 
 
+def _title_stem(title: str | None) -> str:
+    """比较用 stem：忽略大小写与 .md / .markdown 后缀。"""
+    t = (title or "").strip().lower()
+    if t.endswith(".markdown"):
+        return t[:-9].strip()
+    if t.endswith(".md"):
+        return t[:-3].strip()
+    return t
+
+
 async def find_active_output_by_title(
     db: AsyncSession,
     project_id: str,
     file_name: str,
 ) -> OutputAsset | None:
     title = normalize_output_title(file_name)
+    stem = _title_stem(title)
     q = await db.execute(
         select(OutputAsset)
         .where(
             OutputAsset.project_id == project_id,
             OutputAsset.status != "archived",
-            OutputAsset.title == title,
         )
         .order_by(OutputAsset.updated_at.desc())
     )
-    return q.scalars().first()
+    rows = q.scalars().all()
+    for row in rows:
+        if (row.title or "").strip() == title:
+            return row
+    for row in rows:
+        if _title_stem(row.title) == stem:
+            logger.info(
+                "[file-actions] title stem match project_id=%s requested=%s matched=%s output_id=%s",
+                project_id,
+                title,
+                row.title,
+                row.id,
+            )
+            return row
+    return None
 
 
 def _build_output_row(
@@ -273,6 +297,8 @@ async def apply_file_action(
         title = normalize_output_title(str(action.get("file_name") or action.get("fileName") or "新文件.md"))
         existing = await find_active_output_by_title(db, project_id, title)
         if existing:
+            if (existing.title or "").strip() != title:
+                existing.title = title
             logger.info(
                 "[file-actions] create upsert project_id=%s title=%s output_id=%s proposal_id=%s",
                 project_id,

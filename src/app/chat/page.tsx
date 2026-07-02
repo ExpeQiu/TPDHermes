@@ -41,6 +41,7 @@ import {
   ChatTaskBoundaryModel,
   ChatTaskBoundaryPanel,
 } from "@/app/chat/components/chat-task-boundary-panel";
+import { ConfirmDialog } from "@/components/confirm-dialog";
 import { useChatExecution } from "@/app/chat/hooks/use-chat-execution";
 import {
   sessionToPatchPayload,
@@ -76,6 +77,7 @@ function projectChatSessionDefaults(projectId: string): Partial<ChatSession> {
     includeProjectContext: true,
     includeFileContext: false,
     chatMode: "co_create",
+    sessionKind: "chat",
     title: "对话创作",
   };
 }
@@ -134,6 +136,10 @@ function ChatPageInner() {
   const [error, setError] = useState("");
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [boundaryPanelOpen, setBoundaryPanelOpen] = useState(true);
+  const [pendingDeleteSession, setPendingDeleteSession] = useState<{
+    id: string;
+    title: string;
+  } | null>(null);
   const [projects, setProjects] = useState<ProjectRecord[]>([]);
   const [collections, setCollections] = useState<string[]>([]);
   const [skills, setSkills] = useState<string[]>([]);
@@ -611,6 +617,13 @@ function ChatPageInner() {
       rewriteTargetSection,
       rewriteSourceExcerpt,
       rewriteGoal,
+      // /chat 页管理的会话不应被误判为 project_co_create（勾选「携带文件」时）
+      sessionKind:
+        session.scenarioPresetInstructions ||
+        session.quickCreateOverrides ||
+        session.taskEntrySummary
+          ? "scenario"
+          : "chat",
     }));
     const updatedSession = sessionsRef.current.find((item) => item.id === activeSession.id);
     if (updatedSession) queueSessionPatch(activeSession.id, sessionToPatchPayload(updatedSession));
@@ -828,6 +841,7 @@ function ChatPageInner() {
   };
 
   return (
+    <>
     <div className="flex min-h-0 flex-1 overflow-hidden bg-slate-100 text-slate-900 dark:bg-slate-900 dark:text-white">
       <aside
         className={`${
@@ -860,7 +874,9 @@ function ChatPageInner() {
               暂无对话记录，点击「+ 新对话」开始。
             </p>
           ) : null}
-          {sidebarSessions.map((session) => (
+          {sidebarSessions.map((session) => {
+            const sessionTitle = titleFromSession(session);
+            return (
             <div
               key={session.id}
               onClick={() => handleHistorySessionClick(session)}
@@ -872,31 +888,26 @@ function ChatPageInner() {
             >
               {sessionListIcon(session)}
               <div className="min-w-0 flex-1">
-                <span className="block truncate text-sm">{titleFromSession(session)}</span>
+                <span className="block truncate text-sm">{sessionTitle}</span>
                 <span className="block truncate text-[10px] text-slate-500">
                   {sessionProjectIdentifier(session, projects)}
                 </span>
               </div>
               <button
+                type="button"
+                title="删除"
                 onClick={(e) => {
                   e.stopPropagation();
-                  const sessionTitle = titleFromSession(session);
-                  if (
-                    !confirm(
-                      `确定删除对话「${sessionTitle}」？删除后无法恢复。`,
-                    )
-                  ) {
-                    return;
-                  }
-                  deleteSession(session.id);
+                  setPendingDeleteSession({ id: session.id, title: sessionTitle });
                 }}
                 className="text-xs text-slate-500 opacity-0 transition group-hover:opacity-100 hover:text-red-400"
-                aria-label={`删除对话：${titleFromSession(session)}`}
+                aria-label={`删除对话：${sessionTitle}`}
               >
                 ✕
               </button>
             </div>
-          ))}
+            );
+          })}
         </div>
       </aside>
 
@@ -1057,5 +1068,22 @@ function ChatPageInner() {
         </aside>
       </div>
     </div>
+    <ConfirmDialog
+      open={pendingDeleteSession !== null}
+      title="删除对话"
+      description={
+        pendingDeleteSession
+          ? `确定删除「${pendingDeleteSession.title}」？\n对话记录将被永久删除，无法恢复。`
+          : ""
+      }
+      confirmLabel="删除"
+      destructive
+      onCancel={() => setPendingDeleteSession(null)}
+      onConfirm={() => {
+        if (pendingDeleteSession) deleteSession(pendingDeleteSession.id);
+        setPendingDeleteSession(null);
+      }}
+    />
+    </>
   );
 }

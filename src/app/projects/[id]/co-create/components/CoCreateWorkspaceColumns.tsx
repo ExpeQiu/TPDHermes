@@ -10,6 +10,7 @@ import {
 } from "@/app/projects/[id]/co-create/hooks/use-co-create-column-widths";
 
 type Props = CoCreatePanelVisibility & {
+  previewMaximized?: boolean;
   session: ReactNode;
   message: ReactNode;
   preview: ReactNode;
@@ -19,6 +20,7 @@ type Props = CoCreatePanelVisibility & {
 export function CoCreateWorkspaceColumns({
   sidebarOpen,
   filesPanelOpen,
+  previewMaximized = false,
   session,
   message,
   preview,
@@ -38,6 +40,22 @@ export function CoCreateWorkspaceColumns({
       persistWidths();
     },
   });
+
+  if (previewMaximized) {
+    return (
+      <div ref={containerRef} className="flex min-h-0 flex-1 overflow-hidden">
+        <div className="relative min-h-0 min-w-0 flex-1">
+          <div className="h-full overflow-hidden">{preview}</div>
+        </div>
+        {filesPanelOpen ? (
+          <div className="relative min-h-0 shrink-0" style={{ width: filesWidth }}>
+            <ColumnResizeHandle {...bindResize("preview", "files")} />
+            <div className="h-full overflow-hidden">{files}</div>
+          </div>
+        ) : null}
+      </div>
+    );
+  }
 
   return (
     <div ref={containerRef} className="flex min-h-0 flex-1 overflow-hidden">

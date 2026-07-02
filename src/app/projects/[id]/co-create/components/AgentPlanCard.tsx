@@ -5,9 +5,18 @@ import type { AgentPlan, AgentPlanStep } from "@/app/projects/[id]/co-create/co-
 type Props = {
   plan: AgentPlan;
   compact?: boolean;
+  awaitingConfirm?: boolean;
+  onConfirm?: () => void;
+  confirmDisabled?: boolean;
 };
 
-export function AgentPlanCard({ plan, compact }: Props) {
+export function AgentPlanCard({
+  plan,
+  compact,
+  awaitingConfirm,
+  onConfirm,
+  confirmDisabled,
+}: Props) {
   if (!plan.steps.length) return null;
 
   const doneCount = plan.steps.filter((s) => s.status === "done").length;
@@ -27,6 +36,23 @@ export function AgentPlanCard({ plan, compact }: Props) {
           <PlanStepRow key={step.id} step={step} />
         ))}
       </ol>
+      {awaitingConfirm ? (
+        <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-violet-200/80 pt-2.5 dark:border-violet-800/50">
+          <p className="text-[11px] text-violet-700/90 dark:text-violet-200/80">
+            确认计划后将按步骤调用 Skill 并产出文件
+          </p>
+          {onConfirm ? (
+            <button
+              type="button"
+              disabled={confirmDisabled}
+              onClick={onConfirm}
+              className="rounded-md border border-violet-400 bg-violet-600 px-2.5 py-1 text-[11px] font-medium text-white transition hover:bg-violet-500 disabled:opacity-50 dark:border-violet-600 dark:bg-violet-700 dark:hover:bg-violet-600"
+            >
+              开始执行
+            </button>
+          ) : null}
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -46,8 +72,15 @@ function PlanStepRow({ step }: { step: AgentPlanStep }) {
       <span className={`shrink-0 font-mono ${statusClass}`} aria-hidden>
         {statusIcon}
       </span>
-      <div className="min-w-0">
-        <p className="font-medium text-violet-900 dark:text-violet-100">{step.title}</p>
+      <div className="min-w-0 flex-1">
+        <div className="flex flex-wrap items-center gap-1.5">
+          <p className="font-medium text-violet-900 dark:text-violet-100">{step.title}</p>
+          {step.skill ? (
+            <span className="rounded border border-violet-300/70 bg-white/70 px-1 py-0.5 font-mono text-[10px] text-violet-700 dark:border-violet-700 dark:bg-violet-950/50 dark:text-violet-200">
+              {step.skill}
+            </span>
+          ) : null}
+        </div>
         {step.detail ? (
           <p className="mt-0.5 text-violet-700/80 dark:text-violet-200/70">{step.detail}</p>
         ) : null}

@@ -2,6 +2,10 @@
 
 import type { Message } from "@/app/chat/chat-types";
 import { stripFileActionsBlock } from "@/app/projects/[id]/co-create/co-create-file-actions";
+import {
+  buildExistingOutputNamesHint,
+  resolveUniqueOutputFileName,
+} from "@/app/projects/[id]/co-create/co-create-output-naming";
 import { unwrapSkillAssistantMarkdown } from "@/lib/skill-output";
 
 const SINGLE_MARKDOWN_BLOCK_RE = /^```(?:markdown|md|mdx)?\s*\n([\s\S]*?)\n```$/i;
@@ -195,51 +199,64 @@ export function isDocumentGenerationPrompt(prompt: string): boolean {
 export function buildQuickStartOutputSyncInstructions(
   entryTitle: string,
   prompt: string,
+  existingTitles: readonly string[] = [],
 ): string {
   const title = entryTitle.trim();
-  if (!title) return buildDocumentSyncInstructions(prompt);
-  const fileName = inferQuickCreateOutputFileName(title, prompt, "");
+  if (!title) return buildDocumentSyncInstructions(prompt, existingTitles);
+  const fileName = inferQuickCreateOutputFileName(title, prompt, "", existingTitles);
   const quickHint = [
     "【快捷创作标准输出】本轮为场景快捷创作，须产出可沉淀至项目文件库的标准输出物。",
     `优先保存为 /输出/${fileName}（与场景「${title}」对应）。`,
     "正文须完整写在回复中；末尾附加 ```tphermes_file_actions``` create 动作，",
     "create 的 path 必须为 `/输出/{fileName}`，禁止使用本机绝对路径。",
   ].join(" ");
-  const docSync = buildDocumentSyncInstructions(prompt);
+  const docSync = buildDocumentSyncInstructions(prompt, existingTitles);
   return [docSync, quickHint].filter(Boolean).join("\n\n");
 }
 
-export function buildDocumentSyncInstructions(prompt: string): string {
+export function buildDocumentSyncInstructions(
+  prompt: string,
+  existingTitles: readonly string[] = [],
+): string {
   if (!isDocumentGenerationPrompt(prompt)) return "";
+  const namingHint = buildExistingOutputNamesHint(existingTitles);
   return [
     "【文稿同步】用户本轮要求生成完整文稿（演讲稿、发布会稿、新闻稿、方案、报告等）。",
     "正文须先完整写在回复正文中；末尾附加 ```tphermes_file_actions``` 的 create 动作。",
     "create 的 path 必须为 `/输出/{fileName}`（项目虚拟路径），禁止使用 /Users、/home 或本机绝对路径。",
     "若 JSON 的 content 字段过长易截断，可仅写 fileName+path，content 与正文一致且须为合法 JSON 字符串；",
     "勿等用户再次要求「整理成文档」。",
-  ].join(" ");
+    namingHint,
+  ]
+    .filter(Boolean)
+    .join(" ");
 }
 
 export function inferQuickCreateOutputFileName(
   entryTitle: string,
   prompt: string,
   content: string,
+  existingTitles: readonly string[] = [],
 ): string {
   const fromEntry = sanitizeDraftFileName(entryTitle.trim());
   if (fromEntry && fromEntry !== "自动创建文稿") {
-    return /\.md$/i.test(fromEntry) ? fromEntry : `${fromEntry}.md`;
+    return resolveUniqueOutputFileName(fromEntry, existingTitles);
   }
-  return inferAutoCreateDraftFileName(prompt, content);
+  return inferAutoCreateDraftFileName(prompt, content, existingTitles);
 }
 
-export function inferAutoCreateDraftFileName(prompt: string, content: string): string {
+export function inferAutoCreateDraftFileName(
+  prompt: string,
+  content: string,
+  existingTitles: readonly string[] = [],
+): string {
   const normalizedContent = extractAutoCreateDraftBody(content);
   const heading = normalizedContent.match(MARKDOWN_TITLE_RE)?.[1]?.trim();
   const plainTitle = normalizedContent.match(PLAIN_DOC_TITLE_RE)?.[1]?.trim();
   const title = sanitizeDraftFileName(
     heading || plainTitle || inferDraftTitleFromPrompt(prompt) || "自动创建文稿",
   );
-  return /\.md$/i.test(title) ? title : `${title}.md`;
+  return resolveUniqueOutputFileName(title, existingTitles);
 }
 
 export function shouldAutoCreateDraftFromAssistant(

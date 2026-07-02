@@ -14,7 +14,11 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.services.knowledge_policy import resolve_effective_knowledge_policy
-from backend.services.project_kb import merge_project_kb_collections
+from backend.services.project_kb import (
+    count_project_kb_indexed,
+    merge_chat_kb_fallback_collections,
+    merge_project_kb_collections,
+)
 from backend.models.project import Project
 from backend.models.project_config import ProjectConfig
 from backend.models.project_scenario import ProjectScenario
@@ -549,6 +553,22 @@ async def assemble_payload(
     if project_row and str(project_row.id).strip() and str(project_row.id) != "none":
         merged_cols = merge_project_kb_collections(knowledge.collections, project_row.id)
         knowledge = knowledge.model_copy(update={"collections": merged_cols})
+        # /chat 携带项目但项目 KB 无索引：补充公共知识库，允许联网检索
+        if entrypoint == "chat" and request.chat_mode != "doc_optimize":
+            indexed = await count_project_kb_indexed(db, project_row.id)
+            if indexed == 0:
+                fallback_cols = merge_chat_kb_fallback_collections(knowledge.collections)
+                knowledge = knowledge.model_copy(
+                    update={
+                        "collections": fallback_cols,
+                        "project_bound": False,
+                    }
+                )
+                logger.info(
+                    "chat project kb empty, enabled public fallback project=%s collections=%s",
+                    str(project_row.id)[:24],
+                    len(fallback_cols),
+                )
 
     # 对话场景改为用户手动「存入项目」，不在编排完成时自动落 outputs
     save_output = entrypoint != "chat"

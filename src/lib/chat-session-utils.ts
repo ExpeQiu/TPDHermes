@@ -89,22 +89,15 @@ export function projectCoCreateSessionDefaults(projectId: string): Partial<ChatS
     coCreatePipelinePreference: "auto",
     coCreateAgentMode: "agent",
     coCreateApplyMode: "auto",
+    coCreatePlanPhase: "idle",
   };
 }
 
-/** 项目共创会话 */
+/** 项目共创会话（仅 /projects/[id]/co-create 入口，勿用 includeFileContext 推断） */
 export function isProjectCoCreateSession(
-  session: Pick<
-    ChatSession,
-    "sessionKind" | "chatMode" | "includeFileContext" | "selectedProjectId"
-  >,
+  session: Pick<ChatSession, "sessionKind">,
 ): boolean {
-  if (session.sessionKind === "project_co_create") return true;
-  return (
-    session.chatMode === "co_create" &&
-    Boolean(session.includeFileContext) &&
-    Boolean(session.selectedProjectId?.trim())
-  );
+  return session.sessionKind === "project_co_create";
 }
 
 export function getSessionHistoryCategory(session: ChatSession): SessionHistoryCategory {
