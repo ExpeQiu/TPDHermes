@@ -53,4 +53,22 @@ describe("parseTpHermesStreamMeta", () => {
       },
     ]);
   });
+
+  it("maps empty_content and stream_error from tphermes_task meta", () => {
+    const meta = parseTpHermesStreamMeta(
+      JSON.stringify({
+        tphermes_task: {
+          run_id: "run-empty",
+          status: "failed",
+          empty_content: true,
+          stream_error: "Agent 未返回可见正文",
+        },
+      }),
+    );
+
+    expect(meta?.runId).toBe("run-empty");
+    expect(meta?.emptyContent).toBe(true);
+    expect(meta?.streamError).toBe("Agent 未返回可见正文");
+    expect(meta?.runStatus).toBe("failed");
+  });
 });

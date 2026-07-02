@@ -35,6 +35,9 @@ export function buildStreamingWaitHint(options: StreamingWaitHintOptions): strin
   if (options.phase === "agent_waiting_first_token") {
     return "Agent 已开始生成，正在等待首批输出";
   }
+  if (options.phase === "agent_cold_start") {
+    return "Agent 正在初始化（冷启动），请稍候…";
+  }
   if (options.phase === "agent_streaming") {
     return "Agent 正在持续生成内容";
   }

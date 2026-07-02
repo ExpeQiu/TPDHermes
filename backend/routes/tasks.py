@@ -66,7 +66,25 @@ from backend.services.user_identity import effective_user_id_for_api, viewer_rol
 
 logger = logging.getLogger("tpdx.hermes")
 
+_EMPTY_ASSISTANT_CONTENT_ERROR = (
+    "Agent 未返回可见正文（可能为 Hermes 冷启动或 SSE 提前断开）。"
+    "请重试；若持续失败请检查 hermes-agent 日志。"
+)
+
 router = APIRouter(prefix="/tasks", tags=["tasks"])
+
+
+def _resolve_run_status_and_error(
+    assistant_content: str,
+    *,
+    must_follow_template: bool,
+    validation_ok: bool,
+) -> tuple[str, str | None]:
+    if not (assistant_content or "").strip():
+        return "failed", _EMPTY_ASSISTANT_CONTENT_ERROR
+    if must_follow_template and not validation_ok:
+        return "draft", None
+    return "completed", None
 runs_router = APIRouter(prefix="/runs", tags=["runs"])
 
 
@@ -900,10 +918,11 @@ async def execute_task(req: Request, task_req: TaskExecuteRequest, db: AsyncSess
     kb_prefetch_timeout_sec = _env_float("KB_PREFETCH_TIMEOUT_SEC", 12.0, min_value=1.0, max_value=120.0)
     upstream_heartbeat_sec = _env_float(
         "CHAT_STREAM_HEARTBEAT_SEC",
-        12.0,
+        30.0,
         min_value=3.0,
-        max_value=60.0,
+        max_value=120.0,
     )
+    agent_cold_start_ms = _env_int("CHAT_AGENT_COLD_START_MS", 8000, min_value=1000, max_value=120_000)
 
     async def _prefetch_kb_for_chat(progress_cb=None) -> tuple[str, int]:
         if (
@@ -1009,10 +1028,12 @@ async def execute_task(req: Request, task_req: TaskExecuteRequest, db: AsyncSess
             payload.output.required_sections,
             must_have_headings=_must_have_headings(payload),
         )
-        if payload.output.must_follow_template and not validation.get("ok"):
-            status = "draft"
-        else:
-            status = "completed"
+        validation_ok = bool(validation.get("ok", True))
+        status, stream_error = _resolve_run_status_and_error(
+            text,
+            must_follow_template=payload.output.must_follow_template,
+            validation_ok=validation_ok,
+        )
 
         async with async_session_maker() as db2:
             _, output_id = await finalize_run(
@@ -1027,7 +1048,7 @@ async def execute_task(req: Request, task_req: TaskExecuteRequest, db: AsyncSess
                     tool_capture_hit=capture_hit,
                 ),
                 validation=validation,
-                error_message=None,
+                error_message=stream_error,
                 duration_ms=duration_ms,
                 project_id=payload.project.id,
                 scenario_id=payload.scenario.id,
@@ -1176,12 +1197,16 @@ async def execute_task(req: Request, task_req: TaskExecuteRequest, db: AsyncSess
                             break
                         except TimeoutError:
                             waiting_ms = int((time.perf_counter() - last_chunk_at) * 1000)
+                            if not first_chunk_seen and waiting_ms >= agent_cold_start_ms:
+                                phase = "agent_cold_start"
+                            elif not first_chunk_seen:
+                                phase = "agent_waiting_first_token"
+                            else:
+                                phase = "agent_streaming"
                             yield sse_meta_event(
                                 {
                                     "tphermes_task": {
-                                        "phase": "agent_waiting_first_token"
-                                        if not first_chunk_seen
-                                        else "agent_streaming",
+                                        "phase": phase,
                                         "run_id": run_id,
                                         "waiting_ms": waiting_ms,
                                     }
@@ -1306,9 +1331,18 @@ async def execute_task(req: Request, task_req: TaskExecuteRequest, db: AsyncSess
         elif sources_payload.get("sources"):
             validation = {**validation, "citations_ok": True}
 
-        status = "completed"
-        if payload.output.must_follow_template and not validation.get("ok"):
-            status = "draft"
+        validation_ok = bool(validation.get("ok", True))
+        status, stream_error = _resolve_run_status_and_error(
+            finalize_text,
+            must_follow_template=payload.output.must_follow_template,
+            validation_ok=validation_ok,
+        )
+        if stream_error:
+            logger.warning(
+                "chat stream empty assistant_content run_id=%s duration_ms=%s",
+                run_id,
+                duration_ms,
+            )
 
         citations_json_str = (
             json.dumps(sources_payload, ensure_ascii=False)
@@ -1332,7 +1366,7 @@ async def execute_task(req: Request, task_req: TaskExecuteRequest, db: AsyncSess
                         citations_meta=sources_payload,
                     ),
                     validation=validation,
-                    error_message=None,
+                    error_message=stream_error,
                     duration_ms=duration_ms,
                     project_id=payload.project.id,
                     scenario_id=payload.scenario.id,
@@ -1350,9 +1384,13 @@ async def execute_task(req: Request, task_req: TaskExecuteRequest, db: AsyncSess
                 "run_id": run_id,
                 "output_id": output_id,
                 "validation": validation,
+                "status": status,
             },
             "tphermes_sources": sources_payload,
         }
+        if stream_error:
+            meta["tphermes_task"]["empty_content"] = True
+            meta["tphermes_task"]["stream_error"] = stream_error
         from backend.services.file_action_service import parse_file_actions_from_content
 
         parsed_actions = parse_file_actions_from_content(finalize_text)

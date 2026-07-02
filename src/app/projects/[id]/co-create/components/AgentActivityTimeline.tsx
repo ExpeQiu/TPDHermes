@@ -12,6 +12,7 @@ const PHASE_LABELS: Record<string, string> = {
   kb_prefetch_timeout: "知识库预检索超时",
   agent_generating: "Agent 生成中",
   agent_waiting_first_token: "等待首 token",
+  agent_cold_start: "Agent 冷启动",
   agent_streaming: "流式输出中",
 };
 

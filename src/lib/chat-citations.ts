@@ -91,10 +91,14 @@ export interface TpHermesStreamMeta {
   validation?: unknown;
   citations?: CitationSource[];
   unresolvedCitationRefs?: number[];
-  /** 编排流式阶段：kb_prefetch | agent_generating */
+  /** 编排流式阶段：kb_prefetch | agent_generating | agent_cold_start 等 */
   phase?: string;
   kbPrefetchCount?: number;
   lightweight?: boolean;
+  /** backend 标记本轮无可见正文 */
+  emptyContent?: boolean;
+  streamError?: string;
+  runStatus?: string;
   fileActions?: Array<Record<string, unknown>>;
   toolEvents?: AssistantToolEvent[];
 }
@@ -213,6 +217,9 @@ export function parseTpHermesStreamMeta(data: string): TpHermesStreamMeta | null
       typeof task?.run_id === "string" ||
       typeof task?.output_id === "string" ||
       task?.validation !== undefined ||
+      task?.empty_content === true ||
+      typeof task?.stream_error === "string" ||
+      typeof task?.status === "string" ||
       Array.isArray(task?.file_actions) ||
       Array.isArray(task?.tool_events);
     if (!hasTaskPayload && mapped.citations.length === 0 && mapped.unresolvedCitationRefs.length === 0) {
@@ -239,6 +246,9 @@ export function parseTpHermesStreamMeta(data: string): TpHermesStreamMeta | null
             .map(mapToolEventRow)
             .filter((row): row is AssistantToolEvent => row !== null)
         : undefined,
+      emptyContent: task?.empty_content === true ? true : undefined,
+      streamError: typeof task?.stream_error === "string" ? task.stream_error : undefined,
+      runStatus: typeof task?.status === "string" ? task.status : undefined,
     };
   } catch {
     return null;

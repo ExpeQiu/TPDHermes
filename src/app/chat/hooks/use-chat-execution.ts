@@ -250,6 +250,9 @@ function applyStreamMetaToAssistantMessage(
 const CHAT_CONTINUE_USER =
   "请接着上文直接输出后续内容，不要重复已经给出的段落。若已全部写完则只回复「（已结束）」三字。";
 const CHAT_MAX_CONTINUE_ROUNDS = 12;
+const CHAT_EMPTY_CONTENT_FALLBACK =
+  "（本轮未生成可见正文。Agent 可能仍在检索或仅执行了工具；请稍后重试，或检查 Hermes 上游是否正常。）";
+const CHAT_MAX_EMPTY_CONTENT_RETRIES = 1;
 
 function messagesToApiPayload(messages: Message[]): { role: string; content: string }[] {
   return messages
@@ -502,145 +505,184 @@ export function useChatExecution(options: UseChatExecutionOptions) {
           if (projectFileIds?.length) body.project_file_ids = projectFileIds;
           if (pinnedFileIdsForExecute?.length) body.pinned_file_ids = pinnedFileIdsForExecute;
 
-          const res = await fetch(tasksExecuteUrl, {
-            method: "POST",
-            headers,
-            body: JSON.stringify(body),
-            signal: controller.signal,
-          });
-          if (!res.ok) {
-            const errText = await res.text().catch(() => "");
-            throw new Error(`HTTP ${res.status}: ${errText || res.statusText}`);
-          }
-          const reader = res.body?.getReader();
-          if (!reader) throw new Error("响应流不可用");
-          const decoder = new TextDecoder();
-          let buffer = "";
+          let streamMarkedEmpty = false;
+          for (
+            let emptyRetry = 0;
+            emptyRetry <= CHAT_MAX_EMPTY_CONTENT_RETRIES;
+            emptyRetry += 1
+          ) {
+            if (controller.signal.aborted) break;
+            if (emptyRetry > 0) {
+              console.info("[chat] 空正文自动重试", {
+                sessionId,
+                attempt: emptyRetry,
+              });
+              setStreamingPhase("agent_cold_start");
+              fullContent = "";
+              streamMarkedEmpty = false;
+              firstTokenCaptured = false;
+              updateSession(sessionId, (session) => ({
+                ...session,
+                messages: session.messages.map((message) =>
+                  message.id === assistantId ? { ...message, content: "" } : message,
+                ),
+              }));
+            }
 
-          while (!controller.signal.aborted) {
-            const { done, value } = await reader.read();
-            if (done) break;
-            buffer += decoder.decode(value, { stream: true });
-            const extracted = extractSseBlocks(buffer);
-            buffer = extracted.rest;
+            const res = await fetch(tasksExecuteUrl, {
+              method: "POST",
+              headers,
+              body: JSON.stringify(body),
+              signal: controller.signal,
+            });
+            if (!res.ok) {
+              const errText = await res.text().catch(() => "");
+              throw new Error(`HTTP ${res.status}: ${errText || res.statusText}`);
+            }
+            const reader = res.body?.getReader();
+            if (!reader) throw new Error("响应流不可用");
+            const decoder = new TextDecoder();
+            let buffer = "";
 
-            for (const block of extracted.blocks) {
-              const parsedBlock = parseSseBlock(block);
-              if (!parsedBlock) continue;
-              if (parsedBlock.event === "hermes.tool.progress") {
+            while (!controller.signal.aborted) {
+              const { done, value } = await reader.read();
+              if (done) break;
+              buffer += decoder.decode(value, { stream: true });
+              const extracted = extractSseBlocks(buffer);
+              buffer = extracted.rest;
+
+              for (const block of extracted.blocks) {
+                const parsedBlock = parseSseBlock(block);
+                if (!parsedBlock) continue;
+                if (parsedBlock.event === "hermes.tool.progress") {
+                  const toolEvent = parseHermesToolProgressEvent(parsedBlock.data);
+                  if (toolEvent) applyToolEvent(toolEvent);
+                  continue;
+                }
+                const { data } = parsedBlock;
+                const meta = parseTpHermesStreamMeta(data);
+                if (meta?.phase) setStreamingPhase(meta.phase);
+                if (meta?.emptyContent) streamMarkedEmpty = true;
+                if (
+                  meta?.runId ||
+                  meta?.phase ||
+                  meta?.emptyContent ||
+                  meta?.citations?.length ||
+                  meta?.unresolvedCitationRefs?.length ||
+                  meta?.toolEvents?.length
+                ) {
+                  updateSession(sessionId, (session) => ({
+                    ...session,
+                    linkedOutputIds:
+                      meta.outputId != null
+                        ? [...new Set([...(session.linkedOutputIds ?? []), meta.outputId])]
+                        : session.linkedOutputIds,
+                    linkedRunIds: meta.runId
+                      ? [...new Set([...(session.linkedRunIds ?? []), meta.runId])]
+                      : session.linkedRunIds,
+                    messages: session.messages.map((message) =>
+                      message.id === assistantId
+                        ? {
+                            ...applyStreamMetaToAssistantMessage(message, meta),
+                            content: fullContent || message.content,
+                          }
+                        : message,
+                    ),
+                  }));
+                  const updatedSession = sessionsRef.current.find((session) => session.id === sessionId);
+                  const updatedAssistant = updatedSession?.messages.find(
+                    (message) => message.id === assistantId,
+                  );
+                  if (updatedSession) queueSessionPatch(sessionId, sessionToPatchPayload(updatedSession), 0);
+                  if (updatedAssistant) queueMessageSync(sessionId, [updatedAssistant], [], 0);
+                }
+                if (meta?.fileActions?.length) {
+                  onFileActionsFromStream?.(sessionId, assistantId, meta.fileActions);
+                }
+                const part = parseSSEDataPayload(data);
+                if (part.errorText) throw new Error(part.errorText);
+                if (part.content) {
+                  markFirstToken();
+                  fullContent += part.content;
+                  updateSession(sessionId, (session) => ({
+                    ...session,
+                    messages: session.messages.map((message) =>
+                      message.id === assistantId ? { ...message, content: fullContent } : message,
+                    ),
+                  }));
+                  const updatedAssistant = sessionsRef.current
+                    .find((session) => session.id === sessionId)
+                    ?.messages.find((message) => message.id === assistantId);
+                  if (updatedAssistant) queueMessageSync(sessionId, [updatedAssistant]);
+                }
+              }
+            }
+
+            if (buffer.trim()) {
+              const parsedBlock = parseSseBlock(buffer);
+              if (parsedBlock?.event === "hermes.tool.progress") {
                 const toolEvent = parseHermesToolProgressEvent(parsedBlock.data);
                 if (toolEvent) applyToolEvent(toolEvent);
-                continue;
-              }
-              const { data } = parsedBlock;
-              const meta = parseTpHermesStreamMeta(data);
-              if (meta?.phase) setStreamingPhase(meta.phase);
-              if (
-                meta?.runId ||
-                meta?.phase ||
-                meta?.citations?.length ||
-                meta?.unresolvedCitationRefs?.length ||
-                meta?.toolEvents?.length
-              ) {
-                updateSession(sessionId, (session) => ({
-                  ...session,
-                  linkedOutputIds:
-                    meta.outputId != null
-                      ? [...new Set([...(session.linkedOutputIds ?? []), meta.outputId])]
-                      : session.linkedOutputIds,
-                  linkedRunIds: meta.runId
-                    ? [...new Set([...(session.linkedRunIds ?? []), meta.runId])]
-                    : session.linkedRunIds,
-                  messages: session.messages.map((message) =>
-                    message.id === assistantId
-                      ? {
-                          ...applyStreamMetaToAssistantMessage(message, meta),
-                          content: fullContent || message.content,
-                        }
-                      : message,
-                  ),
-                }));
-                const updatedSession = sessionsRef.current.find((session) => session.id === sessionId);
-                const updatedAssistant = updatedSession?.messages.find((message) => message.id === assistantId);
-                if (updatedSession) queueSessionPatch(sessionId, sessionToPatchPayload(updatedSession), 0);
-                if (updatedAssistant) queueMessageSync(sessionId, [updatedAssistant], [], 0);
-              }
-              if (meta?.fileActions?.length) {
-                onFileActionsFromStream?.(sessionId, assistantId, meta.fileActions);
-              }
-              const part = parseSSEDataPayload(data);
-              if (part.errorText) throw new Error(part.errorText);
-              if (part.content) {
-                markFirstToken();
-                fullContent += part.content;
-                updateSession(sessionId, (session) => ({
-                  ...session,
-                  messages: session.messages.map((message) =>
-                    message.id === assistantId ? { ...message, content: fullContent } : message,
-                  ),
-                }));
-                const updatedAssistant = sessionsRef.current
-                  .find((session) => session.id === sessionId)
-                  ?.messages.find((message) => message.id === assistantId);
-                if (updatedAssistant) queueMessageSync(sessionId, [updatedAssistant]);
+              } else if (parsedBlock) {
+                const meta = parseTpHermesStreamMeta(parsedBlock.data);
+                if (meta?.phase) setStreamingPhase(meta.phase);
+                if (meta?.emptyContent) streamMarkedEmpty = true;
+                if (
+                  meta?.runId ||
+                  meta?.phase ||
+                  meta?.emptyContent ||
+                  meta?.citations?.length ||
+                  meta?.unresolvedCitationRefs?.length ||
+                  meta?.toolEvents?.length
+                ) {
+                  updateSession(sessionId, (session) => ({
+                    ...session,
+                    linkedOutputIds:
+                      meta.outputId != null
+                        ? [...new Set([...(session.linkedOutputIds ?? []), meta.outputId])]
+                        : session.linkedOutputIds,
+                    linkedRunIds: meta.runId
+                      ? [...new Set([...(session.linkedRunIds ?? []), meta.runId])]
+                      : session.linkedRunIds,
+                    messages: session.messages.map((message) =>
+                      message.id === assistantId
+                        ? {
+                            ...applyStreamMetaToAssistantMessage(message, meta),
+                            content: fullContent || message.content,
+                          }
+                        : message,
+                    ),
+                  }));
+                  const updatedSession = sessionsRef.current.find((session) => session.id === sessionId);
+                  const updatedAssistant = updatedSession?.messages.find(
+                    (message) => message.id === assistantId,
+                  );
+                  if (updatedSession) queueSessionPatch(sessionId, sessionToPatchPayload(updatedSession), 0);
+                  if (updatedAssistant) queueMessageSync(sessionId, [updatedAssistant], [], 0);
+                }
+                if (meta?.fileActions?.length) {
+                  onFileActionsFromStream?.(sessionId, assistantId, meta.fileActions);
+                }
+                const part = parseSSEDataPayload(parsedBlock.data);
+                if (part.errorText) throw new Error(part.errorText);
+                if (part.content) {
+                  markFirstToken();
+                  fullContent += part.content;
+                }
               }
             }
-          }
 
-          if (buffer.trim()) {
-            const parsedBlock = parseSseBlock(buffer);
-            if (parsedBlock?.event === "hermes.tool.progress") {
-              const toolEvent = parseHermesToolProgressEvent(parsedBlock.data);
-              if (toolEvent) applyToolEvent(toolEvent);
-            } else if (parsedBlock) {
-              const meta = parseTpHermesStreamMeta(parsedBlock.data);
-              if (meta?.phase) setStreamingPhase(meta.phase);
-              if (
-                meta?.runId ||
-                meta?.phase ||
-                meta?.citations?.length ||
-                meta?.unresolvedCitationRefs?.length ||
-                meta?.toolEvents?.length
-              ) {
-                updateSession(sessionId, (session) => ({
-                  ...session,
-                  linkedOutputIds:
-                    meta.outputId != null
-                      ? [...new Set([...(session.linkedOutputIds ?? []), meta.outputId])]
-                      : session.linkedOutputIds,
-                  linkedRunIds: meta.runId
-                    ? [...new Set([...(session.linkedRunIds ?? []), meta.runId])]
-                    : session.linkedRunIds,
-                  messages: session.messages.map((message) =>
-                    message.id === assistantId
-                      ? {
-                          ...applyStreamMetaToAssistantMessage(message, meta),
-                          content: fullContent || message.content,
-                        }
-                      : message,
-                  ),
-                }));
-                const updatedSession = sessionsRef.current.find((session) => session.id === sessionId);
-                const updatedAssistant = updatedSession?.messages.find((message) => message.id === assistantId);
-                if (updatedSession) queueSessionPatch(sessionId, sessionToPatchPayload(updatedSession), 0);
-                if (updatedAssistant) queueMessageSync(sessionId, [updatedAssistant], [], 0);
-              }
-              if (meta?.fileActions?.length) {
-                onFileActionsFromStream?.(sessionId, assistantId, meta.fileActions);
-              }
-              const part = parseSSEDataPayload(parsedBlock.data);
-              if (part.errorText) throw new Error(part.errorText);
-              if (part.content) {
-                markFirstToken();
-                fullContent += part.content;
-              }
-            }
+            if (fullContent.trim()) break;
+            if (emptyRetry >= CHAT_MAX_EMPTY_CONTENT_RETRIES) break;
           }
 
           if (!fullContent.trim()) {
-            fullContent =
-              "（本轮未生成可见正文。Agent 可能仍在检索或仅执行了工具；请稍后重试，或检查 Hermes 上游是否正常。）";
-            console.warn("[chat] 流式结束但正文为空", { sessionId });
+            fullContent = CHAT_EMPTY_CONTENT_FALLBACK;
+            console.warn("[chat] 流式结束但正文为空", {
+              sessionId,
+              streamMarkedEmpty,
+              retries: CHAT_MAX_EMPTY_CONTENT_RETRIES,
+            });
           }
 
           updateSession(sessionId, (session) => ({

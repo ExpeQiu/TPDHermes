@@ -89,6 +89,9 @@ async def lifespan(app: FastAPI):
     else:
         logger.info("KB embedding warmup mode=background")
         asyncio.create_task(warmup_embed_model())
+    from backend.services.hermes_warmup import schedule_hermes_warmup
+
+    asyncio.create_task(schedule_hermes_warmup())
     from backend.services.growth_scheduler import growth_scheduler
     from backend.services.kb_ingest_worker import kb_ingest_worker
     from backend.services.kb_reconcile_scheduler import kb_reconcile_scheduler
