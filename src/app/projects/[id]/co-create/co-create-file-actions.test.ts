@@ -14,6 +14,7 @@ import {
   reconcileStreamPatchProposals,
   resolveCreateActionContent,
   stripFileActionsBlock,
+  countCoCreateSessionTouchedFiles,
 } from "@/app/projects/[id]/co-create/co-create-file-actions";
 
 describe("co-create-file-actions", () => {
@@ -259,5 +260,66 @@ describe("co-create-file-actions", () => {
     );
     expect(pruned.some((item) => item.proposalId === "fallback-create:assistant-1")).toBe(false);
     expect(pruned.some((item) => item.proposalId === "patch-1")).toBe(true);
+  });
+
+  it("countCoCreateSessionTouchedFiles 统计已落库文件并按文件去重", () => {
+    expect(
+      countCoCreateSessionTouchedFiles({
+        messages: [
+          {
+            id: "m1",
+            role: "assistant",
+            content: "",
+            fileActions: [
+              {
+                type: "create",
+                proposalId: "c1",
+                fileName: "a.md",
+                path: "/输出/a.md",
+                content: "x",
+                status: "applied",
+              },
+              {
+                type: "patch",
+                proposalId: "p1",
+                fileId: "out-1",
+                fileKind: "output",
+                fileName: "b.md",
+                summary: "",
+                after: "y",
+                status: "applied",
+              },
+              {
+                type: "patch",
+                proposalId: "p2",
+                fileId: "out-1",
+                fileKind: "output",
+                fileName: "b.md",
+                summary: "",
+                after: "z",
+                status: "applied",
+              },
+              {
+                type: "create",
+                proposalId: "c2",
+                fileName: "c.md",
+                path: "/输出/c.md",
+                content: "w",
+                status: "proposed",
+              },
+            ],
+          },
+        ],
+      }),
+    ).toBe(2);
+  });
+
+  it("countCoCreateSessionTouchedFiles 统计手动保存记录", () => {
+    expect(
+      countCoCreateSessionTouchedFiles({
+        messages: [],
+        touchedFileIds: ["output:out-1", "output:out-1"],
+      }),
+    ).toBe(1);
   });
 });

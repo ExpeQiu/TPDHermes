@@ -68,6 +68,10 @@ export function condenseTopicTitle(text: string, maxLen = 16): string {
 
 export function titleFromSession(session: ChatSession | undefined, fallback = "新对话"): string {
   if (!session) return fallback;
+  if (session.titleManuallySet) {
+    const manual = session.title.trim();
+    if (manual) return manual;
+  }
   const first = firstUserMessageContent(session);
   if (first) return condenseTopicTitle(first);
   if (isPlaceholderSessionTitle(session.title)) return fallback;
@@ -86,6 +90,7 @@ export function projectCoCreateSessionDefaults(projectId: string): Partial<ChatS
     roundFileIds: [],
     archived: false,
     pendingProposalIds: [],
+    touchedFileIds: [],
     coCreatePipelinePreference: "auto",
     coCreateAgentMode: "agent",
     coCreateApplyMode: "auto",
@@ -108,6 +113,19 @@ export function listProjectCoCreateSessions(
   return sessions.filter(
     (session) =>
       !session.archived &&
+      session.selectedProjectId === projectId &&
+      isProjectCoCreateSession(session),
+  );
+}
+
+/** 会话是否属于指定项目的共创工作台 */
+export function isCoCreateSessionForProject(
+  session: Pick<ChatSession, "selectedProjectId" | "sessionKind"> | null | undefined,
+  projectId: string,
+): boolean {
+  return Boolean(
+    projectId &&
+      session &&
       session.selectedProjectId === projectId &&
       isProjectCoCreateSession(session),
   );

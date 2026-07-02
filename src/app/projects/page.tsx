@@ -8,6 +8,7 @@ import { projectRoleBadgeClass, projectRoleLabel } from "@/lib/rbac";
 import { projectStatusLabel } from "@/lib/ui-labels";
 import { useEffectiveUserScopeId } from "@/lib/use-effective-user-scope-id";
 import { resolveCoCreateNavHref } from "@/lib/workflow-nav";
+import { formatDateShanghai } from "@/lib/datetime";
 
 interface Project {
   id: string;
@@ -31,13 +32,6 @@ const statusLabels: Record<Project["status"], string> = {
   completed: "已完成",
   archived: "已归档",
 };
-
-function formatDate(value: string | null | undefined) {
-  if (!value) return "未设置";
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) return value;
-  return parsed.toLocaleDateString("zh-CN");
-}
 
 export default function ProjectsPage() {
   const scopeUserId = useEffectiveUserScopeId();
@@ -195,7 +189,7 @@ export default function ProjectsPage() {
                       </p>
                       <div className="mt-4 flex flex-wrap gap-2 text-xs text-slate-500">
                         <span className="rounded-full border border-slate-300 dark:border-slate-700 px-2.5 py-1">
-                          截止日期：{formatDate(project.deadline)}
+                          截止日期：{formatDateShanghai(project.deadline)}
                         </span>
                       </div>
                     </div>

@@ -46,7 +46,7 @@ def _run_id_from_upstream_body(body: dict) -> str | None:
 async def test_extract_text_from_workshop_generate():
     payload = {"success": True, "content": {"skill": "a4_skill", "content": "# Title"}, "skill": "a4_skill"}
     text = extract_text_from_tool_payload("workshop_generate", payload)
-    assert "a4_skill" in text
+    assert text.startswith("# Title")
 
 
 @pytest.mark.asyncio

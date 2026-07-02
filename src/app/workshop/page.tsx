@@ -40,6 +40,7 @@ import {
   type WorkshopOutputFormat,
 } from "@/lib/workshop-output-artifact";
 import { WorkshopOutputPanel } from "@/components/workshop-output-panel";
+import { formatDateTimeShanghai } from "@/lib/datetime";
 import {
   entrypointLabel,
   fieldLabel,
@@ -119,20 +120,6 @@ type WorkshopScenarioOption = {
   name: string;
   versionLine: string;
 };
-
-function formatOutputTime(iso: string | null): string {
-  if (!iso) return "—";
-  const d = new Date(iso);
-  return Number.isNaN(d.getTime())
-    ? iso
-    : d.toLocaleString("zh-CN", {
-        year: "numeric",
-        month: "2-digit",
-        day: "2-digit",
-        hour: "2-digit",
-        minute: "2-digit",
-      });
-}
 
 export default function WorkshopPage() {
   return (
@@ -1481,7 +1468,7 @@ function WorkshopPageInner() {
                             <span className="text-sm font-medium text-slate-900 dark:text-white">
                               {o.title?.trim() || "未命名输出"}
                             </span>
-                            <span className="text-xs text-slate-500">{formatOutputTime(o.created_at)}</span>
+                            <span className="text-xs text-slate-500">{formatDateTimeShanghai(o.created_at, "—")}</span>
                           </div>
                           <div className="mt-1 flex flex-wrap gap-2 text-xs text-slate-500">
                             <span className="rounded border border-slate-300 dark:border-slate-700 px-1.5 py-0.5 text-slate-400">

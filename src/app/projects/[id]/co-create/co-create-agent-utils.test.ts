@@ -14,7 +14,8 @@ describe("co-create-agent-utils", () => {
     expect(buildAgentModeInstructions("ask")).toContain("禁止调用 write_file");
     expect(buildAgentModeInstructions("ask")).toContain("tavily_search");
     expect(buildAgentModeInstructions("ask")).toContain("公共真源库");
-    expect(buildAgentModeInstructions("agent")).toBe("");
+    expect(buildAgentModeInstructions("agent")).toContain("/附件/");
+    expect(buildAgentModeInstructions("agent")).toContain("/输出/");
   });
 
   it("buildAgentModeInstructions plan 规划阶段含 skill 与 tphermes_plan", () => {

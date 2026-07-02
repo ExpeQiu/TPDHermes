@@ -129,6 +129,12 @@ function mergeSessionWithLocal(serverSession: ChatSession, localSession?: ChatSe
       (serverSession.agentUndoStack?.length ?? 0) > 0
         ? serverSession.agentUndoStack
         : localSession.agentUndoStack,
+    touchedFileIds: [
+      ...new Set([
+        ...(localSession.touchedFileIds ?? []),
+        ...(serverSession.touchedFileIds ?? []),
+      ]),
+    ],
     // 共创 UI 偏好以本地为准，避免 hydrate 覆盖用户刚切换的 Ask/Plan 等模式
     coCreateAgentMode: localSession.coCreateAgentMode ?? serverSession.coCreateAgentMode,
     coCreateApplyMode: localSession.coCreateApplyMode ?? serverSession.coCreateApplyMode,
@@ -197,6 +203,8 @@ export function sessionToPatchPayload(session: ChatSession): Record<string, unkn
     coCreateApplyMode: session.coCreateApplyMode ?? "auto",
     coCreatePlanPhase: session.coCreatePlanPhase ?? "idle",
     agentUndoStack: session.agentUndoStack ?? [],
+    touchedFileIds: session.touchedFileIds ?? [],
+    titleManuallySet: session.titleManuallySet ?? false,
   };
 }
 
@@ -304,6 +312,8 @@ function serverSessionToClient(raw: Record<string, unknown>): ChatSession {
         ? raw.coCreatePlanPhase
         : "idle",
     agentUndoStack: parseAgentUndoStack(raw.agentUndoStack),
+    touchedFileIds: Array.isArray(raw.touchedFileIds) ? (raw.touchedFileIds as string[]) : [],
+    titleManuallySet: Boolean(raw.titleManuallySet),
   };
 }
 
@@ -513,6 +523,7 @@ export function useChatSessionStore({
         coCreatePlanPhase: defaults?.coCreatePlanPhase,
         coCreatePipelinePreference: defaults?.coCreatePipelinePreference,
         agentUndoStack: defaults?.agentUndoStack ?? [],
+        touchedFileIds: defaults?.touchedFileIds ?? [],
       };
       const next = [session, ...sessionsRef.current];
       saveAndSet(next);

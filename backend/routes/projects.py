@@ -63,7 +63,18 @@ def _safe_original_filename(name: str | None) -> str:
 def _ocr_error_detail(code: str) -> str:
     mapping = {
         "ocr_disabled": "图片 OCR 功能已关闭",
-        "ocr_upstream_not_configured": "OCR 服务未配置，请设置 HERMES_CHAT_API_URL",
+        "ocr_upstream_not_configured": "OCR 服务未配置",
+        "ocr_vision_not_configured": (
+            "图片 OCR 需配置视觉模型：请设置 OPENROUTER_API_KEY，"
+            "或 IMAGE_OCR_API_URL + IMAGE_OCR_API_KEY（勿使用 Hermes 对话网关）"
+        ),
+        "ocr_agent_gateway_not_supported": (
+            "图片 OCR 不能走 Hermes 对话网关，请配置 OPENROUTER_API_KEY 或 IMAGE_OCR_API_URL"
+        ),
+        "ocr_vision_unavailable": "视觉模型未能读取图片内容，请检查 OCR 模型配置或更换图片后重试",
+        "ocr_tesseract_not_installed": "Tesseract Python 依赖未安装（pytesseract/Pillow）",
+        "ocr_tesseract_binary_missing": "未找到 Tesseract 可执行文件，请安装 tesseract-ocr 及中文语言包",
+        "ocr_empty_text": "未从图片中识别到文字",
         "empty_image": "图片内容为空",
         "image_too_large": "图片过大，无法 OCR",
     }
@@ -73,6 +84,10 @@ def _ocr_error_detail(code: str) -> str:
         return f"OCR 服务返回错误（{code.split('_')[-1]}）"
     if code.startswith("ocr_upstream_error:"):
         return "OCR 服务不可用，请稍后重试"
+    if code.startswith("ocr_tesseract_failed:"):
+        return f"Tesseract 识别失败：{code.split(':', 1)[-1][:120]}"
+    if code.startswith("ocr_image_decode_failed:"):
+        return "图片格式无法解析，请更换图片后重试"
     return f"图片 OCR 失败：{code}"
 
 

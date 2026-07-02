@@ -1,9 +1,11 @@
 "use client";
 
+import type { ChatSession } from "@/app/chat/chat-types";
 import { isAutoCreateFallbackProposal } from "@/app/projects/[id]/co-create/co-create-auto-draft";
 import { isAutoPatchFallbackProposal } from "@/app/projects/[id]/co-create/co-create-auto-patch";
 import { resolveUniqueOutputFileName } from "@/app/projects/[id]/co-create/co-create-output-naming";
 import type { FileActionProposal } from "@/app/projects/[id]/co-create/co-create-types";
+import { decodeProjectFileSelectValue } from "@/lib/chat-context";
 
 export const CREATE_APPLY_MIN_CONTENT_LEN = 80;
 
@@ -379,4 +381,32 @@ export function reconcileStreamPatchProposals(
       applyError: status === "proposed" ? undefined : proposal.applyError,
     };
   });
+}
+
+function fileActionTargetKey(proposal: FileActionProposal): string {
+  if (proposal.type === "patch") {
+    return `${proposal.fileKind}:${proposal.fileId}`;
+  }
+  const target = createProposalTargetKey(proposal);
+  return target ? `create:${target}` : `create:${proposal.proposalId}`;
+}
+
+/** 统计共创会话中已落库产生/修改的文件数（按文件去重，不含待确认） */
+export function countCoCreateSessionTouchedFiles(
+  session: Pick<ChatSession, "messages" | "touchedFileIds">,
+): number {
+  const actions = mergeFileActionProposals(
+    ...(session.messages ?? []).map((message) => message.fileActions ?? []),
+  ).filter((proposal) => proposal.status === "applied");
+
+  const keys = new Set<string>();
+  for (const proposal of actions) {
+    keys.add(fileActionTargetKey(proposal));
+  }
+  for (const fileKey of session.touchedFileIds ?? []) {
+    const decoded = decodeProjectFileSelectValue(fileKey);
+    if (decoded) keys.add(`${decoded.kind}:${decoded.id}`);
+    else keys.add(`ref:${fileKey}`);
+  }
+  return keys.size;
 }

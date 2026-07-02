@@ -18,6 +18,7 @@ from backend.services.workshop_skill_access import (
     visible_workshop_skill_names,
     workshop_skill_accessible,
 )
+from backend.services.workshop_llm_generator import execute_workshop_skill_generate
 from backend.tools.kb_tools import kb_query
 
 
@@ -156,7 +157,7 @@ async def workshop_generate(skill_name: str, context: dict) -> dict:
         }
 
     try:
-        result = skill.generate(context)
+        result = await execute_workshop_skill_generate(skill, context)
         payload = {
             "success": True,
             "content": result,

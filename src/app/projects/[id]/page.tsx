@@ -23,7 +23,12 @@ import { trackUsage } from "@/lib/usage-tracker";
 import { useUserAccess } from "@/lib/admin-access";
 import { isSystemAdminRole } from "@/lib/user-admin";
 import ProjectMembersPanel from "@/components/projects/ProjectMembersPanel";
+import {
+  AttachmentPreviewModal,
+  type AttachmentPreviewItem,
+} from "@/components/projects/AttachmentPreviewModal";
 import { ProjectOutputContentBody } from "@/components/project-output-content";
+import { formatDateTimeShanghai } from "@/lib/datetime";
 
 interface Project {
   id: string;
@@ -220,7 +225,7 @@ function ProjectOutputCard({
               <h3 className="truncate text-sm font-medium sm:text-base" title={outputDisplayTitle(output)}>
                 {outputDisplayTitle(output)}
               </h3>
-              <span className="shrink-0 text-xs text-slate-500">{formatDate(output.created_at)}</span>
+              <span className="shrink-0 text-xs text-slate-500">{formatDateTimeShanghai(output.created_at)}</span>
             </div>
             <div className="flex flex-wrap gap-1.5">
               <span className={outputStatusBadgeClass(output.status)}>
@@ -282,7 +287,7 @@ function ProjectOutputDetailPanel({
             </h2>
             <div className="mt-1 flex flex-wrap items-center gap-2">
               <p className="text-xs text-slate-500">
-                {output.skill_name} · {formatDate(output.created_at)}
+                {output.skill_name} · {formatDateTimeShanghai(output.created_at)}
               </p>
               <span className={outputStatusBadgeClass(output.status)}>
                 {output.status === "approved" ? "✓ " : ""}
@@ -432,19 +437,6 @@ function outputStatusBadgeClass(status: string): string {
   return "rounded bg-slate-200 px-2 py-0.5 text-xs text-slate-700 dark:bg-slate-700/60 dark:text-slate-400";
 }
 
-function formatDate(value: string | null | undefined) {
-  if (!value) return "未记录";
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) return value;
-  return parsed.toLocaleString("zh-CN", {
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
-}
-
 function sanitizeAttachmentBaseName(name: string): string {
   const trimmed = name.trim() || "项目说明";
   return trimmed.replace(/[\\/:*?"<>|]/g, "_").slice(0, 120);
@@ -464,27 +456,10 @@ function attachmentUserIdPrefix(userId: string): string {
   return (userId || "default").trim().slice(0, 8) || "default";
 }
 
-function attachmentFileExtension(filename: string): string {
-  const idx = filename.lastIndexOf(".");
-  return idx > 0 ? filename.slice(idx) : "";
-}
-
 function buildPasteTextAttachmentFilename(projectName: string, userId: string): string {
   const date = attachmentDateStamp(new Date());
   const uid = attachmentUserIdPrefix(userId);
   return `${sanitizeAttachmentBaseName(projectName)}_${date}_${uid}.md`;
-}
-
-function formatAttachmentDisplayName(
-  attachment: ApiAttachmentRow,
-  projectName: string,
-  userId: string,
-): string {
-  const base = sanitizeAttachmentBaseName(projectName);
-  const date = attachmentDateStamp(attachment.created_at);
-  const uid = attachmentUserIdPrefix(userId);
-  const ext = attachmentFileExtension(attachment.original_filename);
-  return `${base}_${date}_${uid}${ext}`;
 }
 
 export default function ProjectDetailPage() {
@@ -504,6 +479,7 @@ export default function ProjectDetailPage() {
   const [attachmentUploading, setAttachmentUploading] = useState(false);
   const [attachmentOcrUploading, setAttachmentOcrUploading] = useState(false);
   const [attachmentError, setAttachmentError] = useState<string | null>(null);
+  const [previewAttachment, setPreviewAttachment] = useState<AttachmentPreviewItem | null>(null);
   const [pasteTextOpen, setPasteTextOpen] = useState(false);
   const [pasteTextContent, setPasteTextContent] = useState("");
   const [pasteTextSaving, setPasteTextSaving] = useState(false);
@@ -1048,7 +1024,7 @@ export default function ProjectDetailPage() {
               <MetricCard label="累计字数" value={totalWords.toLocaleString()} hint="输出沉淀体量" />
               <MetricCard
                 label="最新活动"
-                value={latestRun ? formatDate(latestRun.created_at) : "暂无"}
+                value={latestRun ? formatDateTimeShanghai(latestRun.created_at) : "暂无"}
                 hint={latestRun ? runStatusLabel(latestRun.status) : "等待执行"}
               />
             </div>
@@ -1231,15 +1207,19 @@ export default function ProjectDetailPage() {
                             key={a.id}
                             className="flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-slate-300 dark:border-slate-700 bg-white/90 dark:bg-slate-900/60 px-3 py-2.5 text-sm"
                           >
-                            <div className="min-w-0 flex-1">
+                            <button
+                              type="button"
+                              onClick={() => setPreviewAttachment(a)}
+                              className="min-w-0 flex-1 rounded-xl text-left transition hover:bg-slate-100/80 dark:hover:bg-slate-800/50"
+                            >
                               <p
                                 className="truncate font-semibold text-slate-900 dark:text-slate-100"
                                 title={a.original_filename}
                               >
-                                {formatAttachmentDisplayName(a, project?.name ?? "项目", scopeUserId)}
+                                {a.original_filename}
                               </p>
                               <p className="text-xs text-slate-500">
-                                {formatFileSize(a.size_bytes)} · {formatDate(a.created_at)}
+                                {formatFileSize(a.size_bytes)} · {formatDateTimeShanghai(a.created_at)}
                               </p>
                               <div className="mt-1 flex flex-wrap items-center gap-2">
                                 <span className={kbIngestBadgeClass(a.ingest_status)}>
@@ -1251,7 +1231,7 @@ export default function ProjectDetailPage() {
                                   </span>
                                 ) : null}
                               </div>
-                            </div>
+                            </button>
                             <div className="flex shrink-0 items-center gap-2">
                               {(a.ingest_status || "").toLowerCase() === "failed" ? (
                                 <button
@@ -1450,7 +1430,7 @@ export default function ProjectDetailPage() {
                       <div className="flex flex-wrap justify-between gap-2">
                         <code className="text-xs text-slate-400 break-all">{r.id}</code>
                         <span className="shrink-0 text-xs text-slate-500">
-                          {formatDate(r.created_at)}
+                          {formatDateTimeShanghai(r.created_at)}
                         </span>
                       </div>
                       <div className="mt-4 flex flex-wrap items-center gap-2 text-xs">
@@ -1486,6 +1466,13 @@ export default function ProjectDetailPage() {
                 skillName={project.name}
               />
             )}
+
+            <AttachmentPreviewModal
+              open={Boolean(previewAttachment)}
+              projectId={String(id)}
+              attachment={previewAttachment}
+              onClose={() => setPreviewAttachment(null)}
+            />
 
             {pasteTextOpen && (
               <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">

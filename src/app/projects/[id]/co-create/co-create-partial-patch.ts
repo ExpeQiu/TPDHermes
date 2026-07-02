@@ -2,6 +2,7 @@
 
 import type { MessageRegionExcerpt } from "@/app/chat/chat-types";
 import type { FileActionProposal } from "@/app/projects/[id]/co-create/co-create-types";
+import { CO_CREATE_OUTPUT_WRITE_POLICY } from "@/app/projects/[id]/co-create/co-create-file-policy";
 import { computeLineDiff, type DiffLine } from "@/lib/text-line-diff";
 
 export type PatchEditMode = "full" | "search_replace" | "line_range";
@@ -20,6 +21,7 @@ export function buildRegionAwarePatchInstructions(
     '1) editMode:"search_replace" + oldString（须与选段原文完全一致）+ newString；或',
     '2) editMode:"line_range" + startLine/endLine（与选段行号一致）+ newText。',
     "除非用户明确要求重写全文，否则不要使用 editMode:\"full\" 或仅提供整篇 after。",
+    CO_CREATE_OUTPUT_WRITE_POLICY,
     "可先用 Hermes patch(mode=replace) 在沙箱验证，再输出 tphermes_file_actions。",
   ].join(" ");
 }

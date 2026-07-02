@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { ChatSession } from "@/app/chat/chat-types";
 import {
   condenseTopicTitle,
+  isCoCreateSessionForProject,
   isProjectCoCreateSession,
   pickProjectCoCreateEntrySession,
   titleFromSession,
@@ -49,6 +50,30 @@ describe("chat-session-utils titles", () => {
 
     expect(titleFromSession(session, "新共创")).toBe("营销素材");
   });
+
+  it("手动重命名后优先展示用户标题", () => {
+    const session = {
+      id: "s2",
+      title: "我的方案讨论",
+      titleManuallySet: true,
+      messages: [
+        {
+          id: "m1",
+          role: "user" as const,
+          content: "请基于当前项目上下文，输出营销素材",
+          userPrompt: "营销素材",
+        },
+      ],
+      createdAt: 0,
+      selectedProjectId: "p1",
+      selectedCollection: "",
+      includeProjectContext: true,
+      includeKnowledgeContext: false,
+      includeSkillsContext: false,
+    } satisfies ChatSession;
+
+    expect(titleFromSession(session, "新共创")).toBe("我的方案讨论");
+  });
 });
 
 describe("isProjectCoCreateSession", () => {
@@ -67,6 +92,26 @@ describe("isProjectCoCreateSession", () => {
     };
     expect(isProjectCoCreateSession(chatWithProjectFile)).toBe(false);
     expect(inferSessionKind(chatWithProjectFile)).toBe("chat");
+  });
+});
+
+describe("isCoCreateSessionForProject", () => {
+  it("仅匹配指定项目的共创会话", () => {
+    expect(
+      isCoCreateSessionForProject(
+        { selectedProjectId: "p1", sessionKind: "project_co_create" },
+        "p1",
+      ),
+    ).toBe(true);
+    expect(
+      isCoCreateSessionForProject(
+        { selectedProjectId: "p2", sessionKind: "project_co_create" },
+        "p1",
+      ),
+    ).toBe(false);
+    expect(
+      isCoCreateSessionForProject({ selectedProjectId: "p1", sessionKind: "chat" }, "p1"),
+    ).toBe(false);
   });
 });
 

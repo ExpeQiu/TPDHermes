@@ -342,6 +342,11 @@ async def apply_file_action(
         return {"ok": True, "file_id": persisted.id, "kind": "output", "version": persisted.version}
 
     if action_type == "patch":
+        target_kind = str(
+            action.get("target_kind") or action.get("file_kind") or action.get("fileKind") or "output"
+        ).strip()
+        if target_kind == "attachment":
+            raise ValueError("上传附件不可直接修改，请创建或修改输出物（/输出/）")
         file_id = str(action.get("target_file_id") or action.get("file_id") or "").strip()
         if not file_id:
             raise ValueError("修改目标文件 ID 不能为空")

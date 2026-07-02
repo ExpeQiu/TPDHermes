@@ -1,8 +1,9 @@
 "use client";
 
-import { useState, type ReactNode } from "react";
+import { useState, type KeyboardEvent, type ReactNode } from "react";
 import type { ChatSession } from "@/app/chat/chat-types";
 import { ConfirmDialog } from "@/components/confirm-dialog";
+import { countCoCreateSessionTouchedFiles } from "@/app/projects/[id]/co-create/co-create-file-actions";
 import { isProjectCoCreateSession, titleFromSession } from "@/lib/chat-session-utils";
 
 type PendingConfirm =
@@ -35,6 +36,8 @@ export function SessionSidebar({
   onArchive,
 }: Props) {
   const [pendingConfirm, setPendingConfirm] = useState<PendingConfirm | null>(null);
+  const [renamingId, setRenamingId] = useState<string | null>(null);
+  const [renameDraft, setRenameDraft] = useState("");
 
   const filtered = sessions.filter(
     (s) =>
@@ -42,6 +45,36 @@ export function SessionSidebar({
       s.selectedProjectId === projectId &&
       isProjectCoCreateSession(s),
   );
+
+  const startRename = (sessionId: string, currentTitle: string) => {
+    setRenamingId(sessionId);
+    setRenameDraft(currentTitle);
+  };
+
+  const cancelRename = () => {
+    setRenamingId(null);
+    setRenameDraft("");
+  };
+
+  const commitRename = (sessionId: string) => {
+    const next = renameDraft.trim();
+    if (next) onRename(sessionId, next);
+    cancelRename();
+  };
+
+  const handleRenameKeyDown = (
+    event: KeyboardEvent<HTMLInputElement>,
+    sessionId: string,
+  ) => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      commitRename(sessionId);
+    }
+    if (event.key === "Escape") {
+      event.preventDefault();
+      cancelRename();
+    }
+  };
 
   return (
     <>
@@ -73,13 +106,14 @@ export function SessionSidebar({
         ) : null}
         {filtered.map((session) => {
           const sessionTitle = titleFromSession(session, "新共创");
-          const fileCount =
-            new Set([...(session.roundFileIds ?? []), ...(session.pinnedFileIds ?? [])]).size;
-          const pending = (session.pendingProposalIds ?? []).length;
+          const fileCount = countCoCreateSessionTouchedFiles(session);
+          const isRenaming = renamingId === session.id;
           return (
             <div
               key={session.id}
-              onClick={() => onSelect(session.id)}
+              onClick={() => {
+                if (!isRenaming) onSelect(session.id);
+              }}
               className={`group cursor-pointer border-b border-slate-300 px-4 py-3 transition dark:border-slate-700/50 ${
                 session.id === activeId
                   ? "bg-slate-300/70 dark:bg-slate-700/70"
@@ -87,22 +121,36 @@ export function SessionSidebar({
               }`}
             >
               <div className="flex items-start gap-2">
-                <span className="text-xs">📁</span>
+                <span className="text-xs leading-5" aria-hidden>
+                  👥
+                </span>
                 <div className="min-w-0 flex-1">
-                  <span className="block truncate text-sm">{sessionTitle}</span>
+                  {isRenaming ? (
+                    <input
+                      type="text"
+                      value={renameDraft}
+                      onChange={(e) => setRenameDraft(e.target.value)}
+                      onKeyDown={(e) => handleRenameKeyDown(e, session.id)}
+                      onBlur={() => commitRename(session.id)}
+                      onClick={(e) => e.stopPropagation()}
+                      className="w-full rounded border border-blue-300 bg-white px-2 py-0.5 text-sm text-slate-900 outline-none ring-0 focus:border-blue-500 dark:border-blue-500/50 dark:bg-slate-900 dark:text-slate-100"
+                      autoFocus
+                    />
+                  ) : (
+                    <span className="block truncate text-sm">{sessionTitle}</span>
+                  )}
                   <div className="mt-0.5 flex items-center justify-between gap-1">
                     <span className="truncate text-[10px] text-slate-500">
                       文件 {fileCount} 个
-                      {pending > 0 ? ` · 待确认 ${pending}` : ""}
                     </span>
                     <div className="flex shrink-0 items-center gap-0.5 opacity-0 transition group-hover:opacity-100">
                       <button
                         type="button"
                         title="重命名"
+                        aria-label={`重命名会话：${sessionTitle}`}
                         onClick={(e) => {
                           e.stopPropagation();
-                          const next = window.prompt("会话标题", session.title);
-                          if (next?.trim()) onRename(session.id, next.trim());
+                          startRename(session.id, sessionTitle);
                         }}
                         className="rounded p-0.5 text-slate-500 hover:bg-slate-300/60 hover:text-blue-600 dark:hover:bg-slate-600/60"
                       >

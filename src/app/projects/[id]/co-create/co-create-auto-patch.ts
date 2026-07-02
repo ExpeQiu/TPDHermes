@@ -1,6 +1,7 @@
 "use client";
 
 import type { ProjectFileKind } from "@/lib/chat-context";
+import { CO_CREATE_OUTPUT_WRITE_POLICY } from "@/app/projects/[id]/co-create/co-create-file-policy";
 import {
   extractAutoCreateDraftBody,
   isDocumentGenerationPrompt,
@@ -61,6 +62,7 @@ export function buildRewriteSyncInstructions(
     "正文须完整写在回复中；末尾附加 ```tphermes_file_actions``` 的 patch 动作。",
     "整篇改写用 editMode=full，content/after 为改写后全文；局部改写用 search_replace 或 line_range。",
     "patch 须包含 target_file_id（或 fileId）、file_kind=output、file_name；勿只给口头建议。",
+    CO_CREATE_OUTPUT_WRITE_POLICY,
   ].join(" ");
 }
 

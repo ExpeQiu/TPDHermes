@@ -183,6 +183,7 @@ function createWorkspaceState(overrides: Record<string, unknown> = {}) {
     refreshFiles: vi.fn().mockResolvedValue(undefined),
     patchTabContent: vi.fn(),
     reloadFileTab: vi.fn().mockResolvedValue(undefined),
+    resetWorkspace: vi.fn(),
     ...overrides,
   };
 }
@@ -397,7 +398,7 @@ describe("CoCreatePage", () => {
     expect(storeState.createSession).not.toHaveBeenCalled();
   });
 
-  it("binds an empty orphan bootstrap session to the project", async () => {
+  it("creates a fresh session instead of binding an empty orphan bootstrap session", async () => {
     const orphanSession = createSessionRecord({
       id: "orphan-empty",
       selectedProjectId: "",
@@ -414,14 +415,12 @@ describe("CoCreatePage", () => {
     renderComponent(React.createElement(CoCreatePage));
 
     await waitFor(() => {
-      expect(storeState.updateSession).toHaveBeenCalledWith(
-        "orphan-empty",
-        expect.any(Function),
-      );
+      expect(storeState.createSession).toHaveBeenCalledTimes(1);
     });
 
-    expect(storeState.createSession).not.toHaveBeenCalled();
-    expect(storeState.selectSession).toHaveBeenCalledWith("orphan-empty");
+    expect(storeState.updateSession).not.toHaveBeenCalled();
+    expect(storeState.selectSession).not.toHaveBeenCalledWith("orphan-empty");
+    expect(mocks.projectCoCreateSessionDefaults).toHaveBeenCalledWith("project-1");
   });
 
   it("creates a default co-create session and injects initial output from url params", async () => {

@@ -30,6 +30,7 @@ type Props = {
   onAskInterpret: (fileKey: string) => void;
   onAskModify: (fileKey: string) => void;
   onSaveContent?: (fileKey: string, content: string) => Promise<void>;
+  onRestoreVersion?: (version: ProjectFileVersionItem) => Promise<void>;
   onAddSelectionToChat?: (payload: SelectionToChatPayload) => void;
   onEditSelection?: (text: string) => void;
   onRewriteSelection?: (payload: SelectionToChatPayload) => void;
@@ -132,6 +133,7 @@ export function FilePreviewPanel({
   onAskInterpret,
   onAskModify,
   onSaveContent,
+  onRestoreVersion,
   onAddSelectionToChat,
   onEditSelection,
   onRewriteSelection,
@@ -153,6 +155,8 @@ export function FilePreviewPanel({
 
   const savedContent = previewDetail?.content ?? "";
   const canEdit = previewDetail?.kind === "output";
+  const currentOutputId = previewDetail?.kind === "output" ? previewDetail.id : null;
+  const isAttachment = previewDetail?.kind === "attachment";
   const isDirty = editDraft !== savedContent;
   const showPatchDiff = Boolean(pendingPatch && viewTab === "preview");
   const diffBefore = pendingPatch?.before ?? savedContent;
@@ -338,6 +342,29 @@ export function FilePreviewPanel({
     setVersionDetailFormat(null);
   };
 
+  const handleRestoreVersion = useCallback(
+    async (version: ProjectFileVersionItem) => {
+      if (!onRestoreVersion || !canEdit) return;
+      try {
+        await onRestoreVersion(version);
+        handleBackToVersionList();
+        setViewTab("preview");
+        console.info("[co-create] 已恢复版本", {
+          projectId,
+          versionId: version.id,
+          version: version.version,
+        });
+      } catch (err) {
+        console.warn("[co-create] 恢复版本失败", {
+          projectId,
+          versionId: version.id,
+          err,
+        });
+      }
+    },
+    [canEdit, onRestoreVersion, projectId],
+  );
+
   const handleSave = useCallback(async () => {
     if (!activeFileKey || !onSaveContent || !isDirty) return;
     setSaveError(null);
@@ -442,7 +469,10 @@ export function FilePreviewPanel({
             <ActionBtn label="加入本轮" onClick={() => onAddToRound(activeFileKey)} />
             <ActionBtn label="固定引用" onClick={() => onPin(activeFileKey)} />
             <ActionBtn label="AI 解读" onClick={() => onAskInterpret(activeFileKey)} />
-            <ActionBtn label="AI 修改" onClick={() => onAskModify(activeFileKey)} />
+            <ActionBtn
+              label={isAttachment ? "生成输出" : "AI 修改"}
+              onClick={() => onAskModify(activeFileKey)}
+            />
             <div className="ml-auto flex items-center gap-1">
               {onTogglePreviewMaximize ? (
                 <ViewTabBtn
@@ -539,13 +569,21 @@ export function FilePreviewPanel({
                     >
                       ← 返回版本列表
                     </button>
-                    <div>
-                      <p className="font-medium text-slate-900 dark:text-slate-100">
-                        v{selectedVersion.version} · {selectedVersion.title ?? "未命名"}
-                      </p>
-                      <p className="text-[10px] text-slate-500">
-                        {selectedVersion.updated_at ?? selectedVersion.created_at}
-                      </p>
+                    <div className="flex items-start justify-between gap-2">
+                      <div>
+                        <p className="font-medium text-slate-900 dark:text-slate-100">
+                          v{selectedVersion.version} · {selectedVersion.title ?? "未命名"}
+                        </p>
+                        <p className="text-[10px] text-slate-500">
+                          {selectedVersion.updated_at ?? selectedVersion.created_at}
+                        </p>
+                      </div>
+                      <RestoreVersionButton
+                        version={selectedVersion}
+                        currentOutputId={currentOutputId}
+                        restoring={saving}
+                        onRestore={onRestoreVersion ? handleRestoreVersion : undefined}
+                      />
                     </div>
                     {versionDetailLoading ? (
                       <p className="text-slate-500">加载版本内容…</p>
@@ -566,17 +604,23 @@ export function FilePreviewPanel({
                 ) : (
                   <ul className="space-y-2">
                     {versions.map((v) => (
-                      <li key={v.id}>
+                      <li key={v.id} className="flex items-stretch gap-1">
                         <button
                           type="button"
                           onClick={() => void handleSelectVersion(v)}
-                          className="w-full rounded border border-slate-200 p-2 text-left transition hover:border-blue-300 hover:bg-blue-50/60 dark:border-slate-700 dark:hover:border-blue-500/40 dark:hover:bg-blue-950/20"
+                          className="min-w-0 flex-1 rounded border border-slate-200 p-2 text-left transition hover:border-blue-300 hover:bg-blue-50/60 dark:border-slate-700 dark:hover:border-blue-500/40 dark:hover:bg-blue-950/20"
                         >
                           <p className="font-medium">
                             v{v.version} · {v.title ?? "未命名"}
                           </p>
                           <p className="text-[10px] text-slate-500">{v.updated_at ?? v.created_at}</p>
                         </button>
+                        <RestoreVersionButton
+                          version={v}
+                          currentOutputId={currentOutputId}
+                          restoring={saving}
+                          onRestore={onRestoreVersion ? handleRestoreVersion : undefined}
+                        />
                       </li>
                     ))}
                   </ul>
@@ -615,6 +659,7 @@ export function FilePreviewPanel({
                   onAddToChat={handleAddSelectionToChat}
                   onRewrite={handleAskRewriteSelection}
                   onCopy={() => void handleCopySelection(selectionMenu.text)}
+                  rewriteDisabled
                   onMouseDown={(e) => e.stopPropagation()}
                 />
               ) : null}
@@ -629,6 +674,56 @@ export function FilePreviewPanel({
         </div>
       )}
     </aside>
+  );
+}
+
+function RestoreVersionButton({
+  version,
+  currentOutputId,
+  restoring,
+  onRestore,
+}: {
+  version: ProjectFileVersionItem;
+  currentOutputId?: string | null;
+  restoring?: boolean;
+  onRestore?: (version: ProjectFileVersionItem) => void | Promise<void>;
+}) {
+  if (!onRestore) return null;
+  const isCurrent = Boolean(currentOutputId && version.id === currentOutputId);
+  return (
+    <button
+      type="button"
+      title={isCurrent ? "当前已是此版本" : `恢复到此版本 (v${version.version})`}
+      aria-label={`恢复到此版本 v${version.version}`}
+      disabled={Boolean(restoring) || isCurrent}
+      onClick={(e) => {
+        e.stopPropagation();
+        void onRestore(version);
+      }}
+      className="inline-flex h-full min-h-[2.75rem] w-9 shrink-0 items-center justify-center self-stretch rounded-md border border-slate-200 text-slate-500 transition hover:border-emerald-300 hover:bg-emerald-50 hover:text-emerald-700 disabled:cursor-not-allowed disabled:opacity-40 dark:border-slate-600 dark:text-slate-400 dark:hover:border-emerald-500/40 dark:hover:bg-emerald-950/30 dark:hover:text-emerald-300"
+    >
+      <RestoreIcon />
+    </button>
+  );
+}
+
+function RestoreIcon() {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      className="h-3.5 w-3.5"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8" />
+      <path d="M21 3v5h-5" />
+      <path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16" />
+      <path d="M8 16H3v5" />
+    </svg>
   );
 }
 
@@ -771,6 +866,7 @@ function SelectionMenu({
   onAddToChat,
   onRewrite,
   onCopy,
+  rewriteDisabled = false,
   onMouseDown,
 }: {
   x: number;
@@ -779,6 +875,7 @@ function SelectionMenu({
   onAddToChat: () => void;
   onRewrite: () => void;
   onCopy: () => void;
+  rewriteDisabled?: boolean;
   onMouseDown: (e: MouseEvent<HTMLDivElement>) => void;
 }) {
   return (
@@ -789,8 +886,12 @@ function SelectionMenu({
       onMouseDown={onMouseDown}
     >
       <SelectionMenuItem label="编辑" shortcut="⌘I" onClick={onEdit} accent />
-      <SelectionMenuItem label="添加到对话" shortcut="⌘U" onClick={onAddToChat} />
-      <SelectionMenuItem label="AI 改写选段" onClick={onRewrite} />
+      <SelectionMenuItem
+        label="添加到对话框中改写"
+        shortcut="⌘U"
+        onClick={onAddToChat}
+      />
+      <SelectionMenuItem label="AI 改写选段" onClick={onRewrite} disabled={rewriteDisabled} />
       <div className="my-1 border-t border-slate-100 dark:border-slate-800" />
       <SelectionMenuItem label="复制" onClick={onCopy} />
     </div>
@@ -802,18 +903,25 @@ function SelectionMenuItem({
   shortcut,
   onClick,
   accent,
+  disabled = false,
 }: {
   label: string;
   shortcut?: string;
   onClick: () => void;
   accent?: boolean;
+  disabled?: boolean;
 }) {
   return (
     <button
       type="button"
       role="menuitem"
-      onClick={onClick}
-      className="flex w-full items-center justify-between gap-3 px-3 py-1.5 text-left text-[11px] text-slate-700 transition hover:bg-slate-50 dark:text-slate-200 dark:hover:bg-slate-800"
+      disabled={disabled}
+      onClick={disabled ? undefined : onClick}
+      className={`flex w-full items-center justify-between gap-3 px-3 py-1.5 text-left text-[11px] transition ${
+        disabled
+          ? "cursor-not-allowed text-slate-400 dark:text-slate-500"
+          : "text-slate-700 hover:bg-slate-50 dark:text-slate-200 dark:hover:bg-slate-800"
+      }`}
     >
       <span className="inline-flex items-center gap-1.5">
         {accent ? (

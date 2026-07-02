@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-import asyncio
 import json
 import logging
 from typing import Any, AsyncGenerator
 
 from backend.services.skill_loader import SkillLoadError, SkillNotFoundError, get_loader
+from backend.services.workshop_llm_generator import execute_workshop_skill_generate
 
 logger = logging.getLogger("tpdx.hermes")
 
@@ -71,7 +71,7 @@ async def run_workshop_skill_async(skill_name: str, context: dict[str, Any]) -> 
     except SkillLoadError as e:
         raise RuntimeError(f"Skill load error: {e}") from e
 
-    result = await asyncio.to_thread(skill.generate, context)
+    result = await execute_workshop_skill_generate(skill, context)
 
     text = _skill_result_to_text(result)
     logger.info("workshop_direct skill=%s result_len=%s", skill_name, len(text))

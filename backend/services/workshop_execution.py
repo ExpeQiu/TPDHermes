@@ -38,6 +38,10 @@ def _stringify_content(value: Any) -> str:
         return ""
     if isinstance(value, str):
         return value
+    if isinstance(value, dict):
+        inner = value.get("content")
+        if isinstance(inner, str) and inner.strip():
+            return inner.strip()
     try:
         return json.dumps(value, ensure_ascii=False, indent=2)
     except TypeError:

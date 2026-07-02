@@ -41,13 +41,16 @@ import {
   archiveProjectOutput,
   fetchProjectFileDetail,
   type ProjectFileItem,
+  type ProjectFileVersionItem,
 } from "@/lib/co-create-api";
 import {
   isChatConversationStarted,
+  isCoCreateSessionForProject,
   pickProjectCoCreateEntrySession,
   projectCoCreateSessionDefaults,
   titleFromSession,
 } from "@/lib/chat-session-utils";
+import { randomUUID } from "@/lib/random-id";
 import { parseCoCreateNewCommand } from "@/app/projects/[id]/co-create/co-create-slash-commands";
 import { useEffectiveUserScopeId } from "@/lib/use-effective-user-scope-id";
 import { ensureDerivedUserId } from "@/lib/user-id";
@@ -80,6 +83,13 @@ import {
   resolveExecutionFromAgentMode,
   type AgentPlan,
 } from "@/app/projects/[id]/co-create/co-create-agent-utils";
+import {
+  CO_CREATE_ATTACHMENT_READONLY_ERROR,
+  isCoCreateAttachmentFileKey,
+  isCoCreateAttachmentPatchProposal,
+  isCoCreateWritableFileKind,
+  rejectCoCreateAttachmentPatchProposals,
+} from "@/app/projects/[id]/co-create/co-create-file-policy";
 import {
   type AgentUndoEntry,
   formatAgentUndoSummary,
@@ -242,7 +252,7 @@ function parseOptionalInt(raw: unknown): number | undefined {
 function mapStreamActions(raw: Array<Record<string, unknown>>): FileActionProposal[] {
   const out: FileActionProposal[] = [];
   for (const item of raw) {
-    const proposalId = String(item.proposal_id || item.proposalId || crypto.randomUUID());
+    const proposalId = String(item.proposal_id || item.proposalId || randomUUID());
     const type = String(item.type || "");
     if (type === "create") {
       const fileName = String(item.file_name || item.fileName || "新文件.md");
@@ -293,16 +303,17 @@ function resolveAutoPatchTargetFile(
   files: ProjectFileItem[],
   tabLabels: Record<string, string>,
 ): AutoPatchTargetFile | null {
-  const fileKey = roundFileKeys[0] ?? pinnedFileKeys[0];
-  if (!fileKey) return null;
-  const decoded = decodeProjectFileSelectValue(fileKey);
-  if (!decoded) return null;
-  return {
-    fileKey,
-    fileId: decoded.id,
-    fileKind: decoded.kind,
-    fileName: regionBlockFileName(files, fileKey, tabLabels),
-  };
+  for (const fileKey of [...roundFileKeys, ...pinnedFileKeys]) {
+    const decoded = decodeProjectFileSelectValue(fileKey);
+    if (!decoded || !isCoCreateWritableFileKind(decoded.kind)) continue;
+    return {
+      fileKey,
+      fileId: decoded.id,
+      fileKind: decoded.kind,
+      fileName: regionBlockFileName(files, fileKey, tabLabels),
+    };
+  }
+  return null;
 }
 
 async function resolveFileBeforeContent(
@@ -553,6 +564,22 @@ function CoCreatePageInner() {
     [queueSessionPatch, sessionsRef, updateSession],
   );
 
+  const appendTouchedFileId = useCallback(
+    (fileKey: string) => {
+      const sessionId = activeIdRef.current;
+      if (!sessionId || !fileKey) return;
+      updateSession(sessionId, (session) => ({
+        ...session,
+        touchedFileIds: [...new Set([...(session.touchedFileIds ?? []), fileKey])],
+      }));
+      const updated = sessionsRef.current.find((session) => session.id === sessionId);
+      if (updated) {
+        queueSessionPatch(sessionId, sessionToPatchPayload(updated));
+      }
+    },
+    [queueSessionPatch, sessionsRef, updateSession],
+  );
+
   const persistFileRefs = useCallback(
     (nextPinned: string[], nextRound: string[]) => {
       if (!activeSession) return;
@@ -709,16 +736,28 @@ function CoCreatePageInner() {
   );
 
   useEffect(() => {
+    if (!isCoCreateSessionForProject(activeSession, projectId)) return;
     if (!activeSession?.messages.some((message) => message.role === "user")) return;
+    if (activeSession.titleManuallySet) return;
     const nextTitle = titleFromSession(activeSession, "新共创");
     if (isPlaceholderFromStore(nextTitle) || nextTitle === activeSession.title) return;
     updateSession(activeSession.id, (session) => ({ ...session, title: nextTitle }));
     const updated = sessionsRef.current.find((item) => item.id === activeSession.id);
     if (updated) queueSessionPatch(activeSession.id, { title: updated.title });
-  }, [activeSession, queueSessionPatch, sessionsRef, updateSession]);
+  }, [activeSession, projectId, queueSessionPatch, sessionsRef, updateSession]);
 
   useEffect(() => {
-    if (sessionsLoading || !projectId) return;
+    entryAppliedRef.current = false;
+    entryProjectIdRef.current = null;
+  }, [projectId]);
+
+  const visibleMessages = useMemo(() => {
+    if (!isCoCreateSessionForProject(activeSession, projectId)) return [];
+    return activeSession?.messages ?? [];
+  }, [activeSession, projectId]);
+
+  useEffect(() => {
+    if (sessionsLoading || !projectId || !scopeUserId) return;
     if (entryAppliedRef.current && entryProjectIdRef.current === projectId) return;
 
     const sessionIdFromUrl = searchParams?.get("session_id");
@@ -746,33 +785,15 @@ function CoCreatePageInner() {
         defaults.roundFileIds = [initialKey];
         defaults.pinnedFileIds = [];
       }
-      const orphan = sessions.find(
-        (session) =>
-          session.sessionKind === "project_co_create" && !session.selectedProjectId?.trim(),
-      );
-      // 仅复用空 bootstrap 会话；已有对话的 orphan 可能来自其他项目，禁止绑定到新项目
-      if (orphan && !isChatConversationStarted(orphan)) {
-        updateSession(orphan.id, (session) => ({
-          ...session,
-          ...defaults,
-          id: session.id,
-          title: session.messages.length > 0 ? session.title : (defaults.title ?? session.title),
-          messages: session.messages,
-          createdAt: session.createdAt,
-        }));
-        const updated = sessionsRef.current.find((session) => session.id === orphan.id);
-        if (updated) queueSessionPatch(orphan.id, sessionToPatchPayload(updated));
-        selectSession(orphan.id);
-        if (initialKey) {
-          fileWorkspace.openFileTab(initialKey);
-        }
-        console.info("[co-create] 已绑定 bootstrap 会话到项目", { projectId, sessionId: orphan.id });
-      } else {
-        createSession(defaults);
-        if (initialKey) {
-          fileWorkspace.openFileTab(initialKey);
-        }
+      // 首次进入项目共创：等同点击「+ 新建」，不复用 orphan（避免 hydrate 出其他项目历史）
+      resetComposerContext();
+      resetTransient();
+      fileWorkspace.resetWorkspace();
+      createSession(defaults);
+      if (initialKey) {
+        fileWorkspace.openFileTab(initialKey);
       }
+      console.info("[co-create] 项目首次进入，已新建共创会话", { projectId });
     } else {
       const target = pickProjectCoCreateEntrySession(sessions, projectId, activeSession);
       if (target && target.id !== activeId) {
@@ -804,6 +825,9 @@ function CoCreatePageInner() {
     fileWorkspace,
     projectId,
     queueSessionPatch,
+    resetComposerContext,
+    resetTransient,
+    scopeUserId,
     searchParams,
     selectSession,
     sessions,
@@ -884,11 +908,22 @@ function CoCreatePageInner() {
             ),
       );
       if (mapped.length === 0) return;
-      const mergedForAssistant = dedupeCreateProposals(mapped);
+      const mergedForAssistant = rejectCoCreateAttachmentPatchProposals(dedupeCreateProposals(mapped));
+      if (
+        mergedForAssistant.some(
+          (item) => isCoCreateAttachmentPatchProposal(item) && item.status === "rejected",
+        )
+      ) {
+        console.warn("[co-create] 已拒绝 attachment patch，请改写入 /输出/", {
+          sessionId,
+          assistantId,
+        });
+      }
       setPendingActions((prev) => {
         const pruned = prunePendingCreatesForAssistantMessage(prev, assistantId, mergedForAssistant);
         let next = pruned;
         for (const proposal of mergedForAssistant) {
+          if (proposal.status === "rejected") continue;
           next = upsertFileActionProposal(next, proposal);
         }
         return dedupeCreateProposals(next);
@@ -898,7 +933,9 @@ function CoCreatePageInner() {
         pendingProposalIds: [
           ...new Set([
             ...(session.pendingProposalIds ?? []),
-            ...mergedForAssistant.map((m) => m.proposalId),
+            ...mergedForAssistant
+              .filter((item) => item.status !== "rejected")
+              .map((m) => m.proposalId),
           ]),
         ],
         messages: session.messages.map((m) => {
@@ -1044,6 +1081,10 @@ function CoCreatePageInner() {
       target: AutoPatchTargetFile,
     ) => {
       if (!assistantMessage || assistantMessage.role !== "assistant") return false;
+      if (!isCoCreateWritableFileKind(target.fileKind)) {
+        console.info("[co-create] 跳过附件自动改写", { fileName: target.fileName });
+        return false;
+      }
 
       const streamFileActions = assistantMessage.fileActions?.filter((item) =>
         isStreamFileActionProposal(item.proposalId),
@@ -1786,6 +1827,9 @@ function CoCreatePageInner() {
         sessionForProposal?.messages
           .flatMap((message) => message.fileActions ?? [])
           .find((item) => item.proposalId === proposal.proposalId) ?? proposal;
+      if (isCoCreateAttachmentPatchProposal(latestProposal)) {
+        throw new Error(CO_CREATE_ATTACHMENT_READONLY_ERROR);
+      }
       try {
         let undoEntry: AgentUndoEntry | null = null;
         let previousContent = "";
@@ -1985,6 +2029,7 @@ function CoCreatePageInner() {
           console.warn("[co-create] 文件应用后刷新失败（文件已落库）", postErr);
         }
         appendAgentUndoEntry(undoEntry);
+        appendTouchedFileId(fileKey);
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         console.warn("[co-create] 文件应用失败", {
@@ -2045,6 +2090,7 @@ function CoCreatePageInner() {
     [
       activeId,
       appendAgentUndoEntry,
+      appendTouchedFileId,
       fileWorkspace,
       pinnedFileIds,
       projectId,
@@ -2073,6 +2119,7 @@ function CoCreatePageInner() {
         return false;
       }
       if (item.type === "patch") {
+        if (item.fileKind === "attachment") return false;
         const assistantContent = findAssistantContentForProposal(session, item.proposalId);
         const before = item.before ?? "";
         return isReadyForAutoPatch(item.after, before, assistantContent);
@@ -2108,7 +2155,7 @@ function CoCreatePageInner() {
         const fileKey = encodeProjectFileSelectValue(latest.fileKind, latest.fileId);
         await applyFileAction(projectId, {
           session_id: sessionId ?? undefined,
-          proposal_id: crypto.randomUUID(),
+          proposal_id: randomUUID(),
           action: {
             type: "patch",
             target_file_id: latest.fileId,
@@ -2161,7 +2208,7 @@ function CoCreatePageInner() {
       try {
         await applyFileAction(projectId, {
           session_id: activeId ?? undefined,
-          proposal_id: crypto.randomUUID(),
+          proposal_id: randomUUID(),
           action: {
             type: "patch",
             target_file_id: decoded.id,
@@ -2177,6 +2224,7 @@ function CoCreatePageInner() {
           await fileWorkspace.reloadFileTab(fileKey);
         }
         setSaveState("saved");
+        appendTouchedFileId(fileKey);
         console.info("[co-create] 手动编辑已保存", { projectId, fileKey });
       } catch (err) {
         console.warn("[co-create] 手动编辑保存失败", { projectId, fileKey, err });
@@ -2186,7 +2234,67 @@ function CoCreatePageInner() {
         setFileSaving(false);
       }
     },
-    [activeId, fileWorkspace, projectId],
+    [activeId, appendTouchedFileId, fileWorkspace, projectId],
+  );
+
+  const handleRestoreVersion = useCallback(
+    async (version: ProjectFileVersionItem) => {
+      const fileKey = fileWorkspace.activeFileKey;
+      if (!fileKey) throw new Error("请先打开要恢复到的文件");
+      const decoded = decodeProjectFileSelectValue(fileKey);
+      if (!decoded || decoded.kind !== "output") throw new Error("仅支持恢复输出类文件");
+      if (version.id === decoded.id) return;
+
+      const label = fileWorkspace.tabLabels[fileKey] ?? version.title ?? "当前文件";
+      if (
+        !window.confirm(
+          `确定将「${label}」恢复为 v${version.version} 的内容吗？\n当前内容会先归档为历史版本。`,
+        )
+      ) {
+        return;
+      }
+
+      setFileSaving(true);
+      try {
+        const detail = await fetchProjectFileDetail(projectId, version.id, "output");
+        const content = detail.content ?? "";
+        await applyFileAction(projectId, {
+          session_id: activeId ?? undefined,
+          proposal_id: randomUUID(),
+          action: {
+            type: "patch",
+            target_file_id: decoded.id,
+            target_kind: "output",
+            content,
+            file_name: version.title ?? label,
+            save_mode: "overwrite",
+          },
+        });
+        fileWorkspace.patchTabContent(fileKey, content);
+        await fileWorkspace.refreshFiles();
+        await fileWorkspace.reloadFileTab(fileKey);
+        setSaveState("saved");
+        appendTouchedFileId(fileKey);
+        console.info("[co-create] 版本已恢复", {
+          projectId,
+          fileKey,
+          versionId: version.id,
+          version: version.version,
+        });
+      } catch (err) {
+        console.warn("[co-create] 版本恢复失败", {
+          projectId,
+          fileKey,
+          versionId: version.id,
+          err,
+        });
+        setSaveState("error");
+        throw err instanceof Error ? err : new Error("恢复失败");
+      } finally {
+        setFileSaving(false);
+      }
+    },
+    [activeId, appendTouchedFileId, fileWorkspace, projectId],
   );
 
   const appendRegionBlock = useCallback(
@@ -2194,7 +2302,7 @@ function CoCreatePageInner() {
       const fileKey = fileWorkspace.activeFileKey;
       if (!fileKey) return;
       const block: ContentRegionBlock = {
-        id: crypto.randomUUID(),
+        id: randomUUID(),
         fileKey,
         fileName: regionBlockFileName(
           fileWorkspace.files,
@@ -2231,9 +2339,14 @@ function CoCreatePageInner() {
 
   const handleRenameSession = useCallback(
     (id: string, title: string) => {
-      updateSession(id, (s) => ({ ...s, title }));
+      const trimmed = title.trim();
+      if (!trimmed) return;
+      updateSession(id, (s) => ({ ...s, title: trimmed, titleManuallySet: true }));
       const updated = sessionsRef.current.find((s) => s.id === id);
-      if (updated) queueSessionPatch(id, { title });
+      if (updated) {
+        queueSessionPatch(id, { title: trimmed, titleManuallySet: true });
+      }
+      console.info("[co-create] 会话已重命名", { sessionId: id, title: trimmed });
     },
     [queueSessionPatch, sessionsRef, updateSession],
   );
@@ -2430,7 +2543,7 @@ function CoCreatePageInner() {
             ) : null}
             <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
               <CoCreateMessageStream
-                messages={activeSession?.messages ?? []}
+                messages={visibleMessages}
                 streaming={streaming}
                 streamingPhase={streamingPhase}
                 renderAfterMessage={renderMessageExtras}
@@ -2517,6 +2630,7 @@ function CoCreatePageInner() {
               onAddToRound={addToRound}
               onPin={pinFile}
               onSaveContent={handleSaveFileContent}
+              onRestoreVersion={handleRestoreVersion}
               onAddSelectionToChat={handleAddSelectionToChat}
               onRewriteSelection={handleRewriteSelection}
               pendingPatch={
@@ -2535,6 +2649,12 @@ function CoCreatePageInner() {
               }}
               onAskModify={(key) => {
                 addToRound(key);
+                if (isCoCreateAttachmentFileKey(key)) {
+                  void sendMessage(
+                    "请基于当前附件内容，在项目 /输出/ 下创建新的输出物（不要修改原附件）。",
+                  );
+                  return;
+                }
                 setInput("/改写当前文件 ");
               }}
               previewMaximized={previewMaximized}
