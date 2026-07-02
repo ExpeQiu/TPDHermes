@@ -2,19 +2,50 @@
 
 import type { ProjectContextResponse } from "@/lib/chat-context";
 
+export type ProjectContextLoadState = "loading" | "ready" | "error";
+
 type Props = {
   projectName: string;
   context: ProjectContextResponse | null;
+  contextLoadState: ProjectContextLoadState;
   outputCount: number;
   embedded?: boolean;
 };
 
-export function ProjectContextBar({ projectName, context, outputCount, embedded }: Props) {
+const contextStatusLabel: Record<ProjectContextLoadState, string> = {
+  loading: "加载中…",
+  ready: "已启用",
+  error: "不可用",
+};
+
+export function ProjectContextBar({
+  projectName,
+  context,
+  contextLoadState,
+  outputCount,
+  embedded,
+}: Props) {
+  const resolvedState: ProjectContextLoadState =
+    contextLoadState === "ready" && context ? "ready" : contextLoadState;
+
   const content = (
     <>
       <span className="font-medium text-slate-800 dark:text-slate-200">项目：{projectName}</span>
       <span className="mx-2 text-slate-400">·</span>
-      <span>项目上下文：{context ? "已启用" : "加载中…"}</span>
+      <span
+        className={
+          resolvedState === "error"
+            ? "text-amber-700 dark:text-amber-300"
+            : undefined
+        }
+        title={
+          resolvedState === "error"
+            ? "项目不存在、已删除，或当前 User ID 无权访问"
+            : undefined
+        }
+      >
+        项目上下文：{contextStatusLabel[resolvedState]}
+      </span>
       <span className="mx-2 text-slate-400">·</span>
       <span>最近输出：{outputCount}</span>
     </>

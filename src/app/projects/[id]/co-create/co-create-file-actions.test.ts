@@ -30,6 +30,12 @@ describe("co-create-file-actions", () => {
 
     const loose = `前文\n\`\`\`json\n{"actions":[{"type":"create"}]}\n\`\`\``;
     expect(stripFileActionsBlock(loose)).toBe("前文");
+
+    const bare = `正文说明\n{"actions":[{"type":"create","fileName":"a.md","content":"# 标题"}]}`;
+    expect(stripFileActionsBlock(bare)).toBe("正文说明");
+
+    const unclosed = "说明\n```json\n{\"actions\":[{\"type\":\"create\"}]";
+    expect(stripFileActionsBlock(unclosed)).toBe("说明");
   });
 
   it("normalizeCreateFilePath 将本机路径转为 /输出/", () => {

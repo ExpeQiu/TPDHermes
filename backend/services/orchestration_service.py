@@ -17,6 +17,7 @@ from backend.services.knowledge_policy import resolve_effective_knowledge_policy
 from backend.services.project_kb import (
     count_project_kb_indexed,
     merge_chat_kb_fallback_collections,
+    merge_co_create_ask_kb_collections,
     merge_project_kb_collections,
 )
 from backend.models.project import Project
@@ -553,8 +554,23 @@ async def assemble_payload(
     if project_row and str(project_row.id).strip() and str(project_row.id) != "none":
         merged_cols = merge_project_kb_collections(knowledge.collections, project_row.id)
         knowledge = knowledge.model_copy(update={"collections": merged_cols})
+        ask_mode = (request.co_create_agent_mode or "").strip() == "ask"
+        # 共创 Ask：始终 union 公共真源库，便于只读调研
+        if entrypoint == "chat" and request.chat_mode != "doc_optimize" and ask_mode:
+            ask_cols = merge_co_create_ask_kb_collections(knowledge.collections, project_row.id)
+            knowledge = knowledge.model_copy(
+                update={
+                    "collections": ask_cols,
+                    "project_bound": False,
+                }
+            )
+            logger.info(
+                "co-create ask mode: public kb collections enabled project=%s count=%s",
+                str(project_row.id)[:24],
+                len(ask_cols),
+            )
         # /chat 携带项目但项目 KB 无索引：补充公共知识库，允许联网检索
-        if entrypoint == "chat" and request.chat_mode != "doc_optimize":
+        elif entrypoint == "chat" and request.chat_mode != "doc_optimize":
             indexed = await count_project_kb_indexed(db, project_row.id)
             if indexed == 0:
                 fallback_cols = merge_chat_kb_fallback_collections(knowledge.collections)
@@ -588,6 +604,7 @@ async def assemble_payload(
         execution=execution,
         user_input=OrchestrationUserInput(message=effective_message),
         actor=OrchestrationActor(user_id=effective_user_id, role=actor_role),
+        co_create_agent_mode=request.co_create_agent_mode,
     )
 
     snapshot = {

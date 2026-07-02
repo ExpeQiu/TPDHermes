@@ -62,9 +62,17 @@ vi.mock("@/lib/co-create-api", async () => {
   };
 });
 
-vi.mock("@/lib/chat-session-utils", () => ({
-  projectCoCreateSessionDefaults: mocks.projectCoCreateSessionDefaults,
-}));
+vi.mock("@/lib/chat-session-utils", async () => {
+  const actual = await vi.importActual<typeof import("@/lib/chat-session-utils")>(
+    "@/lib/chat-session-utils",
+  );
+  return {
+    ...actual,
+    projectCoCreateSessionDefaults: mocks.projectCoCreateSessionDefaults,
+    isChatConversationStarted: (session: { messages?: { role: string }[] }) =>
+      Boolean(session?.messages?.some((message) => message.role === "user")),
+  };
+});
 
 vi.mock("@/lib/use-effective-user-scope-id", () => ({
   useEffectiveUserScopeId: mocks.useEffectiveUserScopeId,
@@ -227,10 +235,15 @@ describe("CoCreatePage", () => {
     mocks.sessionToPatchPayload.mockReset();
     mocks.useFileWorkspace.mockReset();
 
-    mocks.apiGet.mockResolvedValue({
-      id: "project-1",
-      name: "Hermes 集成项目",
-      status: "active",
+    mocks.apiGet.mockImplementation((path: string) => {
+      if (path === "/scenarios/") {
+        return Promise.resolve([]);
+      }
+      return Promise.resolve({
+        id: "project-1",
+        name: "Hermes 集成项目",
+        status: "active",
+      });
     });
     mocks.fetchProjectContext.mockResolvedValue({
       project_id: "project-1",
@@ -282,8 +295,92 @@ describe("CoCreatePage", () => {
     const { container } = renderComponent(React.createElement(CoCreatePage));
 
     expect(container.textContent).toContain("缺少项目 ID");
-    expect(mocks.apiGet).not.toHaveBeenCalled();
+    expect(mocks.fetchProjectContext).not.toHaveBeenCalled();
     expect(mocks.projectCoCreateSessionDefaults).not.toHaveBeenCalled();
+  });
+
+  it("renders error state when project is not found", async () => {
+    mocks.apiGet.mockImplementation((path: string) => {
+      if (path === "/scenarios/") {
+        return Promise.resolve([]);
+      }
+      return Promise.reject(new Error("Project not found"));
+    });
+    mocks.fetchProjectContext.mockRejectedValue(new Error("Project not found"));
+
+    const { container } = renderComponent(React.createElement(CoCreatePage));
+
+    await waitFor(() => {
+      expect(container.textContent).toContain("无法打开项目共创");
+    });
+
+    expect(container.textContent).toContain("返回项目中心");
+    expect(container.textContent).toContain("查看 User ID 设置");
+    expect(mocks.topbarProps).toBeNull();
+  });
+
+  it("creates a new session instead of binding an orphan that already has messages", async () => {
+    const orphanSession = createSessionRecord({
+      id: "orphan-with-history",
+      selectedProjectId: "",
+      title: "营销素材",
+      messages: [
+        {
+          id: "user-1",
+          role: "user",
+          content: "请基于当前项目上下文，输出营销素材",
+          userPrompt: "营销素材",
+        },
+        {
+          id: "assistant-1",
+          role: "assistant",
+          content: "吉利雷神EM-i超级电混技术发布会 领导人发言稿",
+        },
+      ],
+    });
+    const storeState = createStoreState({
+      sessions: [orphanSession],
+      activeId: "orphan-with-history",
+      activeSession: orphanSession,
+    });
+    mocks.useChatSessionStore.mockReturnValue(storeState);
+
+    renderComponent(React.createElement(CoCreatePage));
+
+    await waitFor(() => {
+      expect(storeState.createSession).toHaveBeenCalledTimes(1);
+    });
+
+    expect(storeState.updateSession).not.toHaveBeenCalled();
+    expect(storeState.selectSession).not.toHaveBeenCalledWith("orphan-with-history");
+    expect(mocks.projectCoCreateSessionDefaults).toHaveBeenCalledWith("project-1");
+  });
+
+  it("binds an empty orphan bootstrap session to the project", async () => {
+    const orphanSession = createSessionRecord({
+      id: "orphan-empty",
+      selectedProjectId: "",
+      title: "新共创",
+      messages: [],
+    });
+    const storeState = createStoreState({
+      sessions: [orphanSession],
+      activeId: "orphan-empty",
+      activeSession: orphanSession,
+    });
+    mocks.useChatSessionStore.mockReturnValue(storeState);
+
+    renderComponent(React.createElement(CoCreatePage));
+
+    await waitFor(() => {
+      expect(storeState.updateSession).toHaveBeenCalledWith(
+        "orphan-empty",
+        expect.any(Function),
+      );
+    });
+
+    expect(storeState.createSession).not.toHaveBeenCalled();
+    expect(storeState.selectSession).toHaveBeenCalledWith("orphan-empty");
   });
 
   it("creates a default co-create session and injects initial output from url params", async () => {

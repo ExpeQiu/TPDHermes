@@ -534,6 +534,8 @@ export interface TaskExecuteBody {
   project_file_ids?: string[] | null;
   /** 项目共创：固定引用文件 ID */
   pinned_file_ids?: string[] | null;
+  /** 项目共创创作模式 */
+  co_create_agent_mode?: "ask" | "agent" | "plan" | null;
 }
 
 export interface OrchestrationPreviewResponse {

@@ -15,9 +15,11 @@ WARMUP_ENABLED = os.getenv("HERMES_WARMUP_ENABLED", "1").strip().lower() not in 
     "no",
     "off",
 )
-WARMUP_DELAY_SEC = float(os.getenv("HERMES_WARMUP_DELAY_SEC", "5"))
+WARMUP_DELAY_SEC = float(os.getenv("HERMES_WARMUP_DELAY_SEC", "8"))
 WARMUP_TIMEOUT_SEC = float(os.getenv("HERMES_WARMUP_TIMEOUT_SEC", "60"))
 WARMUP_MESSAGE = os.getenv("HERMES_WARMUP_MESSAGE", "ping")
+WARMUP_MAX_ATTEMPTS = int(os.getenv("HERMES_WARMUP_MAX_ATTEMPTS", "6"))
+WARMUP_RETRY_INTERVAL_SEC = float(os.getenv("HERMES_WARMUP_RETRY_INTERVAL_SEC", "10"))
 
 
 async def warmup_hermes_agent() -> None:
@@ -49,24 +51,41 @@ async def warmup_hermes_agent() -> None:
         pool=10.0,
     )
     logger.info(
-        "[hermes-warmup] POST %s timeout=%ss message=%r",
+        "[hermes-warmup] POST %s timeout=%ss message=%r attempts=%s",
         target_url,
         WARMUP_TIMEOUT_SEC,
         WARMUP_MESSAGE,
+        WARMUP_MAX_ATTEMPTS,
     )
-    try:
-        async with httpx.AsyncClient(timeout=timeout) as client:
-            resp = await client.post(target_url, headers=headers, json=body)
-            if resp.status_code >= 400:
-                logger.warning(
-                    "[hermes-warmup] HTTP %s body=%s",
-                    resp.status_code,
-                    resp.text[:240],
-                )
-            else:
-                logger.info("[hermes-warmup] ok status=%s", resp.status_code)
-    except Exception as exc:
-        logger.warning("[hermes-warmup] failed (non-fatal): %s", exc)
+    last_exc: Exception | None = None
+    for attempt in range(1, WARMUP_MAX_ATTEMPTS + 1):
+        try:
+            async with httpx.AsyncClient(timeout=timeout) as client:
+                resp = await client.post(target_url, headers=headers, json=body)
+                if resp.status_code >= 400:
+                    logger.warning(
+                        "[hermes-warmup] attempt=%s HTTP %s body=%s",
+                        attempt,
+                        resp.status_code,
+                        resp.text[:240],
+                    )
+                else:
+                    logger.info(
+                        "[hermes-warmup] ok attempt=%s status=%s",
+                        attempt,
+                        resp.status_code,
+                    )
+                    return
+        except Exception as exc:
+            last_exc = exc
+            logger.warning(
+                "[hermes-warmup] attempt=%s failed (will retry): %s",
+                attempt,
+                exc,
+            )
+        if attempt < WARMUP_MAX_ATTEMPTS:
+            await asyncio.sleep(WARMUP_RETRY_INTERVAL_SEC)
+    logger.warning("[hermes-warmup] exhausted retries (non-fatal): %s", last_exc)
 
 
 async def schedule_hermes_warmup() -> None:

@@ -115,7 +115,7 @@ export function buildAgentModeInstructions(
     case "ask":
       return [
         "【Ask 只读模式】本轮仅做分析、检索与问答，禁止调用 write_file、patch，禁止输出 tphermes_file_actions。",
-        "可正常使用 kb_query、kb_get_entry、tavily_search 等检索工具，并在正文标注 [^N] 引用。",
+        "须依次检索：项目知识库 → 公共真源库（技术点、发言稿等）→ 不足时 tavily_search 联网；正文标注 [^N]。",
       ].join(" ");
     case "plan": {
       const phase = ctx.planPhase ?? "planning";

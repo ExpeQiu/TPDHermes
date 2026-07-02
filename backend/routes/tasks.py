@@ -37,7 +37,7 @@ from backend.services.orchestration_service import (
     assemble_payload,
     merge_chat_messages,
 )
-from backend.services.project_kb import output_doc_id, project_kb_collection
+from backend.services.project_kb import merge_project_kb_collections, output_doc_id, project_kb_collection
 from backend.services.project_kb_ingest import schedule_ingest_output
 from backend.services.project_access import require_project_for_user
 from backend.services.run_log_service import create_run, finalize_run, mark_run_failed
@@ -602,6 +602,8 @@ async def execute_task(req: Request, task_req: TaskExecuteRequest, db: AsyncSess
         snapshot = {**snapshot, "source_output_id": eff_request.source_output_id.strip()}
     if eff_request.chat_mode:
         snapshot = {**snapshot, "chat_mode": eff_request.chat_mode}
+    if eff_request.co_create_agent_mode:
+        snapshot = {**snapshot, "co_create_agent_mode": eff_request.co_create_agent_mode}
     if eff_request.session_id:
         snapshot = {**snapshot, "session_id": eff_request.session_id.strip()}
 
@@ -914,7 +916,7 @@ async def execute_task(req: Request, task_req: TaskExecuteRequest, db: AsyncSess
     chat_lightweight = payload.entrypoint == "chat" and is_lightweight_chat_message(user_text)
     skip_kb_prefetch = payload.entrypoint == "chat" and should_skip_kb_prefetch_for_co_create_draft(
         user_text
-    )
+    ) and (eff_request.co_create_agent_mode or "").strip() != "ask"
     kb_prefetch_timeout_sec = _env_float("KB_PREFETCH_TIMEOUT_SEC", 12.0, min_value=1.0, max_value=120.0)
     upstream_heartbeat_sec = _env_float(
         "CHAT_STREAM_HEARTBEAT_SEC",
@@ -925,14 +927,17 @@ async def execute_task(req: Request, task_req: TaskExecuteRequest, db: AsyncSess
     agent_cold_start_ms = _env_int("CHAT_AGENT_COLD_START_MS", 8000, min_value=1000, max_value=120_000)
 
     async def _prefetch_kb_for_chat(progress_cb=None) -> tuple[str, int]:
+        has_project = bool((eff_request.project_id or "").strip())
         if (
             chat_lightweight
-            or skip_kb_prefetch
+            or (skip_kb_prefetch and not has_project)
             or not user_text.strip()
             or payload.entrypoint != "chat"
         ):
             return "", 0
         kb_cols = [c for c in payload.knowledge.collections if c]
+        if not kb_cols and eff_request.project_id:
+            kb_cols = merge_project_kb_collections([], eff_request.project_id)
         pf = await asyncio.wait_for(
             prefetch_kb_sources_for_run(
                 run_id=run_id,
@@ -1080,7 +1085,13 @@ async def execute_task(req: Request, task_req: TaskExecuteRequest, db: AsyncSess
         kb_prefetch_count = 0
         if skip_kb_prefetch and user_text.strip():
             yield sse_meta_event({"tphermes_task": {"phase": "co_create_draft", "run_id": run_id}})
-        if payload.entrypoint == "chat" and not chat_lightweight and not skip_kb_prefetch and user_text.strip():
+        should_kb_prefetch = (
+            payload.entrypoint == "chat"
+            and not chat_lightweight
+            and user_text.strip()
+            and (not skip_kb_prefetch or bool((eff_request.project_id or "").strip()))
+        )
+        if should_kb_prefetch:
             async def emit_prefetch_progress(phase: str, extra: dict[str, Any] | None = None) -> None:
                 meta = {"phase": phase, "run_id": run_id}
                 if extra:

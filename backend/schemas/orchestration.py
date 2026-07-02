@@ -115,6 +115,9 @@ class OrchestrationUserInput(BaseModel):
     message: str
 
 
+CoCreateAgentMode = Literal["ask", "agent", "plan"]
+
+
 class OrchestrationPayload(BaseModel):
     """运行时核心编排对象。"""
 
@@ -129,6 +132,10 @@ class OrchestrationPayload(BaseModel):
     execution: OrchestrationExecution = Field(default_factory=OrchestrationExecution)
     user_input: OrchestrationUserInput
     actor: OrchestrationActor | None = None
+    co_create_agent_mode: CoCreateAgentMode | None = Field(
+        default=None,
+        description="项目共创创作模式：ask 只读强制公共库+联网检索",
+    )
 
 
 class TaskKnowledgeOverrides(BaseModel):
@@ -214,6 +221,10 @@ class TaskExecuteRequest(BaseModel):
     pinned_file_ids: list[str] | None = Field(
         default=None,
         description="项目共创固定引用文件 ID 列表",
+    )
+    co_create_agent_mode: CoCreateAgentMode | None = Field(
+        default=None,
+        description="项目共创创作模式：ask/agent/plan",
     )
 
 

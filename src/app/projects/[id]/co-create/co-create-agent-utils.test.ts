@@ -12,6 +12,8 @@ import {
 describe("co-create-agent-utils", () => {
   it("buildAgentModeInstructions 为 ask 模式禁止写文件", () => {
     expect(buildAgentModeInstructions("ask")).toContain("禁止调用 write_file");
+    expect(buildAgentModeInstructions("ask")).toContain("tavily_search");
+    expect(buildAgentModeInstructions("ask")).toContain("公共真源库");
     expect(buildAgentModeInstructions("agent")).toBe("");
   });
 

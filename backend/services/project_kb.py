@@ -71,6 +71,15 @@ def merge_chat_kb_fallback_collections(collections: list[str]) -> list[str]:
     return out
 
 
+def merge_co_create_ask_kb_collections(
+    collections: list[str],
+    project_id: str | None,
+) -> list[str]:
+    """共创 Ask 只读：项目 KB union 公共真源库（不依赖 indexed==0）。"""
+    with_project = merge_project_kb_collections(collections, project_id)
+    return merge_chat_kb_fallback_collections(with_project)
+
+
 async def count_project_kb_indexed(db: AsyncSession, project_id: str) -> int:
     """统计项目内已入库 KB 的附件与输出物数量。"""
     pid = str(project_id or "").strip()

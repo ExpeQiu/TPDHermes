@@ -4,7 +4,10 @@ import Link from "next/link";
 import type { CoCreateSaveState } from "@/app/projects/[id]/co-create/co-create-types";
 import { CoCreateTopbarToolbar } from "@/app/projects/[id]/co-create/components/CoCreateTopbarToolbar";
 import { FileReferenceBar } from "@/app/projects/[id]/co-create/components/FileReferenceBar";
-import { ProjectContextBar } from "@/app/projects/[id]/co-create/components/ProjectContextBar";
+import {
+  ProjectContextBar,
+  type ProjectContextLoadState,
+} from "@/app/projects/[id]/co-create/components/ProjectContextBar";
 import type { ProjectContextResponse } from "@/lib/chat-context";
 import type { ProjectFileItem } from "@/lib/co-create-api";
 
@@ -21,6 +24,7 @@ type Props = {
   onToggleFilesPanel?: () => void;
   filesPanelOpen?: boolean;
   projectContext: ProjectContextResponse | null;
+  projectContextLoadState: ProjectContextLoadState;
   outputCount: number;
   pinnedFileIds: string[];
   roundFileIds: string[];
@@ -49,6 +53,7 @@ export function CoCreateTopbar({
   onToggleFilesPanel,
   filesPanelOpen,
   projectContext,
+  projectContextLoadState,
   outputCount,
   pinnedFileIds,
   roundFileIds,
@@ -69,6 +74,7 @@ export function CoCreateTopbar({
           embedded
           projectName={projectName}
           context={projectContext}
+          contextLoadState={projectContextLoadState}
           outputCount={outputCount}
         />
         <span className="text-slate-400">·</span>

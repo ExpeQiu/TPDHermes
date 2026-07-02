@@ -593,7 +593,10 @@ export function useChatSessionStore({
   }, []);
 
   useEffect(() => {
-    if (!scopeUserId) return;
+    if (!scopeUserId) {
+      setSessionsLoading(false);
+      return;
+    }
     let cancelled = false;
     setSessionsLoading(true);
     setSessionsSyncError("");

@@ -1,6 +1,7 @@
 "use client";
 
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import Link from "next/link";
 import { useParams, useSearchParams } from "next/navigation";
 
 import { apiGet, apiV1 } from "@/lib/api";
@@ -42,6 +43,7 @@ import {
   type ProjectFileItem,
 } from "@/lib/co-create-api";
 import {
+  isChatConversationStarted,
   projectCoCreateSessionDefaults,
   titleFromSession,
 } from "@/lib/chat-session-utils";
@@ -92,6 +94,7 @@ import { FilePreviewPanel } from "@/app/projects/[id]/co-create/components/FileP
 import { CoCreateComposer } from "@/app/projects/[id]/co-create/components/CoCreateComposer";
 import { CoCreateMessageStream } from "@/app/projects/[id]/co-create/components/CoCreateMessageStream";
 import { CoCreateTopbar } from "@/app/projects/[id]/co-create/components/CoCreateTopbar";
+import type { ProjectContextLoadState } from "@/app/projects/[id]/co-create/components/ProjectContextBar";
 import { FileCreateCard } from "@/app/projects/[id]/co-create/components/FileCreateCard";
 import { UpdateToOutputDialog } from "@/app/projects/[id]/co-create/components/UpdateToOutputDialog";
 import { FileDiffModal } from "@/app/projects/[id]/co-create/components/FileDiffModal";
@@ -358,7 +361,10 @@ function CoCreatePageInner() {
   const scopeUserId = useEffectiveUserScopeId();
 
   const [project, setProject] = useState<ProjectRecord | null>(null);
+  const [projectLoadState, setProjectLoadState] = useState<ProjectContextLoadState>("loading");
   const [projectContext, setProjectContext] = useState<ProjectContextResponse | null>(null);
+  const [projectContextLoadState, setProjectContextLoadState] =
+    useState<ProjectContextLoadState>("loading");
   const [collections, setCollections] = useState<string[]>([]);
   const [skills, setSkills] = useState<string[]>([]);
   const [input, setInput] = useState("");
@@ -596,12 +602,33 @@ function CoCreatePageInner() {
 
   useEffect(() => {
     if (!projectId) return;
+    setProjectLoadState("loading");
+    setProjectContextLoadState("loading");
+    setProject(null);
+    setProjectContext(null);
+
     apiGet<ProjectRecord>(`/projects/${projectId}`)
-      .then(setProject)
-      .catch(() => setProject(null));
+      .then((data) => {
+        setProject(data);
+        setProjectLoadState("ready");
+      })
+      .catch((err) => {
+        console.warn("[co-create] 项目详情加载失败", { projectId, err });
+        setProject(null);
+        setProjectLoadState("error");
+      });
+
     fetchProjectContext(projectId)
-      .then(setProjectContext)
-      .catch(() => setProjectContext(null));
+      .then((data) => {
+        setProjectContext(data);
+        setProjectContextLoadState("ready");
+      })
+      .catch((err) => {
+        console.warn("[co-create] 项目上下文加载失败", { projectId, err });
+        setProjectContext(null);
+        setProjectContextLoadState("error");
+      });
+
     fetchChatBootstrap()
       .then((data) => {
         setCollections(data.collections);
@@ -712,7 +739,8 @@ function CoCreatePageInner() {
         (session) =>
           session.sessionKind === "project_co_create" && !session.selectedProjectId?.trim(),
       );
-      if (orphan) {
+      // 仅复用空 bootstrap 会话；已有对话的 orphan 可能来自其他项目，禁止绑定到新项目
+      if (orphan && !isChatConversationStarted(orphan)) {
         updateSession(orphan.id, (session) => ({
           ...session,
           ...defaults,
@@ -1384,6 +1412,7 @@ function CoCreatePageInner() {
     isPlaceholderSessionTitle: isPlaceholderFromStore,
     condenseTopicTitle: condenseFromStore,
     coCreateSessionId: activeId ?? undefined,
+    coCreateAgentMode: agentMode,
     projectFileIds: projectFileIdsForExecute,
     pinnedFileIdsForExecute: pinnedIdsForExecute,
     onFileActionsFromStream: handleFileActionsFromStream,
@@ -2287,6 +2316,41 @@ function CoCreatePageInner() {
     return <div className="p-8 text-sm text-slate-500">缺少项目 ID</div>;
   }
 
+  if (projectLoadState === "loading") {
+    return (
+      <div className="flex flex-1 items-center justify-center p-8 text-sm text-slate-500">
+        加载项目共创…
+      </div>
+    );
+  }
+
+  if (projectLoadState === "error") {
+    return (
+      <div className="flex flex-1 flex-col items-center justify-center gap-4 p-8 text-center">
+        <h1 className="text-lg font-semibold text-slate-900 dark:text-white">无法打开项目共创</h1>
+        <p className="max-w-md text-sm leading-relaxed text-slate-600 dark:text-slate-400">
+          项目不存在、已被删除，或当前 User ID 无权访问。请先在项目中心确认该项目是否可见；若项目由其他账号创建，请在设置中核对
+          User ID 是否一致。
+        </p>
+        <p className="font-mono text-xs text-slate-500">项目 ID：{projectId}</p>
+        <div className="flex flex-wrap justify-center gap-3 pt-1">
+          <Link
+            href="/projects"
+            className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-blue-500"
+          >
+            返回项目中心
+          </Link>
+          <Link
+            href="/settings"
+            className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-100 dark:border-slate-600 dark:text-slate-200 dark:hover:bg-slate-800"
+          >
+            查看 User ID 设置
+          </Link>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="flex h-full min-h-0 flex-col overflow-hidden bg-slate-100 text-slate-900 dark:bg-slate-900 dark:text-white">
       <CoCreateTopbar
@@ -2302,6 +2366,7 @@ function CoCreatePageInner() {
         onToggleFilesPanel={() => setFilesPanelOpen((v) => !v)}
         filesPanelOpen={filesPanelOpen}
         projectContext={projectContext}
+        projectContextLoadState={projectContextLoadState}
         outputCount={fileWorkspace.files.filter((f) => f.kind === "output").length}
         pinnedFileIds={pinnedFileIds}
         roundFileIds={roundFileIds}

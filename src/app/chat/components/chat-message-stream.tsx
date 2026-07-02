@@ -4,6 +4,7 @@ import React from "react";
 
 import { ChatMarkdownWithCitations } from "@/components/chat-markdown-with-citations";
 import { ChatMessageQuickActions } from "@/components/chat-message-quick-actions";
+import { stripFileActionsBlock } from "@/app/projects/[id]/co-create/co-create-file-actions";
 import type { ContextBlock } from "@/lib/chat-context";
 import { StreamingWaitHint } from "@/components/streaming-wait-hint";
 import {
@@ -76,6 +77,8 @@ export function ChatMessageStream({
           streaming &&
           msg.role === "assistant" &&
           msg.id === activeSession.messages[activeSession.messages.length - 1]?.id;
+        const displayContent =
+          msg.role === "assistant" ? stripFileActionsBlock(msg.content) : msg.content;
 
         return (
           <div
@@ -136,16 +139,16 @@ export function ChatMessageStream({
                   msg.content || "…"
                 ) : (
                   <>
-                    {msg.content ? (
+                    {displayContent ? (
                       <ChatMarkdownWithCitations
-                        content={msg.content}
+                        content={displayContent}
                         citations={msg.citations}
                         unresolvedCitationRefs={msg.unresolvedCitationRefs}
                         streaming={isStreamingAssistant}
                       />
                     ) : null}
-                    {!msg.content && !isStreamingAssistant ? "…" : null}
-                    {isStreamingAssistant && !msg.content.trim() ? (
+                    {!displayContent && !isStreamingAssistant ? "…" : null}
+                    {isStreamingAssistant && !displayContent.trim() ? (
                       <StreamingWaitHint
                         text={buildStreamingWaitHint({
                           isFirstTurn: isFirstAssistantTurnForSession(activeSession, msg),
@@ -158,9 +161,9 @@ export function ChatMessageStream({
                 )}
               </div>
 
-              {msg.role === "assistant" && msg.content.trim() ? (
+              {msg.role === "assistant" && displayContent.trim() ? (
                 <ChatMessageQuickActions
-                  content={msg.content}
+                  content={displayContent}
                   role={msg.role}
                   messageId={msg.id}
                   exportTitle={titleFromSession(activeSession)}

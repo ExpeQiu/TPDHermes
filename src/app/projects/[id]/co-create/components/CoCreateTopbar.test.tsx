@@ -61,6 +61,7 @@ describe("CoCreateTopbar", () => {
             outputs_indexed: 2,
           },
         },
+        projectContextLoadState: "ready",
         outputCount: 2,
         pinnedFileIds: ["output:out-1"],
         roundFileIds: ["attachment:att-1"],
@@ -128,6 +129,7 @@ describe("CoCreateTopbar", () => {
         sessionsOpen: true,
         filesPanelOpen: false,
         projectContext: null,
+        projectContextLoadState: "loading",
         outputCount: 0,
         pinnedFileIds: [],
         roundFileIds: [],
@@ -144,5 +146,24 @@ describe("CoCreateTopbar", () => {
     expect(container.textContent).toContain("已自动保存");
     expect(container.querySelector('button[aria-label="隐藏会话栏"]')).not.toBeNull();
     expect(container.querySelector('button[aria-label="显示项目文件"]')).not.toBeNull();
+  });
+
+  it("renders unavailable context when context load failed", () => {
+    const { container } = renderComponent(
+      React.createElement(CoCreateTopbar, {
+        projectName: "Hermes 共创项目",
+        projectId: "p-3",
+        saveState: "idle",
+        projectContext: null,
+        projectContextLoadState: "error",
+        outputCount: 0,
+        pinnedFileIds: [],
+        roundFileIds: [],
+        files: [],
+        onRemoveFileRef: () => {},
+      }),
+    );
+
+    expect(container.textContent).toContain("项目上下文：不可用");
   });
 });

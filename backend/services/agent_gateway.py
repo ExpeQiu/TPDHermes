@@ -126,7 +126,19 @@ def _build_orchestration_guidance(
         )
         project_cols = [c for c in knowledge_collections if is_project_kb_collection(c)]
         public_cols = [c for c in knowledge_collections if not is_project_kb_collection(c)]
-        if payload.entrypoint == "chat" and payload.project.id != "none" and project_cols and public_cols:
+        ask_mode = (payload.co_create_agent_mode or "").strip() == "ask"
+        if ask_mode and payload.entrypoint == "chat" and payload.project.id != "none":
+            auth = "、".join(sorted(KB_AUTHORITATIVE_COLLECTIONS))
+            lines.extend(
+                [
+                    "【Ask 检索强制策略】本轮为共创只读调研：须按顺序检索——"
+                    f"① 项目知识库 {project_cols[0] if project_cols else '（若有）'}；"
+                    f"② 公共真源集合（{auth}）及 orchestration 中其余 public./internal. 集合；"
+                    "③ 若仍不足以回答，必须调用 tavily_search 联网补充。",
+                    "禁止在未完成公共库检索与联网尝试前声称「资料不足」；事实须标注 [^N]。",
+                ]
+            )
+        elif payload.entrypoint == "chat" and payload.project.id != "none" and project_cols and public_cols:
             lines.extend(
                 [
                     f"项目知识库 {project_cols[0]} 可能暂无索引：先 kb_query 项目 collection；"
