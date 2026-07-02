@@ -154,6 +154,7 @@ function createSessionRecord(overrides: Record<string, unknown> = {}) {
     id: "session-1",
     title: "项目共创",
     messages: [],
+    createdAt: Date.now(),
     selectedProjectId: "project-1",
     sessionKind: "project_co_create",
     pinnedFileIds: [] as string[],
@@ -356,6 +357,46 @@ describe("CoCreatePage", () => {
     expect(mocks.projectCoCreateSessionDefaults).toHaveBeenCalledWith("project-1");
   });
 
+  it("aligns to the project empty session when active session belongs to another project", async () => {
+    const otherProjectSession = createSessionRecord({
+      id: "other-project-session",
+      selectedProjectId: "project-other",
+      title: "知识问答",
+      messages: [
+        {
+          id: "user-1",
+          role: "user",
+          content: "请基于当前项目上下文，输出可复用的知识问答与摘要",
+        },
+        {
+          id: "assistant-1",
+          role: "assistant",
+          content: "（本轮未生成可见正文。Agent 可能仍在检索或仅执行了工具；请稍后重试，或检查 Hermes 上游是否正常。）",
+        },
+      ],
+    });
+    const projectEmptySession = createSessionRecord({
+      id: "project-empty",
+      title: "新共创",
+      messages: [],
+      createdAt: Date.now(),
+    });
+    const storeState = createStoreState({
+      sessions: [otherProjectSession, projectEmptySession],
+      activeId: "other-project-session",
+      activeSession: otherProjectSession,
+    });
+    mocks.useChatSessionStore.mockReturnValue(storeState);
+
+    renderComponent(React.createElement(CoCreatePage));
+
+    await waitFor(() => {
+      expect(storeState.selectSession).toHaveBeenCalledWith("project-empty");
+    });
+
+    expect(storeState.createSession).not.toHaveBeenCalled();
+  });
+
   it("binds an empty orphan bootstrap session to the project", async () => {
     const orphanSession = createSessionRecord({
       id: "orphan-empty",
@@ -463,13 +504,13 @@ describe("CoCreatePage", () => {
     renderComponent(React.createElement(CoCreatePage));
 
     await waitFor(() => {
-      expect(storeState.selectSession).toHaveBeenCalledWith("session-existing");
+      expect(storeState.updateSession).toHaveBeenCalledWith(
+        "session-existing",
+        expect.any(Function),
+      );
     });
 
-    expect(storeState.updateSession).toHaveBeenCalledWith(
-      "session-existing",
-      expect.any(Function),
-    );
+    expect(storeState.selectSession).not.toHaveBeenCalled();
     expect(storeState.queueSessionPatch).toHaveBeenCalledWith(
       "session-existing",
       { patched: true },

@@ -100,6 +100,47 @@ export function isProjectCoCreateSession(
   return session.sessionKind === "project_co_create";
 }
 
+/** 某项目下未归档的共创会话 */
+export function listProjectCoCreateSessions(
+  sessions: ChatSession[],
+  projectId: string,
+): ChatSession[] {
+  return sessions.filter(
+    (session) =>
+      !session.archived &&
+      session.selectedProjectId === projectId &&
+      isProjectCoCreateSession(session),
+  );
+}
+
+/**
+ * 进入项目共创页时选择应对齐的会话：
+ * - 当前 active 已属该项目 → 保持
+ * - 否则优先空会话（快捷创作空态），再取最新 createdAt
+ */
+export function pickProjectCoCreateEntrySession(
+  sessions: ChatSession[],
+  projectId: string,
+  activeSession: ChatSession | null | undefined,
+): ChatSession | null {
+  const projectSessions = listProjectCoCreateSessions(sessions, projectId);
+  if (projectSessions.length === 0) return null;
+
+  if (
+    activeSession &&
+    activeSession.selectedProjectId === projectId &&
+    isProjectCoCreateSession(activeSession)
+  ) {
+    return activeSession;
+  }
+
+  const emptySessions = projectSessions.filter((session) => !isChatConversationStarted(session));
+  const pool = emptySessions.length > 0 ? emptySessions : projectSessions;
+  return pool.reduce((latest, session) =>
+    session.createdAt > latest.createdAt ? session : latest,
+  );
+}
+
 export function getSessionHistoryCategory(session: ChatSession): SessionHistoryCategory {
   if (isProjectCoCreateSession(session)) return "co_create";
   if (inferSessionKind(session as unknown as Record<string, unknown>) === "scenario") {

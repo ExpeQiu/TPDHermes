@@ -44,6 +44,7 @@ import {
 } from "@/lib/co-create-api";
 import {
   isChatConversationStarted,
+  pickProjectCoCreateEntrySession,
   projectCoCreateSessionDefaults,
   titleFromSession,
 } from "@/lib/chat-session-utils";
@@ -398,6 +399,7 @@ function CoCreatePageInner() {
   const abortRef = useRef<AbortController | null>(null);
   const firstTokenMetricsRef = useRef({ count: 0, totalMs: 0 });
   const entryAppliedRef = useRef(false);
+  const entryProjectIdRef = useRef<string | null>(null);
   const autoApplyingProposalIdsRef = useRef<Set<string>>(new Set());
   const autoApplyingBusyRef = useRef(false);
   const autoDraftExtractedLenRef = useRef<Map<string, number>>(new Map());
@@ -716,19 +718,28 @@ function CoCreatePageInner() {
   }, [activeSession, queueSessionPatch, sessionsRef, updateSession]);
 
   useEffect(() => {
-    if (sessionsLoading || !projectId || entryAppliedRef.current) return;
+    if (sessionsLoading || !projectId) return;
+    if (entryAppliedRef.current && entryProjectIdRef.current === projectId) return;
+
     const sessionIdFromUrl = searchParams?.get("session_id");
     if (sessionIdFromUrl && sessions.some((s) => s.id === sessionIdFromUrl)) {
       selectSession(sessionIdFromUrl);
       entryAppliedRef.current = true;
+      entryProjectIdRef.current = projectId;
       return;
     }
+
     const outputId = searchParams?.get("output_id");
     const fileId = searchParams?.get("file_id");
     const initialKey = fileKeyFromParams(outputId, fileId, "output");
-    const hasProjectSession = sessions.some(
-      (s) => s.selectedProjectId === projectId && s.sessionKind === "project_co_create",
+    const projectSessions = sessions.filter(
+      (s) =>
+        !s.archived &&
+        s.selectedProjectId === projectId &&
+        s.sessionKind === "project_co_create",
     );
+    const hasProjectSession = projectSessions.length > 0;
+
     if (!hasProjectSession) {
       const defaults = projectCoCreateSessionDefaults(projectId);
       if (initialKey) {
@@ -753,26 +764,44 @@ function CoCreatePageInner() {
         if (updated) queueSessionPatch(orphan.id, sessionToPatchPayload(updated));
         selectSession(orphan.id);
         if (initialKey) {
-          persistFileRefs(defaults.pinnedFileIds ?? [], defaults.roundFileIds ?? []);
           fileWorkspace.openFileTab(initialKey);
         }
         console.info("[co-create] 已绑定 bootstrap 会话到项目", { projectId, sessionId: orphan.id });
       } else {
         createSession(defaults);
+        if (initialKey) {
+          fileWorkspace.openFileTab(initialKey);
+        }
       }
-    } else if (initialKey) {
-      const target = sessions.find((s) => s.selectedProjectId === projectId);
-      if (target) {
+    } else {
+      const target = pickProjectCoCreateEntrySession(sessions, projectId, activeSession);
+      if (target && target.id !== activeId) {
         selectSession(target.id);
-        persistFileRefs(target.pinnedFileIds ?? [], [...new Set([...(target.roundFileIds ?? []), initialKey])]);
+        console.info("[co-create] 已对齐到项目共创会话", {
+          projectId,
+          sessionId: target.id,
+          empty: !isChatConversationStarted(target),
+        });
+      }
+      if (initialKey && target) {
+        const nextRound = [...new Set([...(target.roundFileIds ?? []), initialKey])];
+        updateSession(target.id, (session) => ({
+          ...session,
+          roundFileIds: nextRound,
+        }));
+        const updated = sessionsRef.current.find((session) => session.id === target.id);
+        if (updated) queueSessionPatch(target.id, sessionToPatchPayload(updated));
         fileWorkspace.openFileTab(initialKey);
       }
     }
+
     entryAppliedRef.current = true;
+    entryProjectIdRef.current = projectId;
   }, [
+    activeId,
+    activeSession,
     createSession,
     fileWorkspace,
-    persistFileRefs,
     projectId,
     queueSessionPatch,
     searchParams,

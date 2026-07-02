@@ -4,6 +4,7 @@ import type { ChatSession } from "@/app/chat/chat-types";
 import {
   condenseTopicTitle,
   isProjectCoCreateSession,
+  pickProjectCoCreateEntrySession,
   titleFromSession,
   userMessageTextForTitle,
 } from "@/lib/chat-session-utils";
@@ -66,5 +67,86 @@ describe("isProjectCoCreateSession", () => {
     };
     expect(isProjectCoCreateSession(chatWithProjectFile)).toBe(false);
     expect(inferSessionKind(chatWithProjectFile)).toBe("chat");
+  });
+});
+
+describe("pickProjectCoCreateEntrySession", () => {
+  const base = {
+    selectedCollection: "",
+    includeProjectContext: true,
+    includeKnowledgeContext: false,
+    includeSkillsContext: false,
+    chatMode: "co_create" as const,
+    includeFileContext: false,
+    sessionKind: "project_co_create" as const,
+    archived: false,
+  };
+
+  it("keeps active session when it already belongs to the project", () => {
+    const active = {
+      id: "active",
+      title: "进行中",
+      messages: [{ id: "u1", role: "user" as const, content: "继续写" }],
+      createdAt: 100,
+      selectedProjectId: "project-1",
+      ...base,
+    };
+    const empty = {
+      id: "empty",
+      title: "新共创",
+      messages: [],
+      createdAt: 200,
+      selectedProjectId: "project-1",
+      ...base,
+    };
+    expect(
+      pickProjectCoCreateEntrySession([active, empty], "project-1", active)?.id,
+    ).toBe("active");
+  });
+
+  it("prefers empty session when active belongs to another project", () => {
+    const otherProject = {
+      id: "other",
+      title: "知识问答",
+      messages: [
+        { id: "u1", role: "user" as const, content: "请基于当前项目上下文，输出可复用的知识问答与摘要" },
+      ],
+      createdAt: 300,
+      selectedProjectId: "project-other",
+      ...base,
+    };
+    const empty = {
+      id: "empty",
+      title: "新共创",
+      messages: [],
+      createdAt: 100,
+      selectedProjectId: "project-1",
+      ...base,
+    };
+    expect(
+      pickProjectCoCreateEntrySession([otherProject, empty], "project-1", otherProject)?.id,
+    ).toBe("empty");
+  });
+
+  it("falls back to latest session when project has no empty session", () => {
+    const older = {
+      id: "older",
+      title: "旧稿",
+      messages: [{ id: "u1", role: "user" as const, content: "旧任务" }],
+      createdAt: 100,
+      selectedProjectId: "project-1",
+      ...base,
+    };
+    const newer = {
+      id: "newer",
+      title: "新稿",
+      messages: [{ id: "u2", role: "user" as const, content: "新任务" }],
+      createdAt: 200,
+      selectedProjectId: "project-1",
+      ...base,
+    };
+    expect(
+      pickProjectCoCreateEntrySession([older, newer], "project-1", null)?.id,
+    ).toBe("newer");
   });
 });
