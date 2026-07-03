@@ -12,6 +12,14 @@ ENV HUGGINGFACE_HUB_CACHE=/app/.cache/huggingface
 ARG KB_EMBED_MODEL=BAAI/bge-small-zh-v1.5
 ENV KB_EMBED_MODEL=${KB_EMBED_MODEL}
 
+# 国内 ECS：apt 走阿里云镜像，避免 deb.debian.org 下载超时
+RUN set -eux; \
+    if [ -f /etc/apt/sources.list.d/debian.sources ]; then \
+      sed -i 's|deb.debian.org|mirrors.aliyun.com|g; s|security.debian.org|mirrors.aliyun.com|g' /etc/apt/sources.list.d/debian.sources; \
+    elif [ -f /etc/apt/sources.list ]; then \
+      sed -i 's|deb.debian.org|mirrors.aliyun.com|g; s|security.debian.org|mirrors.aliyun.com|g' /etc/apt/sources.list; \
+    fi
+
 # Tesseract OCR（图片 OCR 本地引擎）
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
