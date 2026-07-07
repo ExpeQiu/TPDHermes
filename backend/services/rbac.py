@@ -52,8 +52,8 @@ PLATFORM_ROLE_LABELS: dict[str, str] = {
     "tenant_partner": "项目成员",
 }
 
-# 非 default 用户的默认平台分组（项目成员）
-DEFAULT_MEMBER_PLATFORM_ROLE: str = "tenant_partner"
+# 非 default 用户的默认平台分组（项目管理员）
+DEFAULT_MEMBER_PLATFORM_ROLE: str = "tenant_editor"
 
 PROJECT_ROLE_LABELS: dict[str, str] = {
     "owner": "负责人",

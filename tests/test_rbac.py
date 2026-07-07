@@ -123,7 +123,7 @@ def test_system_admin_can_assign_managed_user_role():
         assert assigned.json()["platform_role"] == "tenant_partner"
 
 
-def test_default_user_is_platform_admin_new_user_is_partner():
+def test_default_user_is_platform_admin_new_user_is_editor():
     with TestClient(app) as client:
         default_access = client.get(
             "/api/v1/me/access",
@@ -131,12 +131,14 @@ def test_default_user_is_platform_admin_new_user_is_partner():
         ).json()
         assert default_access["platform_role"] == "platform_admin"
 
-        partner_access = client.get(
+        editor_access = client.get(
             "/api/v1/me/access",
             headers={"X-User-ID": "new_member_user"},
         ).json()
-        assert partner_access["platform_role"] == "tenant_partner"
-        assert "ops" not in partner_access["features"]
+        assert editor_access["platform_role"] == "tenant_editor"
+        assert "create" in editor_access["features"]
+        assert "knowledge" in editor_access["features"]
+        assert "ops" not in editor_access["features"]
 
 
 def test_client_role_header_cannot_elevate_without_server_pref():

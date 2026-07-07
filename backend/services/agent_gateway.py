@@ -180,9 +180,11 @@ def _build_orchestration_guidance(
         lines.extend(
             [
                 "当任务涉及在项目内新建文稿、改写已有输出物或直接落成文件时，优先调用 `write_file` 或 `patch` 真正执行文件创建/编辑，不要只停留在口头建议。",
+                "write_file/patch 的物理路径必须使用 HERMES_HOME 下可写目录：`/opt/data/输出/{fileName}` 或相对路径 `输出/{fileName}`；"
+                "禁止写入 `/输出/`（根目录虚拟路径，容器内不可创建）、`/opt/hermes/output`（代码目录不存在）或 `/Users/…`。",
                 "若你执行了 `write_file` 或 `patch`，最终回复末尾必须追加一个 `tphermes_file_actions` JSON 代码块，用于将实际结果同步回 TPDHermes 的 OutputAsset。",
                 "该代码块格式为：```tphermes_file_actions {\"actions\":[...]} ```；create 动作至少包含 type、fileName、path、content。",
-                "create 的 path 必须为 `/输出/{fileName}` 形式的项目虚拟路径，禁止使用本机绝对路径（如 /Users/…）。",
+                "tphermes_file_actions 中 create 的 path 使用项目虚拟路径 `/输出/{fileName}`（与 write_file 物理路径不同，仅用于 TPD 落库）。",
                 "长文稿正文应写在回复正文中；tphermes_file_actions 内 content 须与正文一致且为合法 JSON，避免在 JSON 中塞入未转义超长正文导致截断。",
                 "patch 动作支持三种 editMode：full（整篇 after）、search_replace（oldString+newString，须唯一匹配）、line_range（startLine/endLine+newText，用于选段改写）。",
                 "当用户消息含文件选段引用时，必须使用 search_replace 或 line_range，禁止无关全文重写。",

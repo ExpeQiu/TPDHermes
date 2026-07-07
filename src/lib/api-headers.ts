@@ -18,7 +18,7 @@ export function loadUserRoleFromStorage(): string {
   if (fromStorage) return fromStorage;
   const fromEnv = process.env.NEXT_PUBLIC_DEFAULT_USER_ROLE?.trim();
   if (fromEnv) return fromEnv;
-  return "tenant_partner";
+  return "tenant_editor";
 }
 
 export function getApiHeaders(): Record<string, string> {

@@ -401,6 +401,7 @@ def run_sqlite_migrations(connection: Connection) -> None:
     _backfill_project_scenario_bindings(connection)
     _backfill_project_owner_members(connection)
     _backfill_member_default_platform_roles(connection)
+    _upgrade_member_platform_role_to_editor(connection)
     _ensure_growth_tables(connection)
 
 
@@ -686,7 +687,7 @@ def _backfill_project_owner_members(connection: Connection) -> None:
 
 
 def _backfill_member_default_platform_roles(connection: Connection) -> None:
-    """非 default 用户：旧版默认 tenant_admin / 未设置 → tenant_partner（项目成员）。"""
+    """非 default 用户：未设置 / 旧 alias tenant_viewer → tenant_editor。"""
     tables = connection.execute(
         text("SELECT name FROM sqlite_master WHERE type='table'")
     ).fetchall()
@@ -710,9 +711,9 @@ def _backfill_member_default_platform_roles(connection: Connection) -> None:
         if not isinstance(prefs, dict):
             prefs = {}
         role = str(prefs.get("platform_role") or "").strip()
-        if role not in ("", "tenant_admin", "tenant_viewer"):
+        if role not in ("", "tenant_viewer"):
             continue
-        prefs["platform_role"] = "tenant_partner"
+        prefs["platform_role"] = "tenant_editor"
         connection.execute(
             text(
                 """
@@ -728,6 +729,56 @@ def _backfill_member_default_platform_roles(connection: Connection) -> None:
             },
         )
         changed += 1
-        logger.info("sqlite_migrate: platform_role -> tenant_partner user=%s", uid[:24])
+        logger.info("sqlite_migrate: platform_role -> tenant_editor user=%s", uid[:24])
     if changed:
         logger.info("sqlite_migrate: backfilled platform_role count=%s", changed)
+
+
+def _upgrade_member_platform_role_to_editor(connection: Connection) -> None:
+    """将旧默认 tenant_partner 提升为 tenant_editor（保留 tenant_admin / platform_admin）。"""
+    tables = connection.execute(
+        text("SELECT name FROM sqlite_master WHERE type='table'")
+    ).fetchall()
+    table_names = {str(r[0]) for r in tables}
+    if "user_preferences" not in table_names:
+        return
+
+    rows = connection.execute(
+        text("SELECT user_id, preferences_json FROM user_preferences")
+    ).fetchall()
+    now = datetime.now().isoformat()
+    changed = 0
+    for user_id, prefs_json in rows:
+        uid = str(user_id or "").strip()
+        if not uid or uid == "default":
+            continue
+        try:
+            prefs = json.loads(prefs_json or "{}")
+        except json.JSONDecodeError:
+            prefs = {}
+        if not isinstance(prefs, dict):
+            prefs = {}
+        role = str(prefs.get("platform_role") or "").strip()
+        if role in ("tenant_admin", "platform_admin", "tenant_editor"):
+            continue
+        if role != "tenant_partner":
+            continue
+        prefs["platform_role"] = "tenant_editor"
+        connection.execute(
+            text(
+                """
+                UPDATE user_preferences
+                SET preferences_json = :prefs, updated_at = :ts
+                WHERE user_id = :uid
+                """
+            ),
+            {
+                "prefs": json.dumps(prefs, ensure_ascii=False),
+                "ts": now,
+                "uid": uid,
+            },
+        )
+        changed += 1
+        logger.info("sqlite_migrate: platform_role tenant_partner -> tenant_editor user=%s", uid[:24])
+    if changed:
+        logger.info("sqlite_migrate: upgraded platform_role to tenant_editor count=%s", changed)

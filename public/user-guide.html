@@ -1,0 +1,1075 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>TPCM 技术推广内容共创平台 · 产品使用指南</title>
+  <style>
+    :root {
+      --bg: #f8fafc;
+      --surface: #ffffff;
+      --text: #0f172a;
+      --text-muted: #64748b;
+      --border: #e2e8f0;
+      --primary: #2563eb;
+      --primary-light: #eff6ff;
+      --accent: #7c3aed;
+      --success: #059669;
+      --warning: #d97706;
+      --sidebar-w: 260px;
+      --radius: 12px;
+      --shadow: 0 1px 3px rgba(15, 23, 42, 0.08), 0 4px 16px rgba(15, 23, 42, 0.04);
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    html { scroll-behavior: smooth; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.7;
+      font-size: 15px;
+    }
+
+    /* ── Layout ── */
+    .layout { display: flex; min-height: 100vh; }
+
+    .sidebar {
+      position: fixed;
+      top: 0; left: 0;
+      width: var(--sidebar-w);
+      height: 100vh;
+      background: var(--surface);
+      border-right: 1px solid var(--border);
+      overflow-y: auto;
+      z-index: 100;
+      padding: 24px 0 40px;
+    }
+
+    .sidebar-brand {
+      padding: 0 20px 20px;
+      border-bottom: 1px solid var(--border);
+      margin-bottom: 12px;
+    }
+
+    .sidebar-brand .logo {
+      font-size: 18px;
+      font-weight: 700;
+      color: var(--primary);
+      letter-spacing: -0.02em;
+    }
+
+    .sidebar-brand .subtitle {
+      font-size: 12px;
+      color: var(--text-muted);
+      margin-top: 4px;
+    }
+
+    .nav-group { padding: 8px 12px; }
+
+    .nav-group-title {
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--text-muted);
+      padding: 4px 8px 6px;
+    }
+
+    .nav-link {
+      display: block;
+      padding: 7px 12px;
+      border-radius: 8px;
+      color: var(--text);
+      text-decoration: none;
+      font-size: 14px;
+      transition: background 0.15s, color 0.15s;
+    }
+
+    .nav-link:hover { background: var(--primary-light); color: var(--primary); }
+    .nav-link.active { background: var(--primary-light); color: var(--primary); font-weight: 600; }
+
+    .main {
+      margin-left: var(--sidebar-w);
+      flex: 1;
+      max-width: 860px;
+      padding: 48px 48px 80px;
+    }
+
+    /* ── Hero ── */
+    .hero {
+      background: linear-gradient(135deg, #1e40af 0%, #7c3aed 100%);
+      border-radius: 16px;
+      padding: 40px 44px;
+      color: #fff;
+      margin-bottom: 40px;
+      box-shadow: var(--shadow);
+    }
+
+    .hero h1 {
+      font-size: 28px;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+      margin-bottom: 12px;
+    }
+
+    .hero p { font-size: 15px; opacity: 0.9; max-width: 560px; }
+
+    .hero-tags {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 20px;
+    }
+
+    .hero-tag {
+      background: rgba(255,255,255,0.18);
+      border: 1px solid rgba(255,255,255,0.25);
+      border-radius: 20px;
+      padding: 4px 14px;
+      font-size: 13px;
+    }
+
+    /* ── Sections ── */
+    section { margin-bottom: 48px; scroll-margin-top: 24px; }
+
+    h2 {
+      font-size: 22px;
+      font-weight: 700;
+      color: var(--text);
+      margin-bottom: 16px;
+      padding-bottom: 10px;
+      border-bottom: 2px solid var(--border);
+      letter-spacing: -0.01em;
+    }
+
+    h3 {
+      font-size: 16px;
+      font-weight: 600;
+      color: var(--text);
+      margin: 24px 0 10px;
+    }
+
+    p { margin-bottom: 12px; color: #334155; }
+
+    /* ── Cards ── */
+    .card-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+      gap: 16px;
+      margin: 16px 0;
+    }
+
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 20px;
+      box-shadow: var(--shadow);
+    }
+
+    .card-icon { font-size: 28px; margin-bottom: 10px; }
+
+    .card h4 {
+      font-size: 15px;
+      font-weight: 600;
+      margin-bottom: 6px;
+    }
+
+    .card p { font-size: 13px; color: var(--text-muted); margin: 0; }
+
+    /* ── Steps ── */
+    .steps { counter-reset: step; margin: 16px 0; }
+
+    .step {
+      display: flex;
+      gap: 16px;
+      margin-bottom: 16px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 16px 20px;
+      box-shadow: var(--shadow);
+    }
+
+    .step-num {
+      flex-shrink: 0;
+      width: 32px; height: 32px;
+      background: var(--primary);
+      color: #fff;
+      border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 14px; font-weight: 700;
+    }
+
+    .step-body h4 { font-size: 14px; font-weight: 600; margin-bottom: 4px; }
+    .step-body p { font-size: 13px; margin: 0; color: var(--text-muted); }
+
+    /* ── Table ── */
+    .table-wrap { overflow-x: auto; margin: 16px 0; border-radius: var(--radius); border: 1px solid var(--border); }
+
+    table { width: 100%; border-collapse: collapse; font-size: 14px; background: var(--surface); }
+
+    th {
+      background: #f1f5f9;
+      text-align: left;
+      padding: 10px 16px;
+      font-weight: 600;
+      color: var(--text);
+      border-bottom: 1px solid var(--border);
+    }
+
+    td {
+      padding: 10px 16px;
+      border-bottom: 1px solid var(--border);
+      color: #334155;
+      vertical-align: top;
+    }
+
+    tr:last-child td { border-bottom: none; }
+
+    /* ── Callout ── */
+    .callout {
+      border-radius: var(--radius);
+      padding: 14px 18px;
+      margin: 16px 0;
+      font-size: 14px;
+      display: flex;
+      gap: 10px;
+      align-items: flex-start;
+    }
+
+    .callout-tip { background: #eff6ff; border-left: 4px solid var(--primary); }
+    .callout-warn { background: #fffbeb; border-left: 4px solid var(--warning); }
+    .callout-info { background: #f0fdf4; border-left: 4px solid var(--success); }
+
+    .callout-icon { font-size: 18px; flex-shrink: 0; }
+
+    /* ── Flow diagram ── */
+    .flow {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 8px;
+      margin: 20px 0;
+    }
+
+    .flow-item {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 8px 14px;
+      font-size: 13px;
+      font-weight: 500;
+      box-shadow: var(--shadow);
+    }
+
+    .flow-arrow { color: var(--text-muted); font-size: 18px; }
+
+    /* ── Role badges ── */
+    .badge {
+      display: inline-block;
+      padding: 2px 10px;
+      border-radius: 20px;
+      font-size: 12px;
+      font-weight: 600;
+    }
+
+    .badge-blue { background: #dbeafe; color: #1d4ed8; }
+    .badge-purple { background: #ede9fe; color: #6d28d9; }
+    .badge-green { background: #d1fae5; color: #065f46; }
+    .badge-gray { background: #f1f5f9; color: #475569; }
+
+    /* ── FAQ ── */
+    .faq-item {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      margin-bottom: 10px;
+      overflow: hidden;
+    }
+
+    .faq-q {
+      padding: 14px 18px;
+      font-weight: 600;
+      font-size: 14px;
+      cursor: pointer;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      user-select: none;
+    }
+
+    .faq-q:hover { background: #f8fafc; }
+
+    .faq-a {
+      padding: 0 18px 14px;
+      font-size: 14px;
+      color: var(--text-muted);
+      display: none;
+    }
+
+    .faq-item.open .faq-a { display: block; }
+    .faq-item.open .faq-chevron { transform: rotate(180deg); }
+    .faq-chevron { transition: transform 0.2s; color: var(--text-muted); }
+
+    /* ── Footer ── */
+    .page-footer {
+      margin-top: 60px;
+      padding-top: 24px;
+      border-top: 1px solid var(--border);
+      text-align: center;
+      font-size: 13px;
+      color: var(--text-muted);
+    }
+
+    /* ── Mobile ── */
+    .menu-toggle {
+      display: none;
+      position: fixed;
+      top: 16px; left: 16px;
+      z-index: 200;
+      background: var(--primary);
+      color: #fff;
+      border: none;
+      border-radius: 8px;
+      padding: 8px 14px;
+      font-size: 14px;
+      cursor: pointer;
+    }
+
+    @media (max-width: 768px) {
+      .sidebar { transform: translateX(-100%); transition: transform 0.25s; }
+      .sidebar.open { transform: translateX(0); }
+      .main { margin-left: 0; padding: 72px 20px 60px; }
+      .menu-toggle { display: block; }
+      .hero { padding: 28px 24px; }
+      .hero h1 { font-size: 22px; }
+    }
+
+    @media print {
+      .sidebar, .menu-toggle { display: none; }
+      .main { margin-left: 0; padding: 20px; max-width: 100%; }
+      .hero { background: #1e40af; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+    }
+  </style>
+</head>
+<body>
+
+<button class="menu-toggle" onclick="document.querySelector('.sidebar').classList.toggle('open')">☰ 目录</button>
+
+<div class="layout">
+
+  <!-- 侧边导航 -->
+  <nav class="sidebar" aria-label="指南目录">
+    <div class="sidebar-brand">
+      <div class="logo">TPCM</div>
+      <div class="subtitle">技术推广内容共创平台<br>产品使用指南</div>
+    </div>
+
+    <div class="nav-group">
+      <div class="nav-group-title">入门</div>
+      <a class="nav-link" href="#intro">平台简介</a>
+      <a class="nav-link" href="#start">快速上手</a>
+      <a class="nav-link" href="#roles">角色与权限</a>
+    </div>
+
+    <div class="nav-group">
+      <div class="nav-group-title">核心功能</div>
+      <a class="nav-link" href="#projects">项目中心</a>
+      <a class="nav-link" href="#workshop">场景输出</a>
+      <a class="nav-link" href="#chat">对话创作</a>
+      <a class="nav-link" href="#cocreate">项目共创</a>
+    </div>
+
+    <div class="nav-group">
+      <div class="nav-group-title">配置与管理</div>
+      <a class="nav-link" href="#scenarios">场景编排</a>
+      <a class="nav-link" href="#knowledge">知识库</a>
+      <a class="nav-link" href="#skills">技能工坊</a>
+      <a class="nav-link" href="#settings">用户设置</a>
+    </div>
+
+    <div class="nav-group">
+      <div class="nav-group-title">参考</div>
+      <a class="nav-link" href="#workflows">常见任务</a>
+      <a class="nav-link" href="#faq">常见问题</a>
+    </div>
+  </nav>
+
+  <!-- 主内容 -->
+  <main class="main">
+
+    <div class="hero">
+      <h1>TPCM 技术推广内容共创平台</h1>
+      <p>围绕「项目」组织背景与素材，借助 AI 辅助完成技术推广类内容的共创、生成、优化与沉淀——传播稿、展具方案、视频脚本、发言稿、调研报告，一站完成。</p>
+      <div class="hero-tags">
+        <span class="hero-tag">📁 项目驱动</span>
+        <span class="hero-tag">✍️ AI 辅助创作</span>
+        <span class="hero-tag">📄 标准场景输出</span>
+        <span class="hero-tag">🤝 多人协作</span>
+      </div>
+    </div>
+
+    <!-- 1. 平台简介 -->
+    <section id="intro">
+      <h2>平台简介</h2>
+      <p>TPCM（技术推广内容共创工作台）面向车企及技术品牌团队中的<strong>技术推广、品牌传播、活动策划、展具与 IP 包装</strong>等岗位，帮助您高效产出专业内容。</p>
+
+      <h3>核心理念</h3>
+      <div class="flow">
+        <span class="flow-item">📁 创建项目</span>
+        <span class="flow-arrow">→</span>
+        <span class="flow-item">📎 上传素材</span>
+        <span class="flow-arrow">→</span>
+        <span class="flow-item">🤖 AI 创作</span>
+        <span class="flow-arrow">→</span>
+        <span class="flow-item">📋 输出沉淀</span>
+        <span class="flow-arrow">→</span>
+        <span class="flow-item">🔄 持续优化</span>
+      </div>
+
+      <h3>三种创作方式</h3>
+      <div class="card-grid">
+        <div class="card">
+          <div class="card-icon">🏭</div>
+          <h4>场景输出</h4>
+          <p>按已配置的场景模板，一键生成标准化文档。适合传播稿、立项书、脚本等正式交付物。</p>
+        </div>
+        <div class="card">
+          <div class="card-icon">💬</div>
+          <h4>对话创作</h4>
+          <p>与 AI 自由多轮交流，澄清需求、头脑风暴，或对已有文稿进行对话式润色。</p>
+        </div>
+        <div class="card">
+          <div class="card-icon">🤝</div>
+          <h4>项目共创</h4>
+          <p>在项目文件旁与 AI 协同编辑，边聊边改文档，支持多文件协作与精细改稿。</p>
+        </div>
+      </div>
+
+      <div class="callout callout-tip">
+        <span class="callout-icon">💡</span>
+        <div>三种方式可以组合使用：先用<strong>场景输出</strong>生成初稿，再用<strong>对话创作</strong>或<strong>项目共创</strong>继续打磨，所有成果都会沉淀到项目中。</div>
+      </div>
+    </section>
+
+    <!-- 2. 快速上手 -->
+    <section id="start">
+      <h2>快速上手</h2>
+      <p>首次使用，按以下步骤即可开始创作：</p>
+
+      <div class="steps">
+        <div class="step">
+          <div class="step-num">1</div>
+          <div class="step-body">
+            <h4>打开平台</h4>
+            <p>在浏览器中访问您所在组织提供的平台地址，进入工作台首页。</p>
+          </div>
+        </div>
+        <div class="step">
+          <div class="step-num">2</div>
+          <div class="step-body">
+            <h4>确认身份</h4>
+            <p>点击顶部导航「设置」，在「用户与身份」中确认您的 User ID。若使用，系统会自动绑定身份；跨设备使用时请保持同一 ID。</p>
+          </div>
+        </div>
+        <div class="step">
+          <div class="step-num">3</div>
+          <div class="step-body">
+            <h4>新建项目</h4>
+            <p>进入「项目中心」→「新建项目」，填写项目名称、背景说明、目标受众，并上传相关参考材料。</p>
+          </div>
+        </div>
+        <div class="step">
+          <div class="step-num">4</div>
+          <div class="step-body">
+            <h4>选择创作方式</h4>
+            <p>需要标准模板文档 → 选「场景输出」；需要自由讨论 → 选「对话创作」；需要改项目文件 → 选「项目共创」。</p>
+          </div>
+        </div>
+        <div class="step">
+          <div class="step-num">5</div>
+          <div class="step-body">
+            <h4>查看与优化成果</h4>
+            <p>回到项目详情页的「输出沉淀」，查看、复制生成结果，或继续发起优化。</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="callout callout-info">
+        <span class="callout-icon">✅</span>
+        <div>平台无需传统账号密码登录。您的身份通过 User ID 识别</div>
+      </div>
+    </section>
+
+    <!-- 3. 角色与权限 -->
+    <section id="roles">
+      <h2>角色与权限</h2>
+      <p>不同角色看到的导航菜单有所不同，请对照下表了解您能使用的功能：</p>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>角色</th>
+              <th>可用功能</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><span class="badge badge-blue">项目成员</span></td>
+              <td>首页、项目中心、项目共创、对话创作、场景输出、设置</td>
+            </tr>
+            <tr>
+              <td><span class="badge badge-purple">项目管理员</span></td>
+              <td>上述全部 + 场景编排、知识库、技能工坊</td>
+            </tr>
+            <tr>
+              <td><span class="badge badge-green">系统管理员</span></td>
+              <td>上述全部 + 运维用量</td>
+            </tr>
+            <tr>
+              <td><span class="badge badge-gray">平台管理员</span></td>
+              <td>全部功能</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>项目内角色</h3>
+      <p>在每个项目中，成员可被赋予不同角色：</p>
+      <ul style="padding-left: 20px; color: #334155; margin-bottom: 12px;">
+        <li><strong>负责人</strong>：管理项目成员与项目设置</li>
+        <li><strong>编辑</strong>：可创作、修改项目内容与输出</li>
+        <li><strong>只读</strong>：仅可查看项目信息与成果</li>
+      </ul>
+    </section>
+
+    <!-- 4. 项目中心 -->
+    <section id="projects">
+      <h2>项目中心</h2>
+      <p>项目是平台的核心组织单元。所有背景信息、参考素材和生成成果都围绕项目展开，是您日常工作的主入口。</p>
+
+      <h3>创建项目</h3>
+      <p>点击「项目中心」→「新建项目」，填写以下信息：</p>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>字段</th><th>说明</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>项目名称</td><td>必填，便于识别和检索</td></tr>
+            <tr><td>项目背景</td><td>描述项目目的、技术要点、业务背景</td></tr>
+            <tr><td>目标受众</td><td>内容面向的读者或观众群体</td></tr>
+            <tr><td>截止日期</td><td>可选，帮助团队把握节奏</td></tr>
+            <tr><td>约束条件</td><td>可选，如字数限制、风格要求等</td></tr>
+            <tr><td>附件</td><td>可上传参考文件作为创作素材</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>项目控制台</h3>
+      <p>进入某个项目后，您会看到项目控制台，包含以下区域：</p>
+
+      <div class="card-grid">
+        <div class="card">
+          <h4>📊 控制台</h4>
+          <p>查看项目边界信息、快捷进入三大创作入口，管理项目文件（上传附件、粘贴文字、图片识别转文字）。</p>
+        </div>
+        <div class="card">
+          <h4>👥 项目成员</h4>
+          <p>邀请同事加入项目，分配负责人、编辑或只读角色。</p>
+        </div>
+        <div class="card">
+          <h4>📋 输出沉淀</h4>
+          <p>查看所有历史生成结果，支持复制、继续优化、归档管理。</p>
+        </div>
+        <div class="card">
+          <h4>⭐ 用户反馈</h4>
+          <p>对项目产出进行星级评价和文字反馈，帮助持续改进。</p>
+        </div>
+      </div>
+
+      <h3>项目文件</h3>
+      <p>在项目控制台的「项目文件」区域，您可以：</p>
+      <ul style="padding-left: 20px; color: #334155; margin-bottom: 12px;">
+        <li>上传 Word、PDF、图片等参考材料</li>
+        <li>直接粘贴说明文字</li>
+        <li>上传图片后自动识别文字（OCR）转为可编辑内容</li>
+      </ul>
+      <p>这些文件会在创作时自动作为 AI 的参考上下文，帮助生成更贴合项目的内容。</p>
+    </section>
+
+    <!-- 5. 场景输出 -->
+    <section id="workshop">
+      <h2>场景输出</h2>
+      <p>当您需要按固定模板生成正式文档时，使用场景输出。平台已预置多种业务场景，如技术传播稿、展具立项书、视频脚本、领导讲稿等。</p>
+
+      <h3>操作步骤</h3>
+      <div class="steps">
+        <div class="step">
+          <div class="step-num">1</div>
+          <div class="step-body">
+            <h4>选择结果处理模式</h4>
+            <p>选择「定向生成」——按场景模板生成全新文档。</p>
+          </div>
+        </div>
+        <div class="step">
+          <div class="step-num">2</div>
+          <div class="step-body">
+            <h4>关联项目</h4>
+            <p>选择要写入成果的目标项目（必选）。</p>
+          </div>
+        </div>
+        <div class="step">
+          <div class="step-num">3</div>
+          <div class="step-body">
+            <h4>选择场景</h4>
+            <p>从已发布的场景列表中选择匹配您任务的场景，系统会优先推荐项目已绑定的场景。</p>
+          </div>
+        </div>
+        <div class="step">
+          <div class="step-num">4</div>
+          <div class="step-body">
+            <h4>填写任务信息</h4>
+            <p>根据场景要求填写相关字段（不同场景的字段各不相同）。</p>
+          </div>
+        </div>
+        <div class="step">
+          <div class="step-num">5</div>
+          <div class="step-body">
+            <h4>开始生成</h4>
+            <p>点击「开始生成」，等待 AI 完成创作，结果可保存为项目输出物。</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="callout callout-tip">
+        <span class="callout-icon">💡</span>
+        <div>场景输出生成的文档会自动沉淀到项目的「输出沉淀」中，无需手动保存。</div>
+      </div>
+
+      <h3>适用场景举例</h3>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>业务需求</th><th>推荐场景</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>撰写技术 IP 传播稿</td><td>技术/事件传播稿</td></tr>
+            <tr><td>展具概念策划</td><td>IP 展具概念策划</td></tr>
+            <tr><td>制作展具立项书</td><td>IP 展具制作立项</td></tr>
+            <tr><td>编写视频导演脚本</td><td>技术推广视频脚本</td></tr>
+            <tr><td>准备领导发言稿</td><td>领导讲稿</td></tr>
+            <tr><td>品牌调研报告</td><td>品牌调研计划/报告</td></tr>
+            <tr><td>活动策划方案</td><td>技术推广活动策划</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- 6. 对话创作 -->
+    <section id="chat">
+      <h2>对话创作</h2>
+      <p>对话创作提供开放式的 AI 多轮交流环境，适合需求澄清、头脑风暴，以及对已有文稿进行润色优化。</p>
+
+      <h3>界面布局</h3>
+      <div class="card-grid">
+        <div class="card">
+          <h4>左侧 · 会话历史</h4>
+          <p>管理多个对话会话，可新建、切换或删除历史对话。</p>
+        </div>
+        <div class="card">
+          <h4>中间 · 对话区</h4>
+          <p>与 AI 进行多轮交流，回复内容实时流式显示。</p>
+        </div>
+        <div class="card">
+          <h4>右侧 · 创作边界</h4>
+          <p>配置场景模式、关联项目、选择参考文件等上下文选项。</p>
+        </div>
+      </div>
+
+      <h3>两种场景模式</h3>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>模式</th><th>适用情况</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><strong>对话共创</strong></td>
+              <td>自由对话，不限定参照物。适合探索想法、讨论方案、回答疑问。</td>
+            </tr>
+            <tr>
+              <td><strong>文稿优化</strong></td>
+              <td>必须绑定项目和某一输出物，基于全文进行局部优化改写。适合对已有稿件润色。</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>使用技巧</h3>
+      <ul style="padding-left: 20px; color: #334155; margin-bottom: 12px;">
+        <li>从项目详情页进入对话创作，会自动携带项目上下文</li>
+        <li>可在「创作边界」面板中选择项目文件作为参考</li>
+        <li>对话进行中项目绑定会被锁定，如需更换项目请新建会话</li>
+        <li>满意的内容可点击「存入项目」，保存到输出沉淀</li>
+        <li>AI 提议将对话中的有价值信息写入知识库时，需要您确认后才会执行</li>
+      </ul>
+    </section>
+
+    <!-- 7. 项目共创 -->
+    <section id="cocreate">
+      <h2>项目共创</h2>
+      <p>项目共创是一个三栏协作工作台，让您在与 AI 对话的同时，直接预览和编辑项目文件，实现「边聊边改」的精细协作体验。</p>
+
+      <h3>界面说明</h3>
+      <div class="card-grid">
+        <div class="card">
+          <h4>左侧 · 会话列表</h4>
+          <p>管理多个共创会话，每个会话关联一个项目。</p>
+        </div>
+        <div class="card">
+          <h4>中间 · AI 对话</h4>
+          <p>与 AI 讨论修改方案，AI 可提出文件修改建议。</p>
+        </div>
+        <div class="card">
+          <h4>右侧 · 文件预览</h4>
+          <p>实时预览和编辑项目文件，支持选中段落让 AI 针对性修改。</p>
+        </div>
+      </div>
+
+      <h3>核心能力</h3>
+      <ul style="padding-left: 20px; color: #334155; margin-bottom: 12px;">
+        <li><strong>段落引用</strong>：选中文件中的段落，让 AI 针对性修改</li>
+        <li><strong>文件补丁</strong>：AI 提出修改建议，您确认后一键应用</li>
+        <li><strong>新建文档</strong>：让 AI 基于讨论内容创建新文件</li>
+        <li><strong>撤销改动</strong>：对 AI 的修改不满意可以撤销</li>
+        <li><strong>快捷创作</strong>：空态下可一键发起管理员配置的常用场景</li>
+        <li><strong>自动保存</strong>：编辑内容自动保存，状态栏显示保存进度</li>
+      </ul>
+
+      <div class="callout callout-warn">
+        <span class="callout-icon">⚠️</span>
+        <div>项目共创需要从项目内进入。点击顶部导航「项目共创」时，系统会记住您最近打开的项目；如尚未选择项目，会先引导您到项目中心。</div>
+      </div>
+    </section>
+
+    <!-- 8. 场景编排 -->
+    <section id="scenarios">
+      <h2>场景编排 <span class="badge badge-purple">管理员</span></h2>
+      <p>场景编排用于定义和管理「场景」——即 AI 执行任务时的「合同」，规定了任务目标、输出格式、关联技能和知识范围。配置好后，普通成员在场景输出中只需选场景、填表即可。</p>
+
+      <h3>场景合同包含</h3>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>配置项</th><th>作用</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>场景说明</td><td>描述场景目标、用途和预设指令</td></tr>
+            <tr><td>结果说明 / 输出模版</td><td>定义生成文档的结构和格式要求</td></tr>
+            <tr><td>绑定技能</td><td>指定执行该场景时使用的 AI 技能</td></tr>
+            <tr><td>绑定知识库</td><td>限定 AI 可参考的知识范围</td></tr>
+            <tr><td>输出策略</td><td>格式、章节等输出规则</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>管理流程</h3>
+      <div class="flow">
+        <span class="flow-item">新建场景</span>
+        <span class="flow-arrow">→</span>
+        <span class="flow-item">配置合同</span>
+        <span class="flow-arrow">→</span>
+        <span class="flow-item">绑定技能/知识</span>
+        <span class="flow-arrow">→</span>
+        <span class="flow-item">保存并发布</span>
+        <span class="flow-arrow">→</span>
+        <span class="flow-item">成员可使用</span>
+      </div>
+
+      <div class="callout callout-tip">
+        <span class="callout-icon">💡</span>
+        <div>场景编排页面仅用于配置和预览，不在此页面生成正文。生成操作请在「场景输出」中进行。</div>
+      </div>
+    </section>
+
+    <!-- 9. 知识库 -->
+    <section id="knowledge">
+      <h2>知识库 <span class="badge badge-purple">管理员</span></h2>
+      <p>知识库用于沉淀和管理企业的技术资料、方法论、市场情报等，让 AI 在创作时能引用准确、权威的信息。</p>
+
+      <h3>主要功能</h3>
+      <div class="card-grid">
+        <div class="card">
+          <h4>📂 目录浏览</h4>
+          <p>按业务域和文件夹树形结构浏览知识条目。</p>
+        </div>
+        <div class="card">
+          <h4>📦 按集合</h4>
+          <p>按知识集合分组查看，便于与场景绑定。</p>
+        </div>
+        <div class="card">
+          <h4>🌾 对话收割</h4>
+          <p>审核和处理从对话中沉淀的候选知识。</p>
+        </div>
+        <div class="card">
+          <h4>📤 上传导入</h4>
+          <p>批量导入文件，填写分类信息后入库。</p>
+        </div>
+        <div class="card">
+          <h4>🔍 检索验证</h4>
+          <p>测试检索效果，验证知识是否能被 AI 正确引用。</p>
+        </div>
+        <div class="card">
+          <h4>🕸️ 知识图谱</h4>
+          <p>查看实体之间的关联关系，追溯知识来源。</p>
+        </div>
+      </div>
+
+      <h3>知识条目生命周期</h3>
+      <div class="flow">
+        <span class="flow-item">草稿</span>
+        <span class="flow-arrow">→</span>
+        <span class="flow-item">审核</span>
+        <span class="flow-arrow">→</span>
+        <span class="flow-item">发布</span>
+        <span class="flow-arrow">→</span>
+        <span class="flow-item">AI 可引用</span>
+      </div>
+    </section>
+
+    <!-- 10. 技能工坊 -->
+    <section id="skills">
+      <h2>技能工坊</h2>
+      <p>技能是 AI 执行特定类型任务的能力模块。技能工坊用于安装、启用和管理这些能力，并在场景编排中绑定使用。</p>
+
+      <h3>平台内置技能（部分）</h3>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>类别</th><th>技能名称</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>传播文案</td><td>技术/事件传播稿、领导讲稿、采访 QA</td></tr>
+            <tr><td>展具 IP</td><td>概念策划、制作立项、使用说明</td></tr>
+            <tr><td>IP 包装</td><td>IP 认证策划、IP 包装全案、技术 IP 货架</td></tr>
+            <tr><td>调研分析</td><td>品牌调研计划/报告、技术趋势洞察</td></tr>
+            <tr><td>活动策划</td><td>技术推广活动策划、视频导演脚本</td></tr>
+            <tr><td>战略规划</td><td>技术品牌互锁地图、车型策略方案</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>安装新技能</h3>
+      <div class="steps">
+        <div class="step">
+          <div class="step-num">1</div>
+          <div class="step-body">
+            <h4>技能工坊 → 上传 ZIP</h4>
+            <p>上传符合规范的技能包，安装到个人技能列表。</p>
+          </div>
+        </div>
+        <div class="step">
+          <div class="step-num">2</div>
+          <div class="step-body">
+            <h4>或从技能市场安装</h4>
+            <p>浏览技能市场，一键安装所需技能。</p>
+          </div>
+        </div>
+        <div class="step">
+          <div class="step-num">3</div>
+          <div class="step-body">
+            <h4>启用并在场景中绑定</h4>
+            <p>启用技能后，在场景编排中将其绑定到对应场景。</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 11. 用户设置 -->
+    <section id="settings">
+      <h2>用户设置</h2>
+      <p>点击顶部导航「设置」进入，包含以下选项卡：</p>
+
+      <div class="card-grid">
+        <div class="card">
+          <h4>👤 用户与身份</h4>
+          <p>查看和设置 User ID。跨设备使用时保持同一 ID，即可同步对话记录与项目数据。</p>
+        </div>
+        <div class="card">
+          <h4>🎨 风格</h4>
+          <p>切换浅色或深色主题，偏好保存在本机浏览器中。</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- 12. 常见任务 -->
+    <section id="workflows">
+      <h2>常见任务速查</h2>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>我想…</th><th>怎么做</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>写一份 IP 技术传播稿</td>
+              <td>场景输出 → 选择「技术/事件传播稿」场景 → 填写信息 → 生成 → 自动保存到项目</td>
+            </tr>
+            <tr>
+              <td>上传会议纪要作参考</td>
+              <td>项目详情 → 项目文件 → 上传文件 / 粘贴文字 / 图片 OCR</td>
+            </tr>
+            <tr>
+              <td>对已有稿件润色</td>
+              <td>输出沉淀 → 点击「对话优化」；或进入项目共创打开对应文件</td>
+            </tr>
+            <tr>
+              <td>和 AI 讨论方案想法</td>
+              <td>对话创作 → 选择「对话共创」模式 → 关联项目 → 开始对话</td>
+            </tr>
+            <tr>
+              <td>配置新的文档类型</td>
+              <td>场景编排 → 新建场景 → 配置合同 → 绑定技能/知识 → 发布</td>
+            </tr>
+            <tr>
+              <td>补充企业知识资料</td>
+              <td>知识库 → 上传导入；或审核「对话收割」中的候选条目</td>
+            </tr>
+            <tr>
+              <td>安装新的生成能力</td>
+              <td>技能工坊 → 上传 ZIP 或从技能市场安装 → 启用 → 在场景中绑定</td>
+            </tr>
+            <tr>
+              <td>在另一台电脑继续工作</td>
+              <td>设置中使用相同的 User ID</td>
+            </tr>
+            <tr>
+              <td>邀请同事协作</td>
+              <td>项目详情 → 项目成员 → 添加成员并分配角色</td>
+            </tr>
+            <tr>
+              <td>查看历史生成记录</td>
+              <td>项目详情 → 输出沉淀 → 浏览、复制或继续优化</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- 13. 常见问题 -->
+    <section id="faq">
+      <h2>常见问题</h2>
+
+      <div class="faq-item">
+        <div class="faq-q" onclick="this.parentElement.classList.toggle('open')">
+          三种创作方式有什么区别，我该选哪个？
+          <span class="faq-chevron">▼</span>
+        </div>
+        <div class="faq-a">
+          <strong>场景输出</strong>适合需要按固定模板生成正式文档的场景（如传播稿、立项书）；<strong>对话创作</strong>适合自由讨论、需求澄清或对已有文稿润色；<strong>项目共创</strong>适合需要边看文件边改、多文件协同的精细改稿。三者可以组合使用：场景输出出初稿 → 对话或共创继续优化。
+        </div>
+      </div>
+
+      <div class="faq-item">
+        <div class="faq-q" onclick="this.parentElement.classList.toggle('open')">
+          生成的内容保存在哪里？
+          <span class="faq-chevron">▼</span>
+        </div>
+        <div class="faq-a">
+          场景输出的结果会自动保存到关联项目的「输出沉淀」中。对话创作的内容需要您在满意时手动点击「存入项目」。项目共创中可将文件更新为项目输出物。所有成果都挂在对应项目下，方便统一管理和追溯。
+        </div>
+      </div>
+
+      <div class="faq-item">
+        <div class="faq-q" onclick="this.parentElement.classList.toggle('open')">
+          为什么看不到「场景编排」「知识库」等菜单？
+          <span class="faq-chevron">▼</span>
+        </div>
+        <div class="faq-a">
+          这些功能需要项目管理员及以上权限。普通项目成员专注于内容创作，配置类功能由管理员负责。如需相关权限，请联系您的系统管理员。
+        </div>
+      </div>
+
+      <div class="faq-item">
+        <div class="faq-q" onclick="this.parentElement.classList.toggle('open')">
+          换了一台电脑，之前的对话还在吗？
+          <span class="faq-chevron">▼</span>
+        </div>
+        <div class="faq-a">
+          只要在新设备上使用相同的 User ID，您的对话记录和项目数据都会同步。请在「设置 → 用户与身份」中确认 ID 一致。
+        </div>
+      </div>
+
+      <div class="faq-item">
+        <div class="faq-q" onclick="this.parentElement.classList.toggle('open')">
+          AI 会把我的对话内容自动写入知识库吗？
+          <span class="faq-chevron">▼</span>
+        </div>
+        <div class="faq-a">
+          不会。AI 只有在认为对话中有可复用的有价值信息时，才会提议写入知识库，且必须经您确认后才会执行。您可以放心进行讨论。
+        </div>
+      </div>
+
+      <div class="faq-item">
+        <div class="faq-q" onclick="this.parentElement.classList.toggle('open')">
+          场景输出时提示要先选择项目？
+          <span class="faq-chevron">▼</span>
+        </div>
+        <div class="faq-a">
+          场景输出需要在项目上下文中执行，这样生成结果才能自动沉淀。请先在向导中选择关联项目，或从项目详情页的快捷入口进入场景输出。
+        </div>
+      </div>
+
+      <div class="faq-item">
+        <div class="faq-q" onclick="this.parentElement.classList.toggle('open')">
+          如何对生成结果继续优化？
+          <span class="faq-chevron">▼</span>
+        </div>
+        <div class="faq-a">
+          在项目「输出沉淀」中，每条记录都提供「对话优化」和「项目共创」入口。对话优化适合整体润色，项目共创适合逐段精细修改。优化后的新版本会一并保存在输出沉淀中。
+        </div>
+      </div>
+    </section>
+
+    <footer class="page-footer">
+      <p>TPCM 技术推广内容共创平台 · 产品使用指南</p>
+      <p style="margin-top: 4px;">2026 @ TPCM</p>
+    </footer>
+
+  </main>
+</div>
+
+<script>
+  // 滚动时高亮当前章节导航
+  const sections = document.querySelectorAll('section[id]');
+  const navLinks = document.querySelectorAll('.nav-link');
+
+  const observer = new IntersectionObserver((entries) => {
+    entries.forEach(entry => {
+      if (entry.isIntersecting) {
+        navLinks.forEach(link => link.classList.remove('active'));
+        const active = document.querySelector(`.nav-link[href="#${entry.target.id}"]`);
+        if (active) active.classList.add('active');
+      }
+    });
+  }, { rootMargin: '-20% 0px -60% 0px' });
+
+  sections.forEach(s => observer.observe(s));
+
+  // 移动端点击导航后关闭侧边栏
+  navLinks.forEach(link => {
+    link.addEventListener('click', () => {
+      document.querySelector('.sidebar').classList.remove('open');
+    });
+  });
+</script>
+
+</body>
+</html>

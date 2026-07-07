@@ -101,7 +101,7 @@ def viewer_role(request: Request | None) -> str:
     uid = (uid or "default").strip() or "default"
     if uid == "default" or is_global_admin_user(uid):
         return "platform_admin"
-    return os.getenv("TPDHERMES_DEFAULT_USER_ROLE", "tenant_partner") or "tenant_partner"
+    return os.getenv("TPDHERMES_DEFAULT_USER_ROLE", "tenant_editor") or "tenant_editor"
 
 
 def is_global_admin_user(user_id: str) -> bool:

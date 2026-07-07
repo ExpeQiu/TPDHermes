@@ -24,7 +24,7 @@ export default function UserGroupManagementPanel({ enabled = true }: { enabled?:
   const [err, setErr] = useState("");
   const [query, setQuery] = useState("");
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [draftRole, setDraftRole] = useState<PlatformRole>("tenant_partner");
+  const [draftRole, setDraftRole] = useState<PlatformRole>("tenant_editor");
 
   const refresh = useCallback(async () => {
     setLoading(true);

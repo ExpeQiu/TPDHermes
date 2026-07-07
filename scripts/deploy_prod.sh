@@ -76,6 +76,18 @@ fi
 
 dc() { docker compose "${COMPOSE_FILES[@]}" "$@"; }
 
+ensure_hermes_output_dirs() {
+  if ! dc ps --status running --services 2>/dev/null | grep -qx hermes-agent; then
+    log "skip ensure hermes output dirs (hermes-agent not running)"
+    return 0
+  fi
+  log "ensure hermes-agent output dirs (/opt/data/输出)"
+  dc exec -T hermes-agent sh -lc '
+    mkdir -p /opt/data/输出 /opt/data/output /opt/data/workspace
+    ln -sfn /opt/data/输出 /opt/data/workspace/输出
+  ' || log "WARN: ensure hermes output dirs failed"
+}
+
 ssh_cmd() {
   if [[ -n "$DEPLOY_SSH_PASS" ]]; then
     sshpass -p "$DEPLOY_SSH_PASS" ssh -o StrictHostKeyChecking=no "$@"
@@ -255,6 +267,8 @@ run_deploy_on_server() {
       echo "  docker compose ... restart hermes-agent"
     else
       dc restart hermes-agent
+      sleep 2
+      ensure_hermes_output_dirs
     fi
   else
     log "跳过 hermes-agent restart（配置未变更）"

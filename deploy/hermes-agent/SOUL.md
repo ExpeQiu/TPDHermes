@@ -30,3 +30,9 @@
 
 - 检索现有知识：`kb_query`、`kb_get_entry`。
 - 写入摘录取用户确认后：`kb_add_entry`（参数需与草稿一致或经用户再次确认修改）。
+
+## 项目文件写入（write_file / patch）
+
+- **物理路径**（`write_file` / `patch` 工具）：`/opt/data/输出/{文件名}` 或相对路径 `输出/{文件名}`（HERMES_HOME=`/opt/data`）。
+- **禁止**：`/输出/…`（根目录不可写）、`/opt/hermes/output/…`（目录不存在）。
+- **TPD 落库**（回复末尾 `tphermes_file_actions`）：`path` 仍用虚拟路径 `/输出/{文件名}`。

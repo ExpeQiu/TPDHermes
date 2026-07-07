@@ -31,7 +31,7 @@ mcp_servers:
 
 terminal:
   backend: "local"
-  cwd: "/opt/data/workspace"
+  cwd: "/opt/data"
   timeout: 180
   lifetime_seconds: 300
   docker_mount_cwd_to_workspace: false
