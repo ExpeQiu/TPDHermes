@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, useRef, useCallback, useMemo } from "react";
-import { useParams } from "next/navigation";
+import { useParams, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import Feedback from "@/components/Feedback";
 import { apiGet, apiV1, apiFetch, readJson } from "@/lib/api";
@@ -149,7 +149,12 @@ function mapApiOutput(o: ApiOutputRow): ProjectOutput {
   return {
     id: o.id,
     skill_name: "编排输出",
-    skill_icon: (o.entrypoint || "").toLowerCase() === "chat" ? "💬" : "📄",
+    skill_icon:
+      (o.entrypoint || "").toLowerCase() === "chat"
+        ? "💬"
+        : (o.entrypoint || "").toLowerCase() === "brainstorm"
+          ? "🧠"
+          : "📄",
     title: o.title ?? "输出物",
     content: body,
     created_at: o.created_at ?? "",
@@ -464,13 +469,22 @@ function buildPasteTextAttachmentFilename(projectName: string, userId: string): 
 
 export default function ProjectDetailPage() {
   const { id } = useParams();
+  const searchParams = useSearchParams();
   const [project, setProject] = useState<Project | null>(null);
   const [outputs, setOutputs] = useState<ProjectOutput[]>([]);
   const [outputsLoadError, setOutputsLoadError] = useState<string | null>(null);
   const [runs, setRuns] = useState<ApiRunRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<"info" | "outputs" | "runs" | "members" | "feedback">("info");
+  const initialTab = searchParams?.get("tab");
+  const [activeTab, setActiveTab] = useState<"info" | "outputs" | "runs" | "members" | "feedback">(
+    initialTab === "outputs" ||
+      initialTab === "runs" ||
+      initialTab === "members" ||
+      initialTab === "feedback"
+      ? initialTab
+      : "info",
+  );
   const [selectedOutput, setSelectedOutput] = useState<ProjectOutput | null>(null);
   const [copied, setCopied] = useState(false);
   const [outputFullContent, setOutputFullContent] = useState<string | null>(null);
@@ -1123,6 +1137,11 @@ export default function ProjectDetailPage() {
                         href={`/projects/${id}/co-create`}
                         title="进入项目共创"
                         desc="围绕项目文件与 Agent 协作创作、修改与沉淀"
+                      />
+                      <ActionLink
+                        href={`/projects/${id}/brainstorm`}
+                        title="进入头脑风暴"
+                        desc="多角色圆桌辩论，收敛为 Master Plan"
                       />
                       <ActionLink
                         href={`/chat?project_id=${id}&new_chat=1`}

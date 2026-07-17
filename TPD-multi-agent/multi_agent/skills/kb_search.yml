@@ -1,0 +1,10 @@
+id: kb_search
+name: 知识库检索
+description: 对当前绑定知识库做按需检索（复用 knowledge 模块）
+enabled: true
+kind: tool
+runtime: builtin
+entry: multi_agent.knowledge.retrieve_context
+when: 需要从已绑定知识库补充证据
+risk: none
+agent_safe: true

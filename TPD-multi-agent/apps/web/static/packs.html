@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>P-team · multi-agent</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/static/styles.css" />
+</head>
+<body>
+  <main class="wrap">
+    <nav class="nav">
+      <a href="/">协作台</a>
+      <a href="/packs" aria-current="page">P-team</a>
+      <a href="/roles">Roles</a>
+      <a href="/skills">Skills</a>
+      <a href="/settings">设置</a>
+    </nav>
+    <h1 class="brand">P-<span>team</span></h1>
+    <p class="tagline">组装领域协作包：从角色库挑选圆桌席位与 Consult 专家，或手写内联角色。</p>
+
+    <div class="layout packs-layout">
+      <section class="panel" aria-label="Pack 列表">
+        <h2>已安装</h2>
+        <button type="button" class="btn secondary" id="btn-new">新建 Pack</button>
+        <ul class="pack-list" id="pack-list"></ul>
+        <p class="hint">文件落在 <code>multi_agent/skill_packs/*/pack.yml</code></p>
+      </section>
+
+      <section class="panel" aria-label="编辑 Pack">
+        <h2 id="editor-title">编辑</h2>
+        <form id="pack-form">
+          <label for="pack-id">ID（kebab-case）</label>
+          <input id="pack-id" name="id" required pattern="[a-z][a-z0-9]*(-[a-z0-9]+)*" placeholder="如 content-lab" autocomplete="off" />
+
+          <label for="pack-name">名称</label>
+          <input id="pack-name" name="name" required placeholder="显示名称" />
+
+          <label for="pack-desc">说明</label>
+          <textarea id="pack-desc" name="description" placeholder="一句话描述适用场景"></textarea>
+
+          <div class="section-head">
+            <h3>圆桌角色</h3>
+            <button type="button" class="btn-inline" id="btn-add-role">+ 手写</button>
+          </div>
+          <div class="import-row">
+            <select id="import-roundtable" aria-label="从角色库导入圆桌"></select>
+            <button type="button" class="btn-inline" id="btn-import-roundtable">导入</button>
+          </div>
+          <p class="hint tight">需包含 id 为 <code>moderator</code> 的主持人；缺失时保存会自动补上。也可从 <a href="/roles">Roles</a> 导入。</p>
+          <div id="roles" class="stack"></div>
+
+          <div class="section-head">
+            <h3>Consult 专家</h3>
+            <button type="button" class="btn-inline" id="btn-add-expert">+ 手写</button>
+          </div>
+          <div class="import-row">
+            <select id="import-consult" aria-label="从角色库导入专家"></select>
+            <button type="button" class="btn-inline" id="btn-import-consult">导入</button>
+          </div>
+          <div id="experts" class="stack"></div>
+
+          <button type="submit" class="btn" id="btn-save">保存</button>
+          <div class="status" id="status" role="status"></div>
+        </form>
+      </section>
+    </div>
+  </main>
+  <script src="/static/packs.js"></script>
+</body>
+</html>

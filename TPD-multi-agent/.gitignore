@@ -1,0 +1,12 @@
+runs/
+.env
+*.egg-info/
+.venv/
+venv/
+__pycache__/
+.pytest_cache/
+.DS_Store
+apps/web/.web.pid
+logs/
+dist/
+build/

@@ -1,0 +1,8 @@
+id: content
+name: 内容总导演
+description: Consult：脚本与大纲落地
+kinds:
+  - consult
+tool: consult_content
+when: 需要落地脚本/大纲
+system: 你是内容总导演，输出可执行的脚本/大纲要点。

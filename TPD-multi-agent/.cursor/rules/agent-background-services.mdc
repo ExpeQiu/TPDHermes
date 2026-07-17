@@ -1,0 +1,14 @@
+---
+description: Agent 后台服务须 launchd 常驻；禁止依赖 Agent 会话内 nohup（本仓 Web 启动）
+alwaysApply: true
+---
+
+# multi-agent：Web/后台启动约定
+
+本仓已踩坑验证，细则见用户级规则 `agent-background-services`。
+
+- 启动 Web：**只允许** `./scripts/start.sh`（launchd KeepAlive）
+- 停止：`./scripts/stop.sh`
+- 地址：`http://127.0.0.1:8765/`
+- 本机镜像：`~/Library/Application Support/multi-agent/`
+- **禁止**在 Agent 对话中用 `nohup python apps/web/app.py &` 冒充常驻服务

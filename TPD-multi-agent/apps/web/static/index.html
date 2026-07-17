@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>multi-agent</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/static/styles.css" />
+</head>
+<body>
+  <main class="wrap">
+    <nav class="nav">
+      <a href="/" aria-current="page">协作台</a>
+      <a href="/packs">P-team</a>
+      <a href="/roles">Roles</a>
+      <a href="/skills">Skills</a>
+      <a href="/settings">设置</a>
+    </nav>
+    <h1 class="brand">multi-<span>agent</span></h1>
+    <p class="tagline">先选协作编排，再按信息流转试跑；圆桌可细分讨论方式（轮流 / 并行 / 辩论）。</p>
+
+    <div class="layout">
+      <section class="panel" aria-label="启动运行">
+        <h2>新建运行</h2>
+        <p class="field-label">协作模式</p>
+        <div class="modes" role="radiogroup" aria-label="协作模式" id="modes"></div>
+
+        <div class="mode-extra" id="roundtable-extra" hidden>
+          <p class="field-label">讨论模式</p>
+          <div class="modes discuss" role="radiogroup" aria-label="讨论模式" id="discuss-modes"></div>
+          <p class="field-label">最大轮次</p>
+          <div class="rounds" role="group" aria-label="最大轮次" id="rounds"></div>
+        </div>
+
+        <label for="goal">目标 / 议题</label>
+        <textarea id="goal" placeholder="例如：半固态电池如何包装成抖音脚本"></textarea>
+
+        <label for="pack">P-team <a class="label-link" href="/packs">配置</a></label>
+        <select id="pack"></select>
+
+        <label for="kb">知识库 <a class="label-link" href="/settings">设置</a></label>
+        <select id="kb"></select>
+        <p class="hint tight">绑定外部知识库作检索真源；LLM Mock/Live 由环境变量 <code>MULTI_AGENT_MOCK_MODE</code> / API Key 控制。</p>
+
+        <button type="button" class="btn" id="btn-run">开始协作</button>
+        <button type="button" class="btn secondary" id="btn-refresh">刷新列表</button>
+        <p class="hint" id="run-hint">执行走本机 Python Runtime；日志可在服务端 stderr / logs/web.log 查看。</p>
+        <div class="status" id="status" role="status"></div>
+      </section>
+
+      <div class="right-col">
+        <section class="panel flow-panel" aria-label="信息流转规则" id="flow-panel">
+          <h2>信息流转</h2>
+          <div id="flow" class="flow"></div>
+        </section>
+
+        <section class="panel" aria-label="结果">
+          <h2>结果</h2>
+          <div class="tabs" role="tablist">
+            <button type="button" class="tab" data-tab="delivery" aria-selected="true">交付</button>
+            <button type="button" class="tab" data-tab="trajectory" aria-selected="false">轨迹</button>
+            <button type="button" class="tab" data-tab="json" aria-selected="false">JSON</button>
+            <button type="button" class="tab" data-tab="runs" aria-selected="false">历史</button>
+          </div>
+          <div class="meta" id="meta"></div>
+          <pre class="out" id="out">选择模式并输入目标，或从历史中打开一次 run。</pre>
+        </section>
+      </div>
+    </div>
+  </main>
+  <script src="/static/app.js"></script>
+</body>
+</html>

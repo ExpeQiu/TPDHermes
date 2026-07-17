@@ -17,7 +17,7 @@ from backend.models.orchestration_run import OrchestrationRun
 from backend.models.project_scenario import ProjectScenario
 from backend.models.scenario_profile import ScenarioProfile
 from backend.models.project_attachment import ProjectAttachment
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from backend.schemas.orchestration import TaskExecuteRequest, TaskExecuteOverrides
 from backend.services.orchestration_service import assemble_payload
@@ -606,6 +606,9 @@ async def list_project_outputs(
     for o in rows:
         preview = (o.content or "")[:200]
         meta = run_meta.get(o.run_id or "", {})
+        entrypoint = meta.get("entrypoint") if o.run_id else None
+        if not entrypoint:
+            entrypoint = _entrypoint_from_citations(getattr(o, "citations_json", None))
         out.append(
             OutputListItem(
                 id=o.id,
@@ -614,7 +617,7 @@ async def list_project_outputs(
                 template_id=o.template_id,
                 run_id=o.run_id,
                 scenario_id=getattr(o, "scenario_id", None),
-                entrypoint=meta.get("entrypoint") if o.run_id else None,
+                entrypoint=entrypoint,
                 status=o.status,
                 created_at=o.created_at,
                 content_preview=preview,
@@ -650,6 +653,8 @@ async def get_project_output_detail(
         meta = (await _run_meta_for_outputs(db, [row.run_id])).get(row.run_id, {})
         entrypoint = meta.get("entrypoint")
         user_message = meta.get("user_message")
+    if not entrypoint:
+        entrypoint = _entrypoint_from_citations(getattr(row, "citations_json", None))
     return OutputDetailResponse(
         id=row.id,
         project_id=row.project_id,
@@ -1285,6 +1290,33 @@ class ChatOutputDepositRequest(BaseModel):
     message_id: str | None = None
 
 
+class BrainstormOutputDepositRequest(BaseModel):
+    content: str = Field(..., min_length=1, description="Master Plan / delivery markdown")
+    title: str | None = None
+    topic: str | None = None
+    ma_run_id: str | None = Field(default=None, description="multi-agent run_id（非编排 FK）")
+    discussion_mode: str | None = None
+    pack: str | None = None
+    mock: bool | None = None
+    trajectory_markdown: str | None = None
+
+
+def _entrypoint_from_citations(citations_json: str | None) -> str | None:
+    raw = (citations_json or "").strip()
+    if not raw:
+        return None
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(data, dict):
+        return None
+    src = str(data.get("source") or "").strip().lower()
+    if src == "brainstorm":
+        return "brainstorm"
+    return None
+
+
 @router.post("/{project_id}/outputs/deposit-from-chat", response_model=OutputDetailResponse)
 async def deposit_chat_output(
     project_id: str,
@@ -1399,6 +1431,131 @@ async def deposit_chat_output(
         content_format=row.content_format or "markdown",
         content=row.content or "",
         user_message=meta.get("user_message") if run_id else None,
+    )
+
+
+@router.post("/{project_id}/outputs/deposit-from-brainstorm", response_model=OutputDetailResponse)
+async def deposit_brainstorm_output(
+    project_id: str,
+    body: BrainstormOutputDepositRequest,
+    db: AsyncSession = Depends(get_db),
+    effective_uid: str = Depends(get_effective_user_id),
+):
+    """将头脑风暴 Master Plan 沉淀为项目输出物（复用 outputs，不占用编排 run FK）。"""
+    await require_project_for_user(db, project_id, effective_uid, min_perm="write")
+    content = (body.content or "").strip()
+    if not content:
+        raise HTTPException(status_code=400, detail="正文不能为空")
+
+    topic = (body.topic or "").strip()
+    title = (body.title or "").strip()
+    if not title:
+        title = f"头脑风暴 · {(topic or 'Master Plan')[:40]}"
+    ma_run_id = (body.ma_run_id or "").strip() or None
+
+    citations = {
+        "source": "brainstorm",
+        "ma_run_id": ma_run_id,
+        "topic": topic or None,
+        "discussion_mode": (body.discussion_mode or "").strip() or None,
+        "pack": (body.pack or "").strip() or None,
+        "mock": body.mock,
+        "has_trajectory": bool((body.trajectory_markdown or "").strip()),
+    }
+    now = datetime.now().isoformat()
+
+    existing: OutputAsset | None = None
+    if ma_run_id:
+        q = await db.execute(
+            select(OutputAsset).where(OutputAsset.project_id == project_id)
+        )
+        for cand in q.scalars().all():
+            try:
+                meta = json.loads(cand.citations_json or "{}")
+            except json.JSONDecodeError:
+                continue
+            if (
+                isinstance(meta, dict)
+                and meta.get("source") == "brainstorm"
+                and meta.get("ma_run_id") == ma_run_id
+            ):
+                existing = cand
+                break
+
+    if existing:
+        existing.title = title
+        existing.summary = (topic or content)[:280]
+        existing.content = content
+        existing.citations_json = json.dumps(citations, ensure_ascii=False)
+        existing.updated_at = now
+        existing.status = "draft"
+        await db.commit()
+        await db.refresh(existing)
+        schedule_ingest_output(existing.id)
+        logger.info(
+            "[brainstorm-output-deposit] updated output_id=%s project_id=%s ma_run_id=%s",
+            existing.id,
+            project_id,
+            ma_run_id,
+        )
+        return OutputDetailResponse(
+            id=existing.id,
+            project_id=existing.project_id,
+            title=existing.title,
+            summary=existing.summary,
+            template_id=existing.template_id,
+            run_id=existing.run_id,
+            scenario_id=getattr(existing, "scenario_id", None),
+            entrypoint="brainstorm",
+            status=existing.status,
+            created_at=existing.created_at,
+            updated_at=existing.updated_at,
+            content_format=existing.content_format or "markdown",
+            content=existing.content or "",
+            user_message=topic or None,
+        )
+
+    row = OutputAsset(
+        id=str(uuid.uuid4()),
+        project_id=project_id,
+        scenario_id=None,
+        run_id=None,
+        title=title,
+        summary=(topic or content)[:280],
+        content=content,
+        content_format="markdown",
+        status="draft",
+        citations_json=json.dumps(citations, ensure_ascii=False),
+        owner_id=effective_uid or "default",
+        created_at=now,
+        updated_at=now,
+    )
+    db.add(row)
+    await db.commit()
+    await db.refresh(row)
+    schedule_ingest_output(row.id)
+    logger.info(
+        "[brainstorm-output-deposit] created output_id=%s project_id=%s ma_run_id=%s chars=%s",
+        row.id,
+        project_id,
+        ma_run_id,
+        len(content),
+    )
+    return OutputDetailResponse(
+        id=row.id,
+        project_id=row.project_id,
+        title=row.title,
+        summary=row.summary,
+        template_id=row.template_id,
+        run_id=row.run_id,
+        scenario_id=getattr(row, "scenario_id", None),
+        entrypoint="brainstorm",
+        status=row.status,
+        created_at=row.created_at,
+        updated_at=row.updated_at,
+        content_format=row.content_format or "markdown",
+        content=row.content or "",
+        user_message=topic or None,
     )
 
 

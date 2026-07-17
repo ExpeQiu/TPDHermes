@@ -1,0 +1,333 @@
+{
+  "$schema": "https://compo.dev/schemas/cli-agent-manifest/v1",
+  "name": "multi-agent",
+  "version": "0.1.0",
+  "cli": {
+    "command": "multi-agent",
+    "install": "pip install -e .",
+    "verify": "./verify.sh"
+  },
+  "commands": [
+    {
+      "name": "run-start",
+      "description": "统一入口，支持 mode=auto|roundtable|consult|swarm",
+      "cli_template": "multi-agent run start --goal {goal} --mode {mode} --pack {pack} --format json --demo",
+      "agent_safe": true,
+      "interactive": false,
+      "timeout_sec": 600,
+      "params": {
+        "goal": { "type": "string", "description": "目标描述" },
+        "mode": {
+          "type": "string",
+          "default": "auto",
+          "enum": ["auto", "roundtable", "consult", "swarm"]
+        },
+        "pack": { "type": "string", "default": "nev-tech" }
+      },
+      "output": {
+        "format": "json",
+        "schema_ref": "#/definitions/run_envelope"
+      },
+      "exit_codes": {
+        "0": "success",
+        "1": "error",
+        "2": "no_delivery",
+        "3": "exec_failed"
+      }
+    },
+    {
+      "name": "mode-roundtable",
+      "description": "圆桌辩论模式",
+      "cli_template": "multi-agent mode roundtable --topic {topic} --pack {pack} --rounds {rounds} --format json --demo",
+      "agent_safe": true,
+      "interactive": false,
+      "timeout_sec": 300,
+      "params": {
+        "topic": { "type": "string" },
+        "pack": { "type": "string", "default": "nev-tech" },
+        "rounds": { "type": "integer", "default": 2, "minimum": 1, "maximum": 5 }
+      },
+      "output": { "format": "json", "schema_ref": "#/definitions/run_envelope" },
+      "exit_codes": { "0": "success", "2": "no_delivery", "3": "exec_failed" }
+    },
+    {
+      "name": "mode-consult",
+      "description": "主控 + 专家工具箱 Consult",
+      "cli_template": "multi-agent mode consult --goal {goal} --pack {pack} --format json --demo",
+      "agent_safe": true,
+      "interactive": false,
+      "timeout_sec": 300,
+      "params": {
+        "goal": { "type": "string" },
+        "pack": { "type": "string", "default": "nev-tech" },
+        "expert": { "type": "string", "description": "可选：tech|scene|market|content" }
+      },
+      "output": { "format": "json", "schema_ref": "#/definitions/run_envelope" },
+      "exit_codes": { "0": "success", "2": "no_delivery", "3": "exec_failed" }
+    },
+    {
+      "name": "mode-swarm",
+      "description": "并行 Swarm STORM",
+      "cli_template": "multi-agent mode swarm --goal {goal} --max-parallel {max_parallel} --format json --demo",
+      "agent_safe": "background_only",
+      "interactive": false,
+      "timeout_sec": 0,
+      "spawn_hint": "sessions_spawn | cron | nohup",
+      "reason": "大任务可能较长，建议后台执行",
+      "params": {
+        "goal": { "type": "string" },
+        "max_parallel": { "type": "integer", "default": 5, "minimum": 1, "maximum": 10 }
+      },
+      "output": { "format": "json", "schema_ref": "#/definitions/run_envelope" },
+      "exit_codes": { "0": "success", "2": "no_delivery", "3": "exec_failed" }
+    },
+    {
+      "name": "run-status",
+      "description": "查询 run 状态",
+      "cli_template": "multi-agent run status {run_id} --format json",
+      "agent_safe": true,
+      "interactive": false,
+      "timeout_sec": 30,
+      "params": { "run_id": { "type": "string" } },
+      "exit_codes": { "0": "success", "1": "not_found" }
+    },
+    {
+      "name": "run-trajectory",
+      "description": "读取轨迹",
+      "cli_template": "multi-agent run trajectory {run_id} --format markdown",
+      "agent_safe": true,
+      "interactive": false,
+      "timeout_sec": 30,
+      "params": { "run_id": { "type": "string" } },
+      "exit_codes": { "0": "success", "2": "no_data" }
+    },
+    {
+      "name": "run-resume",
+      "description": "续跑 paused run",
+      "cli_template": "multi-agent run resume {run_id} --format json --demo",
+      "agent_safe": true,
+      "interactive": false,
+      "timeout_sec": 600,
+      "params": { "run_id": { "type": "string" } },
+      "exit_codes": { "0": "success", "1": "error" }
+    },
+    {
+      "name": "run-list",
+      "description": "列出历史 runs 摘要",
+      "cli_template": "multi-agent run list --format json",
+      "agent_safe": true,
+      "interactive": false,
+      "timeout_sec": 30,
+      "output": { "format": "json", "schema_ref": "#/definitions/list_envelope" },
+      "exit_codes": { "0": "success", "2": "no_data" }
+    },
+    {
+      "name": "run-export",
+      "description": "导出 delivery / trajectory / bundle",
+      "cli_template": "multi-agent run export {run_id} --what {what} --format markdown",
+      "agent_safe": true,
+      "interactive": false,
+      "timeout_sec": 30,
+      "params": {
+        "run_id": { "type": "string" },
+        "what": {
+          "type": "string",
+          "default": "delivery",
+          "enum": ["delivery", "trajectory", "bundle"]
+        }
+      },
+      "exit_codes": { "0": "success", "1": "not_found", "2": "no_data" }
+    },
+    {
+      "name": "pack-list",
+      "description": "列出 Skill Pack",
+      "cli_template": "multi-agent pack list --format json",
+      "agent_safe": true,
+      "interactive": false,
+      "timeout_sec": 15,
+      "output": { "format": "json", "schema_ref": "#/definitions/list_envelope" },
+      "exit_codes": { "0": "success", "2": "no_data" }
+    },
+    {
+      "name": "pack-show",
+      "description": "查看 Skill Pack 详情",
+      "cli_template": "multi-agent pack show {pack_id} --format json",
+      "agent_safe": true,
+      "interactive": false,
+      "timeout_sec": 15,
+      "params": { "pack_id": { "type": "string", "default": "nev-tech" } },
+      "exit_codes": { "0": "success", "1": "not_found" }
+    },
+    {
+      "name": "pack-save",
+      "description": "从文件保存 Skill Pack",
+      "cli_template": "multi-agent pack save --file {file} --format json",
+      "agent_safe": false,
+      "interactive": false,
+      "human_required": true,
+      "reason": "写入仓库内 pack.yml，建议人工确认",
+      "params": { "file": { "type": "string" } },
+      "timeout_sec": 30
+    },
+    {
+      "name": "role-list",
+      "description": "列出角色",
+      "cli_template": "multi-agent role list --format json",
+      "agent_safe": true,
+      "interactive": false,
+      "timeout_sec": 15,
+      "output": { "format": "json", "schema_ref": "#/definitions/list_envelope" }
+    },
+    {
+      "name": "role-show",
+      "description": "查看角色详情",
+      "cli_template": "multi-agent role show {role_id} --format json",
+      "agent_safe": true,
+      "interactive": false,
+      "timeout_sec": 15,
+      "params": { "role_id": { "type": "string" } }
+    },
+    {
+      "name": "role-save",
+      "description": "从文件保存角色",
+      "cli_template": "multi-agent role save --file {file} --format json",
+      "agent_safe": false,
+      "interactive": false,
+      "human_required": true,
+      "reason": "写入角色库 yml",
+      "params": { "file": { "type": "string" } }
+    },
+    {
+      "name": "role-delete",
+      "description": "删除角色（需 --force）",
+      "cli_template": "multi-agent role delete {role_id} --force",
+      "agent_safe": false,
+      "interactive": false,
+      "human_required": true,
+      "reason": "不可逆删除",
+      "params": { "role_id": { "type": "string" } }
+    },
+    {
+      "name": "skill-list",
+      "description": "列出 Skills",
+      "cli_template": "multi-agent skill list --format json",
+      "agent_safe": true,
+      "interactive": false,
+      "timeout_sec": 15,
+      "output": { "format": "json", "schema_ref": "#/definitions/list_envelope" }
+    },
+    {
+      "name": "skill-show",
+      "description": "查看 Skill 详情",
+      "cli_template": "multi-agent skill show {skill_id} --format json",
+      "agent_safe": true,
+      "interactive": false,
+      "timeout_sec": 15,
+      "params": { "skill_id": { "type": "string" } }
+    },
+    {
+      "name": "skill-save",
+      "description": "从文件保存 Skill",
+      "cli_template": "multi-agent skill save --file {file} --format json",
+      "agent_safe": false,
+      "interactive": false,
+      "human_required": true,
+      "reason": "写入 skill yml",
+      "params": { "file": { "type": "string" } }
+    },
+    {
+      "name": "skill-import",
+      "description": "从 SKILL.md 导入",
+      "cli_template": "multi-agent skill import --file {file} --format json",
+      "agent_safe": false,
+      "interactive": false,
+      "human_required": true,
+      "reason": "写入 skill 目录",
+      "params": { "file": { "type": "string" } }
+    },
+    {
+      "name": "skill-delete",
+      "description": "删除 Skill（需 --force）",
+      "cli_template": "multi-agent skill delete {skill_id} --force",
+      "agent_safe": false,
+      "interactive": false,
+      "human_required": true,
+      "reason": "不可逆删除",
+      "params": { "skill_id": { "type": "string" } }
+    },
+    {
+      "name": "knowledge-list",
+      "description": "列出知识库绑定",
+      "cli_template": "multi-agent knowledge list --format json",
+      "agent_safe": true,
+      "interactive": false,
+      "timeout_sec": 15,
+      "output": { "format": "json", "schema_ref": "#/definitions/list_envelope" }
+    },
+    {
+      "name": "doctor",
+      "description": "环境自检",
+      "cli_template": "multi-agent doctor --format json",
+      "agent_safe": true,
+      "interactive": false,
+      "timeout_sec": 15
+    },
+    {
+      "name": "config-show",
+      "description": "展示脱敏配置",
+      "cli_template": "multi-agent config show --format json",
+      "agent_safe": true,
+      "interactive": false,
+      "timeout_sec": 15
+    },
+    {
+      "name": "config-init",
+      "description": "初始化用户级配置",
+      "cli_template": "multi-agent config init",
+      "agent_safe": false,
+      "interactive": false,
+      "human_required": true,
+      "reason": "写入 ~/.multi-agent/config.yaml，建议人工确认"
+    }
+  ],
+  "definitions": {
+    "run_envelope": {
+      "type": "object",
+      "required": ["module", "data_source", "run_id", "mode", "coordinator", "delivery"],
+      "properties": {
+        "module": { "type": "string" },
+        "version": { "type": "string" },
+        "data_source": {
+          "type": "string",
+          "description": "绑定知识库 id；无绑定为 none"
+        },
+        "fetched_at": { "type": "string" },
+        "run_id": { "type": "string" },
+        "mode": { "type": "string" },
+        "coordinator": { "type": "string" },
+        "delivery": {
+          "type": "object",
+          "required": ["title", "body_markdown"],
+          "properties": {
+            "title": { "type": "string" },
+            "body_markdown": { "type": "string" },
+            "artifacts": { "type": "array" }
+          }
+        },
+        "warnings": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "list_envelope": {
+      "type": "object",
+      "required": ["module", "data_source", "items"],
+      "properties": {
+        "module": { "type": "string" },
+        "version": { "type": "string" },
+        "data_source": { "type": "string" },
+        "fetched_at": { "type": "string" },
+        "count": { "type": "integer" },
+        "items": { "type": "array" }
+      }
+    }
+  }
+}

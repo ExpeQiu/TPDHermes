@@ -1,0 +1,10 @@
+id: web_search
+name: 联网搜索
+description: 按需检索公开网页摘要（当前为 builtin；live 可接外部检索）
+enabled: true
+kind: tool
+runtime: builtin
+entry: multi_agent.tools.web_search
+when: 需要最新公开信息或站外校验
+risk: network
+agent_safe: true

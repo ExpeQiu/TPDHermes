@@ -1,0 +1,19 @@
+# 圆桌 Master Plan
+
+**议题**：半固态电池如何对外讲清楚
+
+### 开场（主持人）
+议题：半固态电池如何对外讲清楚
+请各位给出最核心破局建议。
+
+**通俗化大师**（R1）：[demo:simplifier] 基于输入「议题：半固态电池如何对外讲清楚 轮次：1 你的视角：说人话；关注直观体验与生活场景 给出核心观点与一条 Action。…」的结论。 system=True mock=true
+
+**技术原教旨主义者**（R1）：[demo:tech_hardcore] 基于输入「议题：半固态电池如何对外讲清楚 轮次：1 你的视角：第一性原理；参数真实性与工程壁垒 给出核心观点与一条 Action。…」的结论。 system=True mock=true
+
+**流量狙击手**（R1）：[demo:growth_hacker] 基于输入「议题：半固态电池如何对外讲清楚 轮次：1 你的视角：传播钩子、情绪价值、完播率 给出核心观点与一条 Action。…」的结论。 system=True mock=true
+
+**战略预言家**（R1）：[demo:strategist] 基于输入「议题：半固态电池如何对外讲清楚 轮次：1 你的视角：护城河、终局与差异化生存 给出核心观点与一条 Action。…」的结论。 system=True mock=true
+
+## 综合方案
+
+[demo:moderator] 基于输入「综合以下圆桌发言，输出 Master Plan（概念 slogan + 三步行动）： ### 开场（主持人） 议题：半固态电池如何对外讲清楚 请各位给出最核心破局建议。 **通俗化大师**（R1）：[demo:simplifier] 基于输…」的结论。 system=True mock=true

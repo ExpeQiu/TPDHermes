@@ -174,6 +174,7 @@ from backend.routes.me import router as me_router
 from backend.routes.mcp import router as mcp_router
 from backend.routes.metrics import router as metrics_router
 from backend.routes.feedback import router as feedback_router, learning_router
+from backend.routes.brainstorm import router as brainstorm_router
 
 include_router_with_version(me_router)
 include_router_with_version(mcp_router, strip_prefix="/mcp")
@@ -196,6 +197,7 @@ include_router_with_version(feishu_bot_router, strip_prefix="/feishu/bot")
 include_router_with_version(metrics_router, strip_prefix="/metrics")
 include_router_with_version(feedback_router, strip_prefix="/feedback")
 include_router_with_version(learning_router, strip_prefix="/learning")
+include_router_with_version(brainstorm_router, strip_prefix="/brainstorm")
 
 
 # ── 根路径 & 健康检查 ───────────────────────────────────────

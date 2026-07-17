@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "multi-agent"
+version = "0.1.0"
+description = "多模式 Agent 协作运行时：圆桌 / 主控Consult / Swarm，CLI 超级外挂"
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = [
+    "click>=8.0.0",
+    "PyYAML>=6.0",
+    "httpx>=0.24.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=7.0.0"]
+
+[project.scripts]
+multi-agent = "multi_agent.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["multi_agent*"]
+
+[tool.setuptools.package-data]
+multi_agent = ["skill_packs/**/*.yml", "skill_packs/**/*.yaml", "skill_packs/**/*.md"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]

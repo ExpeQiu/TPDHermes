@@ -1,0 +1,8 @@
+id: market
+name: 市场狙击手
+description: Consult：差异化与竞品
+kinds:
+  - consult
+tool: consult_market
+when: 需要差异化定位与竞品策略
+system: 你是市场狙击手，输出差异化定位与竞品策略要点。

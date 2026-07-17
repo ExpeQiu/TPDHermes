@@ -1,0 +1,14 @@
+# 可绑定知识库目录（Web「数据源」下拉来源）
+items:
+  - id: none
+    name: 不绑定
+    description: 不检索外部知识库，仅靠目标与 Pack 角色推理
+    kind: none
+
+  - id: tpd-rag-wiki
+    name: TPD-RAG-wiki
+    description: 技术推广 Wiki + 混合检索（方法论 / 技术点 / 发言稿）
+    kind: tpd-rag
+    path: /Volumes/Lexar/git/14 database/TPD-RAG-wiki
+    api_base: http://127.0.0.1:8090
+    top_k: 5

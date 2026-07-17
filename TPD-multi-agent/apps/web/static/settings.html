@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>设置 · multi-agent</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/static/styles.css" />
+</head>
+<body>
+  <main class="wrap">
+    <nav class="nav">
+      <a href="/">协作台</a>
+      <a href="/packs">P-team</a>
+      <a href="/roles">Roles</a>
+      <a href="/skills">Skills</a>
+      <a href="/settings" aria-current="page">设置</a>
+    </nav>
+    <h1 class="brand">运行时 <span>设置</span></h1>
+    <p class="tagline">配置 LLM 与默认知识库绑定。写入 <code>~/.multi-agent/config.yaml</code>；环境变量优先级更高。</p>
+
+    <div class="layout settings-layout">
+      <section class="panel" aria-label="LLM 配置">
+        <h2>LLM 配置</h2>
+        <form id="llm-form">
+          <label class="check block">
+            <input type="checkbox" id="mock-mode" />
+            Mock 模式（不消耗 Token，llm=demo）
+          </label>
+
+          <label for="api-key">API Key</label>
+          <input id="api-key" type="password" autocomplete="off" placeholder="留空则保留原密钥" />
+          <p class="hint tight" id="key-hint">未配置密钥</p>
+
+          <label for="api-base">API Base</label>
+          <input id="api-base" placeholder="空则默认 https://api.openai.com/v1" />
+
+          <label for="model">Model</label>
+          <input id="model" required placeholder="gpt-4o-mini" />
+
+          <p class="hint" id="llm-meta">—</p>
+          <button type="submit" class="btn" id="btn-save-llm">保存 LLM</button>
+          <div class="status" id="llm-status" role="status"></div>
+        </form>
+      </section>
+
+      <section class="panel" aria-label="知识库绑定">
+        <h2>知识库绑定</h2>
+        <form id="kb-form">
+          <label for="knowledge-base">默认知识库</label>
+          <select id="knowledge-base"></select>
+          <p class="hint tight">协作台新建运行时优先选中此项；单次运行仍可临时改选。</p>
+
+          <div class="kb-probe" id="kb-probe" aria-live="polite">
+            <p class="hint">选择知识库后可检测可用性。</p>
+          </div>
+
+          <div class="btn-row">
+            <button type="button" class="btn secondary" id="btn-probe-kb">检测连通性</button>
+            <button type="submit" class="btn" id="btn-save-kb">保存绑定</button>
+          </div>
+          <div class="status" id="kb-status" role="status"></div>
+        </form>
+
+        <h2 class="sub">目录一览</h2>
+        <ul class="kb-list" id="kb-list"></ul>
+        <p class="hint">Catalog 来自 <code>multi_agent/knowledge/catalog.yml</code>（本期只读）。</p>
+      </section>
+    </div>
+  </main>
+  <script src="/static/settings.js"></script>
+</body>
+</html>

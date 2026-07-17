@@ -45,6 +45,11 @@ export default function ProjectsPage() {
   const [opError, setOpError] = useState<string | null>(null);
   const [archivingId, setArchivingId] = useState<string | null>(null);
 
+  const brainstormHref = useMemo(() => {
+    const first = projects.find((p) => p.status !== "archived");
+    return first ? `/projects/${first.id}/brainstorm` : "/projects";
+  }, [projects]);
+
   useEffect(() => {
     apiGet<Project[]>("/projects/")
       .then((data) => {
@@ -99,6 +104,13 @@ export default function ProjectsPage() {
                   title="项目共创"
                   desc=""
                   accent="from-indigo-600 to-violet-600"
+                  compact
+                />
+                <ActionCard
+                  href={brainstormHref}
+                  title="头脑风暴"
+                  desc=""
+                  accent="from-amber-500 to-orange-500"
                   compact
                 />
                 <ActionCard
@@ -204,6 +216,12 @@ export default function ProjectsPage() {
                           className="pointer-events-auto relative z-20 rounded-xl border border-indigo-300 bg-indigo-50 px-4 py-2.5 text-center text-sm font-medium text-indigo-900 transition hover:border-indigo-400 hover:bg-indigo-100 dark:border-indigo-600/50 dark:bg-indigo-950/40 dark:text-indigo-200"
                         >
                           项目共创
+                        </Link>
+                        <Link
+                          href={`/projects/${project.id}/brainstorm`}
+                          className="pointer-events-auto relative z-20 rounded-xl border border-amber-300 bg-amber-50 px-4 py-2.5 text-center text-sm font-medium text-amber-900 transition hover:border-amber-400 hover:bg-amber-100 dark:border-amber-600/50 dark:bg-amber-950/40 dark:text-amber-200"
+                        >
+                          头脑风暴
                         </Link>
                         <Link
                           href={`/workshop?project_id=${project.id}`}

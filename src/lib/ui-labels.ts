@@ -121,6 +121,7 @@ export function runStatusLabel(status: string | null | undefined): string {
 const ENTRYPOINT: Record<string, string> = {
   workshop: "结果工坊",
   chat: "编排协作",
+  brainstorm: "头脑风暴",
   create: "场景编排",
   quick_create: "快速创建",
   project: "项目中心",

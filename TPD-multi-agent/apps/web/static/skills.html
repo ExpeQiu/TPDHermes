@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Skills · multi-agent</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/static/styles.css" />
+</head>
+<body>
+  <main class="wrap">
+    <nav class="nav">
+      <a href="/">协作台</a>
+      <a href="/packs">P-team</a>
+      <a href="/roles">Roles</a>
+      <a href="/skills" aria-current="page">Skills</a>
+      <a href="/settings">设置</a>
+    </nav>
+    <h1 class="brand">Agent <span>Skills</span></h1>
+    <p class="tagline">配置 / 导入 Agent 可调用能力：联网搜索、知识库检索等。一期管理目录；运行时调用后续接入。</p>
+
+    <div class="layout packs-layout">
+      <section class="panel" aria-label="Skills 列表">
+        <h2>已安装</h2>
+        <button type="button" class="btn secondary" id="btn-new">新建 Skill</button>
+        <ul class="pack-list" id="skill-list"></ul>
+        <p class="hint">文件落在 <code>multi_agent/skills/*.yml</code></p>
+
+        <h2 class="sub">导入 SKILL.md</h2>
+        <textarea id="import-md" rows="6" placeholder="粘贴含 YAML frontmatter 的 SKILL.md…"></textarea>
+        <button type="button" class="btn secondary" id="btn-import">导入</button>
+      </section>
+
+      <section class="panel" aria-label="编辑 Skill">
+        <h2 id="editor-title">编辑</h2>
+        <form id="skill-form">
+          <label for="skill-id">ID（snake_case）</label>
+          <input id="skill-id" required pattern="[a-z][a-z0-9_]*" placeholder="如 web_search" autocomplete="off" />
+
+          <label for="skill-name">名称</label>
+          <input id="skill-name" required placeholder="显示名" />
+
+          <label for="skill-desc">说明</label>
+          <textarea id="skill-desc" placeholder="一句话能力描述"></textarea>
+
+          <label for="skill-kind">kind</label>
+          <select id="skill-kind">
+            <option value="tool">tool</option>
+            <option value="prompt">prompt</option>
+            <option value="mcp">mcp</option>
+          </select>
+
+          <label for="skill-runtime">runtime</label>
+          <select id="skill-runtime">
+            <option value="builtin">builtin</option>
+            <option value="http">http</option>
+            <option value="mcp">mcp</option>
+            <option value="shell">shell</option>
+          </select>
+
+          <label for="skill-entry">entry</label>
+          <input id="skill-entry" placeholder="模块路径或 URL" />
+
+          <label for="skill-when">when</label>
+          <input id="skill-when" placeholder="何时调用该能力" />
+
+          <label for="skill-risk">risk</label>
+          <select id="skill-risk">
+            <option value="none">none</option>
+            <option value="network">network</option>
+            <option value="filesystem">filesystem</option>
+            <option value="shell">shell</option>
+          </select>
+
+          <div class="kind-row">
+            <label class="check"><input type="checkbox" id="skill-enabled" checked /> enabled</label>
+            <label class="check"><input type="checkbox" id="skill-safe" checked /> agent_safe</label>
+          </div>
+
+          <button type="submit" class="btn" id="btn-save">保存</button>
+          <button type="button" class="btn secondary" id="btn-delete">删除</button>
+          <div class="status" id="status" role="status"></div>
+        </form>
+      </section>
+    </div>
+  </main>
+  <script src="/static/skills.js"></script>
+</body>
+</html>

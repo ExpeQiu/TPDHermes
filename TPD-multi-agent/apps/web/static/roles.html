@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Roles · multi-agent</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/static/styles.css" />
+</head>
+<body>
+  <main class="wrap">
+    <nav class="nav">
+      <a href="/">协作台</a>
+      <a href="/packs">P-team</a>
+      <a href="/roles" aria-current="page">Roles</a>
+      <a href="/skills">Skills</a>
+      <a href="/settings">设置</a>
+    </nav>
+    <h1 class="brand">Role <span>Agents</span></h1>
+    <p class="tagline">配置可复用角色 Agent：圆桌人格 / Consult 专家。Pack 按 id 引用并合并；此处改 system 对后续运行立即生效。</p>
+
+    <div class="layout packs-layout">
+      <section class="panel" aria-label="角色列表">
+        <h2>角色库</h2>
+        <button type="button" class="btn secondary" id="btn-new">新建角色</button>
+        <ul class="pack-list" id="role-list"></ul>
+        <p class="hint">文件落在 <code>multi_agent/roles/*.yml</code></p>
+      </section>
+
+      <section class="panel" aria-label="编辑角色">
+        <h2 id="editor-title">编辑</h2>
+        <form id="role-form">
+          <label for="role-id">ID（snake_case）</label>
+          <input id="role-id" required pattern="[a-z][a-z0-9_]*" placeholder="如 content_director" autocomplete="off" />
+
+          <label for="role-name">名称</label>
+          <input id="role-name" required placeholder="显示名" />
+
+          <label for="role-desc">说明</label>
+          <textarea id="role-desc" placeholder="一句话职责"></textarea>
+
+          <label>能力 kinds</label>
+          <div class="kind-row">
+            <label class="check"><input type="checkbox" id="kind-roundtable" value="roundtable" /> roundtable</label>
+            <label class="check"><input type="checkbox" id="kind-consult" value="consult" /> consult</label>
+          </div>
+
+          <label for="role-perspective">perspective（圆桌视角）</label>
+          <input id="role-perspective" placeholder="对立立场 / 关注点" />
+
+          <label for="role-tool">tool（Consult 工具名）</label>
+          <input id="role-tool" placeholder="consult_xxx" />
+
+          <label for="role-when">when（何时调用）</label>
+          <input id="role-when" placeholder="触发条件" />
+
+          <label for="role-system">system prompt</label>
+          <textarea id="role-system" placeholder="注入 LLM 的角色设定"></textarea>
+
+          <button type="submit" class="btn" id="btn-save">保存</button>
+          <button type="button" class="btn secondary" id="btn-delete">删除</button>
+          <div class="status" id="status" role="status"></div>
+        </form>
+      </section>
+    </div>
+  </main>
+  <script src="/static/roles.js"></script>
+</body>
+</html>
