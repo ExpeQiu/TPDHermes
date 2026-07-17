@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 from multi_agent.config import Settings, load_settings
 from multi_agent.llm import LLMClient
@@ -40,6 +40,7 @@ class CoordinatorFacade:
         debate_config: Optional[dict[str, Any]] = None,
         moderator_enabled: bool = True,
         context: Optional[str] = None,
+        on_started: Optional[Callable[[str], None]] = None,
     ) -> RunResult:
         pack = pack or self.settings.default_pack
         decision = select_mode(goal or topic or "", explicit=mode)
@@ -61,6 +62,7 @@ class CoordinatorFacade:
                 debate_config=debate_config,
                 moderator_enabled=moderator_enabled,
                 context=context,
+                on_started=on_started,
             )
             result.meta["select_reason"] = decision.reason
             self.store.save_result(result)

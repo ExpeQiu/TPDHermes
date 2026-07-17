@@ -51,8 +51,21 @@ def _run_base(
     mode: str,
     coordinator: str,
     goal: str,
+    on_started: Any | None = None,
 ) -> tuple[str, TrajectoryStore]:
     run_id = store.new_run_id()
+    store.mark_running(
+        run_id,
+        mode=mode,
+        module=module,
+        coordinator=coordinator,
+        topic=goal,
+    )
+    if callable(on_started):
+        try:
+            on_started(run_id)
+        except Exception:  # noqa: BLE001
+            logger.exception("on_started 回调失败 run_id=%s", run_id)
     store.append_event(
         run_id,
         "分派",
@@ -195,6 +208,18 @@ class RoundtableRuntime:
             task=f"圆桌发言 R{round_no}",
             actor=str(name),
             outputs=[opinion[:200]],
+        )
+        badges = [f"R{round_no}"]
+        if label:
+            badges.append(str(label))
+        store.append_progress_turn(
+            run_id,
+            {
+                "kind": "speech",
+                "speaker": str(name),
+                "badge": " · ".join(badges),
+                "content": opinion,
+            },
         )
 
     def _run_round_robin(
@@ -391,6 +416,7 @@ class RoundtableRuntime:
         debate_config: dict[str, Any] | None = None,
         moderator_enabled: bool = True,
         context: str | None = None,
+        on_started: Any | None = None,
     ) -> RunResult:
         discussion_mode = _normalize_discussion_mode(discussion_mode)
         rounds = max(1, int(rounds or 1))
@@ -415,6 +441,7 @@ class RoundtableRuntime:
             mode="roundtable",
             coordinator=moderator.get("name", "主持人"),
             goal=topic,
+            on_started=on_started,
         )
 
         transcripts: list[str] = []
@@ -429,6 +456,17 @@ class RoundtableRuntime:
             task="圆桌开场",
             actor=moderator.get("name", "主持人"),
             outputs=[topic, discussion_mode],
+        )
+        store.append_progress_turn(
+            run_id,
+            {
+                "kind": "opening",
+                "speaker": str(moderator.get("name") or "主持人"),
+                "badge": "开场",
+                "content": (
+                    f"议题：{topic}\n讨论模式：{discussion_mode}\n请各位给出最核心破局建议。"
+                ),
+            },
         )
         kb_retrieved = _kb_context(self.settings, topic)
         kb_block = kb_retrieved
@@ -518,6 +556,15 @@ class RoundtableRuntime:
                     actor=moderator.get("name", "主持人"),
                     outputs=[conflict[:200]],
                 )
+                store.append_progress_turn(
+                    run_id,
+                    {
+                        "kind": "escalate",
+                        "speaker": str(moderator.get("name") or "主持人"),
+                        "badge": "升维冲突",
+                        "content": conflict,
+                    },
+                )
 
             if consensus_enabled and r < rounds:
                 consensus_reached, consensus_score = self._detect_consensus(
@@ -539,6 +586,17 @@ class RoundtableRuntime:
                     transcripts.append(
                         f"**共识检测**：第 {r} 轮达成共识（score={consensus_score:.2f}），提前结束。"
                     )
+                    store.append_progress_turn(
+                        run_id,
+                        {
+                            "kind": "consensus",
+                            "speaker": "共识检测",
+                            "badge": f"R{r}",
+                            "content": (
+                                f"第 {r} 轮达成共识（score={consensus_score:.2f}），提前结束。"
+                            ),
+                        },
+                    )
                     logger.info("run_id=%s 共识提前终止于第 %s 轮", run_id, r)
                     break
         else:
@@ -559,6 +617,15 @@ class RoundtableRuntime:
             + f"**讨论模式**：{discussion_mode}\n\n"
             + "\n\n".join(transcripts)
             + f"\n\n## 综合方案\n\n{synthesis}\n"
+        )
+        store.append_progress_turn(
+            run_id,
+            {
+                "kind": "synthesis",
+                "speaker": str(moderator.get("name") or "主持人"),
+                "badge": "综合方案",
+                "content": synthesis,
+            },
         )
         delivery = Delivery(title=f"圆桌方案：{topic[:40]}", body_markdown=body)
         if not synthesis.strip():

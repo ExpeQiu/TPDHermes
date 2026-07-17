@@ -48,6 +48,8 @@ async function handle(request: NextRequest, context: RouteContext) {
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+/** 兼容偶发走 Next 代理的长请求；头脑风暴主路径已改为异步轮询 */
+export const maxDuration = 300;
 
 export async function GET(request: NextRequest, context: RouteContext) {
   return handle(request, context);

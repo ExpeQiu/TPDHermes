@@ -69,6 +69,117 @@ class TrajectoryStore:
         path.mkdir(parents=True, exist_ok=True)
         return path
 
+    def mark_running(
+        self,
+        run_id: str,
+        *,
+        mode: str,
+        module: str,
+        coordinator: str = "",
+        topic: str = "",
+    ) -> None:
+        """圆桌开始时写入 running 状态，供异步轮询提前拿到 run_id。"""
+        d = self.run_dir(run_id)
+        state = {
+            "run_id": run_id,
+            "status": "running",
+            "mode": mode,
+            "module": module,
+            "coordinator": coordinator,
+            "topic": topic,
+            "updated_at": _now_iso(),
+        }
+        (d / "state.json").write_text(
+            json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+        progress = {
+            "run_id": run_id,
+            "status": "running",
+            "mode": mode,
+            "title": f"圆桌方案：{(topic or '')[:40]}",
+            "topic": topic,
+            "turns": [],
+            "updated_at": _now_iso(),
+            "error": None,
+        }
+        (d / "progress.json").write_text(
+            json.dumps(progress, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+
+    def append_progress_turn(self, run_id: str, turn: dict[str, Any]) -> None:
+        """追加一条可直播的发言（开场 / 专家 / 升维 / 综合方案）。"""
+        d = self.run_dir(run_id)
+        path = d / "progress.json"
+        if path.is_file():
+            try:
+                progress = json.loads(path.read_text(encoding="utf-8"))
+            except json.JSONDecodeError:
+                progress = {"run_id": run_id, "status": "running", "turns": []}
+        else:
+            progress = {"run_id": run_id, "status": "running", "turns": []}
+        turns = progress.get("turns")
+        if not isinstance(turns, list):
+            turns = []
+        item = dict(turn)
+        item.setdefault("id", f"turn-{len(turns) + 1}")
+        turns.append(item)
+        progress["turns"] = turns
+        progress["status"] = progress.get("status") or "running"
+        progress["updated_at"] = _now_iso()
+        path.write_text(json.dumps(progress, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    def mark_progress_status(
+        self,
+        run_id: str,
+        status: str,
+        *,
+        error: str | None = None,
+        title: str | None = None,
+    ) -> None:
+        d = self.run_dir(run_id)
+        path = d / "progress.json"
+        progress: dict[str, Any]
+        if path.is_file():
+            try:
+                progress = json.loads(path.read_text(encoding="utf-8"))
+            except json.JSONDecodeError:
+                progress = {"run_id": run_id, "turns": []}
+        else:
+            progress = {"run_id": run_id, "turns": []}
+        progress["status"] = status
+        progress["updated_at"] = _now_iso()
+        if error is not None:
+            progress["error"] = error
+        if title:
+            progress["title"] = title
+        path.write_text(json.dumps(progress, ensure_ascii=False, indent=2), encoding="utf-8")
+        state_path = d / "state.json"
+        state: dict[str, Any] = {}
+        if state_path.is_file():
+            try:
+                state = json.loads(state_path.read_text(encoding="utf-8"))
+            except json.JSONDecodeError:
+                state = {}
+        state.update(
+            {
+                "run_id": run_id,
+                "status": status,
+                "updated_at": _now_iso(),
+            }
+        )
+        if error:
+            state["error"] = error
+        state_path.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    def load_progress(self, run_id: str) -> Optional[dict[str, Any]]:
+        path = self.root / run_id / "progress.json"
+        if not path.is_file():
+            return None
+        try:
+            return json.loads(path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            return None
+
     def append_event(
         self,
         run_id: str,
@@ -133,6 +244,11 @@ class TrajectoryStore:
         }
         (d / "state.json").write_text(
             json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+        self.mark_progress_status(
+            result.run_id,
+            result.status or "completed",
+            title=result.delivery.title,
         )
         return envelope_path
 

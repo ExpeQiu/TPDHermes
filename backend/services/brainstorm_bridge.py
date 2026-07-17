@@ -11,8 +11,9 @@ from __future__ import annotations
 import logging
 import os
 import sys
+import time
 from pathlib import Path
-from typing import Any
+from typing import Any, Awaitable, Callable
 
 import httpx
 
@@ -23,7 +24,10 @@ DEFAULT_ROUNDS = 2
 DEFAULT_DISCUSSION_MODE = "round_robin"
 DEFAULT_HTTP_URL = "http://127.0.0.1:8765"
 HTTP_TIMEOUT_SEC = float(os.getenv("MULTI_AGENT_HTTP_TIMEOUT", "300"))
+PROGRESS_POLL_SEC = float(os.getenv("MULTI_AGENT_PROGRESS_POLL_SEC", "1.5"))
 DISCUSSION_MODES = frozenset({"round_robin", "parallel", "debate"})
+
+ProgressCallback = Callable[[dict[str, Any]], Awaitable[None] | None]
 
 
 class BrainstormBridgeError(Exception):
@@ -156,6 +160,7 @@ async def _run_via_http(
     moderator_enabled: bool,
     demo: bool | None,
     context: str | None = None,
+    on_progress: ProgressCallback | None = None,
 ) -> dict[str, Any]:
     base = multi_agent_http_base()
     payload: dict[str, Any] = {
@@ -177,18 +182,6 @@ async def _run_via_http(
     if ctx:
         payload["context"] = ctx
 
-    url = f"{base}/api/run"
-    logger.info(
-        "头脑风暴 HTTP 调用 | url=%s | pack=%s | rounds=%s | mode=%s | consensus=%s | demo=%s | context_chars=%s | topic=%s",
-        url,
-        pack,
-        rounds,
-        discussion_mode,
-        consensus_enabled,
-        demo,
-        len(ctx),
-        topic[:80],
-    )
     async with httpx.AsyncClient(timeout=HTTP_TIMEOUT_SEC) as client:
         try:
             health = await client.get(f"{base}/api/health")
@@ -197,16 +190,143 @@ async def _run_via_http(
         except httpx.HTTPError as exc:
             raise BrainstormBridgeError(f"multi-agent 不可达: {exc}") from exc
 
-        resp = await client.post(url, json=payload)
-        if resp.status_code >= 400:
-            detail = resp.text[:400]
+        # 优先异步启动 + 轮询 progress（边跑边推发言）
+        async_url = f"{base}/api/run/async"
+        logger.info(
+            "头脑风暴 HTTP 异步调用 | url=%s | pack=%s | rounds=%s | mode=%s | demo=%s | topic=%s",
+            async_url,
+            pack,
+            rounds,
+            discussion_mode,
+            demo,
+            topic[:80],
+        )
+        try:
+            started = await client.post(async_url, json=payload)
+        except httpx.HTTPError as exc:
+            raise BrainstormBridgeError(f"multi-agent /api/run/async 不可达: {exc}") from exc
+
+        if started.status_code == 404:
+            logger.warning("multi-agent 无 /api/run/async，回退同步 /api/run")
+            return await _run_via_http_sync(client, base, payload, demo=demo)
+
+        if started.status_code >= 400:
+            detail = started.text[:400]
             try:
-                detail = str(resp.json().get("error") or detail)
+                detail = str(started.json().get("error") or detail)
             except Exception:
                 pass
-            raise BrainstormBridgeError(f"multi-agent /api/run 失败: {detail}")
-        data = resp.json()
+            raise BrainstormBridgeError(f"multi-agent /api/run/async 失败: {detail}")
 
+        started_body = started.json()
+        run_id = str(started_body.get("run_id") or "").strip()
+        if not run_id:
+            raise BrainstormBridgeError("multi-agent 异步启动未返回 run_id")
+
+        logger.info("头脑风暴已异步启动 | run_id=%s，开始轮询 progress", run_id)
+        import asyncio
+
+        deadline = time.monotonic() + HTTP_TIMEOUT_SEC
+        last_turn_count = -1
+        while time.monotonic() < deadline:
+            prog_resp = await client.get(f"{base}/api/runs/{run_id}/progress")
+            if prog_resp.status_code == 404:
+                await asyncio.sleep(PROGRESS_POLL_SEC)
+                continue
+            if prog_resp.status_code >= 400:
+                raise BrainstormBridgeError(
+                    f"读取 progress 失败: HTTP {prog_resp.status_code}"
+                )
+            progress = prog_resp.json()
+            turns = progress.get("turns") if isinstance(progress.get("turns"), list) else []
+            status = str(progress.get("status") or "running")
+            if len(turns) != last_turn_count:
+                last_turn_count = len(turns)
+                logger.info(
+                    "头脑风暴进度 | run_id=%s | status=%s | turns=%s",
+                    run_id,
+                    status,
+                    len(turns),
+                )
+                if on_progress:
+                    maybe = on_progress(
+                        {
+                            "run_id": run_id,
+                            "status": status,
+                            "turns": turns,
+                            "title": progress.get("title"),
+                            "topic": progress.get("topic"),
+                            "error": progress.get("error"),
+                        }
+                    )
+                    if asyncio.iscoroutine(maybe):
+                        await maybe
+
+            if status == "failed":
+                raise BrainstormBridgeError(
+                    str(progress.get("error") or f"圆桌失败 run_id={run_id}")
+                )
+            if status in {"completed", "complete", "done"}:
+                bundle_resp = await client.get(f"{base}/api/runs/{run_id}")
+                if bundle_resp.status_code >= 400:
+                    raise BrainstormBridgeError(
+                        f"读取最终结果失败: HTTP {bundle_resp.status_code}"
+                    )
+                bundle = bundle_resp.json()
+                envelope = (
+                    bundle.get("envelope")
+                    if isinstance(bundle.get("envelope"), dict)
+                    else {}
+                )
+                if not envelope:
+                    envelope = {
+                        "run_id": run_id,
+                        "mode": "roundtable",
+                        "coordinator": "主持人",
+                        "status": "completed",
+                        "delivery": {
+                            "title": progress.get("title") or "圆桌 Master Plan",
+                            "body_markdown": "",
+                        },
+                        "meta": {},
+                    }
+                delivery = bundle.get("delivery") or ""
+                if isinstance(delivery, dict):
+                    delivery = str(delivery.get("body_markdown") or "")
+                trajectory = str(bundle.get("trajectory") or "")
+                result = _normalize_result(
+                    envelope=envelope,
+                    delivery=str(delivery),
+                    trajectory=trajectory,
+                    bridge="http",
+                    mock=demo,
+                )
+                result["live_turns"] = turns
+                return result
+
+            await asyncio.sleep(PROGRESS_POLL_SEC)
+
+        raise BrainstormBridgeError(f"轮询 progress 超时 run_id={run_id}")
+
+
+async def _run_via_http_sync(
+    client: httpx.AsyncClient,
+    base: str,
+    payload: dict[str, Any],
+    *,
+    demo: bool | None,
+) -> dict[str, Any]:
+    url = f"{base}/api/run"
+    logger.info("头脑风暴 HTTP 同步调用 | url=%s", url)
+    resp = await client.post(url, json=payload)
+    if resp.status_code >= 400:
+        detail = resp.text[:400]
+        try:
+            detail = str(resp.json().get("error") or detail)
+        except Exception:
+            pass
+        raise BrainstormBridgeError(f"multi-agent /api/run 失败: {detail}")
+    data = resp.json()
     envelope = data.get("envelope") if isinstance(data.get("envelope"), dict) else data
     delivery = data.get("delivery") or ""
     if isinstance(delivery, dict):
@@ -308,6 +428,7 @@ async def run_roundtable(
     debate_config: dict[str, Any] | None = None,
     moderator_enabled: bool = True,
     context: str | None = None,
+    on_progress: ProgressCallback | None = None,
 ) -> dict[str, Any]:
     topic = (topic or "").strip()
     if not topic:
@@ -337,6 +458,7 @@ async def run_roundtable(
                 moderator_enabled=moderator_enabled,
                 demo=demo_hint,
                 context=context_s,
+                on_progress=on_progress,
             )
         except BrainstormBridgeError as exc:
             errors.append(str(exc))

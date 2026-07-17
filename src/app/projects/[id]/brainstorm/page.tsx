@@ -9,6 +9,7 @@ import {
   fetchBrainstormHealth,
   runBrainstorm,
   type BrainstormHealth,
+  type BrainstormJobStatus,
   type BrainstormRunResult,
 } from "@/lib/brainstorm-api";
 import { CONTENT_MAX_CLASS } from "@/lib/content-shell";
@@ -19,6 +20,11 @@ import {
   type BrainstormSetupValues,
 } from "./components/BrainstormSetupPanel";
 import { BrainstormResultPanel } from "./components/BrainstormResultPanel";
+import {
+  BrainstormTurnList,
+  normalizeLiveTurns,
+} from "./components/BrainstormTurnList";
+import type { BrainstormTurn } from "./parse-brainstorm-delivery";
 
 type ProjectBrief = {
   id: string;
@@ -56,6 +62,9 @@ export default function ProjectBrainstormPage() {
   });
   const [loading, setLoading] = useState(true);
   const [running, setRunning] = useState(false);
+  const [jobStatus, setJobStatus] = useState<string | null>(null);
+  const [liveTurns, setLiveTurns] = useState<BrainstormTurn[]>([]);
+  const [liveTitle, setLiveTitle] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<BrainstormRunResult | null>(null);
   /** setup：配置表单；session：运行中 / 结果（逐条发言） */
@@ -135,6 +144,9 @@ export default function ProjectBrainstormPage() {
     setPhase("session");
     setError(null);
     setResult(null);
+    setJobStatus("queued");
+    setLiveTurns([]);
+    setLiveTitle(null);
     setSavedOutputId(null);
     setSaveError(null);
     setShowTrajectory(false);
@@ -169,16 +181,35 @@ export default function ProjectBrainstormPage() {
         debate_config: debateConfig,
         moderator_enabled: setup.moderatorEnabled,
         attachment_ids: setup.selectedAttachmentIds,
+        onJobUpdate: (job: BrainstormJobStatus) => {
+          setJobStatus(job.status);
+          if (job.title) setLiveTitle(job.title);
+          if (Array.isArray(job.turns)) {
+            const next = normalizeLiveTurns(job.turns);
+            setLiveTurns(next);
+            console.info("[brainstorm] 直播发言更新", {
+              status: job.status,
+              turnCount: next.length,
+              lastSpeaker: next[next.length - 1]?.speaker,
+            });
+          }
+        },
       });
+      if (data.live_turns?.length) {
+        setLiveTurns(normalizeLiveTurns(data.live_turns));
+      }
       setResult(data);
+      setJobStatus("completed");
       console.info("[brainstorm] 切换至结果视图（逐条 Markdown）", {
         runId: data.run_id,
         deliveryLen: data.delivery_markdown?.length ?? 0,
+        liveTurns: data.live_turns?.length ?? 0,
       });
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
       setError(msg);
       setPhase("setup");
+      setJobStatus(null);
       console.warn("[brainstorm] 运行失败", { projectId, err });
     } finally {
       setRunning(false);
@@ -301,19 +332,31 @@ export default function ProjectBrainstormPage() {
         ) : null}
 
         {phase === "session" && running && !result ? (
-          <section className="mt-6">
-            <div className="rounded-3xl border border-slate-200 bg-white/80 p-8 text-center dark:border-slate-800 dark:bg-slate-900/50">
-              <div className="mx-auto h-8 w-8 animate-spin rounded-full border-2 border-amber-400 border-t-transparent" />
-              <p className="mt-4 text-sm font-medium text-slate-800 dark:text-slate-200">
-                圆桌进行中…
-              </p>
-              <p className="mt-2 text-xs text-slate-500">
-                多角色依次发言，完成后将逐条渲染各专家回复
-              </p>
-              <p className="mt-1 text-xs text-slate-400">
-                {setup.topic.trim() || "未命名议题"} · {setup.discussionMode} ·{" "}
-                {setup.rounds} 轮
-              </p>
+          <section className="mt-6 space-y-4">
+            <div className="rounded-3xl border border-slate-200 bg-white/80 p-5 sm:p-6 dark:border-slate-800 dark:bg-slate-900/50">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <p className="text-xs uppercase tracking-[0.2em] text-amber-700/80 dark:text-amber-400/80">
+                    Live Roundtable
+                  </p>
+                  <h2 className="mt-1 text-xl font-semibold">
+                    {liveTitle || "圆桌进行中"}
+                  </h2>
+                  <p className="mt-1 text-xs text-slate-500">
+                    {setup.topic.trim() || "未命名议题"} · {setup.discussionMode} ·{" "}
+                    {setup.rounds} 轮
+                    {jobStatus ? ` · ${jobStatus}` : ""}
+                    {liveTurns.length ? ` · 已发言 ${liveTurns.length}` : ""}
+                  </p>
+                </div>
+                <div className="flex items-center gap-2 text-xs text-slate-500">
+                  <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-amber-500" />
+                  {jobStatus === "queued" ? "任务入队" : "逐条接收发言"}
+                </div>
+              </div>
+              <div className="mt-5">
+                <BrainstormTurnList turns={liveTurns} running />
+              </div>
             </div>
           </section>
         ) : null}

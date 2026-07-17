@@ -15,6 +15,7 @@ from backend.services.brainstorm_bridge import (
     health_check,
     run_roundtable,
 )
+from backend.services.brainstorm_jobs import create_brainstorm_job, get_brainstorm_job
 from backend.services.multi_agent_resources import (
     MultiAgentResourceError,
     delete_role as ma_delete_role,
@@ -68,6 +69,10 @@ class BrainstormRunIn(BaseModel):
         default_factory=list,
         description="项目附件 ID；Hermes 抽取正文后注入 multi-agent context",
     )
+    wait: bool = Field(
+        default=False,
+        description="True=同步等待整场圆桌（易被网关/客户端超时）；默认 False 异步入队后轮询",
+    )
 
 
 @router.get("/health")
@@ -83,12 +88,11 @@ async def brainstorm_health():
     return data
 
 
-@router.post("/run")
-async def brainstorm_run(
+async def _prepare_run_context(
     body: BrainstormRunIn,
-    db: AsyncSession = Depends(get_db),
-    effective_uid: str = Depends(get_effective_user_id),
-):
+    db: AsyncSession,
+    effective_uid: str,
+) -> tuple[str, dict[str, Any] | None, dict[str, Any], str]:
     if body.project_id:
         await require_project_for_user(db, body.project_id, effective_uid, min_perm="read")
 
@@ -107,7 +111,7 @@ async def brainstorm_run(
 
     context_md = str(attachment_ctx.get("context_markdown") or "").strip()
     logger.info(
-        "头脑风暴启动 | user=%s | project=%s | pack=%s | rounds=%s | mode=%s | consensus=%s | demo=%s | attachments=%s | context_chars=%s | topic=%s",
+        "头脑风暴启动 | user=%s | project=%s | pack=%s | rounds=%s | mode=%s | consensus=%s | demo=%s | wait=%s | attachments=%s | context_chars=%s | topic=%s",
         effective_uid,
         body.project_id,
         body.pack,
@@ -115,10 +119,50 @@ async def brainstorm_run(
         body.discussion_mode,
         body.consensus_enabled,
         body.demo,
+        body.wait,
         len(body.attachment_ids),
         len(context_md),
         topic[:120],
     )
+    return topic, debate, attachment_ctx, context_md
+
+
+@router.post("/run")
+async def brainstorm_run(
+    body: BrainstormRunIn,
+    db: AsyncSession = Depends(get_db),
+    effective_uid: str = Depends(get_effective_user_id),
+):
+    topic, debate, attachment_ctx, context_md = await _prepare_run_context(
+        body, db, effective_uid
+    )
+
+    # 默认异步：live 圆桌常 >120s，客户端/中间层会断连（nginx 499 / 浏览器报 503）
+    if not body.wait:
+        started = await create_brainstorm_job(
+            {
+                "topic": topic,
+                "project_id": body.project_id,
+                "user_id": effective_uid,
+                "pack": body.pack,
+                "rounds": body.rounds,
+                "demo": body.demo,
+                "discussion_mode": body.discussion_mode,
+                "consensus_enabled": body.consensus_enabled,
+                "consensus_threshold": body.consensus_threshold,
+                "debate_config": debate,
+                "moderator_enabled": body.moderator_enabled,
+                "context": context_md or None,
+                "attachment_items": attachment_ctx.get("items") or [],
+            }
+        )
+        return {
+            "job_id": started["job_id"],
+            "status": started["status"],
+            "async": True,
+            "poll_path": f"/brainstorm/jobs/{started['job_id']}",
+        }
+
     try:
         result = await run_roundtable(
             topic,
@@ -144,7 +188,7 @@ async def brainstorm_run(
     result["attachment_context"] = attachment_ctx.get("items") or []
     result["context_chars"] = len(context_md)
     logger.info(
-        "头脑风暴完成 | user=%s | run_id=%s | bridge=%s | mock=%s | mode=%s | consensus=%s | context_chars=%s",
+        "头脑风暴完成(同步) | user=%s | run_id=%s | bridge=%s | mock=%s | mode=%s | consensus=%s | context_chars=%s",
         effective_uid,
         result.get("run_id"),
         result.get("bridge"),
@@ -154,6 +198,25 @@ async def brainstorm_run(
         len(context_md),
     )
     return result
+
+
+@router.get("/jobs/{job_id}")
+async def brainstorm_job_status(job_id: str):
+    job = await get_brainstorm_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail=f"任务不存在或已过期: {job_id}")
+    return {
+        "job_id": job["job_id"],
+        "status": job["status"],
+        "created_at": job.get("created_at"),
+        "updated_at": job.get("updated_at"),
+        "params_summary": job.get("params_summary"),
+        "error": job.get("error"),
+        "result": job.get("result"),
+        "turns": job.get("turns") or [],
+        "ma_run_id": job.get("ma_run_id"),
+        "title": job.get("title"),
+    }
 
 
 # --- P-team / Roles 配置（设置页） ---
