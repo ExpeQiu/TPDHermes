@@ -26,6 +26,8 @@ import { fetchUserAccess, type UserAccessState } from "@/lib/rbac";
 import { isSystemAdminRole } from "@/lib/user-admin";
 import { CONTENT_MAX_CLASS } from "@/lib/content-shell";
 import McpManagementPanel from "@/components/settings/McpManagementPanel";
+import PackManagementPanel from "@/components/settings/PackManagementPanel";
+import RoleManagementPanel from "@/components/settings/RoleManagementPanel";
 import UserGroupManagementPanel from "@/components/settings/UserGroupManagementPanel";
 import { useThemeStore } from "@/lib/store";
 
@@ -39,7 +41,7 @@ interface MeResponse {
   avatar_url: string | null;
 }
 
-type SettingsTab = "theme" | "identity" | "mcp";
+type SettingsTab = "theme" | "identity" | "mcp" | "pteam" | "roles";
 
 const SETTINGS_TABS: { id: SettingsTab; label: string; description: string }[] = [
   {
@@ -54,6 +56,18 @@ const SETTINGS_TABS: { id: SettingsTab; label: string; description: string }[] =
     description:
       "管理 Hermes-agent 可调用的 MCP 服务与工具白名单；配置写入 deploy/hermes-agent/config.yaml，修改后需重启 hermes-agent。",
   },
+  {
+    id: "pteam",
+    label: "P-team",
+    description:
+      "组装 multi-agent 领域协作包：圆桌席位与 Consult 专家；配置写入 multi_agent/skill_packs/*/pack.yml。",
+  },
+  {
+    id: "roles",
+    label: "Roles",
+    description:
+      "配置可复用角色 Agent（圆桌 / Consult）；Pack 按 id 引用并合并；写入 multi_agent/roles/*.yml。",
+  },
   { id: "theme", label: "风格", description: "切换界面配色，偏好保存在本机浏览器。" },
 ];
 
@@ -63,7 +77,9 @@ const THEME_OPTIONS: { value: "light" | "dark"; label: string }[] = [
 ];
 
 function parseTab(raw: string | null): SettingsTab {
-  if (raw === "identity" || raw === "mcp" || raw === "theme") return raw;
+  if (raw === "identity" || raw === "mcp" || raw === "pteam" || raw === "roles" || raw === "theme") {
+    return raw;
+  }
   return "identity";
 }
 
@@ -328,6 +344,18 @@ function SettingsPageContent() {
           {activeTab === "mcp" && (
             <div className="mt-4">
               <McpManagementPanel />
+            </div>
+          )}
+
+          {activeTab === "pteam" && (
+            <div className="mt-4">
+              <PackManagementPanel />
+            </div>
+          )}
+
+          {activeTab === "roles" && (
+            <div className="mt-4">
+              <RoleManagementPanel />
             </div>
           )}
         </section>

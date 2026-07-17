@@ -30,9 +30,9 @@ usage() {
   ./scripts/deploy_prod.sh --remote [选项]     # 本机 rsync 后 SSH 远程执行
 
 选项:
-  --all              构建 frontend + backend + tphermes-mcp（不构建 hermes-agent 镜像）
+  --all              构建 frontend + backend + tphermes-mcp + multi-agent（不构建 hermes-agent 镜像）
   --since REF        用 git diff REF..HEAD 判断变更（默认 HEAD~1）
-  --services S       手动指定构建服务，逗号分隔，如 backend,frontend
+  --services S       手动指定构建服务，逗号分隔，如 backend,frontend,multi-agent
   --restart-agent    强制 restart hermes-agent（配置未改也会重启）
   --dry-run          只打印将执行的操作
   -h, --help
@@ -47,7 +47,7 @@ usage() {
 示例:
   DEPLOY_SSH_PASS='***' ./scripts/deploy_prod.sh --remote
   ./scripts/deploy_prod.sh --all
-  ./scripts/deploy_prod.sh --services backend,tphermes-mcp
+  ./scripts/deploy_prod.sh --services backend,tphermes-mcp,multi-agent
 EOF
 }
 
@@ -156,7 +156,7 @@ collect_changed_files() {
 
 classify_changes() {
   local files="$1"
-  local need_frontend=0 need_backend=0 need_nginx=0 need_agent=0
+  local need_frontend=0 need_backend=0 need_multi_agent=0 need_nginx=0 need_agent=0
   local line
 
   while IFS= read -r line; do
@@ -168,6 +168,8 @@ classify_changes() {
         need_backend=1 ;;
       skills/*)
         need_backend=1 ;;
+      TPD-multi-agent/*|docker-compose.prod.yml|docker-compose.yml)
+        need_multi_agent=1 ;;
       nginx/*)
         need_nginx=1 ;;
       deploy/hermes-agent/*)
@@ -178,6 +180,7 @@ classify_changes() {
   if [[ "$FORCE_ALL" -eq 1 ]]; then
     need_frontend=1
     need_backend=1
+    need_multi_agent=1
   fi
 
   if [[ "$MANUAL_SERVICES" -eq 0 ]]; then
@@ -186,6 +189,7 @@ classify_changes() {
     if [[ "$need_backend" -eq 1 ]]; then
       BUILD_SERVICES+=(backend tphermes-mcp)
     fi
+    [[ "$need_multi_agent" -eq 1 ]] && BUILD_SERVICES+=(multi-agent)
   fi
 
   UP_SERVICES=()
@@ -196,15 +200,25 @@ classify_changes() {
         frontend) UP_SERVICES+=(frontend) ;;
         backend) UP_SERVICES+=(backend) ;;
         tphermes-mcp) UP_SERVICES+=(tphermes-mcp) ;;
+        multi-agent) UP_SERVICES+=(multi-agent) ;;
         nginx) UP_SERVICES+=(nginx) ;;
       esac
     done
     if [[ " ${UP_SERVICES[*]} " == *" frontend "* ]] || [[ " ${UP_SERVICES[*]} " == *" backend "* ]]; then
       UP_SERVICES+=(nginx)
     fi
+    # backend 依赖 multi-agent healthy：拉起 backend 时一并拉起 multi-agent
+    if [[ " ${UP_SERVICES[*]} " == *" backend "* ]] && [[ " ${UP_SERVICES[*]} " != *" multi-agent "* ]]; then
+      UP_SERVICES+=(multi-agent)
+    fi
   else
     [[ "$need_frontend" -eq 1 ]] && UP_SERVICES+=(frontend)
     [[ "$need_backend" -eq 1 ]] && UP_SERVICES+=(backend tphermes-mcp)
+    [[ "$need_multi_agent" -eq 1 ]] && UP_SERVICES+=(multi-agent)
+    # backend 依赖 multi-agent
+    if [[ " ${UP_SERVICES[*]:-} " == *" backend "* ]] && [[ " ${UP_SERVICES[*]:-} " != *" multi-agent "* ]]; then
+      UP_SERVICES+=(multi-agent)
+    fi
     [[ "$need_nginx" -eq 1 || ${#UP_SERVICES[@]} -gt 0 ]] && UP_SERVICES+=(nginx)
   fi
 

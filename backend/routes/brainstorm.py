@@ -15,11 +15,25 @@ from backend.services.brainstorm_bridge import (
     health_check,
     run_roundtable,
 )
+from backend.services.multi_agent_resources import (
+    MultiAgentResourceError,
+    delete_role as ma_delete_role,
+    get_pack as ma_get_pack,
+    get_role as ma_get_role,
+    list_packs as ma_list_packs,
+    list_roles as ma_list_roles,
+    save_pack as ma_save_pack,
+    save_role as ma_save_role,
+)
 from backend.services.project_access import require_project_for_user
 from backend.services.user_identity import get_effective_user_id
 
 router = APIRouter(prefix="/brainstorm", tags=["brainstorm"])
 logger = logging.getLogger("tpdx.hermes.brainstorm.routes")
+
+
+def _raise_resource(exc: MultiAgentResourceError) -> None:
+    raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
 
 DiscussionMode = Literal["round_robin", "parallel", "debate"]
 
@@ -140,3 +154,119 @@ async def brainstorm_run(
         len(context_md),
     )
     return result
+
+
+# --- P-team / Roles 配置（设置页） ---
+
+
+class PackIn(BaseModel):
+    id: str = Field(..., min_length=1)
+    name: str = Field(..., min_length=1)
+    description: str = ""
+    roundtable_roles: list[dict[str, Any]] = Field(default_factory=list)
+    consult_experts: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class RoleIn(BaseModel):
+    id: str = Field(..., min_length=1)
+    name: str = Field(..., min_length=1)
+    description: str = ""
+    kinds: list[str] = Field(default_factory=list)
+    perspective: str = ""
+    tool: str = ""
+    when: str = ""
+    system: str = ""
+
+
+@router.get("/packs")
+async def api_list_packs():
+    try:
+        return await ma_list_packs()
+    except MultiAgentResourceError as exc:
+        _raise_resource(exc)
+
+
+@router.get("/packs/{pack_id}")
+async def api_get_pack(pack_id: str):
+    try:
+        return await ma_get_pack(pack_id)
+    except MultiAgentResourceError as exc:
+        _raise_resource(exc)
+
+
+@router.post("/packs")
+async def api_create_pack(body: PackIn, effective_uid: str = Depends(get_effective_user_id)):
+    try:
+        data = await ma_save_pack(body.model_dump(), create=True)
+        logger.info("创建 Pack | user=%s | id=%s | source=%s", effective_uid, data.get("id"), data.get("source"))
+        return data
+    except MultiAgentResourceError as exc:
+        _raise_resource(exc)
+
+
+@router.put("/packs/{pack_id}")
+async def api_update_pack(
+    pack_id: str,
+    body: PackIn,
+    effective_uid: str = Depends(get_effective_user_id),
+):
+    payload = body.model_dump()
+    payload["id"] = pack_id
+    try:
+        data = await ma_save_pack(payload, create=False)
+        logger.info("更新 Pack | user=%s | id=%s | source=%s", effective_uid, data.get("id"), data.get("source"))
+        return data
+    except MultiAgentResourceError as exc:
+        _raise_resource(exc)
+
+
+@router.get("/roles")
+async def api_list_roles():
+    try:
+        return await ma_list_roles()
+    except MultiAgentResourceError as exc:
+        _raise_resource(exc)
+
+
+@router.get("/roles/{role_id}")
+async def api_get_role(role_id: str):
+    try:
+        return await ma_get_role(role_id)
+    except MultiAgentResourceError as exc:
+        _raise_resource(exc)
+
+
+@router.post("/roles")
+async def api_create_role(body: RoleIn, effective_uid: str = Depends(get_effective_user_id)):
+    try:
+        data = await ma_save_role(body.model_dump(), create=True)
+        logger.info("创建 Role | user=%s | id=%s | source=%s", effective_uid, data.get("id"), data.get("source"))
+        return data
+    except MultiAgentResourceError as exc:
+        _raise_resource(exc)
+
+
+@router.put("/roles/{role_id}")
+async def api_update_role(
+    role_id: str,
+    body: RoleIn,
+    effective_uid: str = Depends(get_effective_user_id),
+):
+    payload = body.model_dump()
+    payload["id"] = role_id
+    try:
+        data = await ma_save_role(payload, create=False)
+        logger.info("更新 Role | user=%s | id=%s | source=%s", effective_uid, data.get("id"), data.get("source"))
+        return data
+    except MultiAgentResourceError as exc:
+        _raise_resource(exc)
+
+
+@router.delete("/roles/{role_id}")
+async def api_delete_role(role_id: str, effective_uid: str = Depends(get_effective_user_id)):
+    try:
+        data = await ma_delete_role(role_id)
+        logger.info("删除 Role | user=%s | id=%s | source=%s", effective_uid, role_id, data.get("source"))
+        return data
+    except MultiAgentResourceError as exc:
+        _raise_resource(exc)

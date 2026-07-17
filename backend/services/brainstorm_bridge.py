@@ -74,8 +74,10 @@ def resolve_multi_agent_root() -> Path | None:
         p = Path(env).expanduser().resolve()
         if (p / "multi_agent").is_dir():
             return p
-        logger.warning("MULTI_AGENT_ROOT 无效（缺少 multi_agent 包）: %s", p)
-        return None
+        logger.warning(
+            "MULTI_AGENT_ROOT 无效（缺少 multi_agent 包）: %s，尝试 monorepo 候选路径",
+            p,
+        )
 
     hermes_root = Path(__file__).resolve().parents[2]
     candidates = [

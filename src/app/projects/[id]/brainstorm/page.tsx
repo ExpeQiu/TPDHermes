@@ -18,6 +18,7 @@ import {
   type BrainstormAttachment,
   type BrainstormSetupValues,
 } from "./components/BrainstormSetupPanel";
+import { BrainstormResultPanel } from "./components/BrainstormResultPanel";
 
 type ProjectBrief = {
   id: string;
@@ -57,6 +58,8 @@ export default function ProjectBrainstormPage() {
   const [running, setRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<BrainstormRunResult | null>(null);
+  /** setup：配置表单；session：运行中 / 结果（逐条发言） */
+  const [phase, setPhase] = useState<"setup" | "session">("setup");
   const [showTrajectory, setShowTrajectory] = useState(false);
   const [saving, setSaving] = useState(false);
   const [savedOutputId, setSavedOutputId] = useState<string | null>(null);
@@ -129,10 +132,12 @@ export default function ProjectBrainstormPage() {
     if (!fullTopic.trim()) return;
 
     setRunning(true);
+    setPhase("session");
     setError(null);
     setResult(null);
     setSavedOutputId(null);
     setSaveError(null);
+    setShowTrajectory(false);
     try {
       console.info("[brainstorm] 配置提交", {
         projectId,
@@ -166,15 +171,25 @@ export default function ProjectBrainstormPage() {
         attachment_ids: setup.selectedAttachmentIds,
       });
       setResult(data);
-      setShowTrajectory(false);
+      console.info("[brainstorm] 切换至结果视图（逐条 Markdown）", {
+        runId: data.run_id,
+        deliveryLen: data.delivery_markdown?.length ?? 0,
+      });
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
       setError(msg);
+      setPhase("setup");
       console.warn("[brainstorm] 运行失败", { projectId, err });
     } finally {
       setRunning(false);
     }
   }, [attachments, projectId, setup]);
+
+  const onReconfigure = useCallback(() => {
+    setPhase("setup");
+    setShowTrajectory(false);
+    console.info("[brainstorm] 返回配置", { projectId, hasResult: Boolean(result) });
+  }, [projectId, result]);
 
   const onDeposit = useCallback(async () => {
     if (!projectId || !result?.delivery_markdown?.trim()) return;
@@ -262,101 +277,59 @@ export default function ProjectBrainstormPage() {
           </div>
         </header>
 
-        <div className="mt-6">
-          <BrainstormSetupPanel
-            projectName={project?.name || "未命名项目"}
-            projectBackground={project?.background}
-            attachments={attachments}
-            attachmentsLoading={attachmentsLoading}
-            values={setup}
-            onChange={patchSetup}
-            running={running}
-            engineReady={health?.ready ?? null}
-            engineHint={engineHint}
-            onSubmit={() => void onRun()}
-          />
-        </div>
-
         {error ? (
           <div className="mt-4 rounded-2xl border border-red-300 bg-red-50 p-4 text-sm text-red-800 dark:border-red-700 dark:bg-red-950/40 dark:text-red-200">
             {error}
           </div>
         ) : null}
 
-        {result ? (
-          <section className="mt-6 space-y-4">
-            <div className="rounded-3xl border border-slate-200 bg-white/80 p-5 sm:p-6 dark:border-slate-800 dark:bg-slate-900/50">
-              <div className="flex flex-wrap items-start justify-between gap-3">
-                <div>
-                  <p className="text-xs uppercase tracking-[0.2em] text-slate-500">Delivery</p>
-                  <h2 className="mt-1 text-xl font-semibold">{result.title}</h2>
-                  <p className="mt-1 text-xs text-slate-500">
-                    run={result.run_id || "—"} · {result.coordinator} · bridge={result.bridge}
-                    {result.mock ? " · mock" : " · live"}
-                    {result.discussion_mode ? ` · ${result.discussion_mode}` : ""}
-                    {result.consensus_reached
-                      ? ` · 共识@R${result.stopped_at_round ?? "?"}`
-                      : ""}
-                  </p>
-                </div>
-                <div className="flex flex-wrap items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={() => void onDeposit()}
-                    disabled={saving || !result.delivery_markdown?.trim()}
-                    className="rounded-xl border border-amber-400 bg-amber-500 px-3 py-2 text-sm font-medium text-white transition hover:bg-amber-600 disabled:cursor-not-allowed disabled:opacity-50"
-                  >
-                    {saving
-                      ? "保存中…"
-                      : savedOutputId
-                        ? "已保存（再次保存将更新）"
-                        : "保存为项目输出"}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setShowTrajectory((v) => !v)}
-                    className="rounded-xl border border-slate-300 px-3 py-2 text-sm text-slate-700 transition hover:bg-slate-100 dark:border-slate-600 dark:text-slate-300 dark:hover:bg-slate-800"
-                  >
-                    {showTrajectory ? "收起轨迹" : "查看轨迹"}
-                  </button>
-                </div>
-              </div>
-              {savedOutputId ? (
-                <p className="mt-3 text-xs text-emerald-700 dark:text-emerald-300">
-                  已写入项目输出沉淀。
-                  <Link
-                    href={`/projects/${projectId}?tab=outputs`}
-                    className="ml-2 underline underline-offset-2"
-                  >
-                    前往查看
-                  </Link>
-                  <span className="ml-2 text-slate-400">id={savedOutputId}</span>
-                </p>
-              ) : null}
-              {saveError ? (
-                <p className="mt-3 text-xs text-red-700 dark:text-red-300">{saveError}</p>
-              ) : null}
-              <article className="prose prose-slate mt-4 max-w-none whitespace-pre-wrap text-sm leading-relaxed dark:prose-invert">
-                {result.delivery_markdown || "（无交付内容）"}
-              </article>
-              {result.warnings?.length ? (
-                <ul className="mt-4 list-disc space-y-1 pl-5 text-xs text-amber-700 dark:text-amber-300">
-                  {result.warnings.map((w) => (
-                    <li key={w}>{w}</li>
-                  ))}
-                </ul>
-              ) : null}
-            </div>
+        {phase === "setup" ? (
+          <div className="mt-6">
+            <BrainstormSetupPanel
+              projectName={project?.name || "未命名项目"}
+              projectBackground={project?.background}
+              attachments={attachments}
+              attachmentsLoading={attachmentsLoading}
+              values={setup}
+              onChange={patchSetup}
+              running={running}
+              engineReady={health?.ready ?? null}
+              engineHint={engineHint}
+              onSubmit={() => void onRun()}
+            />
+          </div>
+        ) : null}
 
-            {showTrajectory ? (
-              <div className="rounded-3xl border border-slate-200 bg-slate-50/80 p-5 sm:p-6 dark:border-slate-800 dark:bg-slate-950/50">
-                <p className="text-xs uppercase tracking-[0.2em] text-slate-500">Trajectory</p>
-                <pre className="mt-3 max-h-[28rem] overflow-auto whitespace-pre-wrap text-xs leading-relaxed text-slate-700 dark:text-slate-300">
-                  {result.trajectory_markdown || "（无轨迹）"}
-                </pre>
-              </div>
-            ) : null}
+        {phase === "session" && running && !result ? (
+          <section className="mt-6">
+            <div className="rounded-3xl border border-slate-200 bg-white/80 p-8 text-center dark:border-slate-800 dark:bg-slate-900/50">
+              <div className="mx-auto h-8 w-8 animate-spin rounded-full border-2 border-amber-400 border-t-transparent" />
+              <p className="mt-4 text-sm font-medium text-slate-800 dark:text-slate-200">
+                圆桌进行中…
+              </p>
+              <p className="mt-2 text-xs text-slate-500">
+                多角色依次发言，完成后将逐条渲染各专家回复
+              </p>
+              <p className="mt-1 text-xs text-slate-400">
+                {setup.topic.trim() || "未命名议题"} · {setup.discussionMode} ·{" "}
+                {setup.rounds} 轮
+              </p>
+            </div>
           </section>
+        ) : null}
+
+        {phase === "session" && result ? (
+          <BrainstormResultPanel
+            result={result}
+            projectId={projectId}
+            saving={saving}
+            savedOutputId={savedOutputId}
+            saveError={saveError}
+            showTrajectory={showTrajectory}
+            onToggleTrajectory={() => setShowTrajectory((v) => !v)}
+            onDeposit={() => void onDeposit()}
+            onReconfigure={onReconfigure}
+          />
         ) : null}
       </div>
     </main>
