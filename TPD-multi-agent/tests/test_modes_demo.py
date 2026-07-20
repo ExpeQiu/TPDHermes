@@ -17,7 +17,7 @@ def test_select_mode_swarm():
 
 def test_sdk_demo_roundtrip(tmp_path):
     client = create_client(demo=True, runs_dir=str(tmp_path / "runs"))
-    env = client.swarm("对比供应链", max_parallel=2, pack="nev-tech")
+    env = client.swarm("对比供应链", max_parallel=2, pack="tech-ip")
     assert env["data_source"] == "none"
     assert env["delivery"]["body_markdown"]
     assert client.status(env["run_id"])
@@ -26,9 +26,9 @@ def test_sdk_demo_roundtrip(tmp_path):
 
 def test_consult_and_auto(tmp_path):
     client = create_client(demo=True, runs_dir=str(tmp_path / "runs"))
-    c = client.consult("包装成抖音脚本", pack="nev-tech", expert="tech")
+    c = client.consult("包装成抖音脚本", pack="tech-ip", expert="ip_strategist")
     assert c["mode"] == "consult"
-    a = client.run("怎么推高端信仰", mode="auto", pack="nev-tech", rounds=1)
+    a = client.run("怎么推高端信仰", mode="auto", pack="tech-ip", rounds=1)
     assert a["mode"] == "roundtable"
     assert a["module"] == "run-start"
 

@@ -20,8 +20,8 @@ multi-agent --version
 multi-agent --help >/dev/null
 
 echo "==> 离线 smoke：三模式 --demo"
-multi-agent mode roundtable --topic "verify-圆桌" --pack nev-tech --rounds 1 --format json --demo >/tmp/ma-rt.json
-multi-agent mode consult --goal "verify-包装脚本" --pack nev-tech --format json --demo >/tmp/ma-cs.json
+multi-agent mode roundtable --topic "verify-圆桌" --pack tech-ip --rounds 1 --format json --demo >/tmp/ma-rt.json
+multi-agent mode consult --goal "verify-包装脚本" --pack tech-ip --format json --demo >/tmp/ma-cs.json
 multi-agent mode swarm --goal "verify-对比供应链" --max-parallel 3 --format json --demo >/tmp/ma-sw.json
 multi-agent run start --goal "verify-怎么推技术信仰" --mode auto --format json --demo >/tmp/ma-auto.json
 

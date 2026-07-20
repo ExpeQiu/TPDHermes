@@ -50,7 +50,7 @@ export default function ProjectBrainstormPage() {
     description: "",
     rounds: 2,
     demo: true,
-    pack: "nev-tech",
+    pack: "tech-ip",
     selectedAttachmentIds: [],
     discussionMode: "round_robin",
     consensusEnabled: false,

@@ -12,14 +12,14 @@ def test_roundtable_debate_and_consensus(tmp_path):
     rt = RoundtableRuntime(settings, TrajectoryStore(settings.runs_dir), LLMClient(settings))
     result = rt.run(
         "半固态如何对外讲清楚",
-        pack="nev-tech",
+        pack="tech-ip",
         rounds=3,
         discussion_mode="debate",
         consensus_enabled=True,
         consensus_threshold=0.7,
         debate_config={
-            "pro_role_ids": ["simplifier", "growth_hacker"],
-            "con_role_ids": ["tech_hardcore", "strategist"],
+            "pro_role_ids": ["ip_strategist", "brand_researcher"],
+            "con_role_ids": ["comm_planner"],
             "judge_role_id": "moderator",
         },
     )
@@ -38,7 +38,7 @@ def test_roundtable_parallel(tmp_path):
     rt = RoundtableRuntime(settings, TrajectoryStore(settings.runs_dir), LLMClient(settings))
     result = rt.run(
         "并行圆桌冒烟",
-        pack="nev-tech",
+        pack="tech-ip",
         rounds=1,
         discussion_mode="parallel",
     )
@@ -52,7 +52,7 @@ def test_roundtable_injects_attachment_context(tmp_path):
     rt = RoundtableRuntime(settings, TrajectoryStore(settings.runs_dir), LLMClient(settings))
     result = rt.run(
         "议题带材料",
-        pack="nev-tech",
+        pack="tech-ip",
         rounds=1,
         context="### 项目附件材料\n\n半固态电池能量密度 400Wh/kg",
     )

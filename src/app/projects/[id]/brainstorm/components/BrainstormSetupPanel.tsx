@@ -1,6 +1,7 @@
 "use client";
 
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { apiGet } from "@/lib/api";
 
 export type BrainstormAttachment = {
   id: string;
@@ -33,38 +34,133 @@ type RoundtableRole = {
   kind: "expert" | "moderator";
 };
 
-const NEV_TECH_ROLES: RoundtableRole[] = [
-  {
-    id: "simplifier",
-    name: "通俗化大师",
-    perspective: "说人话；关注直观体验与生活场景",
-    kind: "expert",
-  },
-  {
-    id: "tech_hardcore",
-    name: "技术原教旨主义者",
-    perspective: "第一性原理；参数真实性与工程壁垒",
-    kind: "expert",
-  },
-  {
-    id: "growth_hacker",
-    name: "流量狙击手",
-    perspective: "传播钩子、情绪价值、完播率",
-    kind: "expert",
-  },
-  {
-    id: "strategist",
-    name: "战略预言家",
-    perspective: "护城河、终局与差异化生存",
-    kind: "expert",
-  },
-  {
-    id: "moderator",
-    name: "主持人",
-    perspective: "控场、升维冲突、收束可执行方案",
-    kind: "moderator",
-  },
-];
+const MODERATOR_ROLE: RoundtableRole = {
+  id: "moderator",
+  name: "主持人",
+  perspective: "控场、升维冲突、收束可执行方案",
+  kind: "moderator",
+};
+
+/** Pack 切换失败时的本地圆桌席位 fallback（与 skill_packs/*/pack.yml 对齐） */
+const PACK_ROLES_FALLBACK: Record<string, RoundtableRole[]> = {
+  "tech-ip": [
+    {
+      id: "ip_strategist",
+      name: "IP策略师",
+      perspective: "IP全案、矩阵货架、命名定位、技术品牌与车型互锁",
+      kind: "expert",
+    },
+    {
+      id: "brand_researcher",
+      name: "品牌调研官",
+      perspective: "调研洞察、趋势判断、竞品对标证据",
+      kind: "expert",
+    },
+    {
+      id: "comm_planner",
+      name: "传播策划官",
+      perspective: "传播目标、受众分层、节奏ROADMAP、认证权益",
+      kind: "expert",
+    },
+    MODERATOR_ROLE,
+  ],
+  "content-lab": [
+    {
+      id: "content_director",
+      name: "内容导演",
+      perspective: "叙事结构、话术落地、证据点与CTA",
+      kind: "expert",
+    },
+    {
+      id: "video_director",
+      name: "视频导演",
+      perspective: "钩子、分镜、完播与技术展示节奏",
+      kind: "expert",
+    },
+    {
+      id: "brand_researcher",
+      name: "品牌调研官",
+      perspective: "调研洞察、趋势判断、竞品对标证据",
+      kind: "expert",
+    },
+    MODERATOR_ROLE,
+  ],
+  "exhibit-event": [
+    {
+      id: "exhibit_designer",
+      name: "展具体验师",
+      perspective: "展具概念、互动体验、制作预算与交付规范",
+      kind: "expert",
+    },
+    {
+      id: "event_producer",
+      name: "活动制片人",
+      perspective: "参展目标、展台节奏、代言人与任务分工",
+      kind: "expert",
+    },
+    {
+      id: "content_director",
+      name: "内容导演",
+      perspective: "叙事结构、话术落地、证据点与CTA",
+      kind: "expert",
+    },
+    MODERATOR_ROLE,
+  ],
+  "sales-gtm": [
+    {
+      id: "sales_coach",
+      name: "销售话术教练",
+      perspective: "开场、卖点、场景、异议处理与逼单",
+      kind: "expert",
+    },
+    {
+      id: "material_planner",
+      name: "物料统筹",
+      perspective: "视频/图文/KOL/媒介物料齐套与投放节奏",
+      kind: "expert",
+    },
+    {
+      id: "brand_researcher",
+      name: "品牌调研官",
+      perspective: "调研洞察、趋势判断、竞品对标证据",
+      kind: "expert",
+    },
+    MODERATOR_ROLE,
+  ],
+};
+
+function rolesForPack(packId: string): RoundtableRole[] {
+  return PACK_ROLES_FALLBACK[packId] ?? PACK_ROLES_FALLBACK["tech-ip"];
+}
+
+function debateDefaultsFromExperts(experts: RoundtableRole[]) {
+  const ids = experts.map((r) => r.id);
+  const mid = Math.ceil(ids.length / 2) || 0;
+  return {
+    proRoleIds: ids.slice(0, mid),
+    conRoleIds: ids.slice(mid),
+    judgeRoleId: "moderator",
+  };
+}
+
+function mapPackRoles(
+  rows: Array<{ id?: string; name?: string; perspective?: string }> | undefined,
+  fallback: RoundtableRole[],
+): RoundtableRole[] {
+  if (!rows?.length) return fallback;
+  return rows
+    .map((r) => {
+      const id = String(r.id || "").trim();
+      if (!id) return null;
+      return {
+        id,
+        name: String(r.name || id).trim() || id,
+        perspective: String(r.perspective || "").trim(),
+        kind: (id === "moderator" ? "moderator" : "expert") as RoundtableRole["kind"],
+      };
+    })
+    .filter((r): r is RoundtableRole => r != null);
+}
 
 const DISCUSSION_MODE_OPTIONS = [
   {
@@ -84,13 +180,26 @@ const DISCUSSION_MODE_OPTIONS = [
   },
 ];
 
-const EXPERT_ROLES = NEV_TECH_ROLES.filter((r) => r.kind === "expert");
-
 const PACK_OPTIONS = [
   {
-    id: "nev-tech",
-    name: "新能源技术包装",
-    description: "技术营销圆桌：多角色辩论后收敛 Master Plan",
+    id: "tech-ip",
+    name: "技术IP包装",
+    description: "IP全案、调研对标与传播认证圆桌",
+  },
+  {
+    id: "content-lab",
+    name: "技术内容生产",
+    description: "讲稿/新闻稿/视频/知识收割内容线",
+  },
+  {
+    id: "exhibit-event",
+    name: "展具与活动",
+    description: "展具体验与技术推广活动策划",
+  },
+  {
+    id: "sales-gtm",
+    name: "销售与物料落地",
+    description: "终端话术与传播物料齐套",
   },
 ] as const;
 
@@ -129,6 +238,37 @@ export function BrainstormSetupPanel({
   const selectedCount = values.selectedAttachmentIds.length;
   const canSubmit = Boolean(values.topic.trim()) && !running;
   const selectedPack = PACK_OPTIONS.find((p) => p.id === values.pack) ?? PACK_OPTIONS[0];
+  const [roles, setRoles] = useState<RoundtableRole[]>(() => rolesForPack(values.pack));
+  const expertRoles = useMemo(
+    () => roles.filter((r) => r.kind === "expert"),
+    [roles],
+  );
+
+  useEffect(() => {
+    let cancelled = false;
+    const fallback = rolesForPack(values.pack);
+    setRoles(fallback);
+    apiGet<{
+      roundtable_roles?: Array<{ id?: string; name?: string; perspective?: string }>;
+    }>(`/brainstorm/packs/${encodeURIComponent(values.pack)}`)
+      .then((data) => {
+        if (cancelled) return;
+        setRoles(mapPackRoles(data.roundtable_roles, fallback));
+      })
+      .catch(() => {
+        /* 保持 fallback */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [values.pack]);
+
+  const selectPack = (packId: string) => {
+    if (running) return;
+    const nextRoles = rolesForPack(packId);
+    const experts = nextRoles.filter((r) => r.kind === "expert");
+    onChange({ pack: packId, ...debateDefaultsFromExperts(experts) });
+  };
 
   const selectedAttachmentNames = useMemo(() => {
     const set = new Set(values.selectedAttachmentIds);
@@ -249,7 +389,7 @@ export function BrainstormSetupPanel({
                     key={pack.id}
                     type="button"
                     disabled={running}
-                    onClick={() => onChange({ pack: pack.id })}
+                    onClick={() => selectPack(pack.id)}
                     className={`w-full rounded-xl border px-3 py-2.5 text-left transition disabled:opacity-60 ${
                       active
                         ? "border-amber-400 bg-amber-50/80 dark:border-amber-600/60 dark:bg-amber-950/30"
@@ -281,12 +421,12 @@ export function BrainstormSetupPanel({
               参与专家
             </h3>
             <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
-              当前专家团「{selectedPack?.name || values.pack}」· {NEV_TECH_ROLES.length}{" "}
+              当前专家团「{selectedPack?.name || values.pack}」· {roles.length}{" "}
               位
             </p>
           </div>
           <div className="flex-1 space-y-2 overflow-y-auto p-3">
-            {NEV_TECH_ROLES.map((role) => (
+            {roles.map((role) => (
               <div
                 key={role.id}
                 className="rounded-xl border border-slate-200 bg-white p-3 dark:border-slate-700 dark:bg-slate-900"
@@ -415,7 +555,7 @@ export function BrainstormSetupPanel({
                       正方
                     </p>
                     <div className="max-h-32 space-y-1 overflow-y-auto rounded-xl border border-slate-200 bg-white p-2 dark:border-slate-700 dark:bg-slate-950">
-                      {EXPERT_ROLES.map((role) => {
+                      {expertRoles.map((role) => {
                         const inCon = values.conRoleIds.includes(role.id);
                         const checked = values.proRoleIds.includes(role.id);
                         return (
@@ -447,7 +587,7 @@ export function BrainstormSetupPanel({
                       反方
                     </p>
                     <div className="max-h-32 space-y-1 overflow-y-auto rounded-xl border border-slate-200 bg-white p-2 dark:border-slate-700 dark:bg-slate-950">
-                      {EXPERT_ROLES.map((role) => {
+                      {expertRoles.map((role) => {
                         const inPro = values.proRoleIds.includes(role.id);
                         const checked = values.conRoleIds.includes(role.id);
                         return (
@@ -485,7 +625,7 @@ export function BrainstormSetupPanel({
                       className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-950"
                     >
                       <option value="">默认主持人</option>
-                      {NEV_TECH_ROLES.map((role) => (
+                      {roles.map((role) => (
                         <option key={role.id} value={role.id}>
                           {role.name}
                         </option>
@@ -526,6 +666,12 @@ export function BrainstormSetupPanel({
               <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">
                 每位专家每轮发言一次；达到轮次或共识后由引擎收束方案。
               </p>
+              {values.rounds >= 4 && !values.demo ? (
+                <p className="mt-2 rounded-xl border border-amber-200 bg-amber-50/80 px-3 py-2 text-xs text-amber-800 dark:border-amber-800/60 dark:bg-amber-950/40 dark:text-amber-200">
+                  Live 模式下 {values.rounds} 轮通常需要约 {Math.max(5, values.rounds)}–
+                  {values.rounds * 2} 分钟。若共识未达成会跑满全部轮次，请耐心等待，勿重复提交。
+                </p>
+              ) : null}
 
               <label
                 className={`mt-4 flex cursor-pointer items-start gap-3 rounded-2xl border p-4 transition ${
@@ -591,7 +737,9 @@ export function BrainstormSetupPanel({
           <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-200 bg-slate-50/90 px-5 py-4 sm:px-6 dark:border-slate-800 dark:bg-slate-950/50">
             <p className="text-xs text-slate-500 dark:text-slate-400">
               {running
-                ? "圆桌进行中，请稍候…"
+                ? values.rounds >= 4 && !values.demo
+                  ? `圆桌进行中（Live · ${values.rounds} 轮可能需数分钟）…`
+                  : "圆桌进行中，请稍候…"
                 : canSubmit
                   ? `即将启动 ${values.rounds} 轮 · ${
                       values.discussionMode === "debate"
@@ -599,6 +747,10 @@ export function BrainstormSetupPanel({
                         : values.discussionMode === "parallel"
                           ? "并行"
                           : "轮流"
+                    }${
+                      values.rounds >= 4 && !values.demo
+                        ? ` · 预计 ${Math.max(5, values.rounds)}–${values.rounds * 2} 分钟`
+                        : ""
                     }`
                   : "请先填写讨论话题"}
             </p>

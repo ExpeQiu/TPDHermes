@@ -21,7 +21,7 @@ VALID_KINDS = frozenset({"roundtable", "consult"})
 def validate_role_id(role_id: str) -> str:
     rid = (role_id or "").strip().lower()
     if not ROLE_ID_RE.match(rid):
-        raise MultiAgentError("role id 须为 snake_case，如 tech_hardcore、moderator")
+        raise MultiAgentError("role id 须为 snake_case，如 ip_strategist、moderator")
     return rid
 
 

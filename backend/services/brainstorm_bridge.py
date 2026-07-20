@@ -4,7 +4,9 @@
 边界：
 - multi-agent 自带 LLM / Agent 能力（Mock 或 Live 由其进程配置决定）
 - Hermes 只做项目上下文、权限与参数透传，不代持 AI Key / 不转发 Hermes LLM
-- 优先 HTTP（MULTI_AGENT_URL）；不可达时才 SDK 回退（仍使用 multi-agent 包内配置）
+- 优先 HTTP（MULTI_AGENT_URL）；仅当本机可 resolve MULTI_AGENT_ROOT 或显式
+  MULTI_AGENT_SDK_FALLBACK=true 时才 SDK 回退（生产容器通常无源码，避免误导报错）
+- 轮询超时按 rounds 放大，并带 grace 收尾窗口，尽量收取已完成的 run
 """
 from __future__ import annotations
 
@@ -19,11 +21,21 @@ import httpx
 
 logger = logging.getLogger("tpdx.hermes.brainstorm")
 
-DEFAULT_PACK = "nev-tech"
+DEFAULT_PACK = "tech-ip"
 DEFAULT_ROUNDS = 2
 DEFAULT_DISCUSSION_MODE = "round_robin"
 DEFAULT_HTTP_URL = "http://127.0.0.1:8765"
+# 单次 HTTP 请求上限（health / progress / 最终结果）
 HTTP_TIMEOUT_SEC = float(os.getenv("MULTI_AGENT_HTTP_TIMEOUT", "300"))
+# 轮询总时长：max(BASE, rounds * PER_ROUND)；Live 圆桌常超过 300s
+PROGRESS_TIMEOUT_BASE = float(
+    os.getenv("MULTI_AGENT_PROGRESS_TIMEOUT_BASE", str(HTTP_TIMEOUT_SEC))
+)
+PROGRESS_TIMEOUT_PER_ROUND = float(
+    os.getenv("MULTI_AGENT_PROGRESS_TIMEOUT_PER_ROUND", "90")
+)
+# 主超时后的收尾窗口：继续轮询 / 拉取已完成的 run（避免引擎已完成、job 已失败）
+PROGRESS_GRACE_SEC = float(os.getenv("MULTI_AGENT_PROGRESS_GRACE_SEC", "120"))
 PROGRESS_POLL_SEC = float(os.getenv("MULTI_AGENT_PROGRESS_POLL_SEC", "1.5"))
 DISCUSSION_MODES = frozenset({"round_robin", "parallel", "debate"})
 
@@ -43,6 +55,36 @@ def _truthy(value: str | None) -> bool | None:
     if v in {"0", "false", "no", "off"}:
         return False
     return None
+
+
+def resolve_progress_timeout(rounds: int, *, demo: bool | None = None) -> float:
+    """
+    Live 按轮次线性放大；Mock 可缩短。
+    例：rounds=5 Live → max(300, 5*90)=450s。
+    """
+    r = max(1, int(rounds or DEFAULT_ROUNDS))
+    if demo is True:
+        per = min(PROGRESS_TIMEOUT_PER_ROUND, 25.0)
+        base = min(PROGRESS_TIMEOUT_BASE, 120.0)
+    else:
+        per = PROGRESS_TIMEOUT_PER_ROUND
+        base = PROGRESS_TIMEOUT_BASE
+    return max(base, r * per)
+
+
+def _sdk_fallback_allowed(*, prefer_http: bool | None) -> bool:
+    """
+    生产容器通常无源码树：默认仅在能 resolve MULTI_AGENT_ROOT 时才 SDK 回退。
+    MULTI_AGENT_SDK_FALLBACK=false 可强制禁用；prefer_http=False 表示显式走 SDK。
+    """
+    if prefer_http is False:
+        return True
+    forced = _truthy(os.getenv("MULTI_AGENT_SDK_FALLBACK"))
+    if forced is False:
+        return False
+    if forced is True:
+        return True
+    return resolve_multi_agent_root() is not None
 
 
 def resolve_mock_hint(explicit: bool | None = None) -> bool | None:
@@ -148,6 +190,89 @@ def _normalize_result(
     }
 
 
+async def _bundle_to_result(
+    client: httpx.AsyncClient,
+    base: str,
+    run_id: str,
+    *,
+    progress: dict[str, Any] | None,
+    demo: bool | None,
+) -> dict[str, Any] | None:
+    """若 run 已完成则拉取最终 bundle；未完成返回 None。"""
+    prog = progress or {}
+    status = str(prog.get("status") or "").lower()
+    if status not in {"completed", "complete", "done"}:
+        # 再查一次最终结果接口（progress 可能滞后）
+        try:
+            state_resp = await client.get(f"{base}/api/runs/{run_id}")
+        except httpx.HTTPError:
+            return None
+        if state_resp.status_code >= 400:
+            return None
+        try:
+            bundle_probe = state_resp.json()
+        except Exception:
+            return None
+        env_probe = (
+            bundle_probe.get("envelope")
+            if isinstance(bundle_probe.get("envelope"), dict)
+            else bundle_probe
+        )
+        st = ""
+        if isinstance(env_probe, dict):
+            st = str(env_probe.get("status") or "").lower()
+        if st not in {"completed", "complete", "done"}:
+            # 有 delivery 也视为可收
+            delivery_probe = bundle_probe.get("delivery")
+            if not delivery_probe and isinstance(env_probe, dict):
+                delivery_probe = (env_probe.get("delivery") or {})
+            body = ""
+            if isinstance(delivery_probe, dict):
+                body = str(delivery_probe.get("body_markdown") or "")
+            elif isinstance(delivery_probe, str):
+                body = delivery_probe
+            if not body.strip():
+                return None
+        bundle = bundle_probe
+    else:
+        bundle_resp = await client.get(f"{base}/api/runs/{run_id}")
+        if bundle_resp.status_code >= 400:
+            raise BrainstormBridgeError(
+                f"读取最终结果失败: HTTP {bundle_resp.status_code}"
+            )
+        bundle = bundle_resp.json()
+
+    envelope = (
+        bundle.get("envelope") if isinstance(bundle.get("envelope"), dict) else {}
+    )
+    if not envelope:
+        envelope = {
+            "run_id": run_id,
+            "mode": "roundtable",
+            "coordinator": "主持人",
+            "status": "completed",
+            "delivery": {
+                "title": (prog.get("title") if prog else None) or "圆桌 Master Plan",
+                "body_markdown": "",
+            },
+            "meta": {},
+        }
+    delivery = bundle.get("delivery") or ""
+    if isinstance(delivery, dict):
+        delivery = str(delivery.get("body_markdown") or "")
+    trajectory = str(bundle.get("trajectory") or "")
+    turns = prog.get("turns") if isinstance(prog.get("turns"), list) else []
+    result = _normalize_result(
+        envelope=envelope,
+        delivery=str(delivery),
+        trajectory=trajectory,
+        bridge="http",
+        mock=demo,
+    )
+    result["live_turns"] = turns
+    return result
+
+
 async def _run_via_http(
     topic: str,
     *,
@@ -182,7 +307,13 @@ async def _run_via_http(
     if ctx:
         payload["context"] = ctx
 
-    async with httpx.AsyncClient(timeout=HTTP_TIMEOUT_SEC) as client:
+    poll_timeout = resolve_progress_timeout(rounds, demo=demo)
+    # 单次请求超时与轮询总时长解耦，避免长任务被 per-request timeout 误杀
+    req_timeout = httpx.Timeout(
+        max(60.0, min(HTTP_TIMEOUT_SEC, 120.0)),
+        connect=10.0,
+    )
+    async with httpx.AsyncClient(timeout=req_timeout) as client:
         try:
             health = await client.get(f"{base}/api/health")
             if health.status_code != 200:
@@ -193,12 +324,13 @@ async def _run_via_http(
         # 优先异步启动 + 轮询 progress（边跑边推发言）
         async_url = f"{base}/api/run/async"
         logger.info(
-            "头脑风暴 HTTP 异步调用 | url=%s | pack=%s | rounds=%s | mode=%s | demo=%s | topic=%s",
+            "头脑风暴 HTTP 异步调用 | url=%s | pack=%s | rounds=%s | mode=%s | demo=%s | poll_timeout=%.0fs | topic=%s",
             async_url,
             pack,
             rounds,
             discussion_mode,
             demo,
+            poll_timeout,
             topic[:80],
         )
         try:
@@ -223,21 +355,30 @@ async def _run_via_http(
         if not run_id:
             raise BrainstormBridgeError("multi-agent 异步启动未返回 run_id")
 
-        logger.info("头脑风暴已异步启动 | run_id=%s，开始轮询 progress", run_id)
+        logger.info(
+            "头脑风暴已异步启动 | run_id=%s | poll_timeout=%.0fs | grace=%.0fs",
+            run_id,
+            poll_timeout,
+            PROGRESS_GRACE_SEC,
+        )
         import asyncio
 
-        deadline = time.monotonic() + HTTP_TIMEOUT_SEC
+        deadline = time.monotonic() + poll_timeout
+        grace_deadline = deadline + max(0.0, PROGRESS_GRACE_SEC)
         last_turn_count = -1
-        while time.monotonic() < deadline:
+        last_progress: dict[str, Any] = {}
+
+        async def _poll_once() -> dict[str, Any] | None:
+            nonlocal last_turn_count, last_progress
             prog_resp = await client.get(f"{base}/api/runs/{run_id}/progress")
             if prog_resp.status_code == 404:
-                await asyncio.sleep(PROGRESS_POLL_SEC)
-                continue
+                return None
             if prog_resp.status_code >= 400:
                 raise BrainstormBridgeError(
                     f"读取 progress 失败: HTTP {prog_resp.status_code}"
                 )
             progress = prog_resp.json()
+            last_progress = progress if isinstance(progress, dict) else {}
             turns = progress.get("turns") if isinstance(progress.get("turns"), list) else []
             status = str(progress.get("status") or "running")
             if len(turns) != last_turn_count:
@@ -267,46 +408,54 @@ async def _run_via_http(
                     str(progress.get("error") or f"圆桌失败 run_id={run_id}")
                 )
             if status in {"completed", "complete", "done"}:
-                bundle_resp = await client.get(f"{base}/api/runs/{run_id}")
-                if bundle_resp.status_code >= 400:
-                    raise BrainstormBridgeError(
-                        f"读取最终结果失败: HTTP {bundle_resp.status_code}"
-                    )
-                bundle = bundle_resp.json()
-                envelope = (
-                    bundle.get("envelope")
-                    if isinstance(bundle.get("envelope"), dict)
-                    else {}
+                done = await _bundle_to_result(
+                    client, base, run_id, progress=progress, demo=demo
                 )
-                if not envelope:
-                    envelope = {
-                        "run_id": run_id,
-                        "mode": "roundtable",
-                        "coordinator": "主持人",
-                        "status": "completed",
-                        "delivery": {
-                            "title": progress.get("title") or "圆桌 Master Plan",
-                            "body_markdown": "",
-                        },
-                        "meta": {},
-                    }
-                delivery = bundle.get("delivery") or ""
-                if isinstance(delivery, dict):
-                    delivery = str(delivery.get("body_markdown") or "")
-                trajectory = str(bundle.get("trajectory") or "")
-                result = _normalize_result(
-                    envelope=envelope,
-                    delivery=str(delivery),
-                    trajectory=trajectory,
-                    bridge="http",
-                    mock=demo,
-                )
-                result["live_turns"] = turns
-                return result
+                if done:
+                    return done
+            return None
 
+        while time.monotonic() < deadline:
+            done = await _poll_once()
+            if done:
+                return done
             await asyncio.sleep(PROGRESS_POLL_SEC)
 
-        raise BrainstormBridgeError(f"轮询 progress 超时 run_id={run_id}")
+        # 主超时：先尝试直接收已完成结果，再进入 grace 收尾窗口
+        logger.warning(
+            "头脑风暴主轮询超时，尝试收尾 | run_id=%s | turns=%s | grace=%.0fs",
+            run_id,
+            last_turn_count,
+            PROGRESS_GRACE_SEC,
+        )
+        salvaged = await _bundle_to_result(
+            client, base, run_id, progress=last_progress or None, demo=demo
+        )
+        if salvaged:
+            logger.info("头脑风暴超时后成功收取已完成结果 | run_id=%s", run_id)
+            salvaged.setdefault("warnings", [])
+            if isinstance(salvaged["warnings"], list):
+                salvaged["warnings"].append("progress_poll_timeout_salvaged")
+            return salvaged
+
+        while time.monotonic() < grace_deadline:
+            done = await _poll_once()
+            if done:
+                logger.info("头脑风暴 grace 窗口内完成 | run_id=%s", run_id)
+                return done
+            salvaged = await _bundle_to_result(
+                client, base, run_id, progress=last_progress or None, demo=demo
+            )
+            if salvaged:
+                logger.info("头脑风暴 grace 窗口内收取结果 | run_id=%s", run_id)
+                return salvaged
+            await asyncio.sleep(PROGRESS_POLL_SEC)
+
+        raise BrainstormBridgeError(
+            f"轮询 progress 超时 run_id={run_id} "
+            f"(limit={poll_timeout:.0f}s+grace={PROGRESS_GRACE_SEC:.0f}s, "
+            f"last_turns={max(last_turn_count, 0)}, rounds={rounds})"
+        )
 
 
 async def _run_via_http_sync(
@@ -444,7 +593,7 @@ async def run_roundtable(
     if use_http is None:
         use_http = True  # 默认优先独立 Web 引擎
 
-    errors: list[str] = []
+    http_error: BrainstormBridgeError | None = None
     if use_http:
         try:
             return await _run_via_http(
@@ -461,8 +610,16 @@ async def run_roundtable(
                 on_progress=on_progress,
             )
         except BrainstormBridgeError as exc:
-            errors.append(str(exc))
-            logger.warning("头脑风暴 HTTP 失败，尝试 SDK: %s", exc)
+            http_error = exc
+            logger.warning("头脑风暴 HTTP 失败: %s", exc)
+
+    if not _sdk_fallback_allowed(prefer_http=prefer_http):
+        if http_error is not None:
+            # 保留真实 HTTP 原因，避免被「未找到 TPD-multi-agent」掩盖
+            raise http_error
+        raise BrainstormBridgeError(
+            "multi-agent HTTP 未启用，且未允许 SDK 回退（设置 MULTI_AGENT_URL 或 MULTI_AGENT_ROOT）"
+        )
 
     import asyncio
 
@@ -480,14 +637,15 @@ async def run_roundtable(
             demo=demo_hint if demo_hint is not None else True,
             context=context_s,
         )
-    except BrainstormBridgeError:
+    except BrainstormBridgeError as sdk_exc:
+        if http_error is not None:
+            raise BrainstormBridgeError(f"{http_error}；SDK 回退失败: {sdk_exc}") from sdk_exc
         raise
     except Exception as exc:  # noqa: BLE001
-        errors.append(str(exc))
         logger.exception("头脑风暴 SDK 执行失败")
-        raise BrainstormBridgeError(
-            "；".join(errors) if errors else f"圆桌执行失败: {exc}"
-        ) from exc
+        parts = [str(http_error)] if http_error else []
+        parts.append(str(exc))
+        raise BrainstormBridgeError("；".join(parts) if parts else f"圆桌执行失败: {exc}") from exc
 
 
 async def health_check() -> dict[str, Any]:

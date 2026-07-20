@@ -417,8 +417,8 @@
     packEl.innerHTML = "";
     if (!items.length) {
       const opt = document.createElement("option");
-      opt.value = "nev-tech";
-      opt.textContent = "nev-tech";
+      opt.value = "tech-ip";
+      opt.textContent = "tech-ip";
       packEl.appendChild(opt);
       return;
     }

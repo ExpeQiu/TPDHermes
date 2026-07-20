@@ -3,6 +3,6 @@ api_key: ""
 api_base: ""
 model: gpt-4o-mini
 runs_dir: runs
-default_pack: nev-tech
+default_pack: tech-ip
 max_parallel: 5
 knowledge_base: none

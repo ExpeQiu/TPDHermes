@@ -67,7 +67,7 @@ def load_progress(run_id: str) -> dict | None:
 
 def _build_run_kwargs(payload: dict) -> dict:
     """从请求 payload 解析 execute_run 参数（不含 goal/mode）。"""
-    pack = payload.get("pack") or "nev-tech"
+    pack = payload.get("pack") or "tech-ip"
     knowledge_base = (
         payload.get("knowledge_base")
         or payload.get("kb")

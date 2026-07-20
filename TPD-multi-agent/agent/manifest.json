@@ -22,7 +22,7 @@
           "default": "auto",
           "enum": ["auto", "roundtable", "consult", "swarm"]
         },
-        "pack": { "type": "string", "default": "nev-tech" }
+        "pack": { "type": "string", "default": "tech-ip" }
       },
       "output": {
         "format": "json",
@@ -44,7 +44,7 @@
       "timeout_sec": 300,
       "params": {
         "topic": { "type": "string" },
-        "pack": { "type": "string", "default": "nev-tech" },
+        "pack": { "type": "string", "default": "tech-ip" },
         "rounds": { "type": "integer", "default": 2, "minimum": 1, "maximum": 5 }
       },
       "output": { "format": "json", "schema_ref": "#/definitions/run_envelope" },
@@ -59,7 +59,7 @@
       "timeout_sec": 300,
       "params": {
         "goal": { "type": "string" },
-        "pack": { "type": "string", "default": "nev-tech" },
+        "pack": { "type": "string", "default": "tech-ip" },
         "expert": { "type": "string", "description": "可选：tech|scene|market|content" }
       },
       "output": { "format": "json", "schema_ref": "#/definitions/run_envelope" },
@@ -155,7 +155,7 @@
       "agent_safe": true,
       "interactive": false,
       "timeout_sec": 15,
-      "params": { "pack_id": { "type": "string", "default": "nev-tech" } },
+      "params": { "pack_id": { "type": "string", "default": "tech-ip" } },
       "exit_codes": { "0": "success", "1": "not_found" }
     },
     {

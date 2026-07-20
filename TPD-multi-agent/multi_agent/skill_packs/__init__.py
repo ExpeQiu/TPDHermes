@@ -48,7 +48,7 @@ def validate_pack_id(pack_id: str) -> str:
     pid = (pack_id or "").strip().lower()
     if not PACK_ID_RE.match(pid):
         raise MultiAgentError(
-            "pack id 须为 kebab-case，如 nev-tech、content-lab"
+            "pack id 须为 kebab-case，如 tech-ip、content-lab"
         )
     return pid
 

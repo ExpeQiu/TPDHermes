@@ -407,7 +407,7 @@ class RoundtableRuntime:
         self,
         topic: str,
         *,
-        pack: str = "nev-tech",
+        pack: str = "tech-ip",
         rounds: int = 2,
         module: str = "mode-roundtable",
         discussion_mode: str = "round_robin",
@@ -695,7 +695,7 @@ class ConsultRuntime:
         self,
         goal: str,
         *,
-        pack: str = "nev-tech",
+        pack: str = "tech-ip",
         expert: Optional[str] = None,
         module: str = "mode-consult",
         handoff_from: Optional[str] = None,
@@ -737,7 +737,7 @@ class ConsultRuntime:
             )
 
         consult_logs: list[str] = []
-        # 默认调用链：tech → scene → market → content（可裁剪）
+        # 默认调用链：按 Pack.consult_experts 顺序（可裁剪）
         order = experts or pack_data.get("consult_experts", [])
         for exp in order:
             logger.info("run_id=%s Consult %s", run_id, exp.get("id"))
@@ -818,7 +818,7 @@ class SwarmRuntime:
         *,
         max_parallel: Optional[int] = None,
         module: str = "mode-swarm",
-        pack: str = "nev-tech",
+        pack: str = "tech-ip",
     ) -> RunResult:
         mp = max_parallel or self.settings.max_parallel
         run_id, store = _run_base(

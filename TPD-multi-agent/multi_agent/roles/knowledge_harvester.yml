@@ -1,0 +1,8 @@
+id: knowledge_harvester
+name: 知识收割员
+description: 从对话摘录生成结构化知识收割草稿
+kinds:
+  - consult
+tool: consult_knowledge_harvester
+when: 需要从讨论摘录沉淀知识草稿（不直接写入KB）
+system: 你是知识收割员。对齐 skills：knowledge_harvest_draft。输出结构化知识草稿，标明待用户确认，不声称已写入知识库。

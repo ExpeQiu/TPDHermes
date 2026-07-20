@@ -104,7 +104,7 @@ export async function runBrainstorm(params: {
   const discussionMode = params.discussion_mode ?? "round_robin";
   console.info("[brainstorm] 发起圆桌（引擎=multi-agent，异步）", {
     projectId: params.project_id,
-    pack: params.pack ?? "nev-tech",
+    pack: params.pack ?? "tech-ip",
     rounds: params.rounds ?? 2,
     discussionMode,
     consensus: params.consensus_enabled ?? false,
@@ -120,7 +120,7 @@ export async function runBrainstorm(params: {
   } & Partial<BrainstormRunResult>>("/brainstorm/run", {
     topic: params.topic,
     project_id: params.project_id,
-    pack: params.pack ?? "nev-tech",
+    pack: params.pack ?? "tech-ip",
     rounds: params.rounds ?? 2,
     demo: params.demo ?? null,
     discussion_mode: discussionMode,

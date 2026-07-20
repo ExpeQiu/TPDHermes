@@ -1,0 +1,21 @@
+id: tech-ip
+name: 技术IP包装
+description: 技术IP全案、调研对标与传播认证圆桌；对齐 brand/ip/model/lockmap/cert/comm 类 skills
+
+roundtable_roles:
+  - id: ip_strategist
+    name: IP策略师
+  - id: brand_researcher
+    name: 品牌调研官
+  - id: comm_planner
+    name: 传播策划官
+  - id: moderator
+    name: 主持人
+
+consult_experts:
+  - id: ip_strategist
+    name: IP策略师
+  - id: brand_researcher
+    name: 品牌调研官
+  - id: comm_planner
+    name: 传播策划官

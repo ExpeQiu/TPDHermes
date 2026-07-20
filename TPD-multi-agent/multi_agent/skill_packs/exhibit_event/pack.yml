@@ -1,0 +1,19 @@
+id: exhibit-event
+name: 展具与活动
+description: IP展具体验与技术推广活动策划；对齐 display/event 类 skills
+
+roundtable_roles:
+  - id: exhibit_designer
+    name: 展具体验师
+  - id: event_producer
+    name: 活动制片人
+  - id: content_director
+    name: 内容导演
+  - id: moderator
+    name: 主持人
+
+consult_experts:
+  - id: exhibit_designer
+    name: 展具体验师
+  - id: event_producer
+    name: 活动制片人

@@ -33,7 +33,7 @@ async def test_brainstorm_job_completes(monkeypatch: pytest.MonkeyPatch):
             "topic": "测试议题",
             "project_id": "p1",
             "user_id": "u1",
-            "pack": "nev-tech",
+            "pack": "tech-ip",
             "rounds": 1,
             "demo": True,
             "discussion_mode": "round_robin",

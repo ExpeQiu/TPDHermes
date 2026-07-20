@@ -55,7 +55,7 @@ multi-agent --version
 ### 自动选型启动（agent_safe: true）
 
 ```bash
-multi-agent run start --goal "半固态电池包装成抖音脚本" --mode auto --pack nev-tech --format json --demo
+multi-agent run start --goal "半固态电池包装成抖音脚本" --mode auto --pack tech-ip --format json --demo
 ```
 
 - 退出码：0 成功 / 2 无交付 / 3 执行失败 / 1 参数错误
@@ -64,13 +64,13 @@ multi-agent run start --goal "半固态电池包装成抖音脚本" --mode auto 
 ### 圆桌（agent_safe: true）
 
 ```bash
-multi-agent mode roundtable --topic "参数内卷下如何推技术" --pack nev-tech --rounds 2 --format markdown --demo
+multi-agent mode roundtable --topic "参数内卷下如何推技术" --pack tech-ip --rounds 2 --format markdown --demo
 ```
 
 ### Consult 主控+专家（agent_safe: true）
 
 ```bash
-multi-agent mode consult --goal "半固态电池包装成抖音脚本" --pack nev-tech --format json --demo
+multi-agent mode consult --goal "半固态电池包装成抖音脚本" --pack tech-ip --format json --demo
 ```
 
 ### Swarm / STORM（agent_safe: true；大任务建议 background）
@@ -93,7 +93,7 @@ multi-agent run resume <run_id> --format json --demo
 
 ```bash
 multi-agent pack list --format json
-multi-agent pack show nev-tech --format json
+multi-agent pack show tech-ip --format json
 multi-agent role list --format json
 multi-agent skill list --format json
 multi-agent knowledge list --format json

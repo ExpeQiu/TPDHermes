@@ -1,0 +1,39 @@
+{
+  "module": "mode-roundtable",
+  "version": "0.1.0",
+  "data_source": "none",
+  "fetched_at": "2026-07-20T14:47:34+08:00",
+  "run_id": "20260720-144734-cf6088e1",
+  "mode": "roundtable",
+  "coordinator": "主持人",
+  "status": "completed",
+  "delivery": {
+    "title": "圆桌方案：半固态电池如何对外讲清楚",
+    "body_markdown": "# 圆桌 Master Plan\n\n**议题**：半固态电池如何对外讲清楚\n\n**讨论模式**：debate\n\n### 开场（主持人）\n议题：半固态电池如何对外讲清楚\n讨论模式：debate\n请各位给出最核心破局建议。\n\n**IP策略师（正方）**（R1）：[demo:ip_strategist] 基于输入「议题：半固态电池如何对外讲清楚 轮次：1 你的视角：IP全案、矩阵货架、命名定位、技术品牌与车型互锁 你属于正方，请论证支持立场，并回应对方质疑。 给出核心观点与一条 Action。…」的结论。 system=True mock=true\n\n**品牌调研官（反方）**（R1）：[demo:brand_researcher] 基于输入「议题：半固态电池如何对外讲清楚 轮次：1 你的视角：调研洞察、趋势判断、竞品对标证据 你属于反方，请提出质疑与风险，并挑战正方主张。 给出核心观点与一条 Action。…」的结论。 system=True mock=true\n\n**传播策划官（反方）**（R1）：[demo:comm_planner] 基于输入「议题：半固态电池如何对外讲清楚 轮次：1 你的视角：传播目标、受众分层、节奏ROADMAP、认证权益 你属于反方，请提出质疑与风险，并挑战正方主张。 给出核心观点与一条 Action。…」的结论。 system=True mock=true\n\n**主持人（裁判）**（R1）：[demo:moderator] 基于输入「议题：半固态电池如何对外讲清楚 轮次：1 请作为裁判点评本轮正反方要点，给出分数（0-10）与一条改进建议。 近期发言： ### 开场（主持人） 议题：半固态电池如何对外讲清楚 讨论模式：debate 请各位给出最核心破局建议。 **IP策…」的结论。 system=True mock=true\n\n**IP策略师（正方）**（R2）：[demo:ip_strategist] 基于输入「议题：半固态电池如何对外讲清楚 轮次：2 你的视角：IP全案、矩阵货架、命名定位、技术品牌与车型互锁 你属于正方，请论证支持立场，并回应对方质疑。 给出核心观点与一条 Action。…」的结论。 system=True mock=true\n\n**品牌调研官（反方）**（R2）：[demo:brand_researcher] 基于输入「议题：半固态电池如何对外讲清楚 轮次：2 你的视角：调研洞察、趋势判断、竞品对标证据 你属于反方，请提出质疑与风险，并挑战正方主张。 给出核心观点与一条 Action。…」的结论。 system=True mock=true\n\n**传播策划官（反方）**（R2）：[demo:comm_planner] 基于输入「议题：半固态电池如何对外讲清楚 轮次：2 你的视角：传播目标、受众分层、节奏ROADMAP、认证权益 你属于反方，请提出质疑与风险，并挑战正方主张。 给出核心观点与一条 Action。…」的结论。 system=True mock=true\n\n**主持人（裁判）**（R2）：[demo:moderator] 基于输入「议题：半固态电池如何对外讲清楚 轮次：2 请作为裁判点评本轮正反方要点，给出分数（0-10）与一条改进建议。 近期发言： **品牌调研官（反方）**（R1）：[demo:brand_researcher] 基于输入「议题：半固态电池如何对外…」的结论。 system=True mock=true\n\n**共识检测**：第 2 轮达成共识（score=0.85），提前结束。\n\n## 综合方案\n\n[demo:moderator] 基于输入「综合以下圆桌发言，输出 Master Plan（概念 slogan + 三步行动）： **品牌调研官（反方）**（R1）：[demo:brand_researcher] 基于输入「议题：半固态电池如何对外讲清楚 轮次：1 你的视角：调研洞察…」的结论。 system=True mock=true\n",
+    "artifacts": []
+  },
+  "warnings": [],
+  "meta": {
+    "pack": "tech-ip",
+    "rounds": 3,
+    "discussion_mode": "debate",
+    "consensus_enabled": true,
+    "consensus_threshold": 0.7,
+    "consensus_reached": true,
+    "consensus_score": 0.85,
+    "stopped_at_round": 2,
+    "debate": {
+      "pro_role_ids": [
+        "ip_strategist"
+      ],
+      "con_role_ids": [
+        "brand_researcher",
+        "comm_planner"
+      ],
+      "judge_role_id": "moderator"
+    },
+    "context_chars": 0,
+    "knowledge_base": "none",
+    "llm_mode": "demo"
+  }
+}

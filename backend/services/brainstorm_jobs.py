@@ -110,7 +110,7 @@ async def _execute_job(job_id: str, params: dict[str, Any]) -> None:
     try:
         result = await run_roundtable(
             str(params.get("topic") or ""),
-            pack=str(params.get("pack") or "nev-tech"),
+            pack=str(params.get("pack") or "tech-ip"),
             rounds=int(params.get("rounds") or 2),
             demo=params.get("demo"),
             discussion_mode=str(params.get("discussion_mode") or "round_robin"),

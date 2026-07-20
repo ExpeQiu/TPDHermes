@@ -21,7 +21,7 @@ class Settings:
     api_base: str = ""
     model: str = "gpt-4o-mini"
     runs_dir: str = "runs"
-    default_pack: str = "nev-tech"
+    default_pack: str = "tech-ip"
     max_parallel: int = 5
     knowledge_base: str = "none"
     extra: dict[str, Any] = field(default_factory=dict)
@@ -66,7 +66,7 @@ def load_settings(
         "api_base": "",
         "model": "gpt-4o-mini",
         "runs_dir": "runs",
-        "default_pack": "nev-tech",
+        "default_pack": "tech-ip",
         "max_parallel": 5,
         "knowledge_base": "none",
     }
@@ -113,7 +113,7 @@ def load_settings(
         api_base=str(merged.get("api_base") or ""),
         model=str(merged.get("model") or "gpt-4o-mini"),
         runs_dir=str(merged.get("runs_dir") or "runs"),
-        default_pack=str(merged.get("default_pack") or "nev-tech"),
+        default_pack=str(merged.get("default_pack") or "tech-ip"),
         max_parallel=int(merged.get("max_parallel") or 5),
         knowledge_base=str(merged.get("knowledge_base") or "none"),
         extra=dict(merged.get("extra") or {}),
@@ -152,7 +152,7 @@ def ensure_user_config() -> Path:
             "api_base: \"\"\n"
             "model: gpt-4o-mini\n"
             "runs_dir: runs\n"
-            "default_pack: nev-tech\n"
+            "default_pack: tech-ip\n"
             "max_parallel: 5\n"
             "knowledge_base: none\n",
             encoding="utf-8",

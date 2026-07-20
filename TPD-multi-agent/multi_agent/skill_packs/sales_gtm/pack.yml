@@ -1,0 +1,21 @@
+id: sales-gtm
+name: 销售与物料落地
+description: 终端话术与传播物料齐套；对齐 sales/material 类 skills，辅以对标与内容专家
+
+roundtable_roles:
+  - id: sales_coach
+    name: 销售话术教练
+  - id: material_planner
+    name: 物料统筹
+  - id: brand_researcher
+    name: 品牌调研官
+  - id: moderator
+    name: 主持人
+
+consult_experts:
+  - id: sales_coach
+    name: 销售话术教练
+  - id: material_planner
+    name: 物料统筹
+  - id: content_director
+    name: 内容导演

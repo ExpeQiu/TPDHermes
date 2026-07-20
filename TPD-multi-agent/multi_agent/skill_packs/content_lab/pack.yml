@@ -1,0 +1,21 @@
+id: content-lab
+name: 技术内容生产
+description: 讲稿/新闻稿/视频/知识收割内容生产线；对齐 speech/pr/a4/video/knowledge 类 skills
+
+roundtable_roles:
+  - id: content_director
+    name: 内容导演
+  - id: video_director
+    name: 视频导演
+  - id: brand_researcher
+    name: 品牌调研官
+  - id: moderator
+    name: 主持人
+
+consult_experts:
+  - id: content_director
+    name: 内容导演
+  - id: video_director
+    name: 视频导演
+  - id: knowledge_harvester
+    name: 知识收割员

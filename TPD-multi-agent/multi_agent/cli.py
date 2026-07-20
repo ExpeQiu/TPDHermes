@@ -138,7 +138,7 @@ def run_list(fmt: str, output: Optional[str], demo: bool) -> None:
     default="auto",
     show_default=True,
 )
-@click.option("--pack", default=None, help="Skill Pack，默认 nev-tech")
+@click.option("--pack", default=None, help="Skill Pack，默认 tech-ip")
 @click.option("--rounds", default=2, show_default=True, type=int)
 @click.option("--expert", default=None, help="Consult 限定专家 id")
 @click.option("--max-parallel", default=None, type=int)
@@ -336,7 +336,7 @@ def mode() -> None:
 
 @mode.command("roundtable")
 @click.option("--topic", required=True)
-@click.option("--pack", default="nev-tech", show_default=True)
+@click.option("--pack", default="tech-ip", show_default=True)
 @click.option("--rounds", default=2, show_default=True, type=int)
 @click.option(
     "--discussion-mode",
@@ -383,7 +383,7 @@ def mode_roundtable(
 
 @mode.command("consult")
 @click.option("--goal", required=True)
-@click.option("--pack", default="nev-tech", show_default=True)
+@click.option("--pack", default="tech-ip", show_default=True)
 @click.option("--expert", default=None)
 @_common_output_options
 def mode_consult(
@@ -406,7 +406,7 @@ def mode_consult(
 
 @mode.command("swarm")
 @click.option("--goal", required=True)
-@click.option("--pack", default="nev-tech", show_default=True)
+@click.option("--pack", default="tech-ip", show_default=True)
 @click.option("--max-parallel", default=5, show_default=True, type=int)
 @_common_output_options
 def mode_swarm(

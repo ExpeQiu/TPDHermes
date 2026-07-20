@@ -19,7 +19,7 @@ multi-agent --version
 multi-agent run start --goal "半固态电池包装成抖音脚本" --mode auto --format json --demo
 
 # 圆桌
-multi-agent mode roundtable --topic "参数内卷下如何推" --pack nev-tech --format markdown --demo
+multi-agent mode roundtable --topic "参数内卷下如何推" --pack tech-ip --format markdown --demo
 
 # Consult
 multi-agent mode consult --goal "半固态电池包装成抖音脚本" --format json --demo

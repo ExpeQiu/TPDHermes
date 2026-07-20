@@ -48,7 +48,7 @@ class DebateConfigIn(BaseModel):
 class BrainstormRunIn(BaseModel):
     topic: str = Field(..., min_length=1, description="圆桌议题")
     project_id: str | None = Field(default=None, description="关联项目（可选，有则校验权限）")
-    pack: str = Field(default="nev-tech", description="Skill Pack id")
+    pack: str = Field(default="tech-ip", description="Skill Pack id")
     rounds: int = Field(default=2, ge=1, le=5, description="辩论轮数")
     demo: bool | None = Field(
         default=None,

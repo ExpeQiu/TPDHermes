@@ -18,7 +18,7 @@ def test_store_list_runs_and_bundle(tmp_path):
     assert store.load_bundle("missing") is None
 
     client = create_client(demo=True, runs_dir=str(tmp_path / "runs"))
-    env = client.swarm("对比供应链", max_parallel=2, pack="nev-tech")
+    env = client.swarm("对比供应链", max_parallel=2, pack="tech-ip")
     items = client.list_runs()
     assert any(i["id"] == env["run_id"] for i in items)
     bundle = client.export_run(env["run_id"])
@@ -30,15 +30,15 @@ def test_store_list_runs_and_bundle(tmp_path):
 def test_sdk_resource_lists():
     client = create_client(demo=True)
     packs = client.list_packs()
-    assert any(p["id"] == "nev-tech" for p in packs)
+    assert any(p["id"] == "tech-ip" for p in packs)
     roles = client.list_roles()
     assert roles
     skills = client.list_skills()
     assert skills
     kbs = client.list_knowledge()
     assert any(k["id"] == "none" for k in kbs)
-    pack = client.get_pack("nev-tech")
-    assert pack["id"] == "nev-tech"
+    pack = client.get_pack("tech-ip")
+    assert pack["id"] == "tech-ip"
 
 
 def test_cli_pack_list_and_show():
@@ -49,10 +49,10 @@ def test_cli_pack_list_and_show():
     assert data["module"] == "pack-list"
     assert data["items"]
 
-    r2 = runner.invoke(cli, ["pack", "show", "nev-tech", "--format", "json"])
+    r2 = runner.invoke(cli, ["pack", "show", "tech-ip", "--format", "json"])
     assert r2.exit_code == 0
     shown = json.loads(r2.output)
-    assert shown["id"] == "nev-tech"
+    assert shown["id"] == "tech-ip"
 
     r3 = runner.invoke(cli, ["pack", "show", "no-such-pack", "--format", "json"])
     assert r3.exit_code == 1
@@ -85,7 +85,7 @@ def test_cli_role_show_missing():
 def test_cli_run_export(tmp_path, monkeypatch):
     runs = tmp_path / "runs"
     client = create_client(demo=True, runs_dir=str(runs))
-    env = client.roundtable("verify-topic", pack="nev-tech", rounds=1)
+    env = client.roundtable("verify-topic", pack="tech-ip", rounds=1)
     monkeypatch.setenv("MULTI_AGENT_RUNS_DIR", str(runs))
 
     runner = CliRunner()
