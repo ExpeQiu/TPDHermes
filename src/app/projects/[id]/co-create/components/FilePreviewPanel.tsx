@@ -10,6 +10,9 @@ import { formatDateTimeShanghai } from "@/lib/datetime";
 
 type ViewTab = "preview" | "edit" | "versions";
 
+/** 预览区选段右键/鼠标抬起菜单：暂隐藏，后续按需恢复 */
+const ENABLE_SELECTION_MENU = false;
+
 type SelectionMenuState = SelectionToChatPayload & {
   x: number;
   y: number;
@@ -132,10 +135,10 @@ export function FilePreviewPanel({
   onSelectTab,
   onCloseTab,
   onReloadTab,
-  onAddToRound,
-  onPin,
-  onAskInterpret,
-  onAskModify,
+  onAddToRound: _onAddToRound,
+  onPin: _onPin,
+  onAskInterpret: _onAskInterpret,
+  onAskModify: _onAskModify,
   onSaveContent,
   onRenameFile,
   onRestoreVersion,
@@ -166,7 +169,6 @@ export function FilePreviewPanel({
   const savedContent = previewDetail?.content ?? "";
   const canEdit = previewDetail?.kind === "output";
   const currentOutputId = previewDetail?.kind === "output" ? previewDetail.id : null;
-  const isAttachment = previewDetail?.kind === "attachment";
   const displayTitle =
     previewDetail?.title?.trim() ||
     (activeFileKey ? tabLabels[activeFileKey] : "") ||
@@ -253,7 +255,7 @@ export function FilePreviewPanel({
   }, [selectionMenu, closeSelectionMenu]);
 
   useEffect(() => {
-    if (viewTab !== "preview") return;
+    if (!ENABLE_SELECTION_MENU || viewTab !== "preview") return;
     const onKeyDown = (e: globalThis.KeyboardEvent) => {
       if (!(e.metaKey || e.ctrlKey)) return;
       const text = getSelectionInContainer(previewRef.current);
@@ -263,13 +265,13 @@ export function FilePreviewPanel({
         onEditSelection?.(text);
         closeSelectionMenu();
       }
-      // ⌘U「添加到对话框中改写」已停用；改用菜单「AI 改写选段」
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [viewTab, onEditSelection, closeSelectionMenu]);
 
   const handlePreviewMouseUp = (e: MouseEvent<HTMLDivElement>) => {
+    if (!ENABLE_SELECTION_MENU) return;
     if (e.button !== 0) return;
     const container = previewRef.current;
     const range = getSelectionRange(container);
@@ -282,6 +284,7 @@ export function FilePreviewPanel({
   };
 
   const handlePreviewContextMenu = (e: MouseEvent<HTMLDivElement>) => {
+    if (!ENABLE_SELECTION_MENU) return;
     e.preventDefault();
     const container = previewRef.current;
     const range = getSelectionRange(container);
@@ -600,13 +603,7 @@ export function FilePreviewPanel({
       {activeFileKey ? (
         <>
           <div className="flex shrink-0 flex-wrap items-center gap-1 border-b border-slate-300 p-2 dark:border-slate-700">
-            <ActionBtn label="加入本轮" onClick={() => onAddToRound(activeFileKey)} />
-            <ActionBtn label="固定引用" onClick={() => onPin(activeFileKey)} />
-            <ActionBtn label="AI 解读" onClick={() => onAskInterpret(activeFileKey)} />
-            <ActionBtn
-              label={isAttachment ? "生成输出" : "AI 修改"}
-              onClick={() => onAskModify(activeFileKey)}
-            />
+            {/* 加入本轮 / 固定引用 / AI 解读 / AI 修改 暂隐藏，后续按需恢复 */}
             <div className="ml-auto flex items-center gap-1">
               {onTogglePreviewMaximize ? (
                 <ViewTabBtn
@@ -705,8 +702,14 @@ export function FilePreviewPanel({
             <div
               ref={previewRef}
               className="relative min-h-0 flex-1 overflow-y-auto bg-white p-3 text-xs leading-relaxed dark:bg-slate-900/95"
-              onMouseUp={viewTab === "preview" ? handlePreviewMouseUp : undefined}
-              onContextMenu={viewTab === "preview" ? handlePreviewContextMenu : undefined}
+              onMouseUp={
+                ENABLE_SELECTION_MENU && viewTab === "preview" ? handlePreviewMouseUp : undefined
+              }
+              onContextMenu={
+                ENABLE_SELECTION_MENU && viewTab === "preview"
+                  ? handlePreviewContextMenu
+                  : undefined
+              }
             >
               {previewLoading ? (
                 <p className="text-slate-500">加载预览…</p>
@@ -803,15 +806,13 @@ export function FilePreviewPanel({
                 </div>
               )}
 
-              {selectionMenu && viewTab === "preview" ? (
+              {ENABLE_SELECTION_MENU && selectionMenu && viewTab === "preview" ? (
                 <SelectionMenu
                   x={selectionMenu.x}
                   y={selectionMenu.y}
                   onEdit={() => handleEditSelection(selectionMenu.text)}
-                  onAddToChat={handleAddSelectionToChat}
                   onRewrite={handleAskRewriteSelection}
                   onCopy={() => void handleCopySelection(selectionMenu.text)}
-                  addToChatDisabled
                   onMouseDown={(e) => e.stopPropagation()}
                 />
               ) : null}
@@ -1015,19 +1016,15 @@ function SelectionMenu({
   x,
   y,
   onEdit,
-  onAddToChat,
   onRewrite,
   onCopy,
-  addToChatDisabled = false,
   onMouseDown,
 }: {
   x: number;
   y: number;
   onEdit: () => void;
-  onAddToChat: () => void;
   onRewrite: () => void;
   onCopy: () => void;
-  addToChatDisabled?: boolean;
   onMouseDown: (e: MouseEvent<HTMLDivElement>) => void;
 }) {
   return (
@@ -1038,12 +1035,6 @@ function SelectionMenu({
       onMouseDown={onMouseDown}
     >
       <SelectionMenuItem label="编辑" shortcut="⌘I" onClick={onEdit} accent />
-      <SelectionMenuItem
-        label="添加到对话框中改写"
-        shortcut="⌘U"
-        onClick={onAddToChat}
-        disabled={addToChatDisabled}
-      />
       <SelectionMenuItem label="AI 改写选段" onClick={onRewrite} />
       <div className="my-1 border-t border-slate-100 dark:border-slate-800" />
       <SelectionMenuItem label="复制" onClick={onCopy} />

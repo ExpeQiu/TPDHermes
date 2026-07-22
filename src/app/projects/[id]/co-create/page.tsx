@@ -1577,15 +1577,28 @@ function CoCreatePageInner() {
   );
 
   const handleSend = useCallback(
-    async (overridePrompt?: string) => {
+    async (
+      overridePrompt?: string,
+      options?: {
+        /** 直接改写选段等场景：携带选区但不写入对话框 regionBlocks */
+        excerptsOverride?: Array<{
+          fileName: string;
+          startLine: number;
+          endLine: number;
+          text: string;
+        }>;
+      },
+    ) => {
       const rawPrompt = (overridePrompt ?? input).trim();
+      const excerpts =
+        options?.excerptsOverride ?? regionBlocksToExcerpts(regionBlocks);
       const newCommand = parseCoCreateNewCommand(rawPrompt);
-      if (newCommand && regionBlocks.length === 0) {
+      if (newCommand && excerpts.length === 0) {
         handleStartNewSession(newCommand);
         return;
       }
       let userPrompt = rawPrompt;
-      if (!userPrompt && regionBlocks.length === 0) return;
+      if (!userPrompt && excerpts.length === 0) return;
       if (userPrompt.startsWith("/生成新文件")) {
         userPrompt = userPrompt.replace(
           /^\/生成新文件\s*/,
@@ -1597,14 +1610,13 @@ function CoCreatePageInner() {
           "请基于当前引用的文件，按以下要求改写：",
         );
       }
-      const excerpts = regionBlocksToExcerpts(regionBlocks);
       const fullText = composeUserMessageForApi(userPrompt, excerpts);
       const hasTargetFile = pinnedFileIds.length > 0 || roundFileIds.length > 0;
       const autoPipeline = resolveCoCreatePipeline({
         text: rawPrompt,
         pinnedFileCount: pinnedFileIds.length,
         roundFileCount: roundFileIds.length,
-        regionBlockCount: regionBlocks.length,
+        regionBlockCount: excerpts.length,
         hasPendingFileActions: pendingActions.some(
           (proposal) => proposal.status === "applying" || proposal.status === "applied",
         ),
@@ -1660,11 +1672,20 @@ function CoCreatePageInner() {
       if (!overridePrompt) {
         setInput("");
       }
-      setRegionBlocks([]);
+      // 直接改写选段不经对话框，勿清空用户已有的 regionBlocks
+      if (!options?.excerptsOverride) {
+        setRegionBlocks([]);
+      }
       const planAllowsAutoDraft =
         execution.allowAutoDraft &&
         agentMode === "plan" &&
         (planConfirm || planPhase === "executing");
+
+      console.info("[co-create] 发送消息", {
+        override: Boolean(overridePrompt),
+        excerptCount: excerpts.length,
+        directSelectionRewrite: Boolean(options?.excerptsOverride),
+      });
 
       await sendMessage(fullText, {
         userPrompt: userPrompt || undefined,
@@ -2353,11 +2374,38 @@ function CoCreatePageInner() {
 
   const handleRewriteSelection = useCallback(
     (payload: SelectionToChatPayload) => {
-      if (fileWorkspace.activeFileKey) addToRound(fileWorkspace.activeFileKey);
-      appendRegionBlock(payload);
-      setInput("请改写以下选段：\n\n改写要求：");
+      const fileKey = fileWorkspace.activeFileKey;
+      if (!fileKey) return;
+      addToRound(fileKey);
+      const fileName = regionBlockFileName(
+        fileWorkspace.files,
+        fileKey,
+        fileWorkspace.tabLabels,
+      );
+      const excerpts = [
+        {
+          fileName,
+          startLine: payload.startLine,
+          endLine: payload.endLine,
+          text: payload.text,
+        },
+      ];
+      console.info("[co-create] AI 改写选段：直接发送，不加入对话框", {
+        fileName,
+        range: `${payload.startLine}-${payload.endLine}`,
+        textLen: payload.text.length,
+      });
+      void handleSend("请直接改写以下选段，输出可落库的局部修改。", {
+        excerptsOverride: excerpts,
+      });
     },
-    [addToRound, appendRegionBlock, fileWorkspace.activeFileKey],
+    [
+      addToRound,
+      fileWorkspace.activeFileKey,
+      fileWorkspace.files,
+      fileWorkspace.tabLabels,
+      handleSend,
+    ],
   );
 
   const handleRenameSession = useCallback(

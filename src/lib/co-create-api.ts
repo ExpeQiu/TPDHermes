@@ -136,9 +136,10 @@ export async function renameProjectFile(
       save_mode: "overwrite",
     },
   });
+  const resultRecord = result as unknown as { title?: unknown };
   const nextTitle =
-    typeof (result as { title?: string }).title === "string"
-      ? (result as { title: string }).title
+    typeof resultRecord.title === "string"
+      ? resultRecord.title
       : trimmed.toLowerCase().endsWith(".md")
         ? trimmed
         : `${trimmed}.md`;

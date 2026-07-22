@@ -17,7 +17,6 @@ import {
 import {
   adoptServerUnifiedUserIdIfNeeded,
   fetchServerIdentity,
-  generateUnifiedUserId,
   saveUnifiedUserIdLocally,
   syncUnifiedUserIdToServer,
   type UserIdentityState,
@@ -170,16 +169,6 @@ function SettingsPageContent() {
     }
   };
 
-  const handleGenerateUserId = async () => {
-    setErr("");
-    try {
-      const generated = await generateUnifiedUserId();
-      setUserId(generated);
-    } catch (e: unknown) {
-      setErr(e instanceof Error ? e.message : "生成失败");
-    }
-  };
-
   const currentTab = SETTINGS_TABS.find((tab) => tab.id === activeTab) ?? SETTINGS_TABS[0];
 
   return (
@@ -301,20 +290,13 @@ function SettingsPageContent() {
 
               <label className="block text-sm">
                 <span className="text-slate-500 dark:text-slate-400">统一 User ID</span>
-                <div className="mt-1 flex gap-2">
+                <div className="mt-1">
                   <input
-                    className="min-w-0 flex-1 rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+                    className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
                     value={userId}
                     onChange={(e) => setUserId(e.target.value)}
                     placeholder="user_… 或 feishu:…"
                   />
-                  <button
-                    type="button"
-                    onClick={handleGenerateUserId}
-                    className="shrink-0 rounded-lg border border-slate-300 px-3 py-2 text-xs text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
-                  >
-                    确认
-                  </button>
                 </div>
               </label>
               <p className="text-xs text-slate-500">
