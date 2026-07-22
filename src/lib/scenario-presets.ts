@@ -1,6 +1,7 @@
 /**
  * 内置种子数据：仅用于 `/create` 冷启动与引导卡片。
  * 对话创作、场景输出等执行链路以服务端 `ScenarioProfile` / GET /scenarios/{id} 为准。
+ * 与 backend/data/builtin_scenarios.py v2.0.0 对齐（id 稳定，语义按技能域刷新）。
  */
 
 export type Scenario = {
@@ -12,104 +13,122 @@ export type Scenario = {
   recommendedKnowledgeMode: string;
   recommendedSections: string[];
   systemContext: string;
+  /** 场景合同主技能（工坊 allowed[0]） */
+  primarySkill?: string;
+  /** 同场景可选技能 */
+  allowedSkills?: string[];
 };
 
 export const SCENARIOS: Scenario[] = [
   {
-    id: "tech-doc",
-    title: "技术方案说明",
-    summary: "面向客户或合作方输出结构化技术说明、方案综述与价值阐述。",
-    goal: "输出一版可用于外部沟通的技术方案说明。",
-    recommendedTemplate: "方案说明",
+    id: "general",
+    title: "通用协作",
+    summary: "项目内通用问答与协作，不强制绑定技能。",
+    goal: "通用协作与问答。",
+    recommendedTemplate: "自由对话",
     recommendedKnowledgeMode: "优先使用项目知识和指定集合",
-    recommendedSections: ["背景", "目标", "方案设计", "优势", "风险"],
-    systemContext: `你是一位资深技术写作专家，擅长：
-- 撰写清晰、准确、专业的技术文档
-- 将复杂的技术概念用通俗易懂的语言解释
-- 按照行业标准组织文档结构
-- 提供完整的最佳实践说明
-
-输出风格：专业、简洁、结构化，适合开发者和技术人员阅读。`,
+    recommendedSections: [],
+    systemContext: `你是技术品牌与技术推广协作助手。优先结合项目上下文回答；需要结构化交付物时引导用户切换到对应业务场景。`,
+  },
+  {
+    id: "refine",
+    title: "结果优化",
+    summary: "对已有输出润色、扩写、重写或对齐口径。",
+    goal: "对已有内容继续优化和重写。",
+    recommendedTemplate: "优化改写",
+    recommendedKnowledgeMode: "以源材料为主，知识库作补充",
+    recommendedSections: [],
+    systemContext: `在保留事实与关键结论的前提下，按任务说明优化给定材料；不要无依据新增技术参数或承诺。`,
+  },
+  {
+    id: "tech-doc",
+    title: "技术趋势洞察",
+    summary: "行业趋势、品牌调研计划/报告与竞品对标。",
+    goal: "输出可评审的趋势洞察或调研材料。",
+    recommendedTemplate: "趋势洞察报告",
+    recommendedKnowledgeMode: "优先使用知识集合并保留事实来源",
+    recommendedSections: ["执行摘要", "行业洞察", "核心发现", "策略建议"],
+    primarySkill: "tech_trend_skill",
+    allowedSkills: [
+      "tech_trend_skill",
+      "brand_research_plan",
+      "brand_research_report",
+      "benchmark_skill",
+    ],
+    systemContext: `你是技术品牌洞察专家，擅长行业趋势、调研计划/报告与竞品对标；结论先行，标注假设与待核实项。`,
   },
   {
     id: "data-report",
-    title: "分析汇报",
-    summary: "生成结论前置、洞察清晰、适合汇报评审的分析报告。",
-    goal: "输出一版适合管理层或项目评审的分析汇报。",
-    recommendedTemplate: "分析报告",
-    recommendedKnowledgeMode: "优先使用知识集合并保留事实来源",
-    recommendedSections: ["执行摘要", "现状分析", "核心发现", "行动建议"],
-    systemContext: `你是一位专业的数据分析师，擅长：
-- 从数据中发现业务洞察和机会
-- 将数据转化为可执行的策略建议
-- 构建清晰的叙事逻辑，结论先行
-- 使用图表描述和替代方案（如有数据）
-
-输出风格：数据驱动、逻辑严谨、结论前置，建议具体可落地。`,
+    title: "技术IP包装策略",
+    summary: "IP 全案、货架、矩阵、命名、互锁地图与车型赋能策略。",
+    goal: "输出技术 IP 包装与品牌策略材料。",
+    recommendedTemplate: "IP包装全案",
+    recommendedKnowledgeMode: "优先使用项目知识和指定集合",
+    recommendedSections: ["背景洞察", "IP定位", "包装策略", "车型互锁", "执行计划"],
+    primarySkill: "ip_pack_skill",
+    allowedSkills: [
+      "ip_pack_skill",
+      "ip_shelf_skill",
+      "ip_matrix_skill",
+      "brand_name_skill",
+      "tech_lockmap_skill",
+      "model_brand_skill",
+    ],
+    systemContext: `你是技术 IP 包装策略专家，擅长全案、货架、矩阵、命名与车型互锁；定位与信息屋需自洽。`,
   },
   {
     id: "prd",
-    title: "PRD 草案",
-    summary: "快速整理业务背景、用户故事、范围边界与验收要求。",
-    goal: "输出一版适合评审讨论的 PRD 初稿。",
-    recommendedTemplate: "PRD",
-    recommendedKnowledgeMode: "以项目背景为主，知识库作为补充",
-    recommendedSections: ["产品概述", "目标用户", "需求范围", "功能需求", "验收标准"],
-    systemContext: `你是一位资深产品经理，擅长：
-- 撰写结构完整、逻辑清晰的产品需求文档
-- 拆解用户故事，定义功能范围和验收标准
-- 平衡用户体验、技术可行性和业务价值
-- 识别边界情况和依赖关系
-
-输出风格：专业、条理清晰、用词精准，适合跨团队协作和评审。`,
+    title: "技术传播策划",
+    summary: "IP 传播方案、事件传播稿、素材清单与 A4 一页纸。",
+    goal: "输出可落地的技术传播与公关材料。",
+    recommendedTemplate: "传播策划方案",
+    recommendedKnowledgeMode: "优先使用产品知识和标准术语口径",
+    recommendedSections: ["传播目标", "受众分层", "核心信息", "节奏与渠道", "效果评估"],
+    primarySkill: "ip_comm_plan",
+    allowedSkills: ["ip_comm_plan", "tech_pr_skill", "material_skill", "a4_skill"],
+    systemContext: `你是技术传播策划专家，输出需可直接用于传播评审：目标、受众、节奏、渠道与核心话术对齐。`,
   },
   {
     id: "marketing",
-    title: "营销传播素材",
-    summary: "提炼卖点、场景价值和传播话术，适合市场传播与品牌内容。",
-    goal: "输出一版可直接进入传播打磨的营销素材。",
-    recommendedTemplate: "营销文案",
-    recommendedKnowledgeMode: "优先使用产品知识和标准术语口径",
-    recommendedSections: ["核心主张", "卖点提炼", "传播话术", "行动号召"],
-    systemContext: `你是一位技术品牌营销专家，擅长：
-- 提炼技术亮点并转化为受众语言
-- 撰写有传播力的标题、导语和核心文案
-- 适配不同平台和场景
-- 将技术叙事与品牌价值有机结合
-
-输出风格：精准、有吸引力、具备传播势能，适合市场推广和品牌传播场景。`,
+    title: "技术活动与展具",
+    summary: "活动策划、展具概念/立项/说明书与 IP 认证方案。",
+    goal: "输出技术活动或展具相关策划与交付文档。",
+    recommendedTemplate: "活动策划方案",
+    recommendedKnowledgeMode: "优先使用项目知识和指定集合",
+    recommendedSections: ["活动概述", "参展目标", "展台/展具策略", "时间节点", "任务分工"],
+    primarySkill: "event_plan_skill",
+    allowedSkills: [
+      "event_plan_skill",
+      "display_concept_skill",
+      "display_project_skill",
+      "display_guide_skill",
+      "ip_cert_plan",
+    ],
+    systemContext: `你是技术活动与展具策划专家，方案需明确目标、场地约束、互动体验、预算与排期。`,
   },
   {
     id: "debug",
-    title: "故障复盘报告",
-    summary: "整理问题时间线、影响范围、根因与改进动作，形成复盘文档。",
-    goal: "输出一版完整的故障排查与复盘报告。",
-    recommendedTemplate: "复盘报告",
-    recommendedKnowledgeMode: "优先结合项目上下文和历史事实记录",
-    recommendedSections: ["问题概述", "时间线", "根因分析", "影响评估", "改进措施"],
-    systemContext: `你是一位经验丰富的 SRE/运维工程师，擅长：
-- 系统性排查线上故障，快速定位根因
-- 撰写结构化的故障报告
-- 输出可落地的改进措施和预防方案
-- 将技术细节翻译为业务影响说明
-
-输出风格：客观、详实、以解决问题为导向，适合事后复盘和团队分享。`,
+    title: "领导讲稿与采访",
+    summary: "发布会讲稿、发言稿与领导采访 QA。",
+    goal: "输出可上台的讲稿或采访应答材料。",
+    recommendedTemplate: "领导讲稿",
+    recommendedKnowledgeMode: "优先结合项目上下文和标准口径",
+    recommendedSections: ["开篇定调", "技术叙事", "用户价值", "号召与致谢"],
+    primarySkill: "speech_draft_skill",
+    allowedSkills: ["speech_draft_skill", "speech_skill", "interview_qa_skill"],
+    systemContext: `你是领导讲稿与采访应答专家，口径统一、可朗读；敏感问题给桥梁话术，避免过度承诺。`,
   },
   {
     id: "kb-qa",
-    title: "知识问答提炼",
-    summary: "基于资料集合做摘要提炼、问答对整理和知识点沉淀。",
-    goal: "输出一版面向复用的知识问答与摘要。",
-    recommendedTemplate: "知识摘要",
-    recommendedKnowledgeMode: "必须携带知识集合并要求引用事实",
-    recommendedSections: ["核心摘要", "关键知识点", "问答对", "待补充信息"],
-    systemContext: `你是一位专业的知识管理专家，擅长：
-- 从长文档中快速提取关键信息和知识点
-- 生成精准的问答对，用于知识库建设
-- 将分散信息归纳为结构化的知识手册
-- 用通俗语言解释专业概念
-
-输出风格：简洁、准确、易于理解，适合知识沉淀和团队培训。`,
+    title: "视频与销售赋能",
+    summary: "导演脚本、短视频口播与销售话术手册。",
+    goal: "输出视频脚本或销售一线赋能话术。",
+    recommendedTemplate: "视频脚本",
+    recommendedKnowledgeMode: "优先使用产品知识和标准术语口径",
+    recommendedSections: ["核心创意", "分镜/口播结构", "证据点", "行动号召"],
+    primarySkill: "video_script_skill",
+    allowedSkills: ["video_script_skill", "video_skill", "sales_skill"],
+    systemContext: `你是技术视频与销售赋能专家，内容可拍可讲；销售话术可落地到 4S 场景，证据点可核验。`,
   },
 ];
 

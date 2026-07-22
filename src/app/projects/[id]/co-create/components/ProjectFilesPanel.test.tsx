@@ -15,18 +15,22 @@ vi.mock("@/lib/co-create-api", async () => {
   return {
     ...actual,
     uploadProjectAttachment: vi.fn(),
+    exportProjectFileToLocal: vi.fn().mockResolvedValue({ filename: "方案草稿.md" }),
   };
 });
 
-import { uploadProjectAttachment } from "@/lib/co-create-api";
+import { exportProjectFileToLocal, uploadProjectAttachment } from "@/lib/co-create-api";
 
 const uploadProjectAttachmentMock = vi.mocked(uploadProjectAttachment);
+const exportProjectFileToLocalMock = vi.mocked(exportProjectFileToLocal);
 
 describe("ProjectFilesPanel", () => {
   afterEach(() => {
     cleanupDom();
     vi.clearAllMocks();
     uploadProjectAttachmentMock.mockReset();
+    exportProjectFileToLocalMock.mockReset();
+    exportProjectFileToLocalMock.mockResolvedValue({ filename: "方案草稿.md" });
   });
 
   it("renders loading state and empty state", () => {
@@ -128,6 +132,41 @@ describe("ProjectFilesPanel", () => {
 
     clickElement(findByText(container, "方案草稿.md")!);
     expect(onSelectPreview).toHaveBeenCalledWith("output:out-1");
+  });
+
+  it("exports the selected document to local download", async () => {
+    const { container } = renderComponent(
+      React.createElement(ProjectFilesPanel, {
+        projectId: "project-1",
+        files: [
+          {
+            id: "out-1",
+            kind: "output",
+            title: "方案草稿.md",
+            path: "/输出/方案草稿.md",
+            file_type: "markdown",
+          },
+        ],
+        loading: false,
+        openTabKeys: [],
+        activeFileKey: null,
+        pinnedFileIds: [],
+        roundFileIds: [],
+        onSelectPreview: () => {},
+        onRefresh: () => {},
+      }),
+    );
+
+    const exportBtn = container.querySelector('button[aria-label="导出 方案草稿.md"]') as HTMLButtonElement;
+    expect(exportBtn).not.toBeNull();
+    clickElement(exportBtn);
+
+    await vi.waitFor(() => {
+      expect(exportProjectFileToLocalMock).toHaveBeenCalledWith(
+        "project-1",
+        expect.objectContaining({ id: "out-1", kind: "output", title: "方案草稿.md" }),
+      );
+    });
   });
 
   it("uploads attachment and refreshes file list", async () => {

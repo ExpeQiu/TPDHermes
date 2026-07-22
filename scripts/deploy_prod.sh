@@ -116,6 +116,8 @@ rsync_to_remote() {
       --exclude='.mypy_cache/' \
       --exclude='.pytest_cache/' \
       --exclude='.cursor/' \
+      --exclude='._*' \
+      --exclude='.DS_Store' \
       -e "sshpass -p ${DEPLOY_SSH_PASS} ssh -o StrictHostKeyChecking=no" \
       ./ "${DEPLOY_HOST}:${DEPLOY_REMOTE_DIR}/"
   else
@@ -135,6 +137,8 @@ rsync_to_remote() {
       --exclude='.mypy_cache/' \
       --exclude='.pytest_cache/' \
       --exclude='.cursor/' \
+      --exclude='._*' \
+      --exclude='.DS_Store' \
       -e "ssh ${rsync_ssh[*]}" \
       ./ "${DEPLOY_HOST}:${DEPLOY_REMOTE_DIR}/"
   fi

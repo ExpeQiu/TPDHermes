@@ -134,6 +134,33 @@ def test_chat_session_patch_and_message_sync():
         assert assistant_id not in remaining_ids
 
 
+def test_chat_sessions_summary_includes_selected_project_id():
+    headers = {"X-User-ID": f"summary_project_{uuid.uuid4().hex[:8]}"}
+    project_id = f"proj_{uuid.uuid4().hex[:8]}"
+    with TestClient(app) as client:
+        create = client.post(
+            "/api/v1/chat/sessions",
+            headers=headers,
+            json={
+                "title": "项目共创",
+                "messages": [],
+                "sessionKind": "project_co_create",
+                "selectedProjectId": project_id,
+                "includeProjectContext": True,
+            },
+        )
+        assert create.status_code == 200
+        sid = create.json()["id"]
+
+        listed = client.get("/api/v1/chat/sessions", headers=headers)
+        assert listed.status_code == 200
+        items = listed.json().get("items") or []
+        match = next((item for item in items if item["id"] == sid), None)
+        assert match is not None
+        assert match.get("selectedProjectId") == project_id
+        assert match.get("sessionKind") == "project_co_create"
+
+
 def test_me_identity_sync():
     headers = {"X-User-ID": "identity_sync_user"}
     with TestClient(app) as client:

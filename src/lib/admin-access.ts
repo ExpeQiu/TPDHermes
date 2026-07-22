@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { useEffectiveUserScopeId } from "@/lib/use-effective-user-scope-id";
 import {
   canAccessFeature,
+  clearCachedUserAccess,
   fetchUserAccess,
   loadCachedUserAccess,
   type FeatureKey,
@@ -17,31 +18,56 @@ export function isDefaultAdminUser(userId: string | null | undefined): boolean {
   return String(userId || "").trim() === ADMIN_USER_ID;
 }
 
+function accessForUser(userId: string): UserAccessState | null {
+  const cached = loadCachedUserAccess();
+  if (!cached) return null;
+  if (cached.user_id && cached.user_id !== userId) {
+    clearCachedUserAccess();
+    return null;
+  }
+  return cached;
+}
+
 export function useUserAccess() {
   const userId = useEffectiveUserScopeId();
   const readyUser = userId.trim().length > 0;
-  const [access, setAccess] = useState<UserAccessState | null>(() => loadCachedUserAccess());
-  const [loading, setLoading] = useState(() => loadCachedUserAccess() === null);
+  const [access, setAccess] = useState<UserAccessState | null>(() =>
+    readyUser ? accessForUser(userId) : null,
+  );
+  const [loading, setLoading] = useState(() =>
+    readyUser ? accessForUser(userId) === null : true,
+  );
 
   const refresh = useCallback(async () => {
     if (!readyUser) return null;
+    setLoading(true);
     try {
       const next = await fetchUserAccess();
       setAccess(next);
       return next;
     } catch {
+      setAccess((prev) => {
+        if (prev?.user_id && prev.user_id !== userId) return null;
+        return prev;
+      });
       return null;
     } finally {
       setLoading(false);
     }
-  }, [readyUser]);
+  }, [readyUser, userId]);
 
   useEffect(() => {
+    const matched = accessForUser(userId);
+    setAccess(matched);
+    setLoading(matched === null);
     void refresh();
-  }, [refresh]);
+  }, [refresh, userId]);
 
   const canAccess = useCallback(
     (feature: FeatureKey) => {
+      if (access && access.user_id && access.user_id !== userId) {
+        return canAccessFeature(null, feature);
+      }
       if (access) return canAccessFeature(access, feature);
       if (isDefaultAdminUser(userId)) return true;
       return canAccessFeature(null, feature);

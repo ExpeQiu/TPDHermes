@@ -27,8 +27,14 @@ async def workshop_list_skills(user_id: str | None = None) -> dict:
     List all available Skills installed in the workshop.
 
     Returns:
-        {"skills": [str, ...], "count": int}
+        {
+          "skills": [str, ...],  # 兼容旧调用方
+          "catalog": [{name, display_name, description, when, triggers, tags, selection}, ...],
+          "count": int
+        }
     """
+    from backend.services.skill_package import resolve_skill_discovery
+
     uid = (user_id or "").strip()
     loader = get_loader()
     if uid:
@@ -42,7 +48,12 @@ async def workshop_list_skills(user_id: str | None = None) -> dict:
         skills = [name for name in loader.discover() if name in visible]
     else:
         skills = loader.discover()
-    return {"skills": sorted(skills), "count": len(skills)}
+    skills = sorted(skills)
+    catalog = []
+    for name in skills:
+        disc = resolve_skill_discovery(loader.skills_root / name, name)
+        catalog.append(disc)
+    return {"skills": skills, "catalog": catalog, "count": len(skills)}
 
 
 async def workshop_get_skill_info(skill_name: str, user_id: str | None = None) -> dict:
@@ -60,6 +71,8 @@ async def workshop_get_skill_info(skill_name: str, user_id: str | None = None) -
             "path": str
         }
     """
+    from backend.services.skill_package import resolve_skill_discovery
+
     uid = (user_id or "").strip()
     loader = get_loader()
     skill_path = loader.skills_root / skill_name
@@ -87,16 +100,23 @@ async def workshop_get_skill_info(skill_name: str, user_id: str | None = None) -
     if not info["exists"]:
         return info
 
-    # Try to load the skill to get class-level info
+    disc = resolve_skill_discovery(skill_path, skill_name)
+    info["display_name"] = disc.get("display_name")
+    info["description"] = disc.get("description") or None
+    info["when"] = disc.get("when") or None
+    info["triggers"] = disc.get("triggers") or []
+    info["tags"] = disc.get("tags") or []
+    info["selection"] = disc.get("selection") or info["description"]
+
+    # Try to load the skill to get class-level info / version
     try:
         skill = loader.load(skill_name)
-        info["description"] = getattr(skill, "__doc__", None)
-        # Check for skill.json metadata
+        if not info["description"]:
+            info["description"] = getattr(skill, "__doc__", None)
         meta_path = skill_path / "skill.json"
         if meta_path.exists():
             with open(meta_path, "r", encoding="utf-8") as f:
                 meta = json.load(f)
-                info["description"] = meta.get("description", info["description"])
                 info["version"] = meta.get("version")
                 info["author"] = meta.get("author")
     except (SkillNotFoundError, SkillLoadError) as e:

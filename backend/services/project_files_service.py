@@ -119,6 +119,7 @@ async def list_project_files(db: AsyncSession, project_id: str) -> list[dict]:
                 "updated_at": row.updated_at or row.created_at,
                 "summary": (row.summary or "")[:200] or None,
                 "created_at": row.created_at,
+                "owner_id": (row.owner_id or "").strip() or None,
                 "version": row.version,
             }
         )
@@ -136,6 +137,7 @@ async def list_project_files(db: AsyncSession, project_id: str) -> list[dict]:
                 "updated_at": row.created_at,
                 "summary": f"索引: {row.ingest_status}" if row.ingest_status else None,
                 "created_at": row.created_at,
+                "owner_id": None,
                 "version": None,
             }
         )
@@ -169,6 +171,8 @@ async def get_project_file_detail(
             "content": row.content or "",
             "content_format": row.content_format or "markdown",
             "updated_at": row.updated_at,
+            "created_at": row.created_at,
+            "owner_id": (row.owner_id or "").strip() or None,
             "version": row.version,
         }
     if kind == "attachment":
@@ -196,6 +200,8 @@ async def get_project_file_detail(
             "content": content,
             "content_format": content_format,
             "updated_at": row.created_at,
+            "created_at": row.created_at,
+            "owner_id": None,
             "version": None,
         }
     return None

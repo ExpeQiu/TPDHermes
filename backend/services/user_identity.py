@@ -1,4 +1,4 @@
-"""统一推导 user_id（请求体 / Query / X-User-ID、飞书会话、IP+UA 匿名）。"""
+"""统一推导 user_id（Header / 飞书会话 / IP+UA 匿名；默认不信任 body/query 覆盖）。"""
 from __future__ import annotations
 
 import hashlib
@@ -13,6 +13,10 @@ from backend.services.feishu_auth import get_user_session
 logger = logging.getLogger("tpdx.hermes.user_identity")
 
 GLOBAL_ADMIN_ENV = "TPDHERMES_GLOBAL_ADMIN_USER_IDS"
+# 显式打开后才允许 Query/Body 覆盖身份（仅调试）
+ALLOW_USER_ID_OVERRIDE_ENV = "TPDHERMES_ALLOW_USER_ID_OVERRIDE"
+# 显式打开后 user_id=default 才自动成为 platform_admin
+DEFAULT_IS_PLATFORM_ADMIN_ENV = "TPDHERMES_DEFAULT_IS_PLATFORM_ADMIN"
 
 
 def normalize_user_id(value: str | None) -> str:
@@ -20,6 +24,25 @@ def normalize_user_id(value: str | None) -> str:
         return "default"
     s = str(value).strip()
     return s if s else "default"
+
+
+def allow_user_id_override() -> bool:
+    return os.getenv(ALLOW_USER_ID_OVERRIDE_ENV, "0").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+        "on",
+    )
+
+
+def default_is_platform_admin_enabled() -> bool:
+    """兼容旧本地工作流；生产默认关闭，须把 default 写入 GLOBAL_ADMIN 或开本开关。"""
+    return os.getenv(DEFAULT_IS_PLATFORM_ADMIN_ENV, "0").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+        "on",
+    )
 
 
 def derive_user_id(request: Request | None, provided_user_id: str | None = None) -> str:
@@ -69,18 +92,7 @@ def feishu_effective_user_id(request: Request | None) -> str | None:
     return f"feishu:{user.open_id.strip()}"
 
 
-def effective_user_id_for_api(
-    request: Request,
-    *,
-    query_user_id: str | None = None,
-    body_user_id: str | None = None,
-) -> str:
-    """
-    优先级：请求体 user_id > Query user_id > X-User-ID > 飞书会话 > IP+UA。
-    """
-    for cand in (body_user_id, query_user_id):
-        if cand is not None and str(cand).strip():
-            return normalize_user_id(str(cand).strip())
+def _resolve_from_trusted_sources(request: Request) -> str:
     header_uid = (request.headers.get("X-User-ID") or request.headers.get("x-user-id") or "").strip()
     if header_uid:
         return normalize_user_id(header_uid)
@@ -88,6 +100,45 @@ def effective_user_id_for_api(
     if fs:
         return fs
     return derive_user_id(request, None)
+
+
+def effective_user_id_for_api(
+    request: Request,
+    *,
+    query_user_id: str | None = None,
+    body_user_id: str | None = None,
+) -> str:
+    """
+    默认优先级：X-User-ID > 飞书会话 > IP+UA。
+    body/query 覆盖仅当 TPDHERMES_ALLOW_USER_ID_OVERRIDE=1。
+    """
+    trusted = _resolve_from_trusted_sources(request)
+
+    if allow_user_id_override():
+        for cand in (body_user_id, query_user_id):
+            if cand is not None and str(cand).strip():
+                overridden = normalize_user_id(str(cand).strip())
+                if overridden != trusted:
+                    logger.warning(
+                        "user_id override enabled trusted=%s overridden=%s",
+                        trusted[:24],
+                        overridden[:24],
+                    )
+                return overridden
+        return trusted
+
+    for label, cand in (("body", body_user_id), ("query", query_user_id)):
+        if cand is None or not str(cand).strip():
+            continue
+        claimed = normalize_user_id(str(cand).strip())
+        if claimed != trusted:
+            logger.warning(
+                "ignored %s user_id override claimed=%s trusted=%s",
+                label,
+                claimed[:24],
+                trusted[:24],
+            )
+    return trusted
 
 
 def viewer_role(request: Request | None) -> str:
@@ -99,7 +150,9 @@ def viewer_role(request: Request | None) -> str:
             return r
         uid = (request.headers.get("X-User-ID") or request.headers.get("x-user-id") or "").strip() or "default"
     uid = (uid or "default").strip() or "default"
-    if uid == "default" or is_global_admin_user(uid):
+    if is_global_admin_user(uid):
+        return "platform_admin"
+    if uid == "default" and default_is_platform_admin_enabled():
         return "platform_admin"
     return os.getenv("TPDHERMES_DEFAULT_USER_ROLE", "tenant_editor") or "tenant_editor"
 
@@ -112,6 +165,6 @@ def is_global_admin_user(user_id: str) -> bool:
 
 def get_effective_user_id(
     request: Request,
-    user_id: Optional[str] = Query(None, description="显式用户 ID（调试或兼容）"),
+    user_id: Optional[str] = Query(None, description="显式用户 ID（仅调试开关开启时生效）"),
 ) -> str:
     return effective_user_id_for_api(request, query_user_id=user_id)

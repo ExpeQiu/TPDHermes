@@ -41,7 +41,7 @@ const MODERATOR_ROLE: RoundtableRole = {
   kind: "moderator",
 };
 
-/** Pack 切换失败时的本地圆桌席位 fallback（与 skill_packs/*/pack.yml 对齐） */
+/** Pack 切换失败时的本地圆桌席位 fallback（与 skill_packs 下各 pack.yml 对齐） */
 const PACK_ROLES_FALLBACK: Record<string, RoundtableRole[]> = {
   "tech-ip": [
     {

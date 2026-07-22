@@ -110,14 +110,22 @@ async def query_feedback(
     message_id: str | None = None,
     limit: int = Query(default=50, ge=1, le=200),
     db: AsyncSession = Depends(get_db),
+    effective_uid: str = Depends(get_effective_user_id),
 ):
     if session_id and message_id:
         one = await get_feedback_for_message(db, session_id=session_id, message_id=message_id)
         if one:
+            if (one.user_id or "").strip() and (one.user_id or "").strip() != effective_uid:
+                return {"items": []}
             return {"items": [feedback_event_to_dict(one)]}
         return {"items": []}
     rows = await list_feedback(
-        db, run_id=run_id, session_id=session_id, project_id=project_id, limit=limit
+        db,
+        run_id=run_id,
+        session_id=session_id,
+        project_id=project_id,
+        user_id=effective_uid,
+        limit=limit,
     )
     return {"items": [feedback_event_to_dict(r) for r in rows]}
 
@@ -158,8 +166,9 @@ async def get_feedback_stats(
 async def get_pending_feedback_prompts(
     session_id: str | None = None,
     db: AsyncSession = Depends(get_db),
+    effective_uid: str = Depends(get_effective_user_id),
 ):
-    rows = await list_pending_prompts(db, session_id=session_id)
+    rows = await list_pending_prompts(db, session_id=session_id, user_id=effective_uid)
     return {
         "items": [
             {

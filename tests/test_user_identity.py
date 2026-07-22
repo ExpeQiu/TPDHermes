@@ -1,5 +1,7 @@
 """user_identity 推导逻辑单测。"""
 
+import os
+
 from starlette.requests import Request
 
 from backend.services.user_identity import (
@@ -51,7 +53,7 @@ def test_derive_user_id_with_x_forwarded_for():
     assert result.startswith("auto_")
 
 
-def test_effective_user_id_body_wins_header():
+def test_effective_user_id_ignores_body_by_default():
     scope = {
         "type": "http",
         "headers": [
@@ -60,6 +62,20 @@ def test_effective_user_id_body_wins_header():
         "client": ("127.0.0.1", 1),
     }
     req = Request(scope)
+    os.environ.pop("TPDHERMES_ALLOW_USER_ID_OVERRIDE", None)
+    assert effective_user_id_for_api(req, body_user_id="from-body") == "from-header"
+
+
+def test_effective_user_id_body_override_when_enabled(monkeypatch):
+    scope = {
+        "type": "http",
+        "headers": [
+            (b"x-user-id", b"from-header"),
+        ],
+        "client": ("127.0.0.1", 1),
+    }
+    req = Request(scope)
+    monkeypatch.setenv("TPDHERMES_ALLOW_USER_ID_OVERRIDE", "1")
     assert effective_user_id_for_api(req, body_user_id="from-body") == "from-body"
 
 

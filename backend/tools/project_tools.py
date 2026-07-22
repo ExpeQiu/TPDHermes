@@ -13,7 +13,12 @@ from sqlalchemy import select
 
 from backend.db import async_session_maker
 from backend.models.project import Project
-from backend.services.project_member_service import list_member_project_ids, project_visibility_filter
+from backend.services.project_member_service import (
+    ensure_owner_membership,
+    get_project_role,
+    list_member_project_ids,
+    project_visibility_filter,
+)
 from backend.services.user_identity import is_global_admin_user
 
 
@@ -79,6 +84,11 @@ async def project_create(
             updated_at=datetime.now().isoformat(),
         )
         db.add(project)
+        await db.flush()
+        await ensure_owner_membership(db, project_id=project.id, owner_user_id=owner)
+        from backend.services.project_seed import seed_default_scenario_bindings
+
+        await seed_default_scenario_bindings(db, project.id)
         await db.commit()
         await db.refresh(project)
         result = _project_to_dict(project)
@@ -99,14 +109,13 @@ async def project_get(id: str, user_id: str = "") -> dict:
     async with async_session_maker() as db:
         result = await db.execute(select(Project).where(Project.id == id))
         project = result.scalar_one_or_none()
-
-    if not project:
-        return {}
-    uid = (user_id or "").strip() or "default"
-    owner = (getattr(project, "owner_id", None) or "default").strip()
-    if not is_global_admin_user(uid) and owner != uid:
-        return {}
-    return _project_to_dict(project)
+        if not project:
+            return {}
+        uid = (user_id or "").strip() or "default"
+        role = await get_project_role(db, project_id=project.id, user_id=uid, project=project)
+        if not role:
+            return {}
+        return _project_to_dict(project)
 
 
 # ─── Helpers ─────────────────────────────────────────────────────────────────

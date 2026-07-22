@@ -1,3 +1,28 @@
 {
-  "name": "技术发展趋势洞察报告"
+  "name": "技术发展趋势洞察报告",
+  "description": "生成中文《技术发展趋势洞察/技术品牌营销洞察报告》（趋势研判、市场客户、竞品表、能力评估、战略机会、营销策略）。当用户需要技术趋势洞察、行业趋势报告、竞品技术分析、季度或年度技术品牌营销洞察时使用。",
+  "when": "技术趋势洞察 / 行业趋势报告 / 竞品技术分析 / 季度洞察 / 年度洞察 / 技术品牌营销洞察",
+  "triggers": [
+    "技术趋势",
+    "发展趋势",
+    "趋势洞察",
+    "行业趋势",
+    "竞品分析",
+    "技术品牌营销",
+    "季度报告",
+    "年度洞察"
+  ],
+  "tags": ["技术趋势", "洞察报告", "竞品", "营销策略"],
+  "market_tags": ["技术趋势", "洞察报告", "竞品分析"],
+  "market_category": "调研洞察",
+  "version": "1.0.2",
+  "author": "TPD Team",
+  "template": "templates/technology_trend_insight_report.md",
+  "templates": [
+    {
+      "id": "technology_trend_insight_report",
+      "label": "技术发展趋势洞察报告",
+      "path": "templates/technology_trend_insight_report.md"
+    }
+  ]
 }

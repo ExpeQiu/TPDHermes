@@ -208,10 +208,13 @@ class SkillLoader:
 
     def list_skill_metadata(self) -> list[dict[str, Any]]:
         """发现技能及其输出模版选项（skill.json 声明 + 包内 templates/ 自动扫描）。"""
+        from backend.services.skill_package import resolve_skill_discovery
+
         items: list[dict[str, Any]] = []
         for name in self.discover():
             skill_path = self.skills_root / name
             meta = self.read_skill_json(name)
+            disc = resolve_skill_discovery(skill_path, name)
             templates: list[dict[str, Any]] = []
             extra = meta.get("templates")
             if isinstance(extra, list):
@@ -230,7 +233,7 @@ class SkillLoader:
             if isinstance(tpl_path, str) and tpl_path.strip():
                 path = tpl_path.strip()
                 label = Path(path).name
-                display = str(meta.get("name") or name)
+                display = str(disc.get("display_name") or meta.get("name") or name)
                 if not any(x["id"] == path for x in templates):
                     templates.append(
                         self._template_meta_entry(
@@ -261,8 +264,12 @@ class SkillLoader:
             items.append(
                 {
                     "name": name,
-                    "display_name": str(meta.get("name") or name),
-                    "description": str(meta.get("description") or ""),
+                    "display_name": str(disc.get("display_name") or meta.get("name") or name),
+                    "description": str(disc.get("description") or meta.get("description") or ""),
+                    "when": str(disc.get("when") or ""),
+                    "triggers": list(disc.get("triggers") or []),
+                    "tags": list(disc.get("tags") or []),
+                    "selection": str(disc.get("selection") or ""),
                     "templates": templates,
                 }
             )

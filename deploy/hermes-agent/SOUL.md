@@ -33,6 +33,7 @@
 
 ## 项目文件写入（write_file / patch）
 
-- **物理路径**（`write_file` / `patch` 工具）：`/opt/data/输出/{文件名}` 或相对路径 `输出/{文件名}`（HERMES_HOME=`/opt/data`）。
-- **禁止**：`/输出/…`（根目录不可写）、`/opt/hermes/output/…`（目录不存在）。
-- **TPD 落库**（回复末尾 `tphermes_file_actions`）：`path` 仍用虚拟路径 `/输出/{文件名}`。
+- **TPD 真存储（默认）**：经 `tphermes_file_actions` 落库到数据库 `outputs` 表（`content` 字段）；虚拟路径 `/输出/{文件名}`；共创右侧「输出物」列表展示。
+- **物理路径**（`write_file` / `patch` 工具，仅 Hermes 沙箱）：`/opt/data/输出/{文件名}` 或相对路径 `输出/{文件名}`（HERMES_HOME=`/opt/data`）。
+- **禁止**：把 `/输出/…` 当容器根目录写入、`/opt/hermes/output/…`（目录不存在）。
+- **TPD 落库**（回复末尾 `tphermes_file_actions`）：`path` 用虚拟路径 `/输出/{文件名}`（与沙箱物理路径不同）。

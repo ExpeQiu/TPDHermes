@@ -25,6 +25,11 @@ export function useFileWorkspace(projectId: string) {
   const [openTabKeys, setOpenTabKeys] = useState<string[]>([]);
   const [activeFileKey, setActiveFileKey] = useState<string | null>(null);
   const [tabCache, setTabCache] = useState<Record<string, FileTabCache>>({});
+  const tabCacheRef = useRef(tabCache);
+  const loadingKeysRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    tabCacheRef.current = tabCache;
+  }, [tabCache]);
   useEffect(() => {
     setOpenTabKeys([]);
     setActiveFileKey(null);
@@ -51,22 +56,20 @@ export function useFileWorkspace(projectId: string) {
     void refreshFiles();
   }, [refreshFiles]);
 
-  const loadingKeysRef = useRef<Set<string>>(new Set());
-
   const ensureTabLoaded = useCallback(
     async (fileKey: string) => {
       if (!projectId || loadingKeysRef.current.has(fileKey)) return;
-
-      setTabCache((prev) => {
-        const cached = prev[fileKey];
-        if (cached?.detail || cached?.loading) return prev;
-        return { ...prev, [fileKey]: { ...EMPTY_TAB, loading: true } };
-      });
+      const cached = tabCacheRef.current[fileKey];
+      if (cached?.detail || cached?.loading) return;
 
       const decoded = decodeProjectFileSelectValue(fileKey);
-      if (!decoded) return;
+      if (!decoded) {
+        console.warn("[co-create] 无法解析文件 key", { fileKey });
+        return;
+      }
 
       loadingKeysRef.current.add(fileKey);
+      setTabCache((prev) => ({ ...prev, [fileKey]: { ...EMPTY_TAB, loading: true } }));
       try {
         const [detail, versions] = await Promise.all([
           fetchProjectFileDetail(projectId, decoded.id, decoded.kind),
@@ -78,6 +81,11 @@ export function useFileWorkspace(projectId: string) {
           ...prev,
           [fileKey]: { detail, versions, loading: false },
         }));
+        console.info("[co-create] 文件 Tab 已加载", {
+          fileKey,
+          title: detail.title,
+          contentLen: detail.content?.length ?? 0,
+        });
       } catch (err) {
         console.warn("[co-create] 文件 Tab 加载失败", { fileKey, err });
         setTabCache((prev) => ({
@@ -96,6 +104,7 @@ export function useFileWorkspace(projectId: string) {
       if (!fileKey) return;
       setOpenTabKeys((prev) => (prev.includes(fileKey) ? prev : [...prev, fileKey]));
       setActiveFileKey(fileKey);
+      console.info("[co-create] 打开文件 Tab", { fileKey });
       void ensureTabLoaded(fileKey);
     },
     [ensureTabLoaded],
@@ -115,9 +124,13 @@ export function useFileWorkspace(projectId: string) {
     });
   }, []);
 
-  const selectFileTab = useCallback((fileKey: string) => {
-    setActiveFileKey(fileKey);
-  }, []);
+  const selectFileTab = useCallback(
+    (fileKey: string) => {
+      setActiveFileKey(fileKey);
+      void ensureTabLoaded(fileKey);
+    },
+    [ensureTabLoaded],
+  );
 
   const resetWorkspace = useCallback(() => {
     setOpenTabKeys([]);
@@ -138,6 +151,27 @@ export function useFileWorkspace(projectId: string) {
           detail: { ...cached.detail, content },
         },
       };
+    });
+  }, []);
+
+  const patchTabTitle = useCallback((fileKey: string, title: string) => {
+    setTabCache((prev) => {
+      const cached = prev[fileKey];
+      if (!cached?.detail) return prev;
+      return {
+        ...prev,
+        [fileKey]: {
+          ...cached,
+          detail: { ...cached.detail, title },
+        },
+      };
+    });
+    setFiles((prev) => {
+      const decoded = decodeProjectFileSelectValue(fileKey);
+      if (!decoded) return prev;
+      return prev.map((file) =>
+        file.id === decoded.id && file.kind === decoded.kind ? { ...file, title } : file,
+      );
     });
   }, []);
 
@@ -212,6 +246,7 @@ export function useFileWorkspace(projectId: string) {
     versions,
     refreshFiles,
     patchTabContent,
+    patchTabTitle,
     reloadFileTab,
     resetWorkspace,
   };

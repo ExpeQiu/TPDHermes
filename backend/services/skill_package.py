@@ -355,6 +355,70 @@ def _load_json_object(path: Path) -> Dict[str, Any]:
     return raw if isinstance(raw, dict) else {}
 
 
+def resolve_skill_discovery(root: Path, skill_dir_name: str = "") -> Dict[str, Any]:
+    """
+    汇总 Agent 选型用元数据：skill.json / config.json / SKILL.md。
+    优先级：config.json > skill.json > SKILL.md frontmatter。
+    """
+    skill_json = _load_json_object(root / "skill.json")
+    config_json = _load_json_object(root / "config.json")
+    frontmatter = parse_skill_md_frontmatter(root)
+
+    display_name = (
+        str(config_json.get("display_name") or "").strip()
+        or str(skill_json.get("name") or "").strip()
+        or str(frontmatter.get("name") or "").strip()
+        or (skill_dir_name or root.name)
+    )
+    description = (
+        str(config_json.get("description") or "").strip()
+        or str(skill_json.get("description") or "").strip()
+        or str(frontmatter.get("description") or "").strip()
+    )
+    when = (
+        str(config_json.get("when") or "").strip()
+        or str(skill_json.get("when") or "").strip()
+        or str(frontmatter.get("when") or "").strip()
+    )
+
+    triggers_raw = (
+        config_json.get("triggers")
+        if "triggers" in config_json
+        else skill_json.get("triggers")
+        if "triggers" in skill_json
+        else frontmatter.get("triggers")
+    )
+    triggers: list[str] = []
+    if isinstance(triggers_raw, list):
+        triggers = [str(x).strip() for x in triggers_raw if str(x).strip()]
+    elif isinstance(triggers_raw, str) and triggers_raw.strip():
+        triggers = [x.strip() for x in triggers_raw.split(",") if x.strip()]
+
+    tags_raw = config_json.get("market_tags")
+    if tags_raw is None:
+        tags_raw = skill_json.get("market_tags") or skill_json.get("tags")
+    tags: list[str] = []
+    if isinstance(tags_raw, list):
+        tags = [str(x).strip() for x in tags_raw if str(x).strip()]
+    elif isinstance(tags_raw, str) and tags_raw.strip():
+        tags = [x.strip() for x in tags_raw.split(",") if x.strip()]
+
+    # 选型文案：description + when，便于注入 prompt
+    selection = description
+    if when and when not in description:
+        selection = f"{description} 触发：{when}".strip() if description else when
+
+    return {
+        "name": skill_dir_name or root.name,
+        "display_name": display_name,
+        "description": description,
+        "when": when,
+        "triggers": triggers,
+        "tags": tags,
+        "selection": selection,
+    }
+
+
 def derive_upload_config_with_meta(root: Path) -> tuple[Dict[str, Any], Dict[str, Any]]:
     """
     从技能包目录推导可入库 config：

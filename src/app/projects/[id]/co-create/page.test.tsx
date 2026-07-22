@@ -182,6 +182,7 @@ function createWorkspaceState(overrides: Record<string, unknown> = {}) {
     versions: [],
     refreshFiles: vi.fn().mockResolvedValue(undefined),
     patchTabContent: vi.fn(),
+    patchTabTitle: vi.fn(),
     reloadFileTab: vi.fn().mockResolvedValue(undefined),
     resetWorkspace: vi.fn(),
     ...overrides,

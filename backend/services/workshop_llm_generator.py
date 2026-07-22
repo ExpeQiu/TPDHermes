@@ -33,6 +33,15 @@ def should_generate_llm_deliverable(skill: Skill) -> bool:
 def _skill_description(skill: Skill) -> str:
     path = skill.skill_path
     if path:
+        try:
+            from backend.services.skill_package import resolve_skill_discovery
+
+            disc = resolve_skill_discovery(Path(path), skill.name)
+            selection = str(disc.get("selection") or disc.get("description") or "").strip()
+            if selection:
+                return selection
+        except Exception:
+            pass
         meta_path = Path(path) / "skill.json"
         if meta_path.is_file():
             try:

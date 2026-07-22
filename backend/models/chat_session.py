@@ -14,7 +14,7 @@ class ChatSessionRecord(Base):
     __tablename__ = "chat_sessions"
 
     id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
-    user_id = Column(String, nullable=False, default="default", index=True)
+    user_id = Column(String, nullable=False, default="default")
     title = Column(String, nullable=False, default="新对话")
     session_kind = Column(String, nullable=False, default="chat")  # chat | scenario
     context_json = Column(Text)
@@ -29,7 +29,7 @@ class ChatMessageRecord(Base):
     __tablename__ = "chat_messages"
 
     id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
-    session_id = Column(String, ForeignKey("chat_sessions.id", ondelete="CASCADE"), nullable=False, index=True)
+    session_id = Column(String, ForeignKey("chat_sessions.id", ondelete="CASCADE"), nullable=False)
     role = Column(String, nullable=False)
     content = Column(Text, nullable=False, default="")
     metadata_json = Column(Text)

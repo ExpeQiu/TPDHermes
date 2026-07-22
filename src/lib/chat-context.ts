@@ -103,6 +103,27 @@ interface CollectionsResponse {
 
 interface WorkshopSkillsResponse {
   skills: string[];
+  catalog?: WorkshopSkillCatalogItem[];
+}
+
+interface WorkshopSkillCatalogItem {
+  name: string;
+  display_name?: string;
+  description?: string;
+  when?: string;
+  triggers?: string[];
+  selection?: string;
+}
+
+interface WorkshopSkillsMetadataResponse {
+  skills: Array<{
+    name: string;
+    display_name?: string;
+    description?: string;
+    when?: string;
+    triggers?: string[];
+    selection?: string;
+  }>;
 }
 
 export interface ChatTransportConfig {
@@ -210,14 +231,25 @@ function formatKbBlock(
   };
 }
 
-function formatSkillsBlock(skills: string[]): ContextBlock {
+function formatSkillsBlock(
+  skills: string[],
+  catalog?: WorkshopSkillCatalogItem[],
+): ContextBlock {
   const display = skills.slice(0, 12);
+  const byName = new Map((catalog ?? []).map((item) => [item.name, item]));
+  const detailLines = display.map((name) => {
+    const meta = byName.get(name);
+    const label = meta?.display_name?.trim() || name;
+    const tip = (meta?.selection || meta?.description || meta?.when || "").trim();
+    return tip ? `- ${name}（${label}）：${tip}` : `- ${name}`;
+  });
   return {
     tool: "mcp_tphermes_workshop_list_skills",
     title: "工坊技能快照",
     content: compactLines([
       `技能数: ${skills.length}`,
-      `技能: ${display.join(", ") || "暂无"}`,
+      `请按 description/when/triggers 匹配后调用对应 skill_name。`,
+      ...detailLines,
       skills.length > display.length ? `其余: 还有 ${skills.length - display.length} 个技能未展开` : null,
     ]),
   };
@@ -717,12 +749,23 @@ export async function buildToolsContext(options: BuildContextOptions): Promise<B
     tasks.push(
       Promise.resolve(options.skillSnapshot ?? [])
         .then(async (skills) => {
-          if (skills.length > 0) return skills;
+          if (skills.length > 0) {
+            try {
+              const metaRes = await fetch(apiV1("/ws/skills/metadata"), {
+                headers: { ...getApiHeaders() },
+              });
+              const metaBody = await readJson<WorkshopSkillsMetadataResponse>(metaRes);
+              return { skills, catalog: metaBody.skills ?? [] };
+            } catch {
+              return { skills, catalog: [] as WorkshopSkillCatalogItem[] };
+            }
+          }
           const res = await fetch(apiV1("/ws/skills"), { headers: { ...getApiHeaders() } });
-          return readJson<WorkshopSkillsResponse>(res).then((body) => body.skills);
+          const body = await readJson<WorkshopSkillsResponse>(res);
+          return { skills: body.skills, catalog: body.catalog ?? [] };
         })
-        .then((skills) => {
-          blocks.push(formatSkillsBlock(skills));
+        .then(({ skills, catalog }) => {
+          blocks.push(formatSkillsBlock(skills, catalog));
         })
         .catch((error) => {
           warnings.push(`技能快照获取失败：${String(error)}`);

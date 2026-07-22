@@ -340,7 +340,10 @@ export function useChatExecution(options: UseChatExecutionOptions) {
       const assistantId = uuid();
       updateSession(sessionId, (session) => ({
         ...session,
-        messages: [...session.messages, { id: assistantId, role: "assistant", content: "" }],
+        messages: [
+          ...session.messages,
+          { id: assistantId, role: "assistant", content: "", createdAt: Date.now() },
+        ],
       }));
       const assistantPlaceholder = sessionsRef.current
         .find((session) => session.id === sessionId)
@@ -997,6 +1000,7 @@ export function useChatExecution(options: UseChatExecutionOptions) {
       id: uuid(),
       role: "user",
       content: text,
+      createdAt: Date.now(),
       userPrompt: sendOptions?.userPrompt,
       regionExcerpts: sendOptions?.regionExcerpts,
       toolsContext,

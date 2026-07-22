@@ -14,7 +14,9 @@ from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
 from pydantic import BaseModel, Field
-from backend.db import async_session_maker
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from backend.db import async_session_maker, get_db
 from backend.models.kb_source_file import KbSourceFile
 from backend.services.chroma_client import ChromaHttpClient, flatten_chroma_get_ids
 from backend.services.kb_cache import kb_cache_service
@@ -34,8 +36,14 @@ from backend.services.kb_entry_manage import (
     update_kb_entry,
 )
 from backend.services.kb_write import add_kb_harvest_entry
-
+from backend.services.project_access import require_project_for_user
+from backend.services.project_kb import (
+    is_project_kb_collection,
+    project_id_from_kb_collection,
+    project_kb_collection,
+)
 from backend.services.rbac import require_feature
+from backend.services.user_identity import get_effective_user_id
 
 router = APIRouter(
     prefix="/kb",
@@ -121,11 +129,35 @@ def _flatten_get_ids(data: dict[str, Any]) -> list[str]:
 
 
 @router.post("/entries")
-async def kb_create_harvest_entry(body: KbHarvestEntryRequest):
-    """对话确认的摘录入库：默认 unpublished 草稿。"""
+async def kb_create_harvest_entry(
+    body: KbHarvestEntryRequest,
+    db: AsyncSession = Depends(get_db),
+    effective_uid: str = Depends(get_effective_user_id),
+):
+    """对话确认的摘录入库：默认 unpublished 草稿。须对目标项目有写权限。"""
+    pid = body.project_id.strip()
+    col = body.collection_name.strip()
+    await require_project_for_user(db, pid, effective_uid, min_perm="write")
+    if is_project_kb_collection(col):
+        col_pid = project_id_from_kb_collection(col)
+        if col_pid != pid:
+            raise HTTPException(
+                status_code=403,
+                detail="collection 与 project_id 不一致，禁止写入其他项目知识库",
+            )
+    else:
+        # 非项目库：仍要求请求方声明的 project 可写；禁止伪造成其他 project.*.kb
+        expected = project_kb_collection(pid)
+        log.info(
+            "kb harvest non-project collection=%s project=%s expected_project_col=%s user=%s",
+            col,
+            pid[:8],
+            expected,
+            effective_uid[:24],
+        )
     return await add_kb_harvest_entry(
-        collection_name=body.collection_name.strip(),
-        project_id=body.project_id.strip(),
+        collection_name=col,
+        project_id=pid,
         title=body.title,
         content=body.content,
         summary=body.summary,

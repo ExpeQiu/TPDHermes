@@ -10,6 +10,8 @@ export interface ServerChatSessionSummary {
   createdAt?: number;
   updatedAt?: string;
   messageCount?: number;
+  /** 共创侧栏按项目过滤；summary 必须带回，否则跨端会当成无会话并误建 */
+  selectedProjectId?: string;
 }
 
 export interface ServerChatSession extends Record<string, unknown> {

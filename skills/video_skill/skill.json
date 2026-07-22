@@ -1,9 +1,27 @@
 {
   "name": "短视频脚本生成",
-  "description": "基于短视频脚本模板生成30-45秒口播脚本，含钩子、技术展示、场景演绎、证据点、CTA",
-  "version": "1.0.0",
+  "description": "生成30-45秒短视频口播脚本（钩子、技术展示、场景演绎、证据点、CTA）。当用户需要短视频脚本、抖音/视频号口播、30秒脚本时使用；完整导演脚本用 video_script_skill。",
+  "when": "短视频脚本 / 口播脚本 / 30秒脚本 / 视频号脚本",
+  "triggers": [
+    "短视频",
+    "口播脚本",
+    "30秒",
+    "45秒",
+    "视频号",
+    "抖音脚本"
+  ],
+  "tags": [
+    "短视频",
+    "口播"
+  ],
+  "market_tags": [
+    "短视频",
+    "口播"
+  ],
+  "market_category": "内容生产",
+  "version": "1.0.1",
   "author": "TPD Team",
-  "template_file": "/Users/expeqiu/Library/Mobile Documents/iCloud~md~obsidian/Documents/expe/openclaw/aima/技术推广/10-模板库/输出模版/短视频脚本模板.md",
+  "template": "template.md",
   "input_schema": {
     "theme": "string (主题)",
     "hook": "string (钩子：痛点/反差/悬念/数字型)",
@@ -11,6 +29,5 @@
     "scene_demo": "string (场景演绎描述)",
     "evidence": "string (证据点：数据/认证/对比)",
     "cta": "string (行动号召)"
-  },
-  "template": "template.md"
+  }
 }

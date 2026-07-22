@@ -1,6 +1,12 @@
-import { apiFetch, apiGet, apiPost, readJson } from "@/lib/api";
+import { apiFetch, apiGet, apiPatch, apiPost, readJson } from "@/lib/api";
 import type { ProjectFileKind } from "@/lib/chat-context";
 import type { FileActionProposal } from "@/app/projects/[id]/co-create/co-create-types";
+import {
+  downloadFilenameBase,
+  fileExtensionForFormat,
+  mimeTypeForFormat,
+  normalizeWorkshopOutputFormat,
+} from "@/lib/workshop-output-artifact";
 
 export interface ProjectFileItem {
   id: string;
@@ -13,6 +19,8 @@ export interface ProjectFileItem {
   updated_at?: string | null;
   summary?: string | null;
   created_at?: string | null;
+  /** 创建者 User ID（输出物有；附件当前未落库则为空） */
+  owner_id?: string | null;
   version?: string | null;
 }
 
@@ -99,6 +107,45 @@ export async function archiveProjectOutput(
   return apiPost<ProjectFileDetail>(`/projects/${projectId}/outputs/${outputId}/archive`, {});
 }
 
+/** 重命名项目文件（输出物改 title；附件改 original_filename） */
+export async function renameProjectFile(
+  projectId: string,
+  fileId: string,
+  kind: ProjectFileKind,
+  title: string,
+): Promise<{ title: string }> {
+  const trimmed = title.trim();
+  if (!trimmed) throw new Error("文件名不能为空");
+  if (kind === "attachment") {
+    const updated = await apiPatch<{ original_filename: string }>(
+      `/projects/${projectId}/attachments/${fileId}`,
+      { original_filename: trimmed },
+    );
+    console.info("[co-create] 附件已重命名", { projectId, fileId, title: updated.original_filename });
+    return { title: updated.original_filename };
+  }
+  const detail = await fetchProjectFileDetail(projectId, fileId, "output");
+  const result = await applyFileAction(projectId, {
+    proposal_id: `rename-${Date.now()}`,
+    action: {
+      type: "patch",
+      target_file_id: fileId,
+      target_kind: "output",
+      content: detail.content ?? "",
+      file_name: trimmed,
+      save_mode: "overwrite",
+    },
+  });
+  const nextTitle =
+    typeof (result as { title?: string }).title === "string"
+      ? (result as { title: string }).title
+      : trimmed.toLowerCase().endsWith(".md")
+        ? trimmed
+        : `${trimmed}.md`;
+  console.info("[co-create] 输出物已重命名", { projectId, fileId, title: nextTitle });
+  return { title: nextTitle };
+}
+
 /** 上传项目附件（与项目详情页「上传附件」一致） */
 export async function uploadProjectAttachment(
   projectId: string,
@@ -119,6 +166,57 @@ export async function uploadProjectAttachment(
     size: file.size,
     ocr: Boolean(options?.ocr),
   });
+}
+
+function triggerBrowserDownload(blob: Blob, filename: string): void {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+function sanitizeDownloadFilename(title: string, fallbackExt: string): string {
+  const raw = (title || "document").trim() || "document";
+  const safe = raw.replace(/[^\w\u4e00-\u9fff.-]+/g, "_").slice(0, 120);
+  if (/\.[a-z0-9]{1,8}$/i.test(safe)) return safe;
+  return `${safe}.${fallbackExt.replace(/^\./, "")}`;
+}
+
+/** 将项目文件导出并触发浏览器本地下载 */
+export async function exportProjectFileToLocal(
+  projectId: string,
+  file: Pick<ProjectFileItem, "id" | "kind" | "title" | "file_type">,
+): Promise<{ filename: string }> {
+  if (file.kind === "attachment") {
+    const res = await apiFetch(`/projects/${projectId}/attachments/${file.id}/download`);
+    if (!res.ok) {
+      const text = await res.text();
+      throw new Error(text.slice(0, 200) || `HTTP ${res.status}`);
+    }
+    const blob = await res.blob();
+    const filename = sanitizeDownloadFilename(file.title, "bin");
+    triggerBrowserDownload(blob, filename);
+    console.info("[co-create] 附件已导出到本地", { projectId, fileId: file.id, filename });
+    return { filename };
+  }
+
+  const detail = await fetchProjectFileDetail(projectId, file.id, "output");
+  const format = normalizeWorkshopOutputFormat(detail.content_format ?? file.file_type);
+  const ext = fileExtensionForFormat(format);
+  const mime = mimeTypeForFormat(format);
+  const title = detail.title || file.title;
+  const filename = `${downloadFilenameBase(title)}.${ext}`;
+  const blob = new Blob([detail.content ?? ""], { type: mime });
+  triggerBrowserDownload(blob, filename);
+  console.info("[co-create] 输出物已导出到本地", {
+    projectId,
+    fileId: file.id,
+    filename,
+    contentLen: detail.content?.length ?? 0,
+  });
+  return { filename };
 }
 
 export function parseFileActionsFromContent(content: string): FileActionProposal[] {

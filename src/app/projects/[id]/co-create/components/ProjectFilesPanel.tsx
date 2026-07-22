@@ -1,12 +1,12 @@
 "use client";
 
-import { useMemo, useRef, useState, type ChangeEvent } from "react";
+import { useMemo, useRef, useState, type ChangeEvent, type MouseEvent } from "react";
 import {
   decodeProjectFileSelectValue,
   encodeProjectFileSelectValue,
   type ProjectFileKind,
 } from "@/lib/chat-context";
-import { uploadProjectAttachment } from "@/lib/co-create-api";
+import { exportProjectFileToLocal, uploadProjectAttachment } from "@/lib/co-create-api";
 import type { ProjectFileItem } from "@/lib/co-create-api";
 import type { FileRefState } from "@/app/projects/[id]/co-create/co-create-types";
 
@@ -52,6 +52,8 @@ export function ProjectFilesPanel({
   const [filter, setFilter] = useState<FilterKind>("all");
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
+  const [exportingKey, setExportingKey] = useState<string | null>(null);
+  const [exportError, setExportError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handlePickAttachment = () => {
@@ -73,6 +75,25 @@ export function ProjectFilesPanel({
       console.warn("[co-create] 附件上传失败", { projectId, err });
     } finally {
       setUploading(false);
+    }
+  };
+
+  const handleExport = async (e: MouseEvent, file: ProjectFileItem) => {
+    e.stopPropagation();
+    e.preventDefault();
+    if (!projectId) return;
+    const fileKey = encodeProjectFileSelectValue(file.kind, file.id);
+    setExportingKey(fileKey);
+    setExportError(null);
+    try {
+      const result = await exportProjectFileToLocal(projectId, file);
+      console.info("[co-create] 已触发本地下载", { projectId, fileKey, filename: result.filename });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "导出失败";
+      setExportError(message);
+      console.warn("[co-create] 导出失败", { projectId, fileKey, err });
+    } finally {
+      setExportingKey(null);
     }
   };
 
@@ -125,6 +146,9 @@ export function ProjectFilesPanel({
             刷新
           </button>
         </div>
+        {exportError ? (
+          <p className="text-[10px] leading-relaxed text-red-500">{exportError}</p>
+        ) : null}
       </div>
 
       <div className="min-h-0 flex-1 space-y-0.5 overflow-y-auto overscroll-contain p-1">
@@ -140,15 +164,11 @@ export function ProjectFilesPanel({
             const state = refStateFor(fileKey, pinnedFileIds, roundFileIds);
             const isOpen = openTabKeys.includes(fileKey);
             const isActive = activeFileKey === fileKey;
+            const isExporting = exportingKey === fileKey;
             return (
-              <button
+              <div
                 key={fileKey}
-                type="button"
-                onClick={(e) => {
-                  e.currentTarget.focus({ preventScroll: true });
-                  onSelectPreview(fileKey);
-                }}
-                className={`flex w-full items-start gap-2 rounded-md px-2 py-2 text-left text-xs no-underline transition ${
+                className={`group flex w-full items-stretch gap-1 rounded-md text-xs transition ${
                   isActive
                     ? "bg-blue-50 dark:bg-blue-950/30"
                     : isOpen
@@ -156,25 +176,52 @@ export function ProjectFilesPanel({
                       : "hover:bg-slate-200/60 dark:hover:bg-slate-800/60"
                 }`}
               >
-                <span className="relative shrink-0 text-sm leading-none">
-                  {file.kind === "output" ? "📄" : "📎"}
-                  {isOpen ? (
-                    <span
-                      className="absolute -right-0.5 -top-0.5 h-1.5 w-1.5 rounded-full bg-blue-500 ring-1 ring-white dark:ring-slate-900"
-                      title="已打开"
-                    />
-                  ) : null}
-                </span>
-                <span className="min-w-0 flex-1">
-                  <span className="block truncate font-medium">{file.title}</span>
-                  <span className="block truncate text-[10px] text-slate-500">{file.path}</span>
-                </span>
-                {state !== "unselected" ? (
-                  <span className="shrink-0 rounded bg-slate-200 px-1 text-[10px] dark:bg-slate-700">
-                    {refBadge[state]}
+                <button
+                  type="button"
+                  data-file-key={fileKey}
+                  aria-current={isActive ? "true" : undefined}
+                  onClick={(e) => {
+                    e.preventDefault();
+                    e.currentTarget.focus({ preventScroll: true });
+                    console.info("[co-create] 点击文件列表项", {
+                      fileKey,
+                      title: file.title,
+                      kind: file.kind,
+                    });
+                    onSelectPreview(fileKey);
+                  }}
+                  className="flex min-w-0 flex-1 items-start gap-2 rounded-md px-2 py-2 text-left no-underline"
+                >
+                  <span className="relative shrink-0 text-sm leading-none">
+                    {file.kind === "output" ? "📄" : "📎"}
+                    {isOpen ? (
+                      <span
+                        className="absolute -right-0.5 -top-0.5 h-1.5 w-1.5 rounded-full bg-blue-500 ring-1 ring-white dark:ring-slate-900"
+                        title="已打开"
+                      />
+                    ) : null}
                   </span>
-                ) : null}
-              </button>
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate font-medium">{file.title}</span>
+                    <span className="block truncate text-[10px] text-slate-500">{file.path}</span>
+                  </span>
+                  {state !== "unselected" ? (
+                    <span className="shrink-0 rounded bg-slate-200 px-1 text-[10px] dark:bg-slate-700">
+                      {refBadge[state]}
+                    </span>
+                  ) : null}
+                </button>
+                <button
+                  type="button"
+                  title={`导出 ${file.title}`}
+                  aria-label={`导出 ${file.title}`}
+                  disabled={isExporting || !projectId}
+                  onClick={(e) => void handleExport(e, file)}
+                  className="my-1 mr-1 shrink-0 self-center rounded-md px-1.5 py-1 text-[10px] font-medium text-slate-600 opacity-80 transition hover:bg-white hover:text-blue-700 disabled:cursor-not-allowed disabled:opacity-40 group-hover:opacity-100 dark:text-slate-300 dark:hover:bg-slate-700 dark:hover:text-blue-300"
+                >
+                  {isExporting ? "…" : "导出"}
+                </button>
+              </div>
             );
           })
         )}

@@ -32,6 +32,13 @@ def kb_upload_root() -> Path:
     return Path(os.getenv("KB_UPLOAD_DIR", str(Path("./data/kb_uploads").resolve()))).resolve()
 
 
+def project_kb_md_root(project_id: str | None = None) -> Path:
+    """项目入库中间 markdown 根：`$KB_UPLOAD_DIR/project_kb[/{project_id}]`。"""
+    base = kb_upload_root() / "project_kb"
+    pid = str(project_id or "").strip()
+    return (base / pid) if pid else base
+
+
 def _normalize_text(s: str) -> str:
     return "\n".join((s or "").split()).strip()
 

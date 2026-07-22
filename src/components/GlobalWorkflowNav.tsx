@@ -33,16 +33,21 @@ export default function GlobalWorkflowNav() {
   }, []);
 
   const navItems = useMemo(() => {
-    const filterByAccess = (item: (typeof WORKFLOW_NAV_ITEMS)[number]) => {
-      if (item.requiredFeature) return canAccess(item.requiredFeature);
-      if (item.adminOnly) return canAccess("create" as FeatureKey) || canAccess("knowledge" as FeatureKey);
-      return true;
-    };
-    // 避免 SSR 与客户端 localStorage 权限缓存不一致导致 hydration 报错
+    const isRestricted = (item: (typeof WORKFLOW_NAV_ITEMS)[number]) =>
+      Boolean(item.requiredFeature || item.adminOnly);
+
+    // 权限未就绪时隐藏受限入口，避免无权限用户短暂看到「场景编排 / 知识库」等
     if (!mounted || !ready) {
-      return WORKFLOW_NAV_ITEMS.filter((item) => !item.requiredFeature && !item.adminOnly);
+      return WORKFLOW_NAV_ITEMS.filter((item) => !isRestricted(item));
     }
-    return WORKFLOW_NAV_ITEMS.filter(filterByAccess);
+
+    return WORKFLOW_NAV_ITEMS.filter((item) => {
+      if (item.requiredFeature) return canAccess(item.requiredFeature);
+      if (item.adminOnly) {
+        return canAccess("create" as FeatureKey) || canAccess("knowledge" as FeatureKey);
+      }
+      return true;
+    });
   }, [mounted, ready, canAccess]);
 
   return (

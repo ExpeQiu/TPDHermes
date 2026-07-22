@@ -131,7 +131,15 @@ async def ingest_usage_events(
     now = _utc_now_iso()
     rows: list[UsageEvent] = []
     for item in body.events:
-        uid = (item.user_id or "").strip() or effective_uid
+        # 禁止客户端伪造埋点身份，统一归属当前有效用户
+        uid = effective_uid
+        claimed = (item.user_id or "").strip()
+        if claimed and claimed != effective_uid:
+            logger.warning(
+                "metrics ignored event.user_id claimed=%s trusted=%s",
+                claimed[:24],
+                effective_uid[:24],
+            )
         rows.append(
             UsageEvent(
                 id=str(uuid.uuid4()),

@@ -1,0 +1,31 @@
+{
+  "name": "技术推广导演脚本",
+  "description": "生成中文《技术推广视频导演脚本》（创意、故事框架、分镜、技术需求）。当用户需要导演脚本、宣传片脚本、完整分镜脚本（非30秒口播）时使用。",
+  "when": "导演脚本 / 宣传片脚本 / 完整分镜 / 视频创意",
+  "triggers": [
+    "导演脚本",
+    "宣传片脚本",
+    "分镜脚本",
+    "视频创意",
+    "技术推广视频"
+  ],
+  "tags": [
+    "导演脚本",
+    "分镜"
+  ],
+  "market_tags": [
+    "导演脚本",
+    "分镜"
+  ],
+  "market_category": "内容生产",
+  "version": "1.0.1",
+  "author": "TPD Team",
+  "template": "templates/video_script.md",
+  "templates": [
+    {
+      "id": "video_script",
+      "label": "技术推广视频导演脚本",
+      "path": "templates/video_script.md"
+    }
+  ]
+}

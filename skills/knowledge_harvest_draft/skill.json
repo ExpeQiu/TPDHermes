@@ -1,7 +1,24 @@
 {
-  "name": "knowledge_harvest_draft",
-  "description": "从对话摘录生成结构化知识收割草稿（不写入 KB、不替代用户确认）",
-  "version": "1.0.0",
+  "name": "知识收割草稿",
+  "description": "从对话摘录生成结构化知识收割草稿（不直接写入KB，需用户确认）。当用户需要知识收割、对话沉淀、知识草稿、经验结构化时使用。",
+  "when": "知识收割 / 对话沉淀 / 知识草稿 / 经验结构化",
+  "triggers": [
+    "知识收割",
+    "对话沉淀",
+    "知识草稿",
+    "经验沉淀",
+    "结构化摘录"
+  ],
+  "tags": [
+    "知识收割",
+    "沉淀"
+  ],
+  "market_tags": [
+    "知识收割",
+    "沉淀"
+  ],
+  "market_category": "知识管理",
+  "version": "1.0.1",
   "author": "TPD Team",
   "input_schema": {
     "conversation_excerpt": "string，待沉淀的对话或技术说明原文",

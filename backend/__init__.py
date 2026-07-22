@@ -77,6 +77,9 @@ async def lifespan(app: FastAPI):
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
         await conn.run_sync(run_sqlite_migrations)
+    from backend.db import apply_sqlite_runtime_pragmas
+
+    await apply_sqlite_runtime_pragmas()
     logger.info("Database ready.")
     from backend.services.kb_embedding import (
         embed_warmup_blocking_enabled,

@@ -105,6 +105,17 @@ async def upsert_project_member(
     if not uid:
         raise HTTPException(status_code=400, detail="member user_id 不能为空")
 
+    project = await db.get(Project, project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    owner_uid = (project.owner_id or "default").strip() or "default"
+    # 仅 projects.owner_id 可持有成员表 role=owner，避免多 owner 双轨
+    if normalized_role == "owner" and uid != owner_uid:
+        raise HTTPException(
+            status_code=400,
+            detail="仅项目负责人可持有 owner 角色；请先转让负责人或使用 editor",
+        )
+
     existing = (
         await db.execute(
             select(ProjectMember).where(
@@ -119,12 +130,6 @@ async def upsert_project_member(
         existing.updated_at = now
         await db.commit()
         await db.refresh(existing)
-        logger.info(
-            "project member updated project=%s user=%s role=%s",
-            project_id[:8],
-            uid[:24],
-            normalized_role,
-        )
         return existing
 
     row = ProjectMember(
@@ -139,7 +144,7 @@ async def upsert_project_member(
     await db.commit()
     await db.refresh(row)
     logger.info(
-        "project member added project=%s user=%s role=%s",
+        "project member upserted project=%s user=%s role=%s",
         project_id[:8],
         uid[:24],
         normalized_role,

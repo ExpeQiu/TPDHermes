@@ -19,10 +19,31 @@ const DATE_OPTIONS: Intl.DateTimeFormatOptions = {
   day: "2-digit",
 };
 
-function parseDate(value: string | Date | null | undefined): Date | null {
-  if (!value) return null;
+function parseDate(value: string | number | Date | null | undefined): Date | null {
+  if (value == null || value === "") return null;
   const parsed = value instanceof Date ? value : new Date(value);
   return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
+/** 对话气泡时间，如 2026-07-20 14:55（Asia/Shanghai） */
+export function formatMessageTimestamp(
+  value: string | number | Date | null | undefined,
+): string | null {
+  const parsed = parseDate(value);
+  if (!parsed) return null;
+  const parts = new Intl.DateTimeFormat(LOCALE, {
+    timeZone: APP_TIME_ZONE,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).formatToParts(parsed);
+  const get = (type: Intl.DateTimeFormatPartTypes) =>
+    parts.find((part) => part.type === type)?.value ?? "";
+  const hour = get("hour");
+  return `${get("year")}-${get("month")}-${get("day")} ${hour === "24" ? "00" : hour}:${get("minute")}`;
 }
 
 /** 日期 + 时间（Asia/Shanghai），如 2026/07/02 17:05 */

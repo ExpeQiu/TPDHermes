@@ -228,7 +228,8 @@ function summaryToShellSession(summary: ServerChatSessionSummary): ChatSession {
     createdAt: summary.createdAt ?? Date.now(),
     linkedOutputIds: [],
     linkedRunIds: [],
-    selectedProjectId: "",
+    selectedProjectId:
+      typeof summary.selectedProjectId === "string" ? summary.selectedProjectId.trim() : "",
     selectedCollection: "",
     includeProjectContext: sessionKind === "project_co_create",
     includeKnowledgeContext: false,
@@ -525,7 +526,11 @@ export function useChatSessionStore({
         agentUndoStack: defaults?.agentUndoStack ?? [],
         touchedFileIds: defaults?.touchedFileIds ?? [],
       };
-      const next = [session, ...sessionsRef.current];
+      // 共创侧栏按创建时间升序展示，新建会话追加到末尾
+      const next =
+        storageNamespace === "co-create"
+          ? [...sessionsRef.current, session]
+          : [session, ...sessionsRef.current];
       saveAndSet(next);
       activeIdRef.current = session.id;
       setActiveId(session.id);
@@ -622,9 +627,17 @@ export function useChatSessionStore({
         }
         const active = localStorage.getItem(chatActiveStorageKey(scopeUserId, storageNamespace));
         if (normalized.length === 0) {
+          // 共创会话必须绑定 projectId，交由共创页按项目创建，避免空 orphan 导致跨端误建
+          if (storageNamespace === "co-create") {
+            sessionsRef.current = [];
+            setSessions([]);
+            setActiveId(null);
+            console.info("[chat] 共创命名空间无会话，等待页面按项目新建");
+            return;
+          }
           const first: ChatSession = {
             id: uuid(),
-            title: storageNamespace === "co-create" ? "新共创" : "新对话",
+            title: "新对话",
             messages: [],
             createdAt: Date.now(),
             selectedProjectId: "",
@@ -635,9 +648,6 @@ export function useChatSessionStore({
             chatMode: "co_create",
             includeFileContext: false,
             selectedFileId: "",
-            ...(storageNamespace === "co-create"
-              ? { sessionKind: "project_co_create" as const }
-              : {}),
           };
           saveSessions(scopeUserId, [first], storageNamespace);
           sessionsRef.current = [first];
@@ -681,7 +691,20 @@ export function useChatSessionStore({
             storedActive && clientSessions.some((session) => session.id === storedActive)
               ? storedActive
               : clientSessions[0]?.id;
-          if (targetActive) {
+          // 共创：批量 hydrate，确保 selectedProjectId / 文件引用可用于侧栏过滤，避免首进误建
+          if (storageNamespace === "co-create") {
+            const hydratedAll = await Promise.all(
+              clientSessions.map(async (session) => {
+                const full = await hydrateSessionDetail(session.id);
+                return full ?? session;
+              }),
+            );
+            clientSessions = hydratedAll;
+            console.info("[chat] 共创会话已批量 hydrate", {
+              count: clientSessions.length,
+              withProject: clientSessions.filter((s) => Boolean(s.selectedProjectId?.trim())).length,
+            });
+          } else if (targetActive) {
             const hydrated = await hydrateSessionDetail(targetActive);
             if (hydrated) {
               clientSessions = clientSessions.map((session) =>

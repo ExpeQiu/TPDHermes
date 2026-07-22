@@ -69,14 +69,14 @@ class ScenarioVersionMismatchError(Exception):
 
 # 回退用元数据（与历史前端 scenario id 对齐；持久化后以 DB 为准）
 SCENARIO_CATALOG: dict[str, tuple[str, str, str]] = {
-    "general": ("通用对话", "通用协作与问答", "collaborative"),
+    "general": ("通用协作", "通用协作与问答", "collaborative"),
     "refine": ("结果优化", "对已有内容继续优化和重写", "task_oriented"),
-    "tech-doc": ("技术文档写作", "输出结构化技术文档", "task_oriented"),
-    "data-report": ("数据分析报告", "输出数据驱动型分析报告", "task_oriented"),
-    "prd": ("产品需求文档", "输出 PRD 与需求规格", "task_oriented"),
-    "marketing": ("营销推广文案", "输出传播型文案", "task_oriented"),
-    "debug": ("故障排查报告", "输出故障复盘与改进", "task_oriented"),
-    "kb-qa": ("知识库问答", "基于知识检索的问答", "collaborative"),
+    "tech-doc": ("技术趋势洞察", "行业趋势、调研与竞品对标", "task_oriented"),
+    "data-report": ("技术IP包装策略", "IP 全案、货架、矩阵与车型赋能", "task_oriented"),
+    "prd": ("技术传播策划", "传播方案、传播稿与素材清单", "task_oriented"),
+    "marketing": ("技术活动与展具", "活动策划、展具与认证方案", "task_oriented"),
+    "debug": ("领导讲稿与采访", "讲稿、发言稿与采访 QA", "task_oriented"),
+    "kb-qa": ("视频与销售赋能", "视频脚本与销售话术", "task_oriented"),
 }
 
 
@@ -323,13 +323,7 @@ async def assemble_payload(
     entrypoint = request.entrypoint
     scenario_id = (request.scenario_id or "general").strip() or "general"
 
-    effective_message = request.user_message or ""
-    if entrypoint == "workshop":
-        effective_message = _merge_task_into_workshop_message(request)
-    else:
-        ti_block = _text_task_input_block(request)
-        if ti_block:
-            effective_message = ti_block
+    effective_message = _merge_task_into_workshop_message(request)
 
     profile_row = await _load_scenario_profile(db, scenario_id)
 
@@ -589,7 +583,11 @@ async def assemble_payload(
     # 对话场景改为用户手动「存入项目」，不在编排完成时自动落 outputs
     save_output = entrypoint != "chat"
     execution = OrchestrationExecution(
-        stream=request.stream, trace=True, save_output=save_output, save_run_log=True
+        stream=request.stream,
+        trace=True,
+        save_output=save_output,
+        save_run_log=True,
+        session_id=(request.session_id or "").strip() or None,
     )
 
     payload = OrchestrationPayload(
@@ -615,6 +613,7 @@ async def assemble_payload(
         "template_id": output.template_id,
         "entrypoint": entrypoint,
         "user_id": effective_user_id[:24],
+        "session_id": (request.session_id or "").strip() or None,
     }
     logger.info(
         "orchestration assembled request_id=%s entrypoint=%s project=%s scenario=%s ver=%s user_id=%s",

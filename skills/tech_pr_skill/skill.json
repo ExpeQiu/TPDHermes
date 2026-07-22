@@ -1,0 +1,31 @@
+{
+  "name": "IP技术传播稿",
+  "description": "生成中文《IP技术/事件传播稿》（新闻稿结构：导语、亮点、引言、战略意义、媒体联络）。当用户需要技术新闻稿、官方通稿、事件传播稿、PR稿时使用。",
+  "when": "技术新闻稿 / 官方通稿 / 事件传播稿 / PR稿",
+  "triggers": [
+    "新闻稿",
+    "传播稿",
+    "官方通稿",
+    "PR稿",
+    "技术发布稿"
+  ],
+  "tags": [
+    "新闻稿",
+    "传播稿"
+  ],
+  "market_tags": [
+    "新闻稿",
+    "传播稿"
+  ],
+  "market_category": "内容生产",
+  "version": "1.0.1",
+  "author": "TPD Team",
+  "template": "templates/tech_pr.md",
+  "templates": [
+    {
+      "id": "tech_pr",
+      "label": "IP技术/事件传播稿",
+      "path": "templates/tech_pr.md"
+    }
+  ]
+}

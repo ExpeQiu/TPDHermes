@@ -1,0 +1,31 @@
+{
+  "name": "IP技术认证策划",
+  "description": "生成中文《IP技术认证策划方案》（认证科目、规则排期、传播权益与报价）。当用户需要第三方认证立项、权威认证策划、认证传播权益时使用。",
+  "when": "技术认证 / 第三方认证 / 认证立项 / 认证传播权益",
+  "triggers": [
+    "技术认证",
+    "第三方认证",
+    "认证策划",
+    "认证立项",
+    "权威认证"
+  ],
+  "tags": [
+    "技术认证",
+    "权威背书"
+  ],
+  "market_tags": [
+    "技术认证",
+    "权威背书"
+  ],
+  "market_category": "技术IP",
+  "version": "1.0.1",
+  "author": "TPD Team",
+  "template": "templates/ip_cert_plan.md",
+  "templates": [
+    {
+      "id": "ip_cert_plan",
+      "label": "IP技术认证策划方案",
+      "path": "templates/ip_cert_plan.md"
+    }
+  ]
+}

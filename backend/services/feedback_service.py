@@ -153,6 +153,7 @@ async def list_feedback(
     run_id: str | None = None,
     session_id: str | None = None,
     project_id: str | None = None,
+    user_id: str | None = None,
     limit: int = 50,
 ) -> list[FeedbackEvent]:
     q = select(FeedbackEvent).order_by(desc(FeedbackEvent.created_at)).limit(min(limit, 200))
@@ -162,6 +163,8 @@ async def list_feedback(
         q = q.where(FeedbackEvent.session_id == session_id)
     if project_id:
         q = q.where(FeedbackEvent.project_id == project_id)
+    if user_id:
+        q = q.where(FeedbackEvent.user_id == user_id)
     result = await db.execute(q)
     return list(result.scalars().all())
 
@@ -235,7 +238,7 @@ async def enqueue_feedback_prompts(db: AsyncSession, *, hours: int = 24) -> int:
                 id=str(uuid.uuid4()),
                 run_id=run.id,
                 project_id=run.project_id,
-                user_id="default",
+                user_id=(run.user_id or "default").strip() or "default",
                 prompt_status="pending",
             )
         )
@@ -250,6 +253,7 @@ async def list_pending_prompts(
     db: AsyncSession,
     *,
     session_id: str | None = None,
+    user_id: str | None = None,
     limit: int = 20,
 ) -> list[FeedbackPrompt]:
     q = (
@@ -260,6 +264,8 @@ async def list_pending_prompts(
     )
     if session_id:
         q = q.where(FeedbackPrompt.session_id == session_id)
+    if user_id:
+        q = q.where(FeedbackPrompt.user_id == user_id)
     result = await db.execute(q)
     return list(result.scalars().all())
 

@@ -1,15 +1,27 @@
 {
   "name": "销售话术手册生成",
-  "description": "基于销售话术手册模板生成4S店实战话术，含开场白/卖点/场景/异议处理/逼单",
-  "version": "1.0.0",
+  "description": "生成4S店实战销售话术手册（展厅/DCC开场、卖点讲解、场景话术、异议处理、逼单转化）。当用户需要销售话术、门店话术、顾问话术、异议处理、试驾转化、终端培训手册时使用。",
+  "when": "销售话术 / 门店话术 / 顾问话术 / 异议处理 / 试驾转化 / 终端培训",
+  "triggers": [
+    "销售话术",
+    "门店话术",
+    "顾问话术",
+    "异议处理",
+    "试驾转化",
+    "逼单",
+    "4S店培训"
+  ],
+  "tags": ["销售话术", "4S店", "异议处理", "试驾"],
+  "market_tags": ["销售话术", "门店", "异议处理"],
+  "market_category": "终端转化",
+  "version": "1.0.1",
   "author": "TPD Team",
-  "template_file": "/Users/expeqiu/Library/Mobile Documents/iCloud~md~obsidian/Documents/expe/openclaw/aima/技术推广/10-模板库/输出模版/销售话术手册-模板.md",
+  "template": "template.md",
   "input_schema": {
     "vehicle_model": "string (车型)",
     "tech_brand": "string (技术品牌)",
     "top_selling_points": "array of string (主打卖点，3个)",
     "target_competitors": "array of string (对标竞品)",
     "target_users": "array of {type, pain_point, pitch} (目标用户类型)"
-  },
-  "template": "template.md"
+  }
 }

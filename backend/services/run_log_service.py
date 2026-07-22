@@ -140,3 +140,16 @@ async def mark_run_failed(db: AsyncSession, run_id: str, message: str) -> None:
     res.error_message = message
     res.updated_at = datetime.now().isoformat()
     await db.commit()
+
+
+async def mark_run_failed_if_running(db: AsyncSession, run_id: str, message: str) -> bool:
+    """仅当仍为 running 时收口为 failed，避免覆盖已成功 finalize 的状态。"""
+    res = await db.get(OrchestrationRun, run_id)
+    if not res or (res.status or "").strip() != "running":
+        return False
+    res.status = "failed"
+    res.error_message = (res.error_message or "").strip() or message
+    res.updated_at = datetime.now().isoformat()
+    await db.commit()
+    logger.warning("run forced failed (was running) run_id=%s msg=%s", run_id, message[:120])
+    return True

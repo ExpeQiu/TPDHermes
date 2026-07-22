@@ -1,11 +1,12 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState, type KeyboardEvent, type MouseEvent, type ReactNode } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type MouseEvent, type ReactNode } from "react";
 import { InlineTextDiff } from "@/app/projects/[id]/co-create/components/InlineTextDiff";
 import type { PatchEditMode, SelectionToChatPayload } from "@/app/projects/[id]/co-create/co-create-types";
 import { patchEditModeLabel } from "@/app/projects/[id]/co-create/co-create-partial-patch";
 import { ProjectOutputContentBody } from "@/components/project-output-content";
 import { fetchProjectFileDetail, type ProjectFileDetail, type ProjectFileVersionItem } from "@/lib/co-create-api";
+import { formatDateTimeShanghai } from "@/lib/datetime";
 
 type ViewTab = "preview" | "edit" | "versions";
 
@@ -25,11 +26,13 @@ type Props = {
   saving?: boolean;
   onSelectTab: (fileKey: string) => void;
   onCloseTab: (fileKey: string) => void;
+  onReloadTab?: (fileKey: string) => void;
   onAddToRound: (fileKey: string) => void;
   onPin: (fileKey: string) => void;
   onAskInterpret: (fileKey: string) => void;
   onAskModify: (fileKey: string) => void;
   onSaveContent?: (fileKey: string, content: string) => Promise<void>;
+  onRenameFile?: (fileKey: string, title: string) => Promise<void>;
   onRestoreVersion?: (version: ProjectFileVersionItem) => Promise<void>;
   onAddSelectionToChat?: (payload: SelectionToChatPayload) => void;
   onEditSelection?: (text: string) => void;
@@ -128,11 +131,13 @@ export function FilePreviewPanel({
   saving,
   onSelectTab,
   onCloseTab,
+  onReloadTab,
   onAddToRound,
   onPin,
   onAskInterpret,
   onAskModify,
   onSaveContent,
+  onRenameFile,
   onRestoreVersion,
   onAddSelectionToChat,
   onEditSelection,
@@ -144,6 +149,9 @@ export function FilePreviewPanel({
   const [viewTab, setViewTab] = useState<ViewTab>("preview");
   const [editDraft, setEditDraft] = useState("");
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [titleDraft, setTitleDraft] = useState("");
+  const [renaming, setRenaming] = useState(false);
+  const [renameError, setRenameError] = useState<string | null>(null);
   const [selectionMenu, setSelectionMenu] = useState<SelectionMenuState | null>(null);
   const [selectedVersion, setSelectedVersion] = useState<ProjectFileVersionItem | null>(null);
   const [versionDetailLoading, setVersionDetailLoading] = useState(false);
@@ -152,12 +160,20 @@ export function FilePreviewPanel({
   const [versionDetailFormat, setVersionDetailFormat] = useState<string | null>(null);
   const previewRef = useRef<HTMLDivElement>(null);
   const autoSaveTimerRef = useRef<number | null>(null);
+  const [draftFileKey, setDraftFileKey] = useState<string | null>(null);
+  const [titleFileKey, setTitleFileKey] = useState<string | null>(null);
 
   const savedContent = previewDetail?.content ?? "";
   const canEdit = previewDetail?.kind === "output";
   const currentOutputId = previewDetail?.kind === "output" ? previewDetail.id : null;
   const isAttachment = previewDetail?.kind === "attachment";
-  const isDirty = editDraft !== savedContent;
+  const displayTitle =
+    previewDetail?.title?.trim() ||
+    (activeFileKey ? tabLabels[activeFileKey] : "") ||
+    "未命名";
+  // 草稿必须绑定当前文件，避免切换文件时短暂显示/保存上一份内容
+  const isDirty = draftFileKey === activeFileKey && editDraft !== savedContent;
+  const titleDirty = titleFileKey === activeFileKey && titleDraft.trim() !== displayTitle;
   const showPatchDiff = Boolean(pendingPatch && viewTab === "preview");
   const diffBefore = pendingPatch?.before ?? savedContent;
   const diffAfter = pendingPatch?.after ?? savedContent;
@@ -179,13 +195,32 @@ export function FilePreviewPanel({
   useEffect(() => {
     setViewTab("preview");
     setSaveError(null);
+    setRenameError(null);
     closeSelectionMenu();
     setSelectedVersion(null);
     setVersionDetailLoading(false);
     setVersionDetailError(null);
     setVersionDetailContent(null);
     setVersionDetailFormat(null);
+    if (autoSaveTimerRef.current) {
+      window.clearTimeout(autoSaveTimerRef.current);
+      autoSaveTimerRef.current = null;
+    }
+    console.info("[co-create] 预览切换文件", { activeFileKey });
   }, [activeFileKey, closeSelectionMenu]);
+
+  // 在绘制前同步草稿，避免「点了下面文件却仍显示上面文件内容」
+  useLayoutEffect(() => {
+    setEditDraft(savedContent);
+    setDraftFileKey(activeFileKey);
+    setSaveError(null);
+  }, [activeFileKey, savedContent]);
+
+  useLayoutEffect(() => {
+    setTitleDraft(displayTitle);
+    setTitleFileKey(activeFileKey);
+    setRenameError(null);
+  }, [activeFileKey, displayTitle]);
 
   useEffect(() => {
     if (viewTab !== "versions") {
@@ -196,11 +231,6 @@ export function FilePreviewPanel({
       setVersionDetailFormat(null);
     }
   }, [viewTab]);
-
-  useEffect(() => {
-    setEditDraft(savedContent);
-    setSaveError(null);
-  }, [activeFileKey, savedContent]);
 
   useEffect(() => {
     if (viewTab !== "preview") closeSelectionMenu();
@@ -233,16 +263,11 @@ export function FilePreviewPanel({
         onEditSelection?.(text);
         closeSelectionMenu();
       }
-      if ((e.key === "u" || e.key === "U") && text) {
-        e.preventDefault();
-        const meta = getSelectionMeta(previewRef.current);
-        if (meta) onAddSelectionToChat?.(meta);
-        closeSelectionMenu();
-      }
+      // ⌘U「添加到对话框中改写」已停用；改用菜单「AI 改写选段」
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [viewTab, onAddSelectionToChat, onEditSelection, closeSelectionMenu]);
+  }, [viewTab, onEditSelection, closeSelectionMenu]);
 
   const handlePreviewMouseUp = (e: MouseEvent<HTMLDivElement>) => {
     if (e.button !== 0) return;
@@ -366,14 +391,45 @@ export function FilePreviewPanel({
   );
 
   const handleSave = useCallback(async () => {
-    if (!activeFileKey || !onSaveContent || !isDirty) return;
+    if (!activeFileKey || !onSaveContent) return;
+    if (draftFileKey !== activeFileKey) {
+      console.warn("[co-create] 跳过保存：草稿不属于当前文件", {
+        activeFileKey,
+        draftFileKey,
+      });
+      return;
+    }
+    if (editDraft === savedContent) return;
     setSaveError(null);
     try {
       await onSaveContent(activeFileKey, editDraft);
     } catch (err) {
       setSaveError(err instanceof Error ? err.message : "保存失败");
     }
-  }, [activeFileKey, editDraft, isDirty, onSaveContent]);
+  }, [activeFileKey, draftFileKey, editDraft, onSaveContent, savedContent]);
+
+  const handleRename = useCallback(async () => {
+    if (!titleFileKey || !onRenameFile) return;
+    const next = titleDraft.trim();
+    if (!next) {
+      setRenameError("文件名不能为空");
+      return;
+    }
+    if (titleFileKey !== activeFileKey) {
+      console.warn("[co-create] 跳过重命名：文件已切换", { titleFileKey, activeFileKey });
+      return;
+    }
+    if (next === displayTitle) return;
+    setRenaming(true);
+    setRenameError(null);
+    try {
+      await onRenameFile(titleFileKey, next);
+    } catch (err) {
+      setRenameError(err instanceof Error ? err.message : "重命名失败");
+    } finally {
+      setRenaming(false);
+    }
+  }, [activeFileKey, displayTitle, onRenameFile, titleDraft, titleFileKey]);
 
   const handleEditKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
     if ((e.metaKey || e.ctrlKey) && e.key === "s") {
@@ -412,7 +468,85 @@ export function FilePreviewPanel({
   return (
     <aside className="flex h-full min-h-0 flex-col overflow-hidden bg-slate-100 dark:bg-slate-900/40">
       <div className="shrink-0 space-y-2 border-b border-slate-300 p-3 dark:border-slate-700">
-        <p className="text-xs font-semibold text-slate-700 dark:text-slate-200">文件预览</p>
+        <div className="flex items-start justify-between gap-2">
+          <p className="text-xs font-semibold text-slate-700 dark:text-slate-200">文件预览</p>
+          {activeFileKey ? (
+            <div
+              className="min-w-0 max-w-[60%] text-right text-[10px] leading-snug text-slate-500 dark:text-slate-400"
+              title={
+                [
+                  previewDetail?.owner_id ? `创建者 ${previewDetail.owner_id}` : null,
+                  previewDetail?.created_at
+                    ? `创建于 ${formatDateTimeShanghai(previewDetail.created_at)}`
+                    : null,
+                ]
+                  .filter(Boolean)
+                  .join(" · ") || undefined
+              }
+            >
+              <p className="truncate font-mono">
+                {previewDetail?.owner_id?.trim()
+                  ? previewDetail.owner_id.trim()
+                  : previewLoading
+                    ? "…"
+                    : "创建者未记录"}
+              </p>
+              <p className="truncate">
+                {previewDetail?.created_at
+                  ? formatDateTimeShanghai(previewDetail.created_at)
+                  : previewLoading
+                    ? "加载时间…"
+                    : "时间未记录"}
+              </p>
+            </div>
+          ) : null}
+        </div>
+        {activeFileKey ? (
+          <div className="space-y-1">
+            <div className="flex items-center gap-2">
+              <input
+                type="text"
+                value={titleDraft}
+                onChange={(e) => {
+                  setTitleDraft(e.target.value);
+                  setRenameError(null);
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    void handleRename();
+                  }
+                  if (e.key === "Escape") {
+                    setTitleDraft(displayTitle);
+                    setRenameError(null);
+                  }
+                }}
+                onBlur={() => {
+                  if (titleDirty) void handleRename();
+                }}
+                disabled={renaming || !onRenameFile || previewLoading}
+                placeholder="文件名"
+                aria-label="文件名"
+                className="min-w-0 flex-1 rounded-md border border-slate-300 bg-white px-2 py-1 text-xs font-medium text-slate-900 outline-none ring-blue-500 focus:ring-2 disabled:opacity-60 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100"
+              />
+              {titleDirty ? (
+                <button
+                  type="button"
+                  disabled={renaming || !onRenameFile}
+                  onClick={() => void handleRename()}
+                  className="shrink-0 rounded-md bg-blue-600 px-2 py-1 text-[10px] text-white transition hover:bg-blue-500 disabled:opacity-50"
+                >
+                  {renaming ? "保存中…" : "改名"}
+                </button>
+              ) : null}
+            </div>
+            {renameError ? (
+              <p className="text-[10px] text-red-500">{renameError}</p>
+            ) : (
+              <p className="text-[10px] text-slate-400">可直接修改文件名，回车或失焦保存</p>
+            )}
+          </div>
+        ) : null}
         {openTabKeys.length > 0 ? (
           <div className="flex flex-wrap gap-1">
             {openTabKeys.map((fileKey) => {
@@ -541,14 +675,31 @@ export function FilePreviewPanel({
                   {saveError}
                 </p>
               ) : null}
-              <textarea
-                value={editDraft}
-                onChange={(e) => setEditDraft(e.target.value)}
-                onKeyDown={handleEditKeyDown}
-                readOnly={!canEdit}
-                className="min-h-0 flex-1 resize-none border-0 bg-transparent p-3 font-mono text-xs leading-relaxed text-slate-800 focus:outline-none focus:ring-0 dark:text-slate-200"
-                spellCheck={false}
-              />
+              {previewLoading ? (
+                <p className="p-3 text-xs text-slate-500">加载文件内容…</p>
+              ) : !previewDetail ? (
+                <div className="flex flex-1 flex-col items-center justify-center gap-2 p-6 text-center">
+                  <p className="text-xs text-slate-500">未能加载「{displayTitle}」内容</p>
+                  <button
+                    type="button"
+                    onClick={() => activeFileKey && (onReloadTab ?? onSelectTab)(activeFileKey)}
+                    className="rounded-md border border-slate-300 px-2.5 py-1 text-[10px] text-slate-600 transition hover:bg-slate-50 dark:border-slate-600 dark:text-slate-300 dark:hover:bg-slate-800"
+                  >
+                    重试
+                  </button>
+                </div>
+              ) : (
+                <textarea
+                  key={activeFileKey ?? "empty-edit"}
+                  value={editDraft}
+                  onChange={(e) => setEditDraft(e.target.value)}
+                  onKeyDown={handleEditKeyDown}
+                  readOnly={!canEdit}
+                  placeholder={canEdit ? "在此编辑文件内容…" : "附件内容只读，可另存为输出物后编辑"}
+                  className="min-h-0 flex-1 resize-none border-0 bg-transparent p-3 font-mono text-xs leading-relaxed text-slate-800 focus:outline-none focus:ring-0 dark:text-slate-200"
+                  spellCheck={false}
+                />
+              )}
             </div>
           ) : (
             <div
@@ -635,6 +786,7 @@ export function FilePreviewPanel({
                     {pendingPatch?.summary ? ` · ${pendingPatch.summary}` : ""}
                   </div>
                   <InlineTextDiff
+                    key={activeFileKey ?? "patch"}
                     before={diffBefore}
                     after={diffAfter}
                     showLegend
@@ -642,7 +794,7 @@ export function FilePreviewPanel({
                   />
                 </>
               ) : (
-                <div className="select-text text-slate-800 dark:text-slate-200">
+                <div key={activeFileKey ?? "preview"} className="select-text text-slate-800 dark:text-slate-200">
                   <ProjectOutputContentBody
                     content={savedContent || null}
                     contentFormat={previewDetail?.content_format}
@@ -659,7 +811,7 @@ export function FilePreviewPanel({
                   onAddToChat={handleAddSelectionToChat}
                   onRewrite={handleAskRewriteSelection}
                   onCopy={() => void handleCopySelection(selectionMenu.text)}
-                  rewriteDisabled
+                  addToChatDisabled
                   onMouseDown={(e) => e.stopPropagation()}
                 />
               ) : null}
@@ -866,7 +1018,7 @@ function SelectionMenu({
   onAddToChat,
   onRewrite,
   onCopy,
-  rewriteDisabled = false,
+  addToChatDisabled = false,
   onMouseDown,
 }: {
   x: number;
@@ -875,7 +1027,7 @@ function SelectionMenu({
   onAddToChat: () => void;
   onRewrite: () => void;
   onCopy: () => void;
-  rewriteDisabled?: boolean;
+  addToChatDisabled?: boolean;
   onMouseDown: (e: MouseEvent<HTMLDivElement>) => void;
 }) {
   return (
@@ -890,8 +1042,9 @@ function SelectionMenu({
         label="添加到对话框中改写"
         shortcut="⌘U"
         onClick={onAddToChat}
+        disabled={addToChatDisabled}
       />
-      <SelectionMenuItem label="AI 改写选段" onClick={onRewrite} disabled={rewriteDisabled} />
+      <SelectionMenuItem label="AI 改写选段" onClick={onRewrite} />
       <div className="my-1 border-t border-slate-100 dark:border-slate-800" />
       <SelectionMenuItem label="复制" onClick={onCopy} />
     </div>

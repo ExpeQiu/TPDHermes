@@ -118,27 +118,47 @@ def _build_orchestration_guidance(
             ]
         )
 
+    ask_mode = (payload.co_create_agent_mode or "").strip() == "ask"
+    plan_mode = (payload.co_create_agent_mode or "").strip() == "plan"
+    project_cols = [c for c in knowledge_collections if is_project_kb_collection(c)]
+    public_cols = [c for c in knowledge_collections if not is_project_kb_collection(c)]
+
+    if ask_mode and payload.entrypoint == "chat" and payload.project.id != "none":
+        auth = "、".join(sorted(KB_AUTHORITATIVE_COLLECTIONS))
+        lines.extend(
+            [
+                "【Ask 检索强制策略】本轮为共创只读调研：须按顺序检索——"
+                f"① 项目知识库 {project_cols[0] if project_cols else '（若有）'}；"
+                f"② 公共真源集合（{auth}）及 orchestration 中其余 public./internal. 集合；"
+                "③ 若仍不足以回答，必须调用 tavily_search 联网补充。",
+                "禁止在未完成公共库检索与联网尝试前声称「资料不足」；事实须标注 [^N]。",
+                "【Ask 只读】禁止调用 write_file、patch，禁止输出 tphermes_file_actions。",
+            ]
+        )
+    elif plan_mode and payload.entrypoint == "chat" and payload.project.id != "none":
+        lines.extend(
+            [
+                "【Plan 模式】若用户尚未确认执行计划：只规划并输出 "
+                "```tphermes_plan {\"title\":\"...\",\"steps\":[...]} ```，"
+                "禁止 write_file、patch、tphermes_file_actions。",
+                "若用户已明确确认计划并要求执行：按已确认步骤推进，可调用工具与落库协议。",
+            ]
+        )
+
     if knowledge_collections:
         lines.append(
             "当前知识检索范围仅限于这些 collections："
             + ", ".join(knowledge_collections)
             + "。"
         )
-        project_cols = [c for c in knowledge_collections if is_project_kb_collection(c)]
-        public_cols = [c for c in knowledge_collections if not is_project_kb_collection(c)]
-        ask_mode = (payload.co_create_agent_mode or "").strip() == "ask"
-        if ask_mode and payload.entrypoint == "chat" and payload.project.id != "none":
-            auth = "、".join(sorted(KB_AUTHORITATIVE_COLLECTIONS))
-            lines.extend(
-                [
-                    "【Ask 检索强制策略】本轮为共创只读调研：须按顺序检索——"
-                    f"① 项目知识库 {project_cols[0] if project_cols else '（若有）'}；"
-                    f"② 公共真源集合（{auth}）及 orchestration 中其余 public./internal. 集合；"
-                    "③ 若仍不足以回答，必须调用 tavily_search 联网补充。",
-                    "禁止在未完成公共库检索与联网尝试前声称「资料不足」；事实须标注 [^N]。",
-                ]
-            )
-        elif payload.entrypoint == "chat" and payload.project.id != "none" and project_cols and public_cols:
+        if (
+            not ask_mode
+            and not plan_mode
+            and payload.entrypoint == "chat"
+            and payload.project.id != "none"
+            and project_cols
+            and public_cols
+        ):
             lines.extend(
                 [
                     f"项目知识库 {project_cols[0]} 可能暂无索引：先 kb_query 项目 collection；"
@@ -149,11 +169,31 @@ def _build_orchestration_guidance(
             )
 
     if candidate_skills:
-        lines.append(
-            "当前可优先使用的 skills："
-            + ", ".join(candidate_skills)
-            + "。"
-        )
+        try:
+            from backend.services.skill_loader import get_loader
+            from backend.services.skill_package import resolve_skill_discovery
+
+            loader = get_loader()
+            skill_hints: list[str] = []
+            for skill_name in candidate_skills:
+                disc = resolve_skill_discovery(loader.skills_root / skill_name, skill_name)
+                label = str(disc.get("display_name") or skill_name)
+                selection = str(disc.get("selection") or disc.get("description") or "").strip()
+                if selection:
+                    skill_hints.append(f"{skill_name}（{label}：{selection}）")
+                else:
+                    skill_hints.append(skill_name)
+            lines.append("当前可优先使用的 skills：" + "; ".join(skill_hints) + "。")
+            lines.append(
+                "请根据用户意图匹配 skill 的 description/when/triggers 后调用；"
+                "不要仅因名称相似就跳过更匹配的 skill。"
+            )
+        except Exception:
+            lines.append(
+                "当前可优先使用的 skills："
+                + ", ".join(candidate_skills)
+                + "。"
+            )
 
     should_prefer_kb_skill = bool(knowledge_collections and candidate_skills)
     if should_prefer_kb_skill:
@@ -177,20 +217,33 @@ def _build_orchestration_guidance(
             + "。"
         )
     if payload.entrypoint == "chat" and payload.project.id != "none":
-        lines.extend(
-            [
-                "当任务涉及在项目内新建文稿、改写已有输出物或直接落成文件时，优先调用 `write_file` 或 `patch` 真正执行文件创建/编辑，不要只停留在口头建议。",
-                "write_file/patch 的物理路径必须使用 HERMES_HOME 下可写目录：`/opt/data/输出/{fileName}` 或相对路径 `输出/{fileName}`；"
-                "禁止写入 `/输出/`（根目录虚拟路径，容器内不可创建）、`/opt/hermes/output`（代码目录不存在）或 `/Users/…`。",
-                "若你执行了 `write_file` 或 `patch`，最终回复末尾必须追加一个 `tphermes_file_actions` JSON 代码块，用于将实际结果同步回 TPDHermes 的 OutputAsset。",
-                "该代码块格式为：```tphermes_file_actions {\"actions\":[...]} ```；create 动作至少包含 type、fileName、path、content。",
-                "tphermes_file_actions 中 create 的 path 使用项目虚拟路径 `/输出/{fileName}`（与 write_file 物理路径不同，仅用于 TPD 落库）。",
-                "长文稿正文应写在回复正文中；tphermes_file_actions 内 content 须与正文一致且为合法 JSON，避免在 JSON 中塞入未转义超长正文导致截断。",
-                "patch 动作支持三种 editMode：full（整篇 after）、search_replace（oldString+newString，须唯一匹配）、line_range（startLine/endLine+newText，用于选段改写）。",
-                "当用户消息含文件选段引用时，必须使用 search_replace 或 line_range，禁止无关全文重写。",
-                "若本轮只是分析或问答，没有真实文件落地，则不要输出 `tphermes_file_actions`。",
-            ]
-        )
+        mode = (payload.co_create_agent_mode or "").strip()
+        if mode == "ask":
+            pass  # Ask 只读指引已在上方给出
+        elif mode == "plan":
+            lines.extend(
+                [
+                    "Plan 未确认执行前不要写文件；确认执行后，落库协议与 Agent 模式相同："
+                    "优先 write_file/patch，并用 tphermes_file_actions 同步到 TPD outputs。",
+                ]
+            )
+        else:
+            lines.extend(
+                [
+                    "当任务涉及在项目内新建文稿、改写已有输出物或直接落成文件时，优先调用 `write_file` 或 `patch` 真正执行文件创建/编辑，不要只停留在口头建议。",
+                    "默认输出物经 tphermes_file_actions 落库到 TPD 真存储：数据库 outputs 表 content 字段；"
+                    "虚拟路径 `/输出/{fileName}`；共创右侧文件栏「输出物」列表展示。",
+                    "write_file/patch 的物理路径必须使用 HERMES_HOME 下可写目录：`/opt/data/输出/{fileName}` 或相对路径 `输出/{fileName}`；"
+                    "禁止把 `/输出/` 当容器根目录写入、`/opt/hermes/output`（代码目录不存在）或 `/Users/…`。",
+                    "若你执行了 `write_file` 或 `patch`，最终回复末尾必须追加一个 `tphermes_file_actions` JSON 代码块，用于将实际结果同步回 TPDHermes 的 OutputAsset。",
+                    "该代码块格式为：```tphermes_file_actions {\"actions\":[...]} ```；create 动作至少包含 type、fileName、path、content。",
+                    "tphermes_file_actions 中 create 的 path 使用项目虚拟路径 `/输出/{fileName}`（与 write_file 物理路径不同，仅用于 TPD 落库）。",
+                    "长文稿正文应写在回复正文中；tphermes_file_actions 内 content 须与正文一致且为合法 JSON，避免在 JSON 中塞入未转义超长正文导致截断。",
+                    "patch 动作支持三种 editMode：full（整篇 after）、search_replace（oldString+newString，须唯一匹配）、line_range（startLine/endLine+newText，用于选段改写）。",
+                    "当用户消息含文件选段引用时，必须使用 search_replace 或 line_range，禁止无关全文重写。",
+                    "若本轮只是分析或问答，没有真实文件落地，则不要输出 `tphermes_file_actions`。",
+                ]
+            )
 
     run_id = (payload.execution.run_id or "").strip()
     if run_id:
@@ -204,6 +257,9 @@ def _build_orchestration_guidance(
                 "无检索依据的内容不得添加 [^N]；同一 chunk 复用同一 ref；不要自行编写来源脚注正文。",
             ]
         )
+    session_id = (payload.execution.session_id or "").strip()
+    if session_id:
+        lines.append(f"TPDHermes session_id={session_id}（仅用于关联日志，勿当成 Hermes 会话密钥）。")
 
     return " ".join(lines)
 

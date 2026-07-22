@@ -40,7 +40,7 @@ from backend.services.orchestration_service import (
 from backend.services.project_kb import merge_project_kb_collections, output_doc_id, project_kb_collection
 from backend.services.project_kb_ingest import schedule_ingest_output
 from backend.services.project_access import require_project_for_user
-from backend.services.run_log_service import create_run, finalize_run, mark_run_failed
+from backend.services.run_log_service import create_run, finalize_run, mark_run_failed, mark_run_failed_if_running
 from backend.services.template_service import extract_required_sections, get_template_by_id, validate_markdown_sections
 from backend.services.workshop_guard import (
     WorkshopGuardError,
@@ -62,7 +62,7 @@ from backend.services.workshop_execution import (
 )
 from backend.services.workshop_tool_capture import load_workshop_tool_capture
 from backend.services.kb_source_capture import build_sources_for_sse, build_sources_payload_from_capture, load_kb_sources, prefetch_kb_sources_for_run
-from backend.services.user_identity import effective_user_id_for_api, viewer_role
+from backend.services.user_identity import effective_user_id_for_api, normalize_user_id, viewer_role
 
 logger = logging.getLogger("tpdx.hermes")
 
@@ -134,13 +134,32 @@ def _trim_chat_messages(messages: list[dict[str, str]]) -> list[dict[str, str]]:
     return out
 
 
-def _apply_chat_generation_limits(body: dict[str, Any]) -> None:
+def _apply_chat_generation_limits(
+    body: dict[str, Any],
+    *,
+    payload: OrchestrationPayload | None = None,
+    lightweight_mode: bool = False,
+) -> None:
     """
-    P0：默认注入输出上限，降低长响应导致的 20s+ 等待。
+    按入口自适应 max_tokens：寒暄短答保持低上限；共创/工坊默认抬高，避免长文截断。
+    显式 CHAT_MAX_TOKENS 仍优先生效。
     """
-    cap = _env_int("CHAT_MAX_TOKENS", 700, min_value=64, max_value=8_192)
+    if os.getenv("CHAT_MAX_TOKENS", "").strip():
+        cap = _env_int("CHAT_MAX_TOKENS", 700, min_value=64, max_value=16_384)
+    elif lightweight_mode:
+        cap = _env_int("CHAT_MAX_TOKENS_LIGHT", 512, min_value=64, max_value=16_384)
+    elif payload is not None and (
+        payload.entrypoint == "workshop"
+        or (
+            payload.entrypoint == "chat"
+            and (payload.project.id or "none") != "none"
+        )
+        or payload.entrypoint in ("create", "quick_create", "project")
+    ):
+        cap = _env_int("CHAT_MAX_TOKENS_LONG", 4096, min_value=64, max_value=16_384)
+    else:
+        cap = 700
     body.setdefault("max_tokens", cap)
-    # 兼容不同上游字段命名（OpenAI/Anthropic 风格）。
     body.setdefault("max_completion_tokens", cap)
     body.setdefault("max_output_tokens", cap)
 
@@ -460,7 +479,13 @@ async def _resolve_chat_skill_output(
 
 @router.post("/execute")
 async def execute_task(req: Request, task_req: TaskExecuteRequest, db: AsyncSession = Depends(get_db)):
-    effective_uid = effective_user_id_for_api(req, body_user_id=task_req.user_id)
+    effective_uid = effective_user_id_for_api(req)
+    if task_req.user_id and str(task_req.user_id).strip() and normalize_user_id(task_req.user_id) != effective_uid:
+        logger.warning(
+            "tasks.execute ignored body.user_id claimed=%s trusted=%s",
+            str(task_req.user_id).strip()[:24],
+            effective_uid[:24],
+        )
     actor_role = (task_req.user_role or "").strip() or viewer_role(req)
     logger.info(
         "[chat-output-context] tasks execute user_id=%s entrypoint=%s project_id=%s chat_mode=%s source_output_id=%s",
@@ -754,6 +779,13 @@ async def execute_task(req: Request, task_req: TaskExecuteRequest, db: AsyncSess
                     )
             except Exception as exc:
                 logger.exception("finalize_run failed run_id=%s err=%s", run_id, exc)
+                try:
+                    async with async_session_maker() as sfail:
+                        await mark_run_failed_if_running(
+                            sfail, run_id, f"finalize_run failed: {exc}"
+                        )
+                except Exception:  # noqa: BLE001
+                    logger.exception("mark_run_failed_if_running also failed run_id=%s", run_id)
 
             meta = {
                 "tphermes_task": {
@@ -889,6 +921,13 @@ async def execute_task(req: Request, task_req: TaskExecuteRequest, db: AsyncSess
                     )
             except Exception as exc:
                 logger.exception("finalize_run failed run_id=%s err=%s", run_id, exc)
+                try:
+                    async with async_session_maker() as sfail:
+                        await mark_run_failed_if_running(
+                            sfail, run_id, f"finalize_run failed: {exc}"
+                        )
+                except Exception:  # noqa: BLE001
+                    logger.exception("mark_run_failed_if_running also failed run_id=%s", run_id)
 
             meta = {
                 "tphermes_task": {
@@ -966,7 +1005,11 @@ async def execute_task(req: Request, task_req: TaskExecuteRequest, db: AsyncSess
             kb_prefetch_block=kb_prefetch_block or None,
             lightweight_mode=chat_lightweight,
         )
-        _apply_chat_generation_limits(upstream_body)
+        _apply_chat_generation_limits(
+            upstream_body,
+            payload=payload,
+            lightweight_mode=chat_lightweight,
+        )
         upstream_body["stream"] = eff_request.stream
         target_url, api_key = _chat_target_required()
         headers = {"Content-Type": "application/json"}
@@ -1159,7 +1202,11 @@ async def execute_task(req: Request, task_req: TaskExecuteRequest, db: AsyncSess
             kb_prefetch_block=kb_prefetch_block or None,
             lightweight_mode=chat_lightweight,
         )
-        _apply_chat_generation_limits(upstream_body)
+        _apply_chat_generation_limits(
+            upstream_body,
+            payload=payload,
+            lightweight_mode=chat_lightweight,
+        )
         upstream_body["stream"] = True
 
         yield sse_meta_event(
@@ -1389,6 +1436,13 @@ async def execute_task(req: Request, task_req: TaskExecuteRequest, db: AsyncSess
                 )
         except Exception as exc:
             logger.exception("finalize_run failed run_id=%s err=%s", run_id, exc)
+            try:
+                async with async_session_maker() as sfail:
+                    await mark_run_failed_if_running(
+                        sfail, run_id, f"finalize_run failed: {exc}"
+                    )
+            except Exception:  # noqa: BLE001
+                logger.exception("mark_run_failed_if_running also failed run_id=%s", run_id)
 
         meta: dict[str, Any] = {
             "tphermes_task": {
@@ -1421,8 +1475,25 @@ async def execute_task(req: Request, task_req: TaskExecuteRequest, db: AsyncSess
             meta["tphermes_task"]["used_skills"] = used_skills or []
         yield "data: " + json.dumps(meta, ensure_ascii=False) + "\n\n"
 
+    async def guarded_event_stream() -> AsyncGenerator[str, None]:
+        """客户端断连或异常退出时，若仍 running 则强制收口。"""
+        try:
+            async for chunk in event_stream():
+                yield chunk
+        except asyncio.CancelledError:
+            logger.warning("chat stream cancelled run_id=%s", run_id)
+            raise
+        finally:
+            try:
+                async with async_session_maker() as s:
+                    await mark_run_failed_if_running(
+                        s, run_id, "stream ended without finalize (disconnect or error)"
+                    )
+            except Exception:  # noqa: BLE001
+                logger.exception("stream guard mark_failed failed run_id=%s", run_id)
+
     return StreamingResponse(
-        event_stream(),
+        guarded_event_stream(),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",

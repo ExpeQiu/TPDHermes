@@ -102,7 +102,7 @@ function buildPlanExecutionInstructions(ctx: PlanModeInstructionContext): string
   return [
     "【Plan 规划模式·执行阶段】用户已确认计划，按步骤逐步执行并产出结果。",
     "每步优先调用对应 skill 的 workshop_generate / workshop_generate_from_kb；必要时 kb_query、tavily_search。",
-    "涉及文件落地时使用 write_file/patch 并输出 tphermes_file_actions，沉淀至 /输出/；引用标注 [^N]。",
+    "涉及文件落地时使用 write_file/patch 并输出 tphermes_file_actions，沉淀至 /输出/（TPD outputs 表，右侧「输出物」可见）；引用标注 [^N]。",
     CO_CREATE_OUTPUT_WRITE_POLICY,
     "每完成一步在 steps 中标注 status=done；全部完成后汇总产出路径。",
     `已确认计划：\n\`\`\`tphermes_plan\n${planJson}\n\`\`\``,

@@ -1491,6 +1491,18 @@ export default function ProjectDetailPage() {
               projectId={String(id)}
               attachment={previewAttachment}
               onClose={() => setPreviewAttachment(null)}
+              onRenamed={(next) => {
+                setPreviewAttachment((prev) =>
+                  prev && prev.id === next.id ? { ...prev, ...next } : prev,
+                );
+                setAttachments((prev) =>
+                  prev.map((row) =>
+                    row.id === next.id
+                      ? { ...row, original_filename: next.original_filename }
+                      : row,
+                  ),
+                );
+              }}
             />
 
             {pasteTextOpen && (

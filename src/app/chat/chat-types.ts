@@ -32,6 +32,8 @@ export interface Message {
   id: string;
   role: "user" | "assistant" | "system";
   content: string;
+  /** 消息创建时间（毫秒时间戳），用于气泡下方时间展示 */
+  createdAt?: number;
   /** 用户输入部分（不含选段引用），用于 UI 分开展示 */
   userPrompt?: string;
   /** 选段引用块，用于 UI 分开展示 */

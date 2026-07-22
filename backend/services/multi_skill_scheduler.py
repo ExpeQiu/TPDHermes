@@ -47,6 +47,126 @@ DEFAULT_SCENE_RULES: Dict[str, Dict[str, Any]] = {
         "secondary": ["speech_skill", "video_skill"],
         "description": "完整营销物料：规格文档+口播+视频",
     },
+    "IP矩阵": {
+        "primary": "ip_matrix_skill",
+        "fallback": [],
+        "description": "技术IP矩阵图七步法",
+    },
+    "传播素材": {
+        "primary": "material_skill",
+        "fallback": [],
+        "description": "传播素材与媒介投放清单",
+    },
+    "销售话术": {
+        "primary": "sales_skill",
+        "fallback": [],
+        "description": "4S店实战销售话术手册",
+    },
+    "趋势洞察": {
+        "primary": "tech_trend_skill",
+        "fallback": [],
+        "description": "技术发展趋势洞察报告",
+    },
+    "车型赋能": {
+        "primary": "model_brand_skill",
+        "fallback": [],
+        "description": "技术品牌赋能车型策略",
+    },
+    "一页纸": {
+        "primary": "a4_skill",
+        "fallback": [],
+        "description": "A4技术规格一页纸",
+    },
+    "竞品对标": {
+        "primary": "benchmark_skill",
+        "fallback": [],
+        "description": "竞品对标分析表",
+    },
+    "品牌命名": {
+        "primary": "brand_name_skill",
+        "fallback": [],
+        "description": "技术品牌命名策略",
+    },
+    "调研计划": {
+        "primary": "brand_research_plan",
+        "fallback": [],
+        "description": "技术品牌调研计划",
+    },
+    "调研报告": {
+        "primary": "brand_research_report",
+        "fallback": [],
+        "description": "技术品牌调研报告",
+    },
+    "展具概念": {
+        "primary": "display_concept_skill",
+        "fallback": [],
+        "description": "IP技术展具概念策划",
+    },
+    "展具说明": {
+        "primary": "display_guide_skill",
+        "fallback": [],
+        "description": "IP技术展具使用说明书",
+    },
+    "展具立项": {
+        "primary": "display_project_skill",
+        "fallback": [],
+        "description": "IP技术展具制作立项",
+    },
+    "活动策划": {
+        "primary": "event_plan_skill",
+        "fallback": [],
+        "description": "技术推广活动策划",
+    },
+    "采访QA": {
+        "primary": "interview_qa_skill",
+        "fallback": [],
+        "description": "领导采访QA",
+    },
+    "认证策划": {
+        "primary": "ip_cert_plan",
+        "fallback": [],
+        "description": "IP技术认证策划",
+    },
+    "IP传播": {
+        "primary": "ip_comm_plan",
+        "fallback": [],
+        "description": "技术IP传播策划",
+    },
+    "IP全案": {
+        "primary": "ip_pack_skill",
+        "fallback": [],
+        "description": "技术IP包装全案",
+    },
+    "IP货架": {
+        "primary": "ip_shelf_skill",
+        "fallback": [],
+        "description": "技术IP包装货架",
+    },
+    "知识收割": {
+        "primary": "knowledge_harvest_draft",
+        "fallback": [],
+        "description": "知识收割草稿",
+    },
+    "领导讲稿": {
+        "primary": "speech_draft_skill",
+        "fallback": ["speech_skill"],
+        "description": "领导正式讲稿",
+    },
+    "互锁地图": {
+        "primary": "tech_lockmap_skill",
+        "fallback": [],
+        "description": "技术品牌互锁地图",
+    },
+    "新闻稿": {
+        "primary": "tech_pr_skill",
+        "fallback": [],
+        "description": "IP技术传播稿",
+    },
+    "导演脚本": {
+        "primary": "video_script_skill",
+        "fallback": [],
+        "description": "技术推广导演脚本",
+    },
     "默认": {
         "primary": None,
         "fallback": [],
@@ -61,10 +181,34 @@ class SceneClassifier:
     """根据用户输入关键词识别对应场景"""
 
     KEYWORD_MAP = {
-        "口播": ["口播", "配音", "语音", "朗读", "播报", "speech"],
-        "视频": ["视频", "分镜", "脚本", "拍摄", "video"],
-        "规格": ["规格", "参数", "技术文档", "A4", "spec"],
+        "口播": ["口播", "配音", "语音", "朗读", "播报", "speech", "发言稿", "演讲稿", "发布会讲稿"],
+        "视频": ["短视频", "30秒", "45秒", "视频号", "抖音脚本"],
+        "导演脚本": ["导演脚本", "宣传片脚本", "分镜脚本", "视频创意", "技术推广视频"],
+        "规格": ["规格", "参数", "技术文档", "spec"],
+        "一页纸": ["A4", "一页纸", "规格单页", "技术单页", "精华页"],
         "综合": ["完整", "全套", "营销物料", "综合"],
+        "IP矩阵": ["IP矩阵", "技术品牌矩阵", "七步法", "技术IP矩阵"],
+        "传播素材": ["传播素材", "素材清单", "宣发物料", "投放计划", "媒介投放", "KOL", "物料齐套"],
+        "销售话术": ["销售话术", "门店话术", "顾问话术", "异议处理", "试驾转化", "逼单", "4S店"],
+        "趋势洞察": ["技术趋势", "发展趋势", "趋势洞察", "行业趋势", "技术品牌营销"],
+        "车型赋能": ["技术品牌赋能", "车型策略", "配置倒挂", "单独命名", "车型亮点", "IP赋能车型"],
+        "竞品对标": ["竞品对标", "竞品对比", "对标分析", "参数对比", "优劣势"],
+        "品牌命名": ["品牌命名", "技术品牌命名", "命名报告", "Slogan命名"],
+        "调研计划": ["调研计划", "调研立项", "样本规划", "供应商招标"],
+        "调研报告": ["调研报告", "调研结案", "品牌调研报告", "管理者摘要"],
+        "展具概念": ["展具概念", "展台概念", "技术展具", "展具策划"],
+        "展具说明": ["展具说明书", "使用说明书", "操作手册", "安装拆卸", "展具维护"],
+        "展具立项": ["展具立项", "制作立项书", "展具预算", "展台制作"],
+        "活动策划": ["活动策划", "车展", "技术日", "线下活动", "参展方案"],
+        "采访QA": ["采访QA", "媒体问答", "发布会问答", "敏感问题", "领导采访"],
+        "认证策划": ["技术认证", "第三方认证", "认证策划", "认证立项", "权威认证"],
+        "IP传播": ["IP传播", "传播策划", "发布传播", "传播ROADMAP", "传播预算"],
+        "IP全案": ["IP包装", "包装全案", "技术IP全案", "IP打造", "从0到1"],
+        "IP货架": ["IP货架", "包装货架", "信息包", "技术包装沉淀"],
+        "知识收割": ["知识收割", "对话沉淀", "知识草稿", "经验沉淀"],
+        "领导讲稿": ["领导讲稿", "开场演讲", "技术日讲稿", "领导致辞", "正式讲稿"],
+        "互锁地图": ["互锁地图", "技术规划", "车型节奏", "品牌联动", "触点规划", "车型互锁"],
+        "新闻稿": ["新闻稿", "传播稿", "官方通稿", "PR稿", "技术发布稿"],
     }
 
     def classify(self, query: str) -> str:

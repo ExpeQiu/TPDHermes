@@ -1,0 +1,31 @@
+{
+  "name": "领导采访QA",
+  "description": "生成中文《领导采访QA》（金字塔答法、桥梁法、必答题与敏感题）。当用户需要采访QA、媒体问答、发布会问答、敏感问题应对时使用。",
+  "when": "采访QA / 媒体问答 / 发布会问答 / 敏感题应对",
+  "triggers": [
+    "采访QA",
+    "媒体问答",
+    "发布会问答",
+    "敏感问题",
+    "领导采访"
+  ],
+  "tags": [
+    "采访QA",
+    "媒体沟通"
+  ],
+  "market_tags": [
+    "采访QA",
+    "媒体沟通"
+  ],
+  "market_category": "内容生产",
+  "version": "1.0.1",
+  "author": "TPD Team",
+  "template": "templates/interview_qa.md",
+  "templates": [
+    {
+      "id": "interview_qa",
+      "label": "领导采访QA",
+      "path": "templates/interview_qa.md"
+    }
+  ]
+}

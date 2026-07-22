@@ -1,0 +1,31 @@
+{
+  "name": "技术品牌互锁地图",
+  "description": "生成中文《技术规划与技术品牌互锁地图》（技术节点×车型×品牌×触点对齐）。当用户需要互锁地图、技术规划对齐、车型节奏与品牌联动时使用。",
+  "when": "互锁地图 / 技术规划对齐 / 车型节奏联动 / 触点规划",
+  "triggers": [
+    "互锁地图",
+    "技术规划",
+    "车型节奏",
+    "品牌联动",
+    "触点规划"
+  ],
+  "tags": [
+    "互锁地图",
+    "技术规划"
+  ],
+  "market_tags": [
+    "互锁地图",
+    "技术规划"
+  ],
+  "market_category": "技术IP",
+  "version": "1.0.1",
+  "author": "TPD Team",
+  "template": "templates/tech_lockmap.md",
+  "templates": [
+    {
+      "id": "tech_lockmap",
+      "label": "技术规划与技术品牌互锁地图",
+      "path": "templates/tech_lockmap.md"
+    }
+  ]
+}

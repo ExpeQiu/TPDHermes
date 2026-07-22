@@ -1,0 +1,31 @@
+{
+  "name": "IP技术展具使用说明书",
+  "description": "生成中文《IP技术展具使用说明书》（安装拆卸、运输、维护、安全与故障处理）。当用户需要展具说明书、操作手册、安装维护指南时使用。",
+  "when": "展具说明书 / 操作手册 / 安装维护 / 安全须知",
+  "triggers": [
+    "展具说明书",
+    "使用说明书",
+    "操作手册",
+    "安装拆卸",
+    "展具维护"
+  ],
+  "tags": [
+    "展具",
+    "说明书"
+  ],
+  "market_tags": [
+    "展具",
+    "说明书"
+  ],
+  "market_category": "展具活动",
+  "version": "1.0.1",
+  "author": "TPD Team",
+  "template": "templates/display_guide.md",
+  "templates": [
+    {
+      "id": "display_guide",
+      "label": "IP技术展具使用说明书",
+      "path": "templates/display_guide.md"
+    }
+  ]
+}

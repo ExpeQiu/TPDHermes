@@ -26,7 +26,7 @@ from backend.services.kb_ingest_core import (
     run_kb_ingestion,
 )
 from backend.services.kb_proxy import CHROMA_HOST
-from backend.services.kb_write import build_markdown_body, kb_upload_root
+from backend.services.kb_write import build_markdown_body, project_kb_md_root
 from backend.services.project_kb import (
     attachment_doc_id,
     ensure_project_kb_collection_in_config,
@@ -59,7 +59,7 @@ class IngestResult:
 
 
 def _project_kb_md_dir(project_id: str) -> Path:
-    base = kb_upload_root() / "project_kb" / project_id
+    base = project_kb_md_root(project_id)
     base.mkdir(parents=True, exist_ok=True)
     return base
 

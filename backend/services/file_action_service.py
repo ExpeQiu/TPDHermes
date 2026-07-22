@@ -213,7 +213,11 @@ async def _persist_patched_output(
         previous_content = prev.content or ""
         file_id = prev.id
         next_version = prev.version or "1"
-        if previous_content != content:
+        raw_title = action.get("file_name") or action.get("fileName")
+        new_title = normalize_output_title(str(raw_title)) if raw_title else None
+        title_changed = Boolean(new_title and new_title != (prev.title or "").strip())
+        content_changed = previous_content != content
+        if content_changed:
             if previous_content.strip():
                 snapshot_version = str(_parse_version_num(prev.version))
                 snapshot = _build_output_row(
@@ -237,6 +241,15 @@ async def _persist_patched_output(
             prev.content = content
             prev.summary = content[:280]
             prev.updated_at = now
+        if title_changed and new_title:
+            prev.title = new_title
+            prev.updated_at = now
+            logger.info(
+                "[file-actions] overwrite 已更新标题 output_id=%s title=%s project_id=%s",
+                file_id,
+                new_title,
+                project_id,
+            )
         await db.commit()
         persisted = await _reload_output_after_commit(db, file_id)
         schedule_ingest_output(persisted.id)
@@ -245,6 +258,7 @@ async def _persist_patched_output(
             "file_id": persisted.id,
             "kind": "output",
             "version": persisted.version or next_version,
+            "title": persisted.title,
         }
     vnum = _parse_version_num(prev.version) + 1
     title = str(action.get("file_name") or action.get("fileName") or prev.title or "未命名")

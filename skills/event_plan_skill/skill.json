@@ -1,0 +1,31 @@
+{
+  "name": "技术推广活动策划",
+  "description": "生成中文《技术推广活动策划方案》（车展/技术日目标、传播、展台、节点与分工）。当用户需要活动策划、车展方案、技术日策划、线下推广活动时使用。",
+  "when": "活动策划 / 车展方案 / 技术日 / 线下推广",
+  "triggers": [
+    "活动策划",
+    "车展",
+    "技术日",
+    "线下活动",
+    "参展方案"
+  ],
+  "tags": [
+    "活动策划",
+    "车展"
+  ],
+  "market_tags": [
+    "活动策划",
+    "车展"
+  ],
+  "market_category": "展具活动",
+  "version": "1.0.1",
+  "author": "TPD Team",
+  "template": "templates/event_plan.md",
+  "templates": [
+    {
+      "id": "event_plan",
+      "label": "技术推广活动策划方案",
+      "path": "templates/event_plan.md"
+    }
+  ]
+}

@@ -1,0 +1,18 @@
+{
+  "display_name": "技术IP传播策划",
+  "description": "生成中文《技术IP传播策划方案》（目标受众、内容渠道、ROADMAP、预算与评估）。当用户需要IP传播方案、发布传播策划、传播节奏与预算时使用。",
+  "when": "IP传播策划 / 发布传播方案 / 传播ROADMAP / 传播预算",
+  "triggers": [
+    "IP传播",
+    "传播策划",
+    "发布传播",
+    "传播ROADMAP",
+    "传播预算"
+  ],
+  "market_tags": [
+    "IP传播",
+    "传播策划"
+  ],
+  "market_category": "传播物料",
+  "market_rating": 4.7
+}

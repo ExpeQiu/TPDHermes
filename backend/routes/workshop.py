@@ -182,14 +182,17 @@ async def list_skills(
     db: AsyncSession = Depends(get_db),
     effective_uid: str = Depends(get_effective_user_id),
 ):
+    from backend.services.skill_package import resolve_skill_discovery
+
     visible = await visible_workshop_skill_names(
         db,
         effective_uid,
         enabled_only=True,
         require_loadable=True,
     )
-    names = [n for n in loader.discover() if n in visible]
-    return {"skills": names}
+    names = sorted(n for n in loader.discover() if n in visible)
+    catalog = [resolve_skill_discovery(loader.skills_root / name, name) for name in names]
+    return {"skills": names, "catalog": catalog, "count": len(names)}
 
 
 @router.get("/skills/metadata", response_model=None)

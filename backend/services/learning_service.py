@@ -163,7 +163,7 @@ async def _upsert_signal(
     ).scalar_one_or_none()
 
     if existing:
-        existing.count = str(count)
+        existing.count = count
         existing.last_seen_at = now
         existing.payload_json = json.dumps(payload, ensure_ascii=False)
         return existing
@@ -174,7 +174,7 @@ async def _upsert_signal(
         entity_kind=entity_kind,
         entity_id=entity_id,
         entity_label=entity_label,
-        count=str(count),
+        count=count,
         status="open",
         payload_json=json.dumps(payload, ensure_ascii=False),
         last_seen_at=now,
@@ -346,7 +346,7 @@ async def record_kb_miss(
             )
         )
     ).scalar_one_or_none()
-    count = int(existing.count or "1") + 1 if existing else 1
+    count = int(existing.count or 1) + 1 if existing else 1
     await _upsert_signal(
         db,
         signal_type="kb_miss",

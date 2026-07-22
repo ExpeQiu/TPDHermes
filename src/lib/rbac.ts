@@ -48,6 +48,11 @@ export function loadCachedUserAccess(): UserAccessState | null {
   }
 }
 
+export function clearCachedUserAccess(): void {
+  if (typeof window === "undefined") return;
+  window.localStorage.removeItem(ACCESS_CACHE_KEY);
+}
+
 export function canAccessFeature(access: UserAccessState | null, feature: FeatureKey): boolean {
   if (!access) return feature === "settings" || feature === "projects" || feature === "chat" || feature === "workshop";
   return access.features.includes(feature);

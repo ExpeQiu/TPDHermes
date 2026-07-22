@@ -1,7 +1,8 @@
 from fastapi import APIRouter, HTTPException, Depends, UploadFile, File, Request, Query
 from fastapi.responses import FileResponse
-from sqlalchemy import select, update
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import load_only
 import json
 import logging
 import os
@@ -40,6 +41,7 @@ from backend.services.project_kb_ingest import (
 )
 from backend.services.user_directory_service import list_registered_users
 from backend.services.user_identity import get_effective_user_id, viewer_role
+from backend.services.project_seed import seed_default_scenario_bindings
 from backend.data.builtin_scenarios import BUILTIN_SCENARIOS, BUILTIN_VERSION
 
 router = APIRouter(prefix="/projects", tags=["projects"])
@@ -136,34 +138,7 @@ async def _prepare_attachment_payload(
 
 
 async def _seed_default_scenario_bindings(db: AsyncSession, project_id: str) -> None:
-    """新项目自动绑定已存在的内置场景，保证工坊可用。"""
-    now = datetime.now().isoformat()
-    for row in BUILTIN_SCENARIOS:
-        sid = str(row["id"])
-        pro = await db.get(ScenarioProfile, sid)
-        if not pro:
-            continue
-        dup = await db.execute(
-            select(ProjectScenario).where(
-                ProjectScenario.project_id == project_id,
-                ProjectScenario.scenario_id == sid,
-            )
-        )
-        if dup.scalar_one_or_none():
-            continue
-        ver = pro.version if pro.version else BUILTIN_VERSION
-        db.add(
-            ProjectScenario(
-                id=str(uuid.uuid4()),
-                project_id=project_id,
-                scenario_id=sid,
-                scenario_version=ver,
-                is_default=1 if sid == "general" else 0,
-                enabled=1,
-                created_at=now,
-                updated_at=now,
-            )
-        )
+    await seed_default_scenario_bindings(db, project_id)
 
 
 # --- Pydantic Schemas ---
@@ -351,8 +326,17 @@ async def delete_project(
     effective_uid: str = Depends(get_effective_user_id),
 ):
     project = await require_project_for_user(db, project_id, effective_uid, min_perm="delete")
-    await db.commit()
-    return {"message": "Project deleted"}
+    from backend.services.project_lifecycle import destroy_project
+
+    report = await destroy_project(db, project)
+    logger.info(
+        "project deleted id=%s by=%s members=%s kb_ok=%s",
+        project_id[:8],
+        effective_uid[:24],
+        report.get("members_deleted"),
+        (report.get("kb") or {}).get("ok"),
+    )
+    return {"message": "Project deleted", "report": report}
 
 
 # --- 编排：预览与输出物 / 运行记录 ---
@@ -456,6 +440,17 @@ async def get_project_context(
     out_rows = (
         await db.execute(
             select(OutputAsset)
+            .options(
+                load_only(
+                    OutputAsset.id,
+                    OutputAsset.title,
+                    OutputAsset.summary,
+                    OutputAsset.status,
+                    OutputAsset.created_at,
+                    OutputAsset.content,
+                    OutputAsset.kb_ingest_status,
+                )
+            )
             .where(
                 OutputAsset.project_id == project_id,
                 OutputAsset.status != "archived",
@@ -590,7 +585,24 @@ async def list_project_outputs(
     effective_uid: str = Depends(get_effective_user_id),
 ):
     await require_project_for_user(db, project_id, effective_uid)
-    query = select(OutputAsset).where(OutputAsset.project_id == project_id)
+    # 列表仅取预览所需列，避免拉全量 content
+    query = (
+        select(
+            OutputAsset.id,
+            OutputAsset.title,
+            OutputAsset.summary,
+            OutputAsset.template_id,
+            OutputAsset.run_id,
+            OutputAsset.scenario_id,
+            OutputAsset.status,
+            OutputAsset.created_at,
+            OutputAsset.citations_json,
+            OutputAsset.kb_ingest_status,
+            OutputAsset.kb_doc_id,
+            OutputAsset.kb_chunk_count,
+            func.substr(OutputAsset.content, 1, 200).label("content_preview"),
+        ).where(OutputAsset.project_id == project_id)
+    )
     if scenario_id:
         query = query.where(OutputAsset.scenario_id == scenario_id)
     if status:
@@ -599,12 +611,12 @@ async def list_project_outputs(
         query = query.where(OutputAsset.status != "archived")
     query = query.order_by(OutputAsset.created_at.desc()).limit(min(limit, 500))
     q = await db.execute(query)
-    rows = q.scalars().all()
+    rows = q.all()
     run_ids = [o.run_id for o in rows if o.run_id]
     run_meta = await _run_meta_for_outputs(db, run_ids)
     out: list[OutputListItem] = []
     for o in rows:
-        preview = (o.content or "")[:200]
+        preview = o.content_preview or ""
         meta = run_meta.get(o.run_id or "", {})
         entrypoint = meta.get("entrypoint") if o.run_id else None
         if not entrypoint:
@@ -712,7 +724,22 @@ async def list_project_runs(
     _admin_role: str = Depends(require_system_admin()),
 ):
     await require_project_for_user(db, project_id, effective_uid)
-    query = select(OrchestrationRun).where(OrchestrationRun.project_id == project_id)
+    query = (
+        select(OrchestrationRun)
+        .options(
+            load_only(
+                OrchestrationRun.id,
+                OrchestrationRun.entrypoint,
+                OrchestrationRun.scenario_id,
+                OrchestrationRun.status,
+                OrchestrationRun.created_at,
+                OrchestrationRun.duration_ms,
+                OrchestrationRun.response_metadata_json,
+                OrchestrationRun.project_id,
+            )
+        )
+        .where(OrchestrationRun.project_id == project_id)
+    )
     if scenario_id:
         query = query.where(OrchestrationRun.scenario_id == scenario_id)
     if status:
@@ -886,6 +913,58 @@ async def download_project_attachment(
         path,
         media_type=media,
         filename=row.original_filename,
+    )
+
+
+class AttachmentRenameRequest(BaseModel):
+    original_filename: str
+
+
+@router.patch("/{project_id}/attachments/{attachment_id}", response_model=AttachmentListItem)
+async def rename_project_attachment(
+    project_id: str,
+    attachment_id: str,
+    body: AttachmentRenameRequest,
+    db: AsyncSession = Depends(get_db),
+    effective_uid: str = Depends(get_effective_user_id),
+):
+    """仅更新展示/下载用文件名；磁盘 stored_path 不变。"""
+    await require_project_for_user(db, project_id, effective_uid, min_perm="write")
+    q = await db.execute(
+        select(ProjectAttachment).where(
+            ProjectAttachment.id == attachment_id,
+            ProjectAttachment.project_id == project_id,
+        )
+    )
+    row = q.scalar_one_or_none()
+    if not row:
+        raise HTTPException(status_code=404, detail="Attachment not found")
+    safe_name = _safe_original_filename(body.original_filename)
+    if not safe_name.strip():
+        raise HTTPException(status_code=400, detail="文件名不能为空")
+    old_name = row.original_filename
+    row.original_filename = safe_name
+    await db.commit()
+    await db.refresh(row)
+    logger.info(
+        "project_attachment renamed project=%s id=%s from=%s to=%s",
+        project_id,
+        attachment_id,
+        old_name,
+        safe_name,
+    )
+    return AttachmentListItem(
+        id=row.id,
+        project_id=row.project_id,
+        original_filename=row.original_filename,
+        content_type=row.content_type,
+        size_bytes=row.size_bytes,
+        created_at=row.created_at,
+        ingest_status=getattr(row, "ingest_status", None),
+        kb_doc_id=getattr(row, "kb_doc_id", None),
+        chunk_count=getattr(row, "chunk_count", None),
+        ingest_error=getattr(row, "ingest_error", None),
+        ingested_at=getattr(row, "ingested_at", None),
     )
 
 

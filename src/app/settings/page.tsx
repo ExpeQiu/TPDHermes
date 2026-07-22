@@ -313,7 +313,7 @@ function SettingsPageContent() {
                     onClick={handleGenerateUserId}
                     className="shrink-0 rounded-lg border border-slate-300 px-3 py-2 text-xs text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
                   >
-                    生成
+                    确认
                   </button>
                 </div>
               </label>

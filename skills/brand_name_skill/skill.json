@@ -1,0 +1,31 @@
+{
+  "name": "技术品牌命名策略报告",
+  "description": "生成中文《技术品牌策略/命名报告》（命名方向、信息屋、传播节奏、车型节点）。当用户需要技术品牌命名、品牌策略命名、Slogan命名、信息屋时使用。",
+  "when": "技术品牌命名 / 品牌策略命名 / Slogan命名 / 信息屋",
+  "triggers": [
+    "品牌命名",
+    "技术品牌命名",
+    "命名报告",
+    "Slogan命名",
+    "信息屋"
+  ],
+  "tags": [
+    "品牌命名",
+    "技术品牌"
+  ],
+  "market_tags": [
+    "品牌命名",
+    "技术品牌"
+  ],
+  "market_category": "技术IP",
+  "version": "1.0.1",
+  "author": "TPD Team",
+  "template": "templates/brand_name_report.md",
+  "templates": [
+    {
+      "id": "brand_name_report",
+      "label": "技术品牌命名策略报告",
+      "path": "templates/brand_name_report.md"
+    }
+  ]
+}

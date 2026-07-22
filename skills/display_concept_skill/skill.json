@@ -1,0 +1,30 @@
+{
+  "name": "IP技术展具概念策划",
+  "description": "生成中文《IP技术展具概念策划书》（展示维度、行业对标、原理亮点、预算周期）。当用户需要展具概念、展台概念策划、技术展具方案时使用。",
+  "when": "展具概念 / 展台概念 / 技术展具策划",
+  "triggers": [
+    "展具概念",
+    "展台概念",
+    "技术展具",
+    "展具策划"
+  ],
+  "tags": [
+    "展具",
+    "概念策划"
+  ],
+  "market_tags": [
+    "展具",
+    "概念策划"
+  ],
+  "market_category": "展具活动",
+  "version": "1.0.1",
+  "author": "TPD Team",
+  "template": "templates/display_concept.md",
+  "templates": [
+    {
+      "id": "display_concept",
+      "label": "IP技术展具概念策划书",
+      "path": "templates/display_concept.md"
+    }
+  ]
+}

@@ -1,9 +1,21 @@
 {
   "name": "IP矩阵图生成",
-  "description": "基于IP矩阵图七步法模板生成完整技术品牌矩阵",
-  "version": "1.0.0",
+  "description": "按七步法生成技术IP矩阵图（Slogan→定位→愿景→体验四维→亮点→技术底座→车型节奏）。当用户需要IP矩阵、技术品牌矩阵、技术IP结构图、七步法包装、技术品牌定位与愿景、车型互锁表时使用。",
+  "when": "IP矩阵 / 技术品牌矩阵 / 七步法 / 技术IP包装结构 / 车型节奏互锁",
+  "triggers": [
+    "IP矩阵",
+    "技术品牌矩阵",
+    "技术IP矩阵",
+    "七步法",
+    "技术品牌定位",
+    "车型互锁"
+  ],
+  "tags": ["IP矩阵", "技术品牌", "七步法", "车型节奏"],
+  "market_tags": ["IP矩阵", "技术品牌", "七步法"],
+  "market_category": "技术IP",
+  "version": "1.0.1",
   "author": "TPD Team",
-  "template_file": "/Users/expeqiu/Library/Mobile Documents/iCloud~md~obsidian/Documents/expe/openclaw/aima/技术推广/10-模板库/输出模版/IP矩阵图模板.md",
+  "template": "template.md",
   "input_schema": {
     "tech_name": "string (技术名)",
     "slogan": "string (Slogan一句话承诺)",
@@ -13,6 +25,5 @@
     "highlights": "array of {dimension, point, params_scene_benefit} (技术亮点)",
     "tech_stack": "object of {computing, algorithm, data, ecosystem} (技术底座)",
     "vehicle_timeline": "array of {model, plan_level, launch_time} (车型×上市时间)"
-  },
-  "template": "template.md"
+  }
 }

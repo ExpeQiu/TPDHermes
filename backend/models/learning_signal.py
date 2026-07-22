@@ -3,7 +3,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Column, String, Text
+from sqlalchemy import Column, Integer, String, Text
 
 from backend.db import Base
 
@@ -18,7 +18,7 @@ class LearningSignal(Base):
     entity_kind = Column(String, nullable=False)
     entity_id = Column(String)
     entity_label = Column(String)
-    count = Column(String, default="1")
+    count = Column(Integer, default=1)
     status = Column(String, default="open")  # open | ack | dismissed
     payload_json = Column(Text)
     user_id = Column(String, default="default")

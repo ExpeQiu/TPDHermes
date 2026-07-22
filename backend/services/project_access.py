@@ -42,6 +42,9 @@ async def require_project_for_user(
     role = await get_project_role(db, project_id=project_id, user_id=user_id, project=row)
     if not role or not project_perm_allowed(role, min_perm):
         raise HTTPException(status_code=404, detail=detail)
+    status = (row.status or "").strip().lower()
+    if status == "archived" and min_perm in ("write", "delete", "manage_members"):
+        raise HTTPException(status_code=403, detail="项目已归档，仅可只读访问")
     return row
 
 

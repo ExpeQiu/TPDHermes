@@ -40,6 +40,7 @@ import {
   applyFileAction,
   archiveProjectOutput,
   fetchProjectFileDetail,
+  renameProjectFile,
   type ProjectFileItem,
   type ProjectFileVersionItem,
 } from "@/lib/co-create-api";
@@ -424,9 +425,11 @@ function CoCreatePageInner() {
 
   const handleSelectPreview = useCallback(
     (fileKey: string | null) => {
+      if (!fileKey) return;
+      console.info("[co-create] 选择项目文件", { fileKey });
       fileWorkspace.openFileTab(fileKey);
     },
-    [fileWorkspace],
+    [fileWorkspace.openFileTab],
   );
 
   const resetTransient = useCallback(() => {
@@ -780,6 +783,7 @@ function CoCreatePageInner() {
     const hasProjectSession = projectSessions.length > 0;
 
     if (!hasProjectSession) {
+      // 仅在本项目确无共创会话时新建；远端 summary 已带回 selectedProjectId，避免跨端误建
       const defaults = projectCoCreateSessionDefaults(projectId);
       if (initialKey) {
         defaults.roundFileIds = [initialKey];
@@ -793,7 +797,10 @@ function CoCreatePageInner() {
       if (initialKey) {
         fileWorkspace.openFileTab(initialKey);
       }
-      console.info("[co-create] 项目首次进入，已新建共创会话", { projectId });
+      console.info("[co-create] 项目首次进入，已新建共创会话", {
+        projectId,
+        existingCoCreateCount: sessions.filter((s) => s.sessionKind === "project_co_create").length,
+      });
     } else {
       const target = pickProjectCoCreateEntrySession(sessions, projectId, activeSession);
       if (target && target.id !== activeId) {
@@ -2237,6 +2244,22 @@ function CoCreatePageInner() {
     [activeId, appendTouchedFileId, fileWorkspace, projectId],
   );
 
+  const handleRenameFile = useCallback(
+    async (fileKey: string, title: string) => {
+      const decoded = decodeProjectFileSelectValue(fileKey);
+      if (!decoded) throw new Error("无法识别文件");
+      const result = await renameProjectFile(projectId, decoded.id, decoded.kind, title);
+      fileWorkspace.patchTabTitle(fileKey, result.title);
+      await fileWorkspace.refreshFiles();
+      console.info("[co-create] 文件已重命名", {
+        projectId,
+        fileKey,
+        title: result.title,
+      });
+    },
+    [fileWorkspace, projectId],
+  );
+
   const handleRestoreVersion = useCallback(
     async (version: ProjectFileVersionItem) => {
       const fileKey = fileWorkspace.activeFileKey;
@@ -2627,9 +2650,11 @@ function CoCreatePageInner() {
               saving={fileSaving}
               onSelectTab={fileWorkspace.selectFileTab}
               onCloseTab={fileWorkspace.closeFileTab}
+              onReloadTab={(key) => void fileWorkspace.reloadFileTab(key)}
               onAddToRound={addToRound}
               onPin={pinFile}
               onSaveContent={handleSaveFileContent}
+              onRenameFile={handleRenameFile}
               onRestoreVersion={handleRestoreVersion}
               onAddSelectionToChat={handleAddSelectionToChat}
               onRewriteSelection={handleRewriteSelection}

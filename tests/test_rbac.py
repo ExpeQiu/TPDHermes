@@ -123,13 +123,15 @@ def test_system_admin_can_assign_managed_user_role():
         assert assigned.json()["platform_role"] == "tenant_partner"
 
 
-def test_default_user_is_platform_admin_new_user_is_editor():
+def test_default_user_is_not_platform_admin_unless_enabled(monkeypatch):
+    monkeypatch.delenv("TPDHERMES_DEFAULT_IS_PLATFORM_ADMIN", raising=False)
+    monkeypatch.delenv("TPDHERMES_GLOBAL_ADMIN_USER_IDS", raising=False)
     with TestClient(app) as client:
         default_access = client.get(
             "/api/v1/me/access",
             headers={"X-User-ID": "default"},
         ).json()
-        assert default_access["platform_role"] == "platform_admin"
+        assert default_access["platform_role"] != "platform_admin"
 
         editor_access = client.get(
             "/api/v1/me/access",
@@ -139,6 +141,16 @@ def test_default_user_is_platform_admin_new_user_is_editor():
         assert "create" in editor_access["features"]
         assert "knowledge" in editor_access["features"]
         assert "ops" not in editor_access["features"]
+
+
+def test_default_user_platform_admin_when_compat_enabled(monkeypatch):
+    monkeypatch.setenv("TPDHERMES_DEFAULT_IS_PLATFORM_ADMIN", "1")
+    with TestClient(app) as client:
+        default_access = client.get(
+            "/api/v1/me/access",
+            headers={"X-User-ID": "default"},
+        ).json()
+        assert default_access["platform_role"] == "platform_admin"
 
 
 def test_client_role_header_cannot_elevate_without_server_pref():

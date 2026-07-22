@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { apiFetch } from "@/lib/api";
+import { apiFetch, apiPatch } from "@/lib/api";
 import { fetchProjectFileDetail, type ProjectFileDetail } from "@/lib/co-create-api";
 import { ProjectOutputContentBody } from "@/components/project-output-content";
 import { formatDateTimeShanghai } from "@/lib/datetime";
@@ -43,15 +43,21 @@ function formatFileSize(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-
 type Props = {
   open: boolean;
   projectId: string;
   attachment: AttachmentPreviewItem | null;
   onClose: () => void;
+  onRenamed?: (next: AttachmentPreviewItem) => void;
 };
 
-export function AttachmentPreviewModal({ open, projectId, attachment, onClose }: Props) {
+export function AttachmentPreviewModal({
+  open,
+  projectId,
+  attachment,
+  onClose,
+  onRenamed,
+}: Props) {
   const [detail, setDetail] = useState<ProjectFileDetail | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [detailError, setDetailError] = useState<string | null>(null);
@@ -59,13 +65,18 @@ export function AttachmentPreviewModal({ open, projectId, attachment, onClose }:
   const [blobLoading, setBlobLoading] = useState(false);
   const [blobError, setBlobError] = useState<string | null>(null);
   const [downloading, setDownloading] = useState(false);
+  const [displayName, setDisplayName] = useState("");
+  const [editingName, setEditingName] = useState(false);
+  const [nameDraft, setNameDraft] = useState("");
+  const [renaming, setRenaming] = useState(false);
+  const [renameError, setRenameError] = useState<string | null>(null);
 
   const previewKind = useMemo(
     () =>
       attachment
-        ? attachmentPreviewKind(attachment.original_filename, attachment.content_type)
+        ? attachmentPreviewKind(displayName || attachment.original_filename, attachment.content_type)
         : "binary",
-    [attachment],
+    [attachment, displayName],
   );
 
   const needsBlobPreview = previewKind === "pdf" || previewKind === "image";
@@ -77,6 +88,9 @@ export function AttachmentPreviewModal({ open, projectId, attachment, onClose }:
     setBlobLoading(false);
     setBlobError(null);
     setDownloading(false);
+    setEditingName(false);
+    setRenameError(null);
+    setRenaming(false);
     setBlobUrl((prev) => {
       if (prev) URL.revokeObjectURL(prev);
       return null;
@@ -84,23 +98,37 @@ export function AttachmentPreviewModal({ open, projectId, attachment, onClose }:
   }, []);
 
   useEffect(() => {
+    if (!attachment) {
+      setDisplayName("");
+      setNameDraft("");
+      return;
+    }
+    setDisplayName(attachment.original_filename);
+    setNameDraft(attachment.original_filename);
+    setEditingName(false);
+    setRenameError(null);
+  }, [attachment]);
+
+  useEffect(() => {
     if (!open || !attachment || !projectId) {
       resetState();
       return;
     }
 
+    const attachmentId = attachment.id;
+    const fileName = attachment.original_filename;
     let cancelled = false;
     resetState();
     setDetailLoading(true);
 
-    void fetchProjectFileDetail(projectId, attachment.id, "attachment")
+    void fetchProjectFileDetail(projectId, attachmentId, "attachment")
       .then((data) => {
         if (cancelled) return;
         setDetail(data);
         console.info("[project] 附件预览内容已加载", {
           project_id: projectId,
-          attachment_id: attachment.id,
-          file_name: attachment.original_filename,
+          attachment_id: attachmentId,
+          file_name: fileName,
         });
       })
       .catch((err) => {
@@ -109,7 +137,7 @@ export function AttachmentPreviewModal({ open, projectId, attachment, onClose }:
         setDetailError(message);
         console.warn("[project] 附件预览内容加载失败", {
           project_id: projectId,
-          attachment_id: attachment.id,
+          attachment_id: attachmentId,
           err,
         });
       })
@@ -119,7 +147,7 @@ export function AttachmentPreviewModal({ open, projectId, attachment, onClose }:
 
     if (needsBlobPreview) {
       setBlobLoading(true);
-      void apiFetch(`/projects/${projectId}/attachments/${attachment.id}/download`)
+      void apiFetch(`/projects/${projectId}/attachments/${attachmentId}/download`)
         .then(async (res) => {
           if (!res.ok) {
             const text = await res.text();
@@ -138,7 +166,7 @@ export function AttachmentPreviewModal({ open, projectId, attachment, onClose }:
           setBlobError(message);
           console.warn("[project] 附件原文件加载失败", {
             project_id: projectId,
-            attachment_id: attachment.id,
+            attachment_id: attachmentId,
             err,
           });
         })
@@ -150,16 +178,79 @@ export function AttachmentPreviewModal({ open, projectId, attachment, onClose }:
     return () => {
       cancelled = true;
     };
-  }, [attachment, needsBlobPreview, open, projectId, resetState]);
+    // 仅随附件 id / 预览类型变化重载，避免重命名触发重复拉取
+  }, [attachment?.id, needsBlobPreview, open, projectId, resetState]);
 
   useEffect(() => {
     if (!open) return;
     const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
+      if (e.key === "Escape") {
+        if (editingName) {
+          e.preventDefault();
+          setEditingName(false);
+          setNameDraft(displayName);
+          setRenameError(null);
+          return;
+        }
+        onClose();
+      }
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [open, onClose]);
+  }, [open, onClose, editingName, displayName]);
+
+  const handleStartRename = () => {
+    setNameDraft(displayName);
+    setRenameError(null);
+    setEditingName(true);
+  };
+
+  const handleCancelRename = () => {
+    setEditingName(false);
+    setNameDraft(displayName);
+    setRenameError(null);
+  };
+
+  const handleSaveRename = async () => {
+    if (!attachment || !projectId) return;
+    const trimmed = nameDraft.trim();
+    if (!trimmed) {
+      setRenameError("文件名不能为空");
+      return;
+    }
+    if (trimmed === displayName) {
+      setEditingName(false);
+      return;
+    }
+    setRenaming(true);
+    setRenameError(null);
+    try {
+      const updated = await apiPatch<AttachmentPreviewItem>(
+        `/projects/${projectId}/attachments/${attachment.id}`,
+        { original_filename: trimmed },
+      );
+      setDisplayName(updated.original_filename);
+      setNameDraft(updated.original_filename);
+      setEditingName(false);
+      onRenamed?.(updated);
+      console.info("[project] 附件已重命名", {
+        project_id: projectId,
+        attachment_id: attachment.id,
+        from: attachment.original_filename,
+        to: updated.original_filename,
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "重命名失败";
+      setRenameError(message);
+      console.warn("[project] 附件重命名失败", {
+        project_id: projectId,
+        attachment_id: attachment.id,
+        err,
+      });
+    } finally {
+      setRenaming(false);
+    }
+  };
 
   const handleDownload = async () => {
     if (!attachment || !projectId) return;
@@ -174,7 +265,7 @@ export function AttachmentPreviewModal({ open, projectId, attachment, onClose }:
       const url = URL.createObjectURL(blob);
       const anchor = document.createElement("a");
       anchor.href = url;
-      anchor.download = attachment.original_filename;
+      anchor.download = displayName || attachment.original_filename;
       anchor.click();
       URL.revokeObjectURL(url);
     } catch (err) {
@@ -195,6 +286,7 @@ export function AttachmentPreviewModal({ open, projectId, attachment, onClose }:
     previewKind === "text" ||
     previewKind === "binary" ||
     (previewKind === "pdf" && blobError && !blobUrl);
+  const titleName = displayName || attachment.original_filename;
 
   return (
     <div
@@ -209,18 +301,66 @@ export function AttachmentPreviewModal({ open, projectId, attachment, onClose }:
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-start justify-between gap-3 border-b border-slate-300 px-4 py-3 dark:border-slate-700 sm:px-5">
-          <div className="min-w-0">
-            <h2
-              id="attachment-preview-title"
-              className="truncate text-lg font-semibold text-slate-900 dark:text-white"
-              title={attachment.original_filename}
-            >
-              {attachment.original_filename}
-            </h2>
+          <div className="min-w-0 flex-1">
+            {editingName ? (
+              <div className="flex flex-wrap items-center gap-2">
+                <input
+                  id="attachment-preview-title"
+                  type="text"
+                  value={nameDraft}
+                  onChange={(e) => setNameDraft(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      void handleSaveRename();
+                    }
+                  }}
+                  disabled={renaming}
+                  autoFocus
+                  className="min-w-0 flex-1 rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-base font-semibold text-slate-900 outline-none ring-blue-500 focus:ring-2 dark:border-slate-600 dark:bg-slate-900 dark:text-white"
+                  aria-label="附件名称"
+                />
+                <button
+                  type="button"
+                  onClick={() => void handleSaveRename()}
+                  disabled={renaming}
+                  className="rounded-lg bg-blue-600 px-2.5 py-1.5 text-xs font-medium text-white transition hover:bg-blue-500 disabled:opacity-50"
+                >
+                  {renaming ? "保存中…" : "保存"}
+                </button>
+                <button
+                  type="button"
+                  onClick={handleCancelRename}
+                  disabled={renaming}
+                  className="rounded-lg border border-slate-300 px-2.5 py-1.5 text-xs text-slate-600 transition hover:bg-slate-100 disabled:opacity-50 dark:border-slate-600 dark:text-slate-300 dark:hover:bg-slate-700"
+                >
+                  取消
+                </button>
+              </div>
+            ) : (
+              <div className="flex min-w-0 items-center gap-2">
+                <h2
+                  id="attachment-preview-title"
+                  className="truncate text-lg font-semibold text-slate-900 dark:text-white"
+                  title={titleName}
+                >
+                  {titleName}
+                </h2>
+                <button
+                  type="button"
+                  onClick={handleStartRename}
+                  className="shrink-0 rounded-md px-1.5 py-0.5 text-[11px] text-slate-500 transition hover:bg-slate-300 hover:text-slate-800 dark:hover:bg-slate-700 dark:hover:text-slate-100"
+                  title="修改名称"
+                >
+                  重命名
+                </button>
+              </div>
+            )}
             <p className="mt-1 text-xs text-slate-500">
               {formatFileSize(attachment.size_bytes)} · {formatDateTimeShanghai(attachment.created_at)}
               {attachment.ingest_status ? ` · 入库 ${attachment.ingest_status}` : ""}
             </p>
+            {renameError ? <p className="mt-1 text-xs text-red-500">{renameError}</p> : null}
           </div>
           <button
             type="button"
@@ -237,7 +377,7 @@ export function AttachmentPreviewModal({ open, projectId, attachment, onClose }:
 
           {!loading && previewKind === "pdf" && blobUrl ? (
             <iframe
-              title={attachment.original_filename}
+              title={titleName}
               src={blobUrl}
               className="h-[min(70vh,720px)] w-full rounded-xl border border-slate-200 dark:border-slate-700"
             />
@@ -248,7 +388,7 @@ export function AttachmentPreviewModal({ open, projectId, attachment, onClose }:
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img
                 src={blobUrl}
-                alt={attachment.original_filename}
+                alt={titleName}
                 className="max-h-[min(70vh,720px)] max-w-full rounded-xl object-contain"
               />
             </div>

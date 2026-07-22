@@ -39,12 +39,16 @@ export function SessionSidebar({
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameDraft, setRenameDraft] = useState("");
 
-  const filtered = sessions.filter(
-    (s) =>
-      !s.archived &&
-      s.selectedProjectId === projectId &&
-      isProjectCoCreateSession(s),
-  );
+  const filtered = sessions
+    .filter(
+      (s) =>
+        !s.archived &&
+        s.selectedProjectId === projectId &&
+        isProjectCoCreateSession(s),
+    )
+    // 按创建时间升序：旧会话在上，新建在最下方
+    .slice()
+    .sort((a, b) => (a.createdAt ?? 0) - (b.createdAt ?? 0));
 
   const startRename = (sessionId: string, currentTitle: string) => {
     setRenamingId(sessionId);

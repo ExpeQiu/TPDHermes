@@ -7,7 +7,8 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import datetime
+import os
+from datetime import datetime, timedelta
 from typing import Iterable
 from uuid import uuid4
 
@@ -403,6 +404,12 @@ def run_sqlite_migrations(connection: Connection) -> None:
     _backfill_member_default_platform_roles(connection)
     _upgrade_member_platform_role_to_editor(connection)
     _ensure_growth_tables(connection)
+    # 诊断修复：幂等补索引 → 清孤儿/僵死 → 归一化类型（顺序保证 FK 开启前先干净）
+    _ensure_performance_indexes(connection)
+    _cleanup_orphan_rows(connection)
+    _fail_stale_running_runs(connection)
+    _normalize_learning_signal_counts(connection)
+    _drop_redundant_chat_indexes(connection)
 
 
 def _ensure_growth_tables(connection: Connection) -> None:
@@ -454,7 +461,7 @@ def _ensure_growth_tables(connection: Connection) -> None:
                     entity_kind TEXT NOT NULL,
                     entity_id TEXT,
                     entity_label TEXT,
-                    count TEXT DEFAULT '1',
+                    count INTEGER DEFAULT 1,
                     status TEXT DEFAULT 'open',
                     payload_json TEXT,
                     user_id TEXT DEFAULT 'default',
@@ -540,9 +547,247 @@ def _ensure_growth_tables(connection: Connection) -> None:
             ],
         )
 
+    # 存量库：索引可能在建表之后才写入 migrate，必须在表外幂等补齐
+    if "feedback_events" in names:
+        connection.execute(
+            text("CREATE INDEX IF NOT EXISTS idx_feedback_run ON feedback_events (run_id)")
+        )
+        connection.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS idx_feedback_session_msg "
+                "ON feedback_events (session_id, message_id)"
+            )
+        )
+
+
+def _table_names(connection: Connection) -> set[str]:
+    rows = connection.execute(
+        text("SELECT name FROM sqlite_master WHERE type='table'")
+    ).fetchall()
+    return {str(r[0]) for r in rows}
+
+
+def _ensure_performance_indexes(connection: Connection) -> None:
+    """热路径与队列查询索引（幂等）。"""
+    names = _table_names(connection)
+    stmts: list[tuple[str, str]] = []
+
+    if "orchestration_runs" in names:
+        stmts.extend(
+            [
+                (
+                    "idx_orchestration_runs_project_created",
+                    "CREATE INDEX IF NOT EXISTS idx_orchestration_runs_project_created "
+                    "ON orchestration_runs (project_id, created_at)",
+                ),
+                (
+                    "idx_orchestration_runs_status_created",
+                    "CREATE INDEX IF NOT EXISTS idx_orchestration_runs_status_created "
+                    "ON orchestration_runs (status, created_at)",
+                ),
+            ]
+        )
+    if "outputs" in names:
+        stmts.extend(
+            [
+                (
+                    "idx_outputs_project_created",
+                    "CREATE INDEX IF NOT EXISTS idx_outputs_project_created "
+                    "ON outputs (project_id, created_at)",
+                ),
+                (
+                    "idx_outputs_project_status",
+                    "CREATE INDEX IF NOT EXISTS idx_outputs_project_status "
+                    "ON outputs (project_id, status)",
+                ),
+            ]
+        )
+    if "kb_ingest_jobs" in names:
+        stmts.append(
+            (
+                "idx_kb_ingest_jobs_status_created",
+                "CREATE INDEX IF NOT EXISTS idx_kb_ingest_jobs_status_created "
+                "ON kb_ingest_jobs (status, created_at)",
+            )
+        )
+    if "usage_events" in names:
+        stmts.append(
+            (
+                "idx_usage_events_event_time",
+                "CREATE INDEX IF NOT EXISTS idx_usage_events_event_time "
+                "ON usage_events (event_time)",
+            )
+        )
+    if "kb_cache" in names:
+        stmts.append(
+            (
+                "idx_kb_cache_project_collection",
+                "CREATE INDEX IF NOT EXISTS idx_kb_cache_project_collection "
+                "ON kb_cache (project_id, collection)",
+            )
+        )
+    if "project_members" in names:
+        stmts.append(
+            (
+                "idx_project_members_user",
+                "CREATE INDEX IF NOT EXISTS idx_project_members_user "
+                "ON project_members (user_id)",
+            )
+        )
+    if "feedback_events" in names:
+        stmts.extend(
+            [
+                (
+                    "idx_feedback_run",
+                    "CREATE INDEX IF NOT EXISTS idx_feedback_run ON feedback_events (run_id)",
+                ),
+                (
+                    "idx_feedback_session_msg",
+                    "CREATE INDEX IF NOT EXISTS idx_feedback_session_msg "
+                    "ON feedback_events (session_id, message_id)",
+                ),
+            ]
+        )
+
+    for name, sql in stmts:
+        connection.execute(text(sql))
+        logger.info("sqlite_migrate: ensure index %s", name)
+
+
+def _cleanup_orphan_rows(connection: Connection) -> None:
+    """清理 FK 关闭期间累积的孤儿数据。"""
+    names = _table_names(connection)
+    now = datetime.now().isoformat()
+
+    if "project_scenarios" in names and "projects" in names and "scenario_profiles" in names:
+        result = connection.execute(
+            text(
+                """
+                DELETE FROM project_scenarios
+                WHERE NOT EXISTS (SELECT 1 FROM projects p WHERE p.id = project_scenarios.project_id)
+                   OR NOT EXISTS (
+                        SELECT 1 FROM scenario_profiles s WHERE s.id = project_scenarios.scenario_id
+                   )
+                """
+            )
+        )
+        logger.info(
+            "sqlite_migrate: cleaned orphan project_scenarios deleted=%s",
+            result.rowcount,
+        )
+
+    if "project_members" in names and "projects" in names:
+        result = connection.execute(
+            text(
+                """
+                DELETE FROM project_members
+                WHERE NOT EXISTS (SELECT 1 FROM projects p WHERE p.id = project_members.project_id)
+                """
+            )
+        )
+        logger.info(
+            "sqlite_migrate: cleaned orphan project_members deleted=%s",
+            result.rowcount,
+        )
+
+    if "orchestration_runs" in names and "projects" in names:
+        result = connection.execute(
+            text(
+                """
+                UPDATE orchestration_runs
+                SET project_id = NULL, updated_at = :ts
+                WHERE project_id IS NOT NULL
+                  AND NOT EXISTS (SELECT 1 FROM projects p WHERE p.id = orchestration_runs.project_id)
+                """
+            ),
+            {"ts": now},
+        )
+        logger.info(
+            "sqlite_migrate: nulled orphan orchestration_runs.project_id updated=%s",
+            result.rowcount,
+        )
+
+    if "outputs" in names and "projects" in names:
+        # outputs.project_id NOT NULL，无法置空，只能删除孤儿
+        result = connection.execute(
+            text(
+                """
+                DELETE FROM outputs
+                WHERE NOT EXISTS (SELECT 1 FROM projects p WHERE p.id = outputs.project_id)
+                """
+            )
+        )
+        logger.info(
+            "sqlite_migrate: cleaned orphan outputs deleted=%s",
+            result.rowcount,
+        )
+
+
+def _fail_stale_running_runs(connection: Connection) -> None:
+    """超时仍 running 的编排收口为 failed，避免僵尸任务。"""
+    names = _table_names(connection)
+    if "orchestration_runs" not in names:
+        return
+
+    hours = int(os.getenv("TPDHERMES_STALE_RUN_HOURS", "2") or "2")
+    if hours < 1:
+        hours = 2
+    cutoff = (datetime.now() - timedelta(hours=hours)).isoformat()
+    now = datetime.now().isoformat()
+    msg = f"stale running auto-failed after {hours}h (db migrate cleanup)"
+    result = connection.execute(
+        text(
+            """
+            UPDATE orchestration_runs
+            SET status = 'failed',
+                error_message = COALESCE(NULLIF(error_message, ''), :msg),
+                updated_at = :ts
+            WHERE status = 'running'
+              AND created_at < :cutoff
+            """
+        ),
+        {"msg": msg, "ts": now, "cutoff": cutoff},
+    )
+    logger.info(
+        "sqlite_migrate: stale running -> failed updated=%s cutoff=%s hours=%s",
+        result.rowcount,
+        cutoff,
+        hours,
+    )
+
+
+def _normalize_learning_signal_counts(connection: Connection) -> None:
+    """将 learning_signals.count 归一为可解析整数（兼容历史 TEXT）。"""
+    names = _table_names(connection)
+    if "learning_signals" not in names:
+        return
+    result = connection.execute(
+        text(
+            """
+            UPDATE learning_signals
+            SET count = CAST(count AS INTEGER)
+            WHERE CAST(count AS INTEGER) IS NOT NULL
+            """
+        )
+    )
+    logger.info(
+        "sqlite_migrate: normalized learning_signals.count updated=%s",
+        result.rowcount,
+    )
+
+
+def _drop_redundant_chat_indexes(connection: Connection) -> None:
+    """复合索引已覆盖单列前缀，去掉 create_all 产生的冗余索引。"""
+    names = _table_names(connection)
+    if "chat_sessions" in names:
+        connection.execute(text("DROP INDEX IF EXISTS ix_chat_sessions_user_id"))
+    if "chat_messages" in names:
+        connection.execute(text("DROP INDEX IF EXISTS ix_chat_messages_session_id"))
+    logger.info("sqlite_migrate: dropped redundant chat single-column indexes if present")
+
 
 def _seed_builtin_scenarios(connection: Connection) -> None:
-    """写入内置场景；已存在 id 或用户已删除（抑制表）则跳过。"""
+    """写入/升级内置场景；用户已删除（抑制表）则跳过；版本落后时 upsert 合同字段。"""
     now = datetime.now().isoformat()
     suppressed = load_suppressed_ids_sync(connection)
     for row in BUILTIN_SCENARIOS:
@@ -550,47 +795,98 @@ def _seed_builtin_scenarios(connection: Connection) -> None:
         if sid in suppressed:
             logger.debug("sqlite_migrate: skip seeded scenario id=%s (suppressed)", sid)
             continue
-        exists = connection.execute(
-            text("SELECT 1 FROM scenario_profiles WHERE id = :id LIMIT 1"),
+        params = {
+            "id": sid,
+            "code": str(row["code"]),
+            "name": str(row["name"]),
+            "description": row.get("description"),
+            "category": row.get("category"),
+            "goal": row.get("goal"),
+            "conversation_mode": str(row.get("conversation_mode", "task_oriented")),
+            "domain_json": json.dumps(row.get("domain_json") or {}, ensure_ascii=False),
+            "knowledge_policy_json": json.dumps(row.get("knowledge_policy_json") or {}, ensure_ascii=False),
+            "skills_policy_json": json.dumps(row.get("skills_policy_json") or {}, ensure_ascii=False),
+            "output_policy_json": json.dumps(row.get("output_policy_json") or {}, ensure_ascii=False),
+            "preset_instructions": row.get("preset_instructions"),
+            "opening_hint": row.get("opening_hint"),
+            "version": BUILTIN_VERSION,
+            "status": "published",
+            "created_at": now,
+            "updated_at": now,
+        }
+        existing = connection.execute(
+            text("SELECT version FROM scenario_profiles WHERE id = :id LIMIT 1"),
             {"id": sid},
         ).fetchone()
-        if exists:
+        if not existing:
+            connection.execute(
+                text(
+                    """
+                    INSERT INTO scenario_profiles (
+                      id, code, name, description, category, goal, conversation_mode,
+                      domain_json, knowledge_policy_json, skills_policy_json, output_policy_json,
+                      preset_instructions, opening_hint, version, status, created_by, created_at, updated_at
+                    ) VALUES (
+                      :id, :code, :name, :description, :category, :goal, :conversation_mode,
+                      :domain_json, :knowledge_policy_json, :skills_policy_json, :output_policy_json,
+                      :preset_instructions, :opening_hint, :version, :status, NULL, :created_at, :updated_at
+                    )
+                    """
+                ),
+                params,
+            )
+            logger.info("sqlite_migrate: seeded scenario_profiles id=%s", sid)
+            continue
+        cur_ver = str(existing[0] or "")
+        if cur_ver == BUILTIN_VERSION:
             continue
         connection.execute(
             text(
                 """
-                INSERT INTO scenario_profiles (
-                  id, code, name, description, category, goal, conversation_mode,
-                  domain_json, knowledge_policy_json, skills_policy_json, output_policy_json,
-                  preset_instructions, opening_hint, version, status, created_by, created_at, updated_at
-                ) VALUES (
-                  :id, :code, :name, :description, :category, :goal, :conversation_mode,
-                  :domain_json, :knowledge_policy_json, :skills_policy_json, :output_policy_json,
-                  :preset_instructions, :opening_hint, :version, :status, NULL, :created_at, :updated_at
-                )
+                UPDATE scenario_profiles SET
+                  code = :code,
+                  name = :name,
+                  description = :description,
+                  category = :category,
+                  goal = :goal,
+                  conversation_mode = :conversation_mode,
+                  domain_json = :domain_json,
+                  knowledge_policy_json = :knowledge_policy_json,
+                  skills_policy_json = :skills_policy_json,
+                  output_policy_json = :output_policy_json,
+                  preset_instructions = :preset_instructions,
+                  opening_hint = :opening_hint,
+                  version = :version,
+                  status = :status,
+                  updated_at = :updated_at
+                WHERE id = :id
                 """
             ),
-            {
-                "id": sid,
-                "code": str(row["code"]),
-                "name": str(row["name"]),
-                "description": row.get("description"),
-                "category": row.get("category"),
-                "goal": row.get("goal"),
-                "conversation_mode": str(row.get("conversation_mode", "task_oriented")),
-                "domain_json": json.dumps(row.get("domain_json") or {}, ensure_ascii=False),
-                "knowledge_policy_json": json.dumps(row.get("knowledge_policy_json") or {}, ensure_ascii=False),
-                "skills_policy_json": json.dumps(row.get("skills_policy_json") or {}, ensure_ascii=False),
-                "output_policy_json": json.dumps(row.get("output_policy_json") or {}, ensure_ascii=False),
-                "preset_instructions": row.get("preset_instructions"),
-                "opening_hint": row.get("opening_hint"),
-                "version": BUILTIN_VERSION,
-                "status": "published",
-                "created_at": now,
-                "updated_at": now,
-            },
+            params,
         )
-        logger.info("sqlite_migrate: seeded scenario_profiles id=%s", sid)
+        logger.info(
+            "sqlite_migrate: upgraded scenario_profiles id=%s %s -> %s",
+            sid,
+            cur_ver,
+            BUILTIN_VERSION,
+        )
+        # 同步项目绑定版本，避免工坊因版本漂移拦截
+        if "project_scenarios" in {
+            str(r[0])
+            for r in connection.execute(
+                text("SELECT name FROM sqlite_master WHERE type='table'")
+            ).fetchall()
+        }:
+            connection.execute(
+                text(
+                    """
+                    UPDATE project_scenarios
+                    SET scenario_version = :ver, updated_at = :ts
+                    WHERE scenario_id = :sid
+                    """
+                ),
+                {"ver": BUILTIN_VERSION, "ts": now, "sid": sid},
+            )
 
 
 def _backfill_project_scenario_bindings(connection: Connection) -> None:

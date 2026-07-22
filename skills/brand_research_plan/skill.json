@@ -1,0 +1,31 @@
+{
+  "name": "技术品牌调研计划",
+  "description": "生成中文《技术品牌调研计划》（立项、方法样本、被访者、供应商、预算节奏）。当用户需要调研立项、调研计划书、供应商招标调研、样本规划时使用。",
+  "when": "调研计划 / 调研立项 / 供应商招标 / 样本规划",
+  "triggers": [
+    "调研计划",
+    "调研立项",
+    "品牌调研",
+    "样本规划",
+    "供应商招标"
+  ],
+  "tags": [
+    "调研计划",
+    "技术品牌"
+  ],
+  "market_tags": [
+    "调研计划",
+    "技术品牌"
+  ],
+  "market_category": "调研洞察",
+  "version": "1.0.1",
+  "author": "TPD Team",
+  "template": "templates/research_plan.md",
+  "templates": [
+    {
+      "id": "research_plan",
+      "label": "技术品牌调研计划",
+      "path": "templates/research_plan.md"
+    }
+  ]
+}

@@ -22,11 +22,14 @@ const HREF_FEATURE: Partial<Record<string, FeatureKey>> = {
 };
 
 export default function HomeEntrySection({ entries }: { entries: readonly EntryItem[] }) {
-  const { canAccess, isAdmin } = useUserAccess();
+  const { canAccess, isAdmin, ready } = useUserAccess();
   const visibleEntries = entries.filter((item) => {
     const feature = item.requiredFeature ?? HREF_FEATURE[item.href];
-    if (feature) return canAccess(feature);
-    if (item.adminOnly) return isAdmin;
+    if (feature) {
+      if (!ready) return false;
+      return canAccess(feature);
+    }
+    if (item.adminOnly) return ready && isAdmin;
     return true;
   });
 

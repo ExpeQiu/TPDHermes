@@ -61,6 +61,20 @@ def infer_session_kind(context: dict[str, Any]) -> str:
     return SESSION_KIND_CHAT
 
 
+def _iso_to_ms(value: str | None) -> int | None:
+    if not value:
+        return None
+    text = str(value).strip()
+    if not text:
+        return None
+    try:
+        if text.endswith("Z"):
+            text = text[:-1] + "+00:00"
+        return int(datetime.fromisoformat(text).timestamp() * 1000)
+    except (ValueError, TypeError, OSError):
+        return None
+
+
 def message_record_to_dict(row: ChatMessageRecord) -> dict[str, Any]:
     meta = _json_load(row.metadata_json, {})
     out: dict[str, Any] = {
@@ -68,6 +82,9 @@ def message_record_to_dict(row: ChatMessageRecord) -> dict[str, Any]:
         "role": row.role,
         "content": row.content or "",
     }
+    created_ms = _iso_to_ms(row.created_at if isinstance(row.created_at, str) else None)
+    if created_ms is not None:
+        out["createdAt"] = created_ms
     for key in MESSAGE_META_KEYS:
         if key in meta and meta[key] is not None:
             out[key] = meta[key]
@@ -75,6 +92,12 @@ def message_record_to_dict(row: ChatMessageRecord) -> dict[str, Any]:
 
 
 def session_record_to_summary(row: ChatSessionRecord, *, message_count: int = 0) -> dict[str, Any]:
+    context = _json_load(row.context_json, {})
+    selected_project_id = ""
+    if isinstance(context, dict):
+        raw_project_id = context.get("selectedProjectId")
+        if isinstance(raw_project_id, str):
+            selected_project_id = raw_project_id.strip()
     return {
         "id": row.id,
         "title": row.title,
@@ -82,6 +105,8 @@ def session_record_to_summary(row: ChatSessionRecord, *, message_count: int = 0)
         "createdAt": row.created_at_ms,
         "updatedAt": row.updated_at,
         "messageCount": message_count,
+        # 列表侧栏按项目过滤依赖此字段；缺省会导致跨端误建「新共创」
+        "selectedProjectId": selected_project_id,
     }
 
 

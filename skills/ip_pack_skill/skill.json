@@ -1,0 +1,31 @@
+{
+  "name": "技术IP包装全案",
+  "description": "生成中文《技术IP包装全案策划》（从0到1：定位、亮点场景、车型节奏、执行预算）。当用户需要IP包装全案、技术IP从0到1、IP打造计划时使用。",
+  "when": "IP包装全案 / 技术IP从0到1 / IP打造计划",
+  "triggers": [
+    "IP包装",
+    "包装全案",
+    "技术IP全案",
+    "IP打造",
+    "从0到1"
+  ],
+  "tags": [
+    "IP包装",
+    "全案策划"
+  ],
+  "market_tags": [
+    "IP包装",
+    "全案策划"
+  ],
+  "market_category": "技术IP",
+  "version": "1.0.1",
+  "author": "TPD Team",
+  "template": "templates/ip_pack_plan.md",
+  "templates": [
+    {
+      "id": "ip_pack_plan",
+      "label": "技术IP包装全案策划",
+      "path": "templates/ip_pack_plan.md"
+    }
+  ]
+}

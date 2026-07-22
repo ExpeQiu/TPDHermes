@@ -5,7 +5,9 @@ import type { FileActionProposal } from "@/app/projects/[id]/co-create/co-create
 
 /** 共创写回规则：附件只读，仅可创建/修改输出物 */
 export const CO_CREATE_OUTPUT_WRITE_POLICY = [
-  "【文件写回规则】项目 /附件/ 为上传只读材料，禁止 patch 或覆盖修改 attachment。",
+  "【文件写回规则】默认输出物落库到 TPD 真存储：数据库 outputs 表的 content 字段；虚拟路径为 /输出/{fileName}。",
+  "落库成功后在共创右侧文件栏「输出物」列表展示（如 📄 技术活动.md /输出/技术活动.md）。",
+  "项目 /附件/ 为上传只读材料，禁止 patch 或覆盖修改 attachment。",
   "仅可 create 新输出物，或 patch 已有输出物（/输出/）。",
   "基于附件改写时：读取附件后 create 写入 /输出/ 新文件，或 patch 已有输出物，勿改原附件。",
 ].join(" ");

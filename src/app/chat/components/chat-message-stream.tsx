@@ -12,6 +12,7 @@ import {
   isFirstAssistantTurn,
 } from "@/lib/streaming-wait-hint";
 import type { ChatSession, Message } from "@/app/chat/chat-types";
+import { formatMessageTimestamp } from "@/lib/datetime";
 
 type ChatMessageStreamProps = {
   activeSession?: ChatSession;
@@ -79,6 +80,7 @@ export function ChatMessageStream({
           msg.id === activeSession.messages[activeSession.messages.length - 1]?.id;
         const displayContent =
           msg.role === "assistant" ? stripFileActionsBlock(msg.content) : msg.content;
+        const messageTime = formatMessageTimestamp(msg.createdAt);
 
         return (
           <div
@@ -160,6 +162,16 @@ export function ChatMessageStream({
                   </>
                 )}
               </div>
+
+              {messageTime ? (
+                <div
+                  className={`mt-1 text-[11px] leading-none text-slate-400 dark:text-slate-500 ${
+                    msg.role === "user" ? "text-right" : "text-left"
+                  }`}
+                >
+                  {messageTime}
+                </div>
+              ) : null}
 
               {msg.role === "assistant" && displayContent.trim() ? (
                 <ChatMessageQuickActions

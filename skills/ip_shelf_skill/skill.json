@@ -1,0 +1,31 @@
+{
+  "name": "技术IP包装货架",
+  "description": "生成中文《技术IP包装货架文档》（信息屋、Slogan/愿景/定位、亮点与车型匹配）。当用户需要IP货架、标准化信息包、技术包装沉淀时使用。",
+  "when": "IP货架 / 标准化信息包 / 技术包装沉淀 / 信息屋",
+  "triggers": [
+    "IP货架",
+    "包装货架",
+    "信息包",
+    "技术包装沉淀",
+    "信息屋"
+  ],
+  "tags": [
+    "IP货架",
+    "信息屋"
+  ],
+  "market_tags": [
+    "IP货架",
+    "信息屋"
+  ],
+  "market_category": "技术IP",
+  "version": "1.0.1",
+  "author": "TPD Team",
+  "template": "templates/ip_shelf_doc.md",
+  "templates": [
+    {
+      "id": "ip_shelf_doc",
+      "label": "技术IP包装货架文档",
+      "path": "templates/ip_shelf_doc.md"
+    }
+  ]
+}

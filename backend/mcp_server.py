@@ -117,7 +117,10 @@ async def kb_add_entry(
 
 @mcp.tool(
     title="Workshop List Skills",
-    description="List all Skills available in the workshop (skills/ directory).",
+    description=(
+        "List workshop Skills with selection metadata. "
+        "Use catalog[].description/when/triggers to pick the best skill_name before generate."
+    ),
 )
 async def workshop_list_skills(user_id: str | None = None) -> dict:
     """List all available Skills."""
@@ -127,7 +130,10 @@ async def workshop_list_skills(user_id: str | None = None) -> dict:
 
 @mcp.tool(
     title="Workshop Get Skill Info",
-    description="Get detailed information about a specific Skill.",
+    description=(
+        "Get Skill metadata including description, when, triggers and tags "
+        "to decide whether to call workshop_generate / workshop_generate_from_kb."
+    ),
 )
 async def workshop_get_skill_info(skill_name: str, user_id: str | None = None) -> dict:
     """Get skill details."""

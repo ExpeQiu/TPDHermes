@@ -9,7 +9,12 @@ from fastapi import Depends, HTTPException, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.db import get_db
-from backend.services.user_identity import get_effective_user_id, is_global_admin_user, viewer_role
+from backend.services.user_identity import (
+    default_is_platform_admin_enabled,
+    get_effective_user_id,
+    is_global_admin_user,
+    viewer_role,
+)
 from backend.services.user_preference_service import PREF_KEY_PLATFORM_ROLE, get_user_preferences
 
 logger = logging.getLogger("tpdx.hermes.rbac")
@@ -86,7 +91,10 @@ def normalize_project_role(value: str | None) -> str | None:
 
 
 def is_default_platform_admin_user(user_id: str) -> bool:
-    return (user_id or "").strip() == "default"
+    """仅当显式开启兼容开关时，user_id=default 才视为平台管理员。"""
+    if (user_id or "").strip() != "default":
+        return False
+    return default_is_platform_admin_enabled()
 
 
 async def ensure_default_member_platform_role(db: AsyncSession, user_id: str) -> None:

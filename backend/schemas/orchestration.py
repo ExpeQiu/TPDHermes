@@ -102,6 +102,10 @@ class OrchestrationExecution(BaseModel):
     save_output: bool = True
     save_run_log: bool = True
     run_id: str | None = Field(default=None, description="编排 run 主键，工坊 Agent 模式写入 MCP context")
+    session_id: str | None = Field(
+        default=None,
+        description="TPDHermes 会话 ID，写入编排 JSON 供 Hermes 侧关联（非 Hermes 原生 session）",
+    )
 
 
 class OrchestrationActor(BaseModel):
