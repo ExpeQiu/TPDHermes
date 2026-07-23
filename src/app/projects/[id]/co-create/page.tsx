@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useParams, useSearchParams } from "next/navigation";
 
 import { apiGet, apiV1 } from "@/lib/api";
+import { fetchRunKbSources } from "@/lib/chat-citations";
 import {
   buildCoCreateQuickStartPlan,
   type CoCreateQuickStartScenarioDetail,
@@ -45,10 +46,12 @@ import {
   type ProjectFileVersionItem,
 } from "@/lib/co-create-api";
 import {
-  isChatConversationStarted,
   isCoCreateSessionForProject,
+  listProjectCoCreateSessions,
+  listSurplusEmptyCoCreateSessionIds,
   pickProjectCoCreateEntrySession,
   projectCoCreateSessionDefaults,
+  sessionHasPersistedMessages,
   titleFromSession,
 } from "@/lib/chat-session-utils";
 import { randomUUID } from "@/lib/random-id";
@@ -353,6 +356,28 @@ function findAssistantContentForProposal(
   return hostMessage?.content ?? "";
 }
 
+/** 防 React Strict / 竞态导致同一项目短时间重复误建空「新共创」 */
+const CO_CREATE_ENTRY_CREATE_DEDUP_MS = 8_000;
+const coCreateEntryCreateAtByProject = new Map<string, number>();
+
+function shouldSkipDuplicateEntryCreate(projectId: string): boolean {
+  const lastAt = coCreateEntryCreateAtByProject.get(projectId) ?? 0;
+  return Date.now() - lastAt < CO_CREATE_ENTRY_CREATE_DEDUP_MS;
+}
+
+function markEntryCreate(projectId: string): void {
+  coCreateEntryCreateAtByProject.set(projectId, Date.now());
+}
+
+function clearEntryCreateGuard(projectId: string): void {
+  coCreateEntryCreateAtByProject.delete(projectId);
+}
+
+/** 测试用：清空入口误建去重状态 */
+export function resetCoCreateEntryCreateGuardForTests(): void {
+  coCreateEntryCreateAtByProject.clear();
+}
+
 export default function CoCreatePage() {
   return (
     <Suspense
@@ -412,6 +437,8 @@ function CoCreatePageInner() {
   const firstTokenMetricsRef = useRef({ count: 0, totalMs: 0 });
   const entryAppliedRef = useRef(false);
   const entryProjectIdRef = useRef<string | null>(null);
+  const citationHydrateAttemptedRef = useRef<Set<string>>(new Set());
+  const [entryRetryTick, setEntryRetryTick] = useState(0);
   const autoApplyingProposalIdsRef = useRef<Set<string>>(new Set());
   const autoApplyingBusyRef = useRef(false);
   const autoDraftExtractedLenRef = useRef<Map<string, number>>(new Map());
@@ -470,6 +497,7 @@ function CoCreatePageInner() {
     scopeUserId,
     defaultCollection: "",
     storageNamespace: "co-create",
+    preferredProjectId: projectId || undefined,
     onResetTransientState: resetTransient,
   });
 
@@ -754,6 +782,62 @@ function CoCreatePageInner() {
     entryProjectIdRef.current = null;
   }, [projectId]);
 
+  // 与 /chat 对齐：正文有 [^N] 但缺 citations 时，按 runId 补拉溯源（共创此前缺失导致角标永远「未找到片段」）
+  useEffect(() => {
+    if (sessionsLoading || !activeId) return;
+    if (!isCoCreateSessionForProject(activeSession, projectId)) return;
+    const session = sessionsRef.current.find((item) => item.id === activeId);
+    if (!session) return;
+    for (const msg of session.messages) {
+      if (msg.role !== "assistant" || !msg.runId || !msg.content.includes("[^")) continue;
+      if (msg.citations?.length) continue;
+      const hydrateKey = `${msg.id}:${msg.runId}`;
+      if (citationHydrateAttemptedRef.current.has(hydrateKey)) continue;
+      citationHydrateAttemptedRef.current.add(hydrateKey);
+      console.info("[co-create] 补拉引用溯源", { sessionId: activeId, messageId: msg.id, runId: msg.runId });
+      void fetchRunKbSources(msg.runId)
+        .then((fetched) => {
+          if (fetched.citations.length === 0 && fetched.unresolvedCitationRefs.length === 0) {
+            console.warn("[co-create] run 无可用 citations", { runId: msg.runId });
+            return;
+          }
+          updateSession(activeId, (state) => ({
+            ...state,
+            messages: state.messages.map((message) =>
+              message.id === msg.id
+                ? {
+                    ...message,
+                    citations: fetched.citations,
+                    unresolvedCitationRefs: fetched.unresolvedCitationRefs,
+                  }
+                : message,
+            ),
+          }));
+          const updatedMessage = sessionsRef.current
+            .find((item) => item.id === activeId)
+            ?.messages.find((item) => item.id === msg.id);
+          if (updatedMessage) queueMessageSync(activeId, [updatedMessage], [], 0);
+          console.info("[co-create] 引用溯源已补齐", {
+            messageId: msg.id,
+            citations: fetched.citations.length,
+            unresolved: fetched.unresolvedCitationRefs.length,
+          });
+        })
+        .catch((err) => {
+          console.warn("[co-create] citation hydrate failed", err);
+        });
+    }
+  }, [
+    activeId,
+    activeSession,
+    projectId,
+    queueMessageSync,
+    sessions,
+    sessionsLoading,
+    sessionsRef,
+    updateSession,
+  ]);
+
   const visibleMessages = useMemo(() => {
     if (!isCoCreateSessionForProject(activeSession, projectId)) return [];
     return activeSession?.messages ?? [];
@@ -774,22 +858,36 @@ function CoCreatePageInner() {
     const outputId = searchParams?.get("output_id");
     const fileId = searchParams?.get("file_id");
     const initialKey = fileKeyFromParams(outputId, fileId, "output");
-    const projectSessions = sessions.filter(
-      (s) =>
-        !s.archived &&
-        s.selectedProjectId === projectId &&
-        s.sessionKind === "project_co_create",
-    );
+    // 以 sessionsRef 为准，避免 Strict/闭包里 sessions 过期导致误判「无会话」
+    const projectSessions = listProjectCoCreateSessions(sessionsRef.current, projectId);
     const hasProjectSession = projectSessions.length > 0;
 
     if (!hasProjectSession) {
+      if (shouldSkipDuplicateEntryCreate(projectId)) {
+        // 已触发过 create，但 remount 后 store 仍空：不标记 applied，短暂后清守卫并重试
+        console.warn("[co-create] 跳过重复新建，等待会话进入 store", {
+          projectId,
+          storeCount: sessionsRef.current.length,
+        });
+        window.setTimeout(() => {
+          if (listProjectCoCreateSessions(sessionsRef.current, projectId).length > 0) return;
+          clearEntryCreateGuard(projectId);
+          entryAppliedRef.current = false;
+          entryProjectIdRef.current = null;
+          setEntryRetryTick((tick) => tick + 1);
+          console.info("[co-create] 空项目新建守卫已复位，准备重试", { projectId });
+        }, 450);
+        return;
+      }
       // 仅在本项目确无共创会话时新建；远端 summary 已带回 selectedProjectId，避免跨端误建
       const defaults = projectCoCreateSessionDefaults(projectId);
       if (initialKey) {
         defaults.roundFileIds = [initialKey];
         defaults.pinnedFileIds = [];
       }
-      // 首次进入项目共创：等同点击「+ 新建」，不复用 orphan（避免 hydrate 出其他项目历史）
+      markEntryCreate(projectId);
+      entryAppliedRef.current = true;
+      entryProjectIdRef.current = projectId;
       resetComposerContext();
       resetTransient();
       fileWorkspace.resetWorkspace();
@@ -799,36 +897,59 @@ function CoCreatePageInner() {
       }
       console.info("[co-create] 项目首次进入，已新建共创会话", {
         projectId,
-        existingCoCreateCount: sessions.filter((s) => s.sessionKind === "project_co_create").length,
+        existingCoCreateCount: sessionsRef.current.filter((s) => s.sessionKind === "project_co_create")
+          .length,
       });
-    } else {
-      const target = pickProjectCoCreateEntrySession(sessions, projectId, activeSession);
-      if (target) {
-        // 始终走 selectSession：对齐 active，并对 shell 按需 hydrate（summary 已含 selectedProjectId）
-        selectSession(target.id);
-        console.info("[co-create] 已对齐到项目共创会话", {
-          projectId,
-          sessionId: target.id,
-          empty: !isChatConversationStarted(target),
-        });
-      }
-      if (initialKey && target) {
-        const nextRound = [...new Set([...(target.roundFileIds ?? []), initialKey])];
-        updateSession(target.id, (session) => ({
-          ...session,
-          roundFileIds: nextRound,
-        }));
-        const updated = sessionsRef.current.find((session) => session.id === target.id);
-        if (updated) queueSessionPatch(target.id, sessionToPatchPayload(updated));
-        fileWorkspace.openFileTab(initialKey);
-      }
+      return;
     }
 
+    // 本项目已有会话：清除「空项目新建」去重，避免日后误跳过
+    clearEntryCreateGuard(projectId);
     entryAppliedRef.current = true;
     entryProjectIdRef.current = projectId;
+
+    const target = pickProjectCoCreateEntrySession(sessionsRef.current, projectId, activeSession);
+    if (target) {
+      // 始终走 selectSession：对齐 active，并对 shell 按需 hydrate（summary 已含 selectedProjectId）
+      selectSession(target.id);
+      console.info("[co-create] 已对齐到项目共创会话", {
+        projectId,
+        sessionId: target.id,
+        empty: !sessionHasPersistedMessages(target),
+        messageCount: target.messageCount ?? target.messages.length,
+      });
+    }
+    if (initialKey && target) {
+      const nextRound = [...new Set([...(target.roundFileIds ?? []), initialKey])];
+      updateSession(target.id, (session) => ({
+        ...session,
+        roundFileIds: nextRound,
+      }));
+      const updated = sessionsRef.current.find((session) => session.id === target.id);
+      if (updated) queueSessionPatch(target.id, sessionToPatchPayload(updated));
+      fileWorkspace.openFileTab(initialKey);
+    }
+
+    // 归档历史误建的占位空壳；始终保留当前 active，避免「新建后即被归档消失」
+    const keepSessionId = activeIdRef.current ?? target?.id ?? null;
+    const surplusEmptyIds = listSurplusEmptyCoCreateSessionIds(sessionsRef.current, projectId, {
+      keepSessionId,
+    });
+    if (surplusEmptyIds.length > 0) {
+      for (const sessionId of surplusEmptyIds) {
+        updateSession(sessionId, (session) => ({ ...session, archived: true }));
+        queueSessionPatch(sessionId, { archived: true }, 0);
+      }
+      console.info("[co-create] 已归档多余空共创会话", {
+        projectId,
+        count: surplusEmptyIds.length,
+        keepSessionId,
+      });
+    }
   }, [
     activeSession,
     createSession,
+    entryRetryTick,
     fileWorkspace,
     projectId,
     queueSessionPatch,
@@ -1560,9 +1681,12 @@ function CoCreatePageInner() {
         ...projectCoCreateSessionDefaults(projectId),
         ...(options?.title?.trim() ? { title: options.title.trim() } : {}),
       };
-      createSession(defaults);
+      // 手动新建不受入口去重影响，并避免随后被当成「多余空壳」清掉
+      clearEntryCreateGuard(projectId);
+      const created = createSession(defaults);
       console.info("[co-create] /new 新建会话", {
         projectId,
+        sessionId: created?.id ?? null,
         title: options?.title?.trim() || null,
       });
     },

@@ -94,10 +94,12 @@ def message_record_to_dict(row: ChatMessageRecord) -> dict[str, Any]:
 def session_record_to_summary(row: ChatSessionRecord, *, message_count: int = 0) -> dict[str, Any]:
     context = _json_load(row.context_json, {})
     selected_project_id = ""
+    archived = False
     if isinstance(context, dict):
         raw_project_id = context.get("selectedProjectId")
         if isinstance(raw_project_id, str):
             selected_project_id = raw_project_id.strip()
+        archived = bool(context.get("archived"))
     return {
         "id": row.id,
         "title": row.title,
@@ -107,6 +109,8 @@ def session_record_to_summary(row: ChatSessionRecord, *, message_count: int = 0)
         "messageCount": message_count,
         # 列表侧栏按项目过滤依赖此字段；缺省会导致跨端误建「新共创」
         "selectedProjectId": selected_project_id,
+        # 侧栏/空壳清理依赖；缺省会导致已归档空壳反复出现
+        "archived": archived,
     }
 
 

@@ -159,6 +159,18 @@ def test_chat_sessions_summary_includes_selected_project_id():
         assert match is not None
         assert match.get("selectedProjectId") == project_id
         assert match.get("sessionKind") == "project_co_create"
+        assert match.get("archived") is False
+
+        patched = client.patch(
+            f"/api/v1/chat/sessions/{sid}",
+            headers=headers,
+            json={"archived": True},
+        )
+        assert patched.status_code == 200
+        listed2 = client.get("/api/v1/chat/sessions", headers=headers)
+        match2 = next((item for item in (listed2.json().get("items") or []) if item["id"] == sid), None)
+        assert match2 is not None
+        assert match2.get("archived") is True
 
 
 def test_me_identity_sync():

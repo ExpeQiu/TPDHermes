@@ -111,6 +111,18 @@ export function SessionSidebar({
         {filtered.map((session) => {
           const sessionTitle = titleFromSession(session, "新共创");
           const fileCount = countCoCreateSessionTouchedFiles(session);
+          const persistedMsgCount =
+            session.messages.length > 0
+              ? session.messages.length
+              : typeof session.messageCount === "number"
+                ? session.messageCount
+                : 0;
+          const metaLabel =
+            fileCount > 0
+              ? `文件 ${fileCount} 个`
+              : persistedMsgCount > 0
+                ? `对话 ${persistedMsgCount} 条`
+                : "文件 0 个";
           const isRenaming = renamingId === session.id;
           return (
             <div
@@ -145,7 +157,7 @@ export function SessionSidebar({
                   )}
                   <div className="mt-0.5 flex items-center justify-between gap-1">
                     <span className="truncate text-[10px] text-slate-500">
-                      文件 {fileCount} 个
+                      {metaLabel}
                     </span>
                     <div className="flex shrink-0 items-center gap-0.5 opacity-0 transition group-hover:opacity-100">
                       <button

@@ -36,6 +36,18 @@ export function isChatConversationStarted(
   return Boolean(session?.messages.some((m) => m.role === "user"));
 }
 
+/**
+ * 是否已有落库/可恢复的对话内容。
+ * shell（messages=[]）时用 messageCount，避免把有历史的空壳误判为空会话。
+ */
+export function sessionHasPersistedMessages(
+  session: Pick<ChatSession, "messages" | "messageCount"> | undefined,
+): boolean {
+  if (!session) return false;
+  if (isChatConversationStarted(session)) return true;
+  return (session.messageCount ?? 0) > 0;
+}
+
 export function isPlaceholderSessionTitle(title: string): boolean {
   return PLACEHOLDER_SESSION_TITLES.has(title.trim());
 }
@@ -133,8 +145,9 @@ export function isCoCreateSessionForProject(
 
 /**
  * 进入项目共创页时选择应对齐的会话：
- * - 当前 active 已属该项目 → 保持
- * - 否则优先空会话（快捷创作空态），再取最新 createdAt
+ * - 当前 active 已属该项目 → 保持（含用户刚点的空「新共创」）
+ * - 否则优先有历史的会话（含 shell 的 messageCount>0），取最新 createdAt
+ * - 仅当本项目全是空会话时，才落最新空壳（快捷创作空态）
  */
 export function pickProjectCoCreateEntrySession(
   sessions: ChatSession[],
@@ -144,19 +157,133 @@ export function pickProjectCoCreateEntrySession(
   const projectSessions = listProjectCoCreateSessions(sessions, projectId);
   if (projectSessions.length === 0) return null;
 
-  if (
-    activeSession &&
-    activeSession.selectedProjectId === projectId &&
-    isProjectCoCreateSession(activeSession)
-  ) {
+  if (isCoCreateSessionForProject(activeSession, projectId) && activeSession) {
     return activeSession;
   }
 
-  const emptySessions = projectSessions.filter((session) => !isChatConversationStarted(session));
-  const pool = emptySessions.length > 0 ? emptySessions : projectSessions;
+  const withHistory = projectSessions.filter((session) => sessionHasPersistedMessages(session));
+  const pool = withHistory.length > 0 ? withHistory : projectSessions;
   return pool.reduce((latest, session) =>
     session.createdAt > latest.createdAt ? session : latest,
   );
+}
+
+/**
+ * bootstrap 首屏 hydrate 目标：
+ * - 有 preferredProjectId 时，优先该项目下会话（stored active 属该项目则保留，否则按入口挑选）
+ * - 否则沿用 storedActive / 列表第一项
+ */
+export function pickBootstrapHydrateSessionId(
+  sessions: Array<
+    Pick<
+      ChatSession,
+      | "id"
+      | "createdAt"
+      | "archived"
+      | "selectedProjectId"
+      | "sessionKind"
+      | "messages"
+      | "messageCount"
+    >
+  >,
+  storedActive: string | null | undefined,
+  preferredProjectId?: string,
+): string | undefined {
+  if (!sessions.length) return undefined;
+
+  if (preferredProjectId?.trim()) {
+    const projectSessions = listProjectCoCreateSessions(
+      sessions as ChatSession[],
+      preferredProjectId.trim(),
+    );
+    if (projectSessions.length > 0) {
+      if (storedActive && projectSessions.some((session) => session.id === storedActive)) {
+        return storedActive;
+      }
+      return pickProjectCoCreateEntrySession(
+        sessions as ChatSession[],
+        preferredProjectId.trim(),
+        null,
+      )?.id;
+    }
+  }
+
+  if (storedActive && sessions.some((session) => session.id === storedActive)) {
+    return storedActive;
+  }
+  return sessions[0]?.id;
+}
+
+/**
+ * 列出可归档的多余空共创会话 ID（占位标题且无落库消息）。
+ * - 项目已有历史：归档旧空壳，但保留 keepSessionId，并额外保留最新一个空壳（避免「+新建」即被清）
+ * - 项目仅有空壳：只保留最新一个（或 keepSessionId），归档其余
+ */
+export function listSurplusEmptyCoCreateSessionIds(
+  sessions: ChatSession[],
+  projectId: string,
+  options?: { keepSessionId?: string | null },
+): string[] {
+  const projectSessions = listProjectCoCreateSessions(sessions, projectId);
+  const empties = projectSessions.filter(
+    (session) =>
+      !sessionHasPersistedMessages(session) && isPlaceholderSessionTitle(session.title),
+  );
+  if (empties.length === 0) return [];
+
+  const keepSessionId = options?.keepSessionId?.trim() || null;
+  const hasHistory = projectSessions.some((session) => sessionHasPersistedMessages(session));
+  const newestEmpty = empties.reduce((latest, session) =>
+    session.createdAt > latest.createdAt ? session : latest,
+  );
+
+  const keepIds = new Set<string>();
+  if (keepSessionId && empties.some((session) => session.id === keepSessionId)) {
+    keepIds.add(keepSessionId);
+  }
+  // 有历史时也保留最新空壳，保证「新建」会话不会在同轮/bootstrap 被清掉
+  keepIds.add(newestEmpty.id);
+
+  if (!hasHistory && keepIds.size === 0) {
+    keepIds.add(newestEmpty.id);
+  }
+
+  return empties.filter((session) => !keepIds.has(session.id)).map((session) => session.id);
+}
+
+/**
+ * 跨项目扫描可归档的多余空共创会话（含无 selectedProjectId 的孤儿空壳）。
+ */
+export function listAllSurplusEmptyCoCreateSessionIds(
+  sessions: ChatSession[],
+  options?: { keepSessionId?: string | null },
+): string[] {
+  const projectIds = new Set<string>();
+  for (const session of sessions) {
+    if (!isProjectCoCreateSession(session) || session.archived) continue;
+    const projectId = session.selectedProjectId?.trim();
+    if (projectId) projectIds.add(projectId);
+  }
+
+  const ids = new Set<string>();
+  for (const projectId of projectIds) {
+    for (const sessionId of listSurplusEmptyCoCreateSessionIds(sessions, projectId, options)) {
+      ids.add(sessionId);
+    }
+  }
+
+  // 无项目绑定的占位空壳：全部归档（可保留 keepSessionId）
+  const keepSessionId = options?.keepSessionId?.trim() || null;
+  for (const session of sessions) {
+    if (!isProjectCoCreateSession(session) || session.archived) continue;
+    if (session.selectedProjectId?.trim()) continue;
+    if (sessionHasPersistedMessages(session)) continue;
+    if (!isPlaceholderSessionTitle(session.title)) continue;
+    if (session.id === keepSessionId) continue;
+    ids.add(session.id);
+  }
+
+  return [...ids];
 }
 
 export function getSessionHistoryCategory(session: ChatSession): SessionHistoryCategory {

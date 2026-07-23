@@ -12,6 +12,8 @@ export interface ServerChatSessionSummary {
   messageCount?: number;
   /** 共创侧栏按项目过滤；summary 必须带回，否则跨端会当成无会话并误建 */
   selectedProjectId?: string;
+  /** 已归档；summary 需带回，否则空壳清理后刷新仍会再现 */
+  archived?: boolean;
 }
 
 export interface ServerChatSession extends Record<string, unknown> {

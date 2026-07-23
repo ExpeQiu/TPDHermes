@@ -154,7 +154,9 @@ export function ChatMarkdownWithCitations({
   const sourceByRef = useMemo(() => {
     const map = new Map<number, CitationSource>();
     for (const s of citations ?? []) {
-      map.set(s.ref, s);
+      const refNum = typeof s.ref === "number" ? s.ref : Number(s.ref);
+      if (!Number.isFinite(refNum)) continue;
+      map.set(refNum, s);
     }
     return map;
   }, [citations]);

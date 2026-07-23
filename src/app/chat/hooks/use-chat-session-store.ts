@@ -22,6 +22,9 @@ import {
   firstUserMessageContent,
   isPlaceholderSessionTitle,
   isProjectCoCreateSession,
+  listAllSurplusEmptyCoCreateSessionIds,
+  pickBootstrapHydrateSessionId,
+  sessionHasPersistedMessages,
 } from "@/lib/chat-session-utils";
 
 import type { ChatSession, Message } from "@/app/chat/chat-types";
@@ -31,6 +34,8 @@ type UseChatSessionStoreOptions = {
   scopeUserId: string;
   defaultCollection: string;
   storageNamespace?: string;
+  /** 共创页传入：bootstrap hydrate 优先该项目会话，避免拉到其他项目 last-active */
+  preferredProjectId?: string;
   onResetTransientState?: () => void;
 };
 
@@ -148,6 +153,14 @@ function mergeSessionWithLocal(serverSession: ChatSession, localSession?: ChatSe
         ...(serverSession.touchedFileIds ?? []),
       ]),
     ],
+    archived:
+      // 服务端已显式归档 → 归档；本地归档不得盖住服务端仍有消息的会话（防侧栏被 localStorage 误清空）
+      Boolean(serverSession.archived) ||
+      (Boolean(localSession.archived) &&
+        !sessionHasPersistedMessages({
+          messages: displayMessages,
+          messageCount: serverSession.messageCount ?? localSession.messageCount,
+        })),
     // 共创 UI 偏好以本地为准，避免 hydrate 覆盖用户刚切换的 Ask/Plan 等模式
     coCreateAgentMode: localSession.coCreateAgentMode ?? serverSession.coCreateAgentMode,
     coCreateApplyMode: localSession.coCreateApplyMode ?? serverSession.coCreateApplyMode,
@@ -272,6 +285,7 @@ function summaryToShellSession(summary: ServerChatSessionSummary): ChatSession {
     includeFileContext: sessionKind === "project_co_create",
     selectedFileId: "",
     sessionKind,
+    archived: Boolean(summary.archived),
   };
 }
 
@@ -356,6 +370,7 @@ export function useChatSessionStore({
   scopeUserId,
   defaultCollection,
   storageNamespace = "chat",
+  preferredProjectId,
   onResetTransientState,
 }: UseChatSessionStoreOptions) {
   const [sessions, setSessions] = useState<ChatSession[]>([]);
@@ -591,11 +606,21 @@ export function useChatSessionStore({
       setActiveId(id);
       localStorage.setItem(chatActiveStorageKey(scopeUserId, storageNamespace), id);
       const existing = sessionsRef.current.find((session) => session.id === id);
-      // shell（messages 空）或仅有本地超前消息时，拉取服务端详情以补齐文件引用等
+      // shell / 消息未齐 / 有引用角标但缺 citations：需要拉详情补齐溯源
+      const citationsIncomplete = Boolean(
+        existing?.messages.some(
+          (message) =>
+            message.role === "assistant" &&
+            Boolean(message.runId) &&
+            message.content.includes("[^") &&
+            !(message.citations && message.citations.length > 0),
+        ),
+      );
       const needsHydrate =
         !!existing &&
         scopeUserId &&
         (existing.messages.length === 0 ||
+          citationsIncomplete ||
           (typeof existing.messageCount === "number" &&
             existing.messageCount > 0 &&
             existing.messages.length < existing.messageCount));
@@ -607,6 +632,9 @@ export function useChatSessionStore({
             session.id === id ? mergeSessionWithLocal(full, session) : session,
           );
           saveAndSet(next);
+          if (citationsIncomplete) {
+            console.info("[chat] 已按需 hydrate 以补齐引用溯源", { sessionId: id });
+          }
         });
       }
     },
@@ -730,10 +758,11 @@ export function useChatSessionStore({
         if (serverSummaries.length > 0) {
           let clientSessions = serverSummaries.map((item) => summaryToShellSession(item));
           const storedActive = localStorage.getItem(chatActiveStorageKey(scopeUserId, storageNamespace));
-          const targetActive =
-            storedActive && clientSessions.some((session) => session.id === storedActive)
-              ? storedActive
-              : clientSessions[0]?.id;
+          const targetActive = pickBootstrapHydrateSessionId(
+            clientSessions,
+            storedActive,
+            preferredProjectId,
+          );
           // summary 已含 selectedProjectId，共创与普通会话均只 hydrate 当前 active，避免首进 N 路详情打满连接池
           if (targetActive) {
             const hydrated = await hydrateSessionDetail(targetActive);
@@ -745,13 +774,14 @@ export function useChatSessionStore({
             console.info("[chat] 会话已按需 hydrate", {
               namespace: storageNamespace,
               active: targetActive,
+              preferredProjectId: preferredProjectId || null,
               shellCount: clientSessions.length,
               withProject: clientSessions.filter((s) => Boolean(s.selectedProjectId?.trim())).length,
             });
           }
           if (cancelled) return;
           const scopedServer = filterSessionsForNamespace(clientSessions, storageNamespace);
-          const merged = mergeLocalSessionsWithServer(scopedServer, localRaw);
+          let merged = mergeLocalSessionsWithServer(scopedServer, localRaw);
           const serverById = new Map(scopedServer.map((session) => [session.id, session]));
           const localOnly = merged.filter(
             (session) => !serverById.has(session.id) && session.messages.length >= 0,
@@ -786,6 +816,33 @@ export function useChatSessionStore({
               console.warn("[chat] 补同步消息失败", session.id, err);
             }
           });
+          // 共创命名空间：跨项目一次扫掉历史误建空壳（本地立即生效，后台 patch）
+          if (storageNamespace === "co-create") {
+            const surplusIds = listAllSurplusEmptyCoCreateSessionIds(merged, {
+              keepSessionId: targetActive,
+            });
+            if (surplusIds.length > 0) {
+              const surplusSet = new Set(surplusIds);
+              merged = merged.map((session) =>
+                surplusSet.has(session.id) ? { ...session, archived: true } : session,
+              );
+              console.info("[chat] 共创空壳已批量归档（本地生效，后台同步）", {
+                count: surplusIds.length,
+                keepSessionId: targetActive ?? null,
+              });
+              void mapPool(surplusIds, 4, async (sessionId) => {
+                try {
+                  await patchChatSessionOnServer(sessionId, { archived: true });
+                } catch (err) {
+                  console.warn("[chat] 空壳归档同步失败", sessionId, err);
+                }
+              });
+            }
+          }
+          // 共创：active 优先落在本项目 hydrate 目标，避免侧栏/主区先闪其他项目会话
+          if (targetActive && preferredProjectId?.trim()) {
+            localStorage.setItem(chatActiveStorageKey(scopeUserId, storageNamespace), targetActive);
+          }
           initFromSessions(merged);
           return;
         }
@@ -804,7 +861,7 @@ export function useChatSessionStore({
     return () => {
       cancelled = true;
     };
-  }, [scopeUserId, storageNamespace]);
+  }, [scopeUserId, storageNamespace, preferredProjectId]);
 
   return {
     sessions,

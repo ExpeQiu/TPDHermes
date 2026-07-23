@@ -8,7 +8,7 @@ import {
   normalizeAutoCreateDraftContent,
   shouldAutoCreateDraftFromAssistant,
 } from "./co-create-auto-draft";
-import CoCreatePage from "./page";
+import CoCreatePage, { resetCoCreateEntryCreateGuardForTests } from "./page";
 
 const mocks = vi.hoisted(() => ({
   nav: {
@@ -220,6 +220,7 @@ function createStoreState(overrides: Record<string, unknown> = {}) {
 describe("CoCreatePage", () => {
   beforeEach(() => {
     cleanupDom();
+    resetCoCreateEntryCreateGuardForTests();
     mocks.topbarProps = null;
     mocks.workspaceColumnsProps = null;
     mocks.nav.params = { id: "project-1" };
@@ -510,7 +511,7 @@ describe("CoCreatePage", () => {
       );
     });
 
-    expect(storeState.selectSession).not.toHaveBeenCalled();
+    expect(storeState.selectSession).toHaveBeenCalledWith("session-existing");
     expect(storeState.queueSessionPatch).toHaveBeenCalledWith(
       "session-existing",
       { patched: true },
