@@ -120,18 +120,22 @@ function effectiveServerMessageCount(serverSession: ChatSession): number {
 function mergeSessionWithLocal(serverSession: ChatSession, localSession?: ChatSession): ChatSession {
   if (!localSession) return serverSession;
   const serverMsgCount = effectiveServerMessageCount(serverSession);
-  // shell（未 hydrate）时用 messageCount 比较，避免把「本地缓存 = 服务端」误判为需全量 sync
-  const useLocalMessages = localSession.messages.length > serverMsgCount;
-  // shell 不把「本地缓存 ≈ 服务端」塞进 messages，否则 select 时误判已 hydrate、跳过拉取
-  const displayMessages = useLocalMessages
-    ? localSession.messages
-    : serverSession.messages;
+  const serverHasBodies = serverSession.messages.length > 0;
+  // shell（无正文）不得用空数组盖掉本地已 hydrate 的消息；仅当本地比服务端正文更多时才用本地
+  const displayMessages =
+    !serverHasBodies && localSession.messages.length > 0
+      ? localSession.messages
+      : localSession.messages.length > serverSession.messages.length
+        ? localSession.messages
+        : serverSession.messages;
   return {
     ...localSession,
     ...serverSession,
     title: serverSession.title || localSession.title,
     messages: displayMessages,
     messageCount: Math.max(serverMsgCount, displayMessages.length),
+    // 详情偶发缺 sessionKind 时保留本地（共创侧栏依赖 project_co_create）
+    sessionKind: serverSession.sessionKind || localSession.sessionKind,
     selectedProjectId: serverSession.selectedProjectId?.trim()
       ? serverSession.selectedProjectId
       : localSession.selectedProjectId,
@@ -183,6 +187,43 @@ function mergeLocalSessionsWithServer(
     if (!serverIds.has(local.id)) merged.push(local);
   }
   return merged;
+}
+
+/**
+ * bootstrap 收尾时保留「已 hydrate / 新建」的 live 会话，避免空壳回写把对话点没。
+ */
+function preserveLiveHydratedSessions(
+  merged: ChatSession[],
+  liveSessions: ChatSession[],
+): ChatSession[] {
+  if (liveSessions.length === 0) return merged;
+  const byId = new Map(merged.map((session) => [session.id, session]));
+  for (const live of liveSessions) {
+    const base = byId.get(live.id);
+    if (!base) {
+      byId.set(live.id, live);
+      continue;
+    }
+    const liveMsgCount = live.messages.length;
+    const baseMsgCount = base.messages.length;
+    const liveHasCitations = live.messages.some((message) => (message.citations?.length ?? 0) > 0);
+    const baseHasCitations = base.messages.some((message) => (message.citations?.length ?? 0) > 0);
+    if (liveMsgCount > baseMsgCount || (liveMsgCount > 0 && liveMsgCount === baseMsgCount && liveHasCitations && !baseHasCitations)) {
+      byId.set(live.id, {
+        ...base,
+        ...live,
+        messages: live.messages,
+        messageCount: Math.max(
+          typeof base.messageCount === "number" ? base.messageCount : 0,
+          typeof live.messageCount === "number" ? live.messageCount : 0,
+          liveMsgCount,
+        ),
+        // 任一侧重未归档则保持可见，避免误归档把侧栏项点没
+        archived: Boolean(base.archived && live.archived),
+      });
+    }
+  }
+  return [...byId.values()];
 }
 
 function sessionsNeedingMessageSync(
@@ -380,12 +421,16 @@ export function useChatSessionStore({
 
   const sessionsRef = useRef<ChatSession[]>([]);
   const activeIdRef = useRef<string | null>(null);
+  const preferredProjectIdRef = useRef(preferredProjectId);
+  const bootstrapGenRef = useRef(0);
   const sessionPatchTimersRef = useRef<Map<string, number>>(new Map());
   const messageSyncTimersRef = useRef<Map<string, number>>(new Map());
   const pendingSessionPatchRef = useRef<Map<string, Record<string, unknown>>>(new Map());
   const pendingMessageSyncRef = useRef<
     Map<string, { messages: Map<string, Record<string, unknown>>; removedMessageIds: Set<string> }>
   >(new Map());
+
+  preferredProjectIdRef.current = preferredProjectId;
 
   const activeSession = useMemo(
     () => sessions.find((session) => session.id === activeId),
@@ -628,9 +673,19 @@ export function useChatSessionStore({
         void hydrateSessionDetail(id).then((full) => {
           if (!full) return;
           if (activeIdRef.current !== id) return;
-          const next = sessionsRef.current.map((session) =>
-            session.id === id ? mergeSessionWithLocal(full, session) : session,
-          );
+          const next = sessionsRef.current.map((session) => {
+            if (session.id !== id) return session;
+            const merged = mergeSessionWithLocal(full, session);
+            // 点击切换时若详情已带回正文，绝不回退成空壳
+            if (full.messages.length > 0 && merged.messages.length === 0) {
+              return {
+                ...merged,
+                messages: full.messages,
+                messageCount: Math.max(merged.messageCount ?? 0, full.messages.length),
+              };
+            }
+            return merged;
+          });
           saveAndSet(next);
           if (citationsIncomplete) {
             console.info("[chat] 已按需 hydrate 以补齐引用溯源", { sessionId: id });
@@ -685,56 +740,71 @@ export function useChatSessionStore({
       return;
     }
     let cancelled = false;
+    const bootstrapGen = ++bootstrapGenRef.current;
     setSessionsLoading(true);
     setSessionsSyncError("");
 
-    const bootstrapSessions = async () => {
-      const initFromSessions = (saved: ChatSession[]) => {
-        const scoped = filterSessionsForNamespace(saved, storageNamespace);
-        const normalized = normalizeSessionsPlaceholders(scoped);
-        if (normalized.some((session, index) => session.title !== scoped[index]?.title)) {
-          saveSessions(scopeUserId, normalized, storageNamespace);
-          console.info("[chat] 已根据首条用户消息回填历史会话主题");
-        }
-        const active = localStorage.getItem(chatActiveStorageKey(scopeUserId, storageNamespace));
-        if (normalized.length === 0) {
-          // 共创会话必须绑定 projectId，交由共创页按项目创建，避免空 orphan 导致跨端误建
-          if (storageNamespace === "co-create") {
-            sessionsRef.current = [];
-            setSessions([]);
-            setActiveId(null);
-            console.info("[chat] 共创命名空间无会话，等待页面按项目新建");
+    const initFromSessions = (saved: ChatSession[]) => {
+      // 落盘前再保留一遍 live hydrate，防止异步 bootstrap 用空壳覆盖用户刚点开的对话
+      const withLive = preserveLiveHydratedSessions(saved, sessionsRef.current);
+      const scoped = filterSessionsForNamespace(withLive, storageNamespace);
+      const normalized = normalizeSessionsPlaceholders(scoped);
+      if (normalized.some((session, index) => session.title !== scoped[index]?.title)) {
+        saveSessions(scopeUserId, normalized, storageNamespace);
+        console.info("[chat] 已根据首条用户消息回填历史会话主题");
+      }
+      const active = localStorage.getItem(chatActiveStorageKey(scopeUserId, storageNamespace));
+      if (normalized.length === 0) {
+        // 共创会话必须绑定 projectId，交由共创页按项目创建，避免空 orphan 导致跨端误建
+        if (storageNamespace === "co-create") {
+          // 若 live 仍有会话，不要清空（bootstrap 竞态）
+          if (sessionsRef.current.length > 0) {
+            console.warn("[chat] bootstrap 结果为空，保留 live 共创会话", {
+              liveCount: sessionsRef.current.length,
+            });
             return;
           }
-          const first: ChatSession = {
-            id: uuid(),
-            title: "新对话",
-            messages: [],
-            createdAt: Date.now(),
-            selectedProjectId: "",
-            selectedCollection: "",
-            includeProjectContext: false,
-            includeKnowledgeContext: false,
-            includeSkillsContext: false,
-            chatMode: "co_create",
-            includeFileContext: false,
-            selectedFileId: "",
-          };
-          saveSessions(scopeUserId, [first], storageNamespace);
-          sessionsRef.current = [first];
-          setSessions([first]);
-          setActiveId(first.id);
-          void createChatSessionOnServer(sessionToServerPayload(first)).catch((err) => {
-            console.warn("[chat] 创建默认会话失败", err);
-          });
-        } else {
-          sessionsRef.current = normalized;
-          setSessions(normalized);
-          setActiveId(active && normalized.find((session) => session.id === active) ? active : normalized[0].id);
+          sessionsRef.current = [];
+          setSessions([]);
+          setActiveId(null);
+          console.info("[chat] 共创命名空间无会话，等待页面按项目新建");
+          return;
         }
-        saveSessions(scopeUserId, sessionsRef.current, storageNamespace);
-      };
+        const first: ChatSession = {
+          id: uuid(),
+          title: "新对话",
+          messages: [],
+          createdAt: Date.now(),
+          selectedProjectId: "",
+          selectedCollection: "",
+          includeProjectContext: false,
+          includeKnowledgeContext: false,
+          includeSkillsContext: false,
+          chatMode: "co_create",
+          includeFileContext: false,
+          selectedFileId: "",
+        };
+        saveSessions(scopeUserId, [first], storageNamespace);
+        sessionsRef.current = [first];
+        setSessions([first]);
+        setActiveId(first.id);
+        void createChatSessionOnServer(sessionToServerPayload(first)).catch((err) => {
+          console.warn("[chat] 创建默认会话失败", err);
+        });
+      } else {
+        sessionsRef.current = normalized;
+        setSessions(normalized);
+        const liveActive = activeIdRef.current;
+        const preferredActive =
+          (liveActive && normalized.find((session) => session.id === liveActive)?.id) ||
+          (active && normalized.find((session) => session.id === active)?.id) ||
+          normalized[0].id;
+        setActiveId(preferredActive);
+      }
+      saveSessions(scopeUserId, sessionsRef.current, storageNamespace);
+    };
 
+    const bootstrapSessions = async () => {
       try {
         let serverSummaries = filterSummariesForNamespace(
           await fetchChatSessionsSummary(),
@@ -754,14 +824,15 @@ export function useChatSessionStore({
             storageNamespace,
           );
         }
-        if (cancelled) return;
+        if (cancelled || bootstrapGen !== bootstrapGenRef.current) return;
         if (serverSummaries.length > 0) {
           let clientSessions = serverSummaries.map((item) => summaryToShellSession(item));
           const storedActive = localStorage.getItem(chatActiveStorageKey(scopeUserId, storageNamespace));
+          const preferredProject = preferredProjectIdRef.current;
           const targetActive = pickBootstrapHydrateSessionId(
             clientSessions,
             storedActive,
-            preferredProjectId,
+            preferredProject,
           );
           // summary 已含 selectedProjectId，共创与普通会话均只 hydrate 当前 active，避免首进 N 路详情打满连接池
           if (targetActive) {
@@ -774,14 +845,21 @@ export function useChatSessionStore({
             console.info("[chat] 会话已按需 hydrate", {
               namespace: storageNamespace,
               active: targetActive,
-              preferredProjectId: preferredProjectId || null,
+              preferredProjectId: preferredProject || null,
               shellCount: clientSessions.length,
               withProject: clientSessions.filter((s) => Boolean(s.selectedProjectId?.trim())).length,
             });
           }
-          if (cancelled) return;
+          if (cancelled || bootstrapGen !== bootstrapGenRef.current) return;
           const scopedServer = filterSessionsForNamespace(clientSessions, storageNamespace);
           let merged = mergeLocalSessionsWithServer(scopedServer, localRaw);
+          // 合并 bootstrap 期间用户点击/新建产生的 live 状态，防止空壳回写把对话冲掉
+          const latestLocal = filterSessionsForNamespace(
+            loadSessions(scopeUserId, storageNamespace),
+            storageNamespace,
+          );
+          merged = preserveLiveHydratedSessions(merged, latestLocal);
+          merged = preserveLiveHydratedSessions(merged, sessionsRef.current);
           const serverById = new Map(scopedServer.map((session) => [session.id, session]));
           const localOnly = merged.filter(
             (session) => !serverById.has(session.id) && session.messages.length >= 0,
@@ -789,6 +867,7 @@ export function useChatSessionStore({
           if (localOnly.length > 0) {
             await bulkUpsertChatSessions(localOnly.map((session) => sessionToServerPayload(session)));
           }
+          if (cancelled || bootstrapGen !== bootstrapGenRef.current) return;
           const needingSync = sessionsNeedingMessageSync(merged, scopedServer);
           // 限流补同步：优先当前会话，其余最多再补 2 个，避免消息 sync 雪崩
           const syncTargets = [
@@ -816,10 +895,13 @@ export function useChatSessionStore({
               console.warn("[chat] 补同步消息失败", session.id, err);
             }
           });
+          if (cancelled || bootstrapGen !== bootstrapGenRef.current) return;
           // 共创命名空间：跨项目一次扫掉历史误建空壳（本地立即生效，后台 patch）
           if (storageNamespace === "co-create") {
+            const keepActive = activeIdRef.current || targetActive;
             const surplusIds = listAllSurplusEmptyCoCreateSessionIds(merged, {
-              keepSessionId: targetActive,
+              keepSessionId: keepActive,
+              protectRecentMs: 120_000,
             });
             if (surplusIds.length > 0) {
               const surplusSet = new Set(surplusIds);
@@ -828,7 +910,7 @@ export function useChatSessionStore({
               );
               console.info("[chat] 共创空壳已批量归档（本地生效，后台同步）", {
                 count: surplusIds.length,
-                keepSessionId: targetActive ?? null,
+                keepSessionId: keepActive ?? null,
               });
               void mapPool(surplusIds, 4, async (sessionId) => {
                 try {
@@ -839,21 +921,47 @@ export function useChatSessionStore({
               });
             }
           }
-          // 共创：active 优先落在本项目 hydrate 目标，避免侧栏/主区先闪其他项目会话
-          if (targetActive && preferredProjectId?.trim()) {
+          // 再次保留 live，避免归档/补同步等待期间用户 hydrate 的正文被覆盖
+          merged = preserveLiveHydratedSessions(merged, sessionsRef.current);
+          // 共创：active 优先落在本项目 hydrate 目标，但若用户已点选本项目会话则尊重点击
+          const preferredProjectTrim = preferredProjectIdRef.current?.trim();
+          const liveActive = activeIdRef.current;
+          if (preferredProjectTrim && liveActive) {
+            const liveOk = merged.some(
+              (session) =>
+                session.id === liveActive &&
+                !session.archived &&
+                session.selectedProjectId === preferredProjectTrim,
+            );
+            if (liveOk) {
+              localStorage.setItem(chatActiveStorageKey(scopeUserId, storageNamespace), liveActive);
+            } else if (targetActive) {
+              localStorage.setItem(chatActiveStorageKey(scopeUserId, storageNamespace), targetActive);
+            }
+          } else if (targetActive && preferredProjectTrim) {
             localStorage.setItem(chatActiveStorageKey(scopeUserId, storageNamespace), targetActive);
           }
+          if (cancelled || bootstrapGen !== bootstrapGenRef.current) return;
           initFromSessions(merged);
           return;
         }
-        initFromSessions(localRaw);
+        initFromSessions(
+          preserveLiveHydratedSessions(localRaw, sessionsRef.current),
+        );
       } catch (err) {
         console.warn("[chat] 拉取服务端会话失败，回退 localStorage", err);
-        if (cancelled) return;
-        initFromSessions(loadSessions(scopeUserId, storageNamespace));
+        if (cancelled || bootstrapGen !== bootstrapGenRef.current) return;
+        initFromSessions(
+          preserveLiveHydratedSessions(
+            loadSessions(scopeUserId, storageNamespace),
+            sessionsRef.current,
+          ),
+        );
         setSessionsSyncError(err instanceof Error ? err.message : "会话同步失败");
       } finally {
-        if (!cancelled) setSessionsLoading(false);
+        if (!cancelled && bootstrapGen === bootstrapGenRef.current) {
+          setSessionsLoading(false);
+        }
       }
     };
 
@@ -861,7 +969,8 @@ export function useChatSessionStore({
     return () => {
       cancelled = true;
     };
-  }, [scopeUserId, storageNamespace, preferredProjectId]);
+    // preferredProjectId 用 ref 读取，避免仅项目切换时整表 bootstrap 用空壳冲掉已打开对话
+  }, [scopeUserId, storageNamespace]);
 
   return {
     sessions,

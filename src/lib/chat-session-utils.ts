@@ -218,17 +218,25 @@ export function pickBootstrapHydrateSessionId(
  * 列出可归档的多余空共创会话 ID（占位标题且无落库消息）。
  * - 项目已有历史：归档旧空壳，但保留 keepSessionId，并额外保留最新一个空壳（避免「+新建」即被清）
  * - 项目仅有空壳：只保留最新一个（或 keepSessionId），归档其余
+ * - protectRecentMs：跳过近期新建的空壳，避免点击新建后被立刻归档/冲掉
  */
 export function listSurplusEmptyCoCreateSessionIds(
   sessions: ChatSession[],
   projectId: string,
-  options?: { keepSessionId?: string | null },
+  options?: { keepSessionId?: string | null; protectRecentMs?: number },
 ): string[] {
   const projectSessions = listProjectCoCreateSessions(sessions, projectId);
-  const empties = projectSessions.filter(
-    (session) =>
-      !sessionHasPersistedMessages(session) && isPlaceholderSessionTitle(session.title),
-  );
+  const protectRecentMs = Math.max(0, options?.protectRecentMs ?? 0);
+  const now = Date.now();
+  const empties = projectSessions.filter((session) => {
+    if (sessionHasPersistedMessages(session) || !isPlaceholderSessionTitle(session.title)) {
+      return false;
+    }
+    if (protectRecentMs > 0 && now - (session.createdAt || 0) < protectRecentMs) {
+      return false;
+    }
+    return true;
+  });
   if (empties.length === 0) return [];
 
   const keepSessionId = options?.keepSessionId?.trim() || null;
@@ -256,7 +264,7 @@ export function listSurplusEmptyCoCreateSessionIds(
  */
 export function listAllSurplusEmptyCoCreateSessionIds(
   sessions: ChatSession[],
-  options?: { keepSessionId?: string | null },
+  options?: { keepSessionId?: string | null; protectRecentMs?: number },
 ): string[] {
   const projectIds = new Set<string>();
   for (const session of sessions) {
@@ -272,14 +280,17 @@ export function listAllSurplusEmptyCoCreateSessionIds(
     }
   }
 
-  // 无项目绑定的占位空壳：全部归档（可保留 keepSessionId）
+  // 无项目绑定的占位空壳：全部归档（可保留 keepSessionId / 近期保护）
   const keepSessionId = options?.keepSessionId?.trim() || null;
+  const protectRecentMs = Math.max(0, options?.protectRecentMs ?? 0);
+  const now = Date.now();
   for (const session of sessions) {
     if (!isProjectCoCreateSession(session) || session.archived) continue;
     if (session.selectedProjectId?.trim()) continue;
     if (sessionHasPersistedMessages(session)) continue;
     if (!isPlaceholderSessionTitle(session.title)) continue;
     if (session.id === keepSessionId) continue;
+    if (protectRecentMs > 0 && now - (session.createdAt || 0) < protectRecentMs) continue;
     ids.add(session.id);
   }
 

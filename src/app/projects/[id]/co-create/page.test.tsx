@@ -8,7 +8,8 @@ import {
   normalizeAutoCreateDraftContent,
   shouldAutoCreateDraftFromAssistant,
 } from "./co-create-auto-draft";
-import CoCreatePage, { resetCoCreateEntryCreateGuardForTests } from "./page";
+import { resetCoCreateEntryCreateGuardForTests } from "./co-create-entry-create-guard";
+import CoCreatePage from "./page";
 
 const mocks = vi.hoisted(() => ({
   nav: {

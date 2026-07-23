@@ -121,15 +121,19 @@ def session_records_to_client(
     context = _json_load(row.context_json, {})
     linked_output_ids = _json_load(row.linked_output_ids_json, [])
     linked_run_ids = _json_load(row.linked_run_ids_json, [])
-    return {
+    # context 刻意不存 sessionKind（见 client_session_to_context_fields reserved）；
+    # 详情必须带回列上的 session_kind，否则前端 hydrate 后丢失 project_co_create，侧栏/正文被滤掉
+    payload = {
         "id": row.id,
         "title": row.title,
         "messages": [message_record_to_dict(m) for m in messages],
         "createdAt": row.created_at_ms,
         "linkedOutputIds": linked_output_ids if isinstance(linked_output_ids, list) else [],
         "linkedRunIds": linked_run_ids if isinstance(linked_run_ids, list) else [],
-        **context,
+        **(context if isinstance(context, dict) else {}),
+        "sessionKind": row.session_kind or SESSION_KIND_CHAT,
     }
+    return payload
 
 
 def client_session_to_context_fields(payload: dict[str, Any]) -> dict[str, Any]:
