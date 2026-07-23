@@ -28,7 +28,8 @@ def _sqlite_on_connect(dbapi_conn, _connection_record) -> None:
     cursor = dbapi_conn.cursor()
     try:
         cursor.execute("PRAGMA foreign_keys=ON")
-        cursor.execute("PRAGMA busy_timeout=5000")
+        # 共创首进/消息 sync 并发较高时，适当拉长等待，降低 database is locked
+        cursor.execute("PRAGMA busy_timeout=15000")
         # WAL / synchronous 在只读或部分挂载上可能失败，失败不阻断启动
         try:
             cursor.execute("PRAGMA journal_mode=WAL")

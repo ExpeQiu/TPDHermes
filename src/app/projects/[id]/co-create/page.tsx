@@ -803,7 +803,8 @@ function CoCreatePageInner() {
       });
     } else {
       const target = pickProjectCoCreateEntrySession(sessions, projectId, activeSession);
-      if (target && target.id !== activeId) {
+      if (target) {
+        // 始终走 selectSession：对齐 active，并对 shell 按需 hydrate（summary 已含 selectedProjectId）
         selectSession(target.id);
         console.info("[co-create] 已对齐到项目共创会话", {
           projectId,
@@ -826,7 +827,6 @@ function CoCreatePageInner() {
     entryAppliedRef.current = true;
     entryProjectIdRef.current = projectId;
   }, [
-    activeId,
     activeSession,
     createSession,
     fileWorkspace,

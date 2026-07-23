@@ -78,6 +78,8 @@ export interface ChatSession {
   rewriteGoal?: string;
   /** 显式会话类型，如 project_co_create */
   sessionKind?: string;
+  /** summary 带回的服务端消息数；shell 会话用其判断是否需要补同步，避免误触发雪崩 */
+  messageCount?: number;
   pinnedFileIds?: string[];
   roundFileIds?: string[];
   archived?: boolean;

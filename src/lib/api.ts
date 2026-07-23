@@ -52,9 +52,23 @@ export async function readJson<T>(res: Response): Promise<T> {
   return res.json() as Promise<T>;
 }
 
-export async function apiGet<T>(path: string): Promise<T> {
-  const res = await fetch(apiV1(path), await mergeApiHeadersAsync({ cache: "no-store" }));
+export async function apiGet<T>(path: string, init?: RequestInit): Promise<T> {
+  const res = await fetch(
+    apiV1(path),
+    await mergeApiHeadersAsync({ cache: "no-store", ...init }),
+  );
   return readJson<T>(res);
+}
+
+/** 带超时的 GET，避免慢请求占满浏览器同域连接池 */
+export async function apiGetWithTimeout<T>(path: string, timeoutMs = 15000): Promise<T> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await apiGet<T>(path, { signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 export async function apiPost<T>(path: string, body: unknown): Promise<T> {

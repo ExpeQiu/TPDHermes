@@ -1,5 +1,5 @@
 /** 服务端聊天/场景会话历史 API */
-import { apiGet, apiPost, apiPut, apiDelete, apiPatch } from "./api";
+import { apiGet, apiGetWithTimeout, apiPost, apiPut, apiDelete, apiPatch } from "./api";
 
 export type ChatSessionKind = "chat" | "scenario" | "project_co_create";
 
@@ -30,7 +30,10 @@ export async function fetchChatSessionsSummary(): Promise<ServerChatSessionSumma
 }
 
 export async function fetchChatSessionDetail(sessionId: string): Promise<ServerChatSession> {
-  return apiGet<ServerChatSession>(`/chat/sessions/${encodeURIComponent(sessionId)}`);
+  return apiGetWithTimeout<ServerChatSession>(
+    `/chat/sessions/${encodeURIComponent(sessionId)}`,
+    15000,
+  );
 }
 
 export async function fetchChatSessionsFull(): Promise<ServerChatSession[]> {

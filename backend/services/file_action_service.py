@@ -215,7 +215,7 @@ async def _persist_patched_output(
         next_version = prev.version or "1"
         raw_title = action.get("file_name") or action.get("fileName")
         new_title = normalize_output_title(str(raw_title)) if raw_title else None
-        title_changed = Boolean(new_title and new_title != (prev.title or "").strip())
+        title_changed = bool(new_title and new_title != (prev.title or "").strip())
         content_changed = previous_content != content
         if content_changed:
             if previous_content.strip():

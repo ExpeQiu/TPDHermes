@@ -106,14 +106,27 @@ function filterSummariesForNamespace(
   return summaries.filter((summary) => summary.sessionKind !== "project_co_create");
 }
 
+/** 服务端已落库消息数：已 hydrate 用 messages.length，否则用 summary.messageCount */
+function effectiveServerMessageCount(serverSession: ChatSession): number {
+  if (serverSession.messages.length > 0) return serverSession.messages.length;
+  return typeof serverSession.messageCount === "number" ? serverSession.messageCount : 0;
+}
+
 function mergeSessionWithLocal(serverSession: ChatSession, localSession?: ChatSession): ChatSession {
   if (!localSession) return serverSession;
-  const useLocalMessages = localSession.messages.length > serverSession.messages.length;
+  const serverMsgCount = effectiveServerMessageCount(serverSession);
+  // shell（未 hydrate）时用 messageCount 比较，避免把「本地缓存 = 服务端」误判为需全量 sync
+  const useLocalMessages = localSession.messages.length > serverMsgCount;
+  // shell 不把「本地缓存 ≈ 服务端」塞进 messages，否则 select 时误判已 hydrate、跳过拉取
+  const displayMessages = useLocalMessages
+    ? localSession.messages
+    : serverSession.messages;
   return {
     ...localSession,
     ...serverSession,
     title: serverSession.title || localSession.title,
-    messages: useLocalMessages ? localSession.messages : serverSession.messages,
+    messages: displayMessages,
+    messageCount: Math.max(serverMsgCount, displayMessages.length),
     selectedProjectId: serverSession.selectedProjectId?.trim()
       ? serverSession.selectedProjectId
       : localSession.selectedProjectId,
@@ -167,8 +180,28 @@ function sessionsNeedingMessageSync(
   return merged.filter((session) => {
     const server = serverById.get(session.id);
     if (!server) return session.messages.length > 0;
-    return session.messages.length > server.messages.length;
+    return session.messages.length > effectiveServerMessageCount(server);
   });
+}
+
+/** 限制并发，避免同域连接池被打满（浏览器约 6 路） */
+async function mapPool<T, R>(
+  items: T[],
+  concurrency: number,
+  fn: (item: T) => Promise<R>,
+): Promise<R[]> {
+  if (items.length === 0) return [];
+  const results = new Array<R>(items.length);
+  let cursor = 0;
+  const workers = Array.from({ length: Math.min(concurrency, items.length) }, async () => {
+    while (true) {
+      const index = cursor++;
+      if (index >= items.length) return;
+      results[index] = await fn(items[index]);
+    }
+  });
+  await Promise.all(workers);
+  return results;
 }
 
 export function sessionToPatchPayload(session: ChatSession): Record<string, unknown> {
@@ -228,6 +261,7 @@ function summaryToShellSession(summary: ServerChatSessionSummary): ChatSession {
     createdAt: summary.createdAt ?? Date.now(),
     linkedOutputIds: [],
     linkedRunIds: [],
+    messageCount: typeof summary.messageCount === "number" ? summary.messageCount : 0,
     selectedProjectId:
       typeof summary.selectedProjectId === "string" ? summary.selectedProjectId.trim() : "",
     selectedCollection: "",
@@ -557,9 +591,18 @@ export function useChatSessionStore({
       setActiveId(id);
       localStorage.setItem(chatActiveStorageKey(scopeUserId, storageNamespace), id);
       const existing = sessionsRef.current.find((session) => session.id === id);
-      if (existing && existing.messages.length === 0 && scopeUserId) {
+      // shell（messages 空）或仅有本地超前消息时，拉取服务端详情以补齐文件引用等
+      const needsHydrate =
+        !!existing &&
+        scopeUserId &&
+        (existing.messages.length === 0 ||
+          (typeof existing.messageCount === "number" &&
+            existing.messageCount > 0 &&
+            existing.messages.length < existing.messageCount));
+      if (needsHydrate) {
         void hydrateSessionDetail(id).then((full) => {
           if (!full) return;
+          if (activeIdRef.current !== id) return;
           const next = sessionsRef.current.map((session) =>
             session.id === id ? mergeSessionWithLocal(full, session) : session,
           );
@@ -691,26 +734,20 @@ export function useChatSessionStore({
             storedActive && clientSessions.some((session) => session.id === storedActive)
               ? storedActive
               : clientSessions[0]?.id;
-          // 共创：批量 hydrate，确保 selectedProjectId / 文件引用可用于侧栏过滤，避免首进误建
-          if (storageNamespace === "co-create") {
-            const hydratedAll = await Promise.all(
-              clientSessions.map(async (session) => {
-                const full = await hydrateSessionDetail(session.id);
-                return full ?? session;
-              }),
-            );
-            clientSessions = hydratedAll;
-            console.info("[chat] 共创会话已批量 hydrate", {
-              count: clientSessions.length,
-              withProject: clientSessions.filter((s) => Boolean(s.selectedProjectId?.trim())).length,
-            });
-          } else if (targetActive) {
+          // summary 已含 selectedProjectId，共创与普通会话均只 hydrate 当前 active，避免首进 N 路详情打满连接池
+          if (targetActive) {
             const hydrated = await hydrateSessionDetail(targetActive);
             if (hydrated) {
               clientSessions = clientSessions.map((session) =>
                 session.id === targetActive ? hydrated : session,
               );
             }
+            console.info("[chat] 会话已按需 hydrate", {
+              namespace: storageNamespace,
+              active: targetActive,
+              shellCount: clientSessions.length,
+              withProject: clientSessions.filter((s) => Boolean(s.selectedProjectId?.trim())).length,
+            });
           }
           if (cancelled) return;
           const scopedServer = filterSessionsForNamespace(clientSessions, storageNamespace);
@@ -722,17 +759,33 @@ export function useChatSessionStore({
           if (localOnly.length > 0) {
             await bulkUpsertChatSessions(localOnly.map((session) => sessionToServerPayload(session)));
           }
-          for (const session of sessionsNeedingMessageSync(merged, scopedServer)) {
+          const needingSync = sessionsNeedingMessageSync(merged, scopedServer);
+          // 限流补同步：优先当前会话，其余最多再补 2 个，避免消息 sync 雪崩
+          const syncTargets = [
+            ...needingSync.filter((session) => session.id === targetActive),
+            ...needingSync.filter((session) => session.id !== targetActive),
+          ].slice(0, 3);
+          if (needingSync.length > syncTargets.length) {
+            console.info("[chat] 跳过多余本地补同步，待切换会话时再处理", {
+              needed: needingSync.length,
+              synced: syncTargets.length,
+            });
+          }
+          await mapPool(syncTargets, 2, async (session) => {
             console.info("[chat] 本地消息比服务端新，补同步", {
               session_id: session.id,
               message_count: session.messages.length,
             });
-            void syncChatSessionMessagesOnServer(session.id, {
-              messages: session.messages.map((message, index) => messageToSyncPayload(message, index)),
-            }).catch((err) => {
+            try {
+              await syncChatSessionMessagesOnServer(session.id, {
+                messages: session.messages.map((message, index) =>
+                  messageToSyncPayload(message, index),
+                ),
+              });
+            } catch (err) {
               console.warn("[chat] 补同步消息失败", session.id, err);
-            });
-          }
+            }
+          });
           initFromSessions(merged);
           return;
         }
