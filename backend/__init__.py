@@ -204,6 +204,11 @@ include_router_with_version(brainstorm_router, strip_prefix="/brainstorm")
 
 
 # ── 根路径 & 健康检查 ───────────────────────────────────────
+# 飞书探测结果短缓存：Docker 探活频繁时避免每次外呼拖到数秒
+_FEISHU_HEALTH_CACHE_TTL_SEC = float(os.getenv("FEISHU_HEALTH_CACHE_TTL_SEC", "60"))
+_feishu_health_cache: dict[str, object] = {"ts": 0.0, "value": "unknown"}
+
+
 @app.get("/")
 async def root():
     return APIResponse.success(data={"service": "TPDHermes API", "status": "running"})
@@ -215,6 +220,8 @@ async def health():
     增强版健康检查
     返回：服务状态 | 数据库连接 | 版本号 | 依赖服务状态
     """
+    import time
+
     import httpx
 
     checks = {"database": "unknown", "feishu_api": "unknown"}
@@ -235,18 +242,31 @@ async def health():
     # 飞书 API 连通性（如果配置了 App ID；官方为 POST JSON）
     app_id = os.getenv("FEISHU_APP_ID")
     if app_id:
-        try:
-            async with httpx.AsyncClient(timeout=5.0) as client:
-                resp = await client.post(
-                    "https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal",
-                    json={
-                        "app_id": app_id,
-                        "app_secret": os.getenv("FEISHU_APP_SECRET", ""),
-                    },
-                )
-                checks["feishu_api"] = "ok" if resp.status_code == 200 else f"status={resp.status_code}"
-        except Exception as e:
-            checks["feishu_api"] = f"error: {e}"
+        now = time.monotonic()
+        cached_ts = float(_feishu_health_cache.get("ts") or 0.0)
+        cached_val = str(_feishu_health_cache.get("value") or "unknown")
+        if cached_ts and (now - cached_ts) < _FEISHU_HEALTH_CACHE_TTL_SEC:
+            checks["feishu_api"] = cached_val
+        else:
+            try:
+                async with httpx.AsyncClient(timeout=5.0) as client:
+                    resp = await client.post(
+                        "https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal",
+                        json={
+                            "app_id": app_id,
+                            "app_secret": os.getenv("FEISHU_APP_SECRET", ""),
+                        },
+                    )
+                    checks["feishu_api"] = "ok" if resp.status_code == 200 else f"status={resp.status_code}"
+            except Exception as e:
+                checks["feishu_api"] = f"error: {e}"
+            _feishu_health_cache["ts"] = now
+            _feishu_health_cache["value"] = checks["feishu_api"]
+            logger.info(
+                "feishu health probe refreshed status=%s ttl=%.0fs",
+                checks["feishu_api"],
+                _FEISHU_HEALTH_CACHE_TTL_SEC,
+            )
     else:
         checks["feishu_api"] = "skipped"
 

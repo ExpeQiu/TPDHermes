@@ -76,6 +76,23 @@ fi
 
 dc() { docker compose "${COMPOSE_FILES[@]}" "$@"; }
 
+ensure_hermes_config_readable() {
+  # bind mount 的 config.yaml/SOUL.md 若为 700+本机 UID(501)，容器内 HERMES_UID=10000 读不到
+  local uid gid
+  uid="$(dc exec -T hermes-agent sh -lc 'echo "${HERMES_UID:-10000}"' 2>/dev/null | tr -d '\r' || echo 10000)"
+  gid="$(dc exec -T hermes-agent sh -lc 'echo "${HERMES_GID:-10000}"' 2>/dev/null | tr -d '\r' || echo 10000)"
+  [[ -z "$uid" ]] && uid=10000
+  [[ -z "$gid" ]] && gid=10000
+  log "ensure hermes-agent config readable (chown ${uid}:${gid}, chmod 644)"
+  if [[ -f deploy/hermes-agent/config.yaml ]]; then
+    chown "${uid}:${gid}" deploy/hermes-agent/config.yaml deploy/hermes-agent/SOUL.md 2>/dev/null \
+      || chown root:root deploy/hermes-agent/config.yaml deploy/hermes-agent/SOUL.md
+    chmod 644 deploy/hermes-agent/config.yaml deploy/hermes-agent/SOUL.md
+  else
+    log "WARN: deploy/hermes-agent/config.yaml missing"
+  fi
+}
+
 ensure_hermes_output_dirs() {
   if ! dc ps --status running --services 2>/dev/null | grep -qx hermes-agent; then
     log "skip ensure hermes output dirs (hermes-agent not running)"
@@ -282,13 +299,18 @@ run_deploy_on_server() {
   if [[ "$RESTART_AGENT" -eq 1 ]]; then
     log "restart hermes-agent（配置或显式要求）"
     if [[ "$DRY_RUN" -eq 1 ]]; then
-      echo "  docker compose ... restart hermes-agent"
+      echo "  ensure_hermes_config_readable + docker compose ... restart hermes-agent"
     else
+      ensure_hermes_config_readable
       dc restart hermes-agent
       sleep 2
       ensure_hermes_output_dirs
     fi
   else
+    # 即使不重启 agent，也纠偏权限，避免下次启动仍 Permission denied
+    if [[ "$DRY_RUN" -eq 0 ]]; then
+      ensure_hermes_config_readable
+    fi
     log "跳过 hermes-agent restart（配置未变更）"
   fi
 
