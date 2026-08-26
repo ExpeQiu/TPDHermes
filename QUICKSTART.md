@@ -25,7 +25,7 @@ open http://127.0.0.1:3000
 |------|------|
 | 多模型路由 | 统一调度 OpenAI / Claude / DeepSeek 等模型 |
 | MCP 工具 | 支持 FastMCP 协议扩展工具调用 |
-| 知识库检索 | Chroma 向量库 + Sentence-Transformers 语义检索 |
+| 知识库检索 | Chroma 向量库 + Sentence-Transformers 语义检索；与 myKW 手动双向同步见 `guide/myKW双向同步.md` |
 | Web UI | Next.js 前端，支持对话、工具调用可视化 |
 | API 接口 | FastAPI 后端，前缀 `/api/v1`，文档在 `/docs` |
 
