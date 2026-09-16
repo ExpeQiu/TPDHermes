@@ -39,12 +39,13 @@ Agent 可通过 mcp_tphermes_kb_query 查询集合 public.structured_tech.remote
 """.strip()
 
 KEY_COLLECTIONS = [
-    "internal.structured_tech.tech_points",
-    "public.release_assets.speeches",
+    "internal.geelywiki.pages",
     "public.structured_tech.geely_tech",
     "public.internal_methodology.tpd_experience",
     "public.public_intel.auto_company_strategy",
     "public.public_intel.vehicle_model_library",
+    "internal.structured_tech.tech_points",
+    "public.release_assets.speeches",
     "bilibili_video_analysis",
     "public.structured_tech.remote_debug",
 ]

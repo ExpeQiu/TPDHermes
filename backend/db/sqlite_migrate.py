@@ -537,6 +537,23 @@ def _ensure_growth_tables(connection: Connection) -> None:
         )
         logger.info("sqlite_migrate: created table experience_entries")
 
+    live_tables = {str(r[0]) for r in connection.execute(
+        text("SELECT name FROM sqlite_master WHERE type='table'")
+    ).fetchall()}
+    if "experience_entries" in live_tables:
+        _add_columns(connection, "experience_entries", [("kg_node_id", "TEXT")])
+    if "kg_relation" in live_tables:
+        _add_columns(
+            connection,
+            "kg_relation",
+            [
+                ("source", "TEXT"),
+                ("authority", "TEXT"),
+                ("source_collection", "TEXT"),
+                ("evidence_kind", "TEXT"),
+            ],
+        )
+
     if "outputs" in names:
         _add_columns(
             connection,

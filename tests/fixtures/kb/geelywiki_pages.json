@@ -1,0 +1,46 @@
+{
+  "publish_scope": "internal",
+  "pages": [
+    {
+      "slug": "model-galaxy-xingyao-7",
+      "title": "车型卡 · 银河星耀7 MAX",
+      "type": "model",
+      "domain": "brand_map",
+      "layer": "L2",
+      "audience": "internal",
+      "knowledge_status": "extracted",
+      "related": ["brand-galaxy", "qianli-haohan"],
+      "equipped_with": [
+        {
+          "slug": "qianli-haohan",
+          "role": "adas",
+          "variant": "H3"
+        }
+      ],
+      "related_to": [
+        {
+          "slug": "raytheon-em",
+          "role": "powertrain-family"
+        }
+      ],
+      "claims": [
+        {
+          "id": "promo-price",
+          "statement": "限时价 9.88-12.98 万",
+          "usage": "historical",
+          "evidence_kind": "compiled_internal",
+          "kind": "price"
+        }
+      ],
+      "body": "# 银河星耀7 MAX\n\n10 万级插混轿车，档案主挂千里浩瀚 H3 与 e-AWD。现行价格和综合续航须核验，不得把 2026-05 限时价当作当前报价。\n\n配置说明见 claims。本页用于 Hermes LLMwiki 归档测试。\n"
+    },
+    {
+      "slug": "qianli-haohan",
+      "title": "千里浩瀚",
+      "type": "product",
+      "domain": "structured_tech",
+      "claims": [],
+      "body": "# 千里浩瀚\n\n智驾技术点。搭载关系以车型页 equipped_with 为准。\n"
+    }
+  ]
+}

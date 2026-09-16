@@ -2,7 +2,8 @@
 知识图谱实体与关系（对齐离线 kg_data CSV / Neo4j 约束）。
 
 OWNS、PLANNED_BY 可由 Vehicle.brand_id、PlannedVehicle.brand_id 推导；
-HAS_INSIGHT、CONTAINS_TECH 使用 KgRelation 显式存储。
+HAS_INSIGHT、CONTAINS_TECH、RELATED_TO 使用 KgRelation 显式存储。
+搭载仅 CONTAINS_TECH + authority=canonical（GeelyWiki equipped_with）。
 """
 
 from sqlalchemy import Column, String, Text, UniqueConstraint
@@ -115,3 +116,7 @@ class KgRelation(Base):
     src_id = Column(String, nullable=False, index=True)
     dst_kind = Column(String, nullable=False, index=True)
     dst_id = Column(String, nullable=False, index=True)
+    source = Column(String)
+    authority = Column(String)
+    source_collection = Column(String)
+    evidence_kind = Column(String)

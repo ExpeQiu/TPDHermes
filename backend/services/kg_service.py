@@ -27,7 +27,7 @@ from backend.models.kg_entities import (
 logger = logging.getLogger("tpdx.hermes")
 
 NODE_KINDS = frozenset({"Brand", "Vehicle", "TechInsight", "CoreTech", "PlannedVehicle"})
-REL_TYPES = frozenset({"OWNS", "HAS_INSIGHT", "CONTAINS_TECH", "PLANNED_BY"})
+REL_TYPES = frozenset({"OWNS", "HAS_INSIGHT", "CONTAINS_TECH", "PLANNED_BY", "RELATED_TO"})
 
 _MODEL_BY_KIND: dict[str, type] = {
     "Brand": KgBrand,
@@ -198,6 +198,10 @@ class KgStoreService:
                             src_id=str(sid),
                             dst_kind=str(dk),
                             dst_id=str(did),
+                            source=str(row.get("source") or ""),
+                            authority=str(row.get("authority") or ""),
+                            source_collection=str(row.get("source_collection") or ""),
+                            evidence_kind=str(row.get("evidence_kind") or ""),
                         )
                     )
                 counts["relations"] += 1
@@ -277,7 +281,6 @@ class KgStoreService:
         if kind not in _MODEL_BY_KIND:
             return False
         model = _MODEL_BY_KIND[kind]
-        id_field = _ID_FIELD[kind]
         async with async_session_maker() as db:
             row = await db.get(model, node_id)
             if row:
@@ -301,37 +304,24 @@ class KgStoreService:
         src_id: str,
         dst_kind: str,
         dst_id: str,
+        source: str = "",
+        authority: str = "",
+        source_collection: str = "",
+        evidence_kind: str = "",
     ) -> dict[str, Any]:
-        rel_type = rel_type.upper()
-        if rel_type not in REL_TYPES:
-            raise ValueError("bad rel_type")
-        if src_kind not in NODE_KINDS or dst_kind not in NODE_KINDS:
-            raise ValueError("bad node kind")
-        rid = str(uuid.uuid4())
-        async with async_session_maker() as db:
-            db.add(
-                KgRelation(
-                    id=rid,
-                    rel_type=rel_type,
-                    src_kind=src_kind,
-                    src_id=src_id,
-                    dst_kind=dst_kind,
-                    dst_id=dst_id,
-                )
-            )
-            try:
-                await db.commit()
-            except IntegrityError:
-                await db.rollback()
-                raise
-        return {
-            "id": rid,
-            "rel_type": rel_type,
-            "src_kind": src_kind,
-            "src_id": src_id,
-            "dst_kind": dst_kind,
-            "dst_id": dst_id,
-        }
+        from backend.services.kb_graph_pipeline import upsert_relation_with_authority
+
+        return await upsert_relation_with_authority(
+            rel_type=rel_type,
+            src_kind=src_kind,
+            src_id=src_id,
+            dst_kind=dst_kind,
+            dst_id=dst_id,
+            source=source,
+            authority=authority,
+            source_collection=source_collection,
+            evidence_kind=evidence_kind,
+        )
 
     async def delete_relation(self, rel_id: str) -> bool:
         async with async_session_maker() as db:

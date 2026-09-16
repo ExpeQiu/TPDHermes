@@ -24,7 +24,7 @@ from backend.services.kb_embedding import (
     extract_searchable_text,
 )
 from backend.services.kb_vault_assets import vault_relative_file
-from backend.services.kb_contract import KB_DOMAIN_ENUM, KB_REQUIRED_METADATA_KEYS
+from backend.services.kb_contract import KB_DOMAIN_ENUM, KB_REQUIRED_METADATA_KEYS, OPTIONAL_CHUNK_META_KEYS
 
 logger = logging.getLogger("tpdx.hermes")
 
@@ -240,11 +240,6 @@ def run_kb_ingestion(
             published = bool(defaults.get("published", True))
         published = bool(published)
 
-        source_type = str(
-            merged.get("source_type") or defaults.get("source_type") or ""
-        ).strip()
-        skip_embed_upsert = source_type == "conversation_harvest"
-
         chunks = chunk_markdown_text(body)
         chunk_count = len(chunks)
         checksum = sha256_file(path)
@@ -291,20 +286,8 @@ def run_kb_ingestion(
             if merged.get("project_ids") is not None:
                 base_meta["project_ids"] = merged["project_ids"]
 
-            # conversation_harvest / 扩展 tracing 字段（不落 REQUIRED 校验范围）
-            for _hk in (
-                "dedupe_key",
-                "conversation_id",
-                "confidence",
-                "harvested_from_user_confirmed",
-                "trace_id",
-                "created_by",
-                "scenario_id",
-                "project_id",
-                "source_id",
-                "output_status",
-                "entrypoint",
-            ):
+            # conversation_harvest / wiki / 外部情报扩展字段
+            for _hk in OPTIONAL_CHUNK_META_KEYS:
                 if merged.get(_hk) is not None:
                     base_meta[_hk] = merged[_hk]
             if merged.get("message_ids") is not None:
@@ -341,7 +324,7 @@ def run_kb_ingestion(
                 batch_docs = docs_out[i : i + batch_chunk_size]
                 batch_metas = metas_out[i : i + batch_chunk_size]
                 batch_embeddings = None
-                if embed_on_upsert_enabled() and not skip_embed_upsert:
+                if embed_on_upsert_enabled():
                     embed_inputs = [
                         extract_searchable_text(doc, meta)
                         for doc, meta in zip(batch_docs, batch_metas)

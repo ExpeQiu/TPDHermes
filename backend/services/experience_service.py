@@ -14,11 +14,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.models.experience_entry import ExperienceEntry
 from backend.models.feedback_event import FeedbackEvent
+from backend.services.kb_contract import (
+    AUTHORITY_EXPERIENCE,
+    SOURCE_EXPERIENCE,
+    TPD_EXPERIENCE_COLLECTION,
+)
+from backend.services.kb_graph_pipeline import apply_kg_bundle, slug_node_id
 from backend.services.kb_write import add_kb_harvest_entry
 
 logger = logging.getLogger("tpdx.hermes.experience")
-
-from backend.services.kb_contract import TPD_EXPERIENCE_COLLECTION
 
 DEFAULT_VALID_DAYS = 180
 
@@ -60,6 +64,27 @@ async def save_experience_from_feedback(
         scenario_id=feedback.scenario_id,
     )
 
+    kg_node_id = None
+    try:
+        tag = str(tags[0] if tags else "general")
+        iid = slug_node_id("exp_insight", kb_result.get("doc_id") or title)
+        bundle = {
+            "tech_insights": [
+                {
+                    "insight_id": iid,
+                    "s_level": title,
+                    "narrative_theme": tag,
+                    "source": SOURCE_EXPERIENCE,
+                }
+            ],
+            "relations": [],
+        }
+        await apply_kg_bundle(bundle, kb_entry_id=str(kb_result.get("doc_id") or ""))
+        kg_node_id = iid
+        harvest_meta["authority"] = AUTHORITY_EXPERIENCE
+    except Exception:
+        logger.exception("experience graph failed title=%s", title)
+
     entry = ExperienceEntry(
         id=str(uuid.uuid4()),
         project_id=feedback.project_id,
@@ -73,6 +98,7 @@ async def save_experience_from_feedback(
         published="false",
         kb_doc_id=kb_result.get("doc_id"),
         collection_name=TPD_EXPERIENCE_COLLECTION,
+        kg_node_id=kg_node_id,
     )
     db.add(entry)
     await db.commit()
@@ -117,6 +143,7 @@ def experience_entry_to_dict(row: ExperienceEntry) -> dict[str, Any]:
         "iteration_of": row.iteration_of,
         "valid_until": row.valid_until,
         "kb_doc_id": row.kb_doc_id,
+        "kg_node_id": row.kg_node_id,
         "collection_name": row.collection_name,
         "created_at": row.created_at,
     }

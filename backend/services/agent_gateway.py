@@ -10,7 +10,7 @@ import re
 from typing import Any
 
 from backend.schemas.orchestration import OrchestrationPayload, TaskInputPayload
-from backend.services.kb_contract import KB_AUTHORITATIVE_COLLECTIONS
+from backend.services.kb_contract import KB_AUTHORITATIVE_ORDER
 from backend.services.project_kb import is_project_kb_collection
 
 ORCHESTRATION_MARKER_BEGIN = "<<<ORCHESTRATION_JSON_BEGIN>>>"
@@ -107,12 +107,13 @@ def _build_orchestration_guidance(
                 "项目附件与输出沉淀已写入 orchestration.knowledge.collections 中的 project.*.kb 集合；"
                 "需要引用时请调用 kb_query / kb_get_entry 按需检索，不要假设 prompt 中已包含全文。",
                 "知识库 collection_name 必须与 kb_list_collections 返回的完整名称完全一致"
-                "（如 public.structured_tech.geely_tech、internal.structured_tech.tech_points），"
+                "（如 public.structured_tech.geely_tech、internal.geelywiki.pages），"
                 "禁止省略 public./internal./project. 前缀或使用短名。",
                 "真源集合（冲突时优先采纳）："
-                + "、".join(sorted(KB_AUTHORITATIVE_COLLECTIONS))
-                + "（内部知识库·技术点、发布素材·发言稿）。"
-                "公开情报·技术库（public.structured_tech.geely_tech）为互联网检索补充，不得覆盖真源口径。",
+                + "、".join(KB_AUTHORITATIVE_ORDER)
+                + "（GeelyWiki 内部 LLMwiki 归档）。"
+                "公开情报（车企战略、车型库、技术库）为补充，须走向量检索但不得覆盖真源口径与 equipped_with 搭载。"
+                "经验库 public.internal_methodology.tpd_experience 可参考，权威低于内部 Wiki。",
                 "kb_query 的 query 优先使用文档中的产品代号、技术缩写、英文标识（如 GEA、Flyme），"
                 "避免仅用营销口号或空泛词；若 count 为 0，应换用更具体的检索词重试，勿直接编造正文。",
             ]
@@ -124,7 +125,7 @@ def _build_orchestration_guidance(
     public_cols = [c for c in knowledge_collections if not is_project_kb_collection(c)]
 
     if ask_mode and payload.entrypoint == "chat" and payload.project.id != "none":
-        auth = "、".join(sorted(KB_AUTHORITATIVE_COLLECTIONS))
+        auth = "、".join(KB_AUTHORITATIVE_ORDER)
         lines.extend(
             [
                 "【Ask 检索强制策略】本轮为共创只读调研：须按顺序检索——"

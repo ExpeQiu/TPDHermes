@@ -2,7 +2,7 @@
 myKW（Obsidian 4.Knowledge）与 TPDHermes 向量库的双向同步契约。
 
 仅手动触发（CLI / 脚本），不做后台轮询。
-- push：vault 真源目录 → Chroma（吉利官方文档）
+- push：默认关闭。内部知识改由 GeelyWiki pages.json 入库；需显式 --force-push 或 MYKW_PUSH_ENABLED=1。
 - pull：Hermes 自产条目 → vault `02-知识库/从Hermes回写/`
 不互写：竞品 collection、project.*.kb、Wiki 冻结快照。
 """
@@ -12,6 +12,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import os
 import re
 import unicodedata
 from dataclasses import asdict, dataclass
@@ -112,6 +113,12 @@ TARGETS: tuple[ImportTarget, ...] = (
 )
 
 PUSH_COLLECTIONS: frozenset[str] = frozenset(t.collection for t in TARGETS)
+MYKW_PUSH_REFUSED_REASON = "mykw_push_disabled"
+
+
+def mykw_push_enabled() -> bool:
+    raw = os.getenv("MYKW_PUSH_ENABLED", "").strip().lower()
+    return raw in ("1", "true", "yes", "on")
 
 
 def resolve_vault_root(explicit: str | None = None) -> Path:
@@ -501,8 +508,30 @@ def push_to_hermes(
     hermes_api: str = "http://localhost:8000",
     project_id: str = "__all__",
     batch_chunk_size: int = 64,
+    allow_push: bool = False,
 ) -> dict[str, Any]:
     run_id = new_ingest_job_id().replace("ing_", "sync_", 1)
+    if apply and not allow_push:
+        logger.warning(
+            "mykw sync push refused run_id=%s reason=%s",
+            run_id,
+            MYKW_PUSH_REFUSED_REASON,
+        )
+        return {
+            "run_id": run_id,
+            "direction": "push",
+            "apply": apply,
+            "ok": False,
+            "refused": True,
+            "reason": MYKW_PUSH_REFUSED_REASON,
+            "message": (
+                "内部知识已改由 GeelyWiki pages.json 入库。"
+                "需要直推请加 --force-push 或设置 MYKW_PUSH_ENABLED=1。"
+            ),
+            "vault_root": str(vault_root),
+            "targets": [],
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+        }
     targets = [t for t in TARGETS if not only or t.name in only]
     reports: list[dict[str, Any]] = []
     for target in targets:

@@ -90,6 +90,40 @@ def test_delete_stale_chunks_removes_extra():
     assert set(del_ids) == {"d_chunk_0002", "d_chunk_0003"}
 
 
+@patch("backend.services.kb_ingest_core.embed_texts_sync", return_value=[[0.1, 0.2]])
+@patch("backend.services.kb_ingest_core.embed_on_upsert_enabled", return_value=True)
+@patch("backend.services.kb_ingest_core.ChromaHttpClient")
+def test_conversation_harvest_still_embeds(MockClient, _embed_on, mock_embed, tmp_path: Path):
+    p = tmp_path / "h.md"
+    p.write_text("# 收割\n经验正文\n", encoding="utf-8")
+    cli = MagicMock()
+    MockClient.return_value = cli
+    cli.heartbeat.return_value = True
+    cli.get_by_where.return_value = {"ids": []}
+    manifest = {
+        "batch_id": "b",
+        "collection": "public.internal_methodology.tpd_experience",
+        "defaults": {
+            "domain": "internal_methodology",
+            "folder_path": "conversation_harvest",
+            "source": "tpd_experience",
+            "source_type": "conversation_harvest",
+            "published": False,
+        },
+        "documents": [{"doc_id": "harvest_x", "file_path": str(p)}],
+    }
+    rep = run_kb_ingestion(
+        manifest=manifest,
+        collection="public.internal_methodology.tpd_experience",
+        chroma_url="http://c",
+        job_id="j-harvest",
+        dry_run=False,
+    )
+    assert rep["doc_succeeded"] == 1
+    mock_embed.assert_called()
+    assert cli.upsert.call_args.kwargs.get("embeddings")
+
+
 @patch("backend.services.kb_ingest_core.embed_on_upsert_enabled", return_value=False)
 @patch("backend.services.kb_ingest_core.ChromaHttpClient")
 def test_run_kb_ingestion_deletes_stale_after_upsert(

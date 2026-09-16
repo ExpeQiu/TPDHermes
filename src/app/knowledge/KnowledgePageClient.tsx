@@ -706,8 +706,8 @@ function KbClassifyRulesHint({ compact }: { compact?: boolean }) {
         <li>
           <strong className="text-slate-700 dark:text-slate-300">按集合</strong>：按 Chroma{" "}
           <code className="text-emerald-700 dark:text-emerald-300/90">collection</code> 分组，规范名如{" "}
-          <code className="text-emerald-700 dark:text-emerald-300/90">internal.structured_tech.tech_points</code>
-          （展示名「内部知识库·技术点」）
+          <code className="text-emerald-700 dark:text-emerald-300/90">internal.geelywiki.pages</code>
+          （展示名「内部知识库·GeelyWiki」）
         </li>
         <li>导入时在「上传导入」填写 domain / folder_path，或在 metadata 中补全后刷新</li>
       </ul>

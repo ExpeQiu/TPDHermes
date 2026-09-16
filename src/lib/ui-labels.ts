@@ -169,6 +169,7 @@ export function kgKindLabel(kind: string): string {
 
 const SOURCE_TYPE_LABELS: Record<string, string> = {
   conversation_harvest: "对话收割",
+  geelywiki: "GeelyWiki",
   file: "文件",
   upload: "上传",
   project_output: "项目输出",
@@ -267,6 +268,8 @@ export function kbDomainLabel(domain: string | undefined | null): string {
 const KB_TOPIC_LABELS: Record<string, string> = {
   speeches: "发言稿",
   geely_tech: "吉利技术",
+  geelywiki: "吉利Wiki",
+  pages: "页面归档",
   vehicle_launch: "车型发布",
   autonomous_driving: "自动驾驶",
   remote_debug: "远程联调",

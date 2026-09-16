@@ -23,6 +23,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from backend.services.mykw_kb_sync import (  # noqa: E402
+    mykw_push_enabled,
     pull_from_hermes,
     push_to_hermes,
     resolve_vault_root,
@@ -44,6 +45,11 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--output-dir", default=str(DEFAULT_OUTPUT_DIR))
     p.add_argument("--log-dir", default=str(DEFAULT_LOG_DIR))
     p.add_argument("--apply", action="store_true", help="真正写入；缺省为预览")
+    p.add_argument(
+        "--force-push",
+        action="store_true",
+        help="允许 myKW→Chroma 直推（默认关闭；内部知识走 GeelyWiki）",
+    )
     p.add_argument("--overwrite", action="store_true", help="pull 时覆盖已有回写笔记")
     p.add_argument("--sync-cache", action="store_true", help="push --apply 后触发 kb_cache sync")
     p.add_argument("--only", action="append", default=[], help="push 仅指定 target 名，可重复")
@@ -76,6 +82,7 @@ def main() -> int:
             sync_cache=args.sync_cache,
             hermes_api=args.hermes_api,
             project_id=args.project_id,
+            allow_push=bool(args.force_push or mykw_push_enabled()),
         )
     else:
         report = pull_from_hermes(

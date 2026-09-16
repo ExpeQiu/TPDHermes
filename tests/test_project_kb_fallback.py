@@ -6,6 +6,18 @@ from backend.services.project_kb import (
     merge_co_create_ask_kb_collections,
     project_kb_collection,
 )
+from backend.services.kb_contract import (
+    GEELYWIKI_PAGES_COLLECTION,
+    PUBLIC_INTEL_COLLECTIONS,
+    TPD_EXPERIENCE_COLLECTION,
+)
+
+
+def test_chat_fallback_includes_wiki_intel_and_experience():
+    assert GEELYWIKI_PAGES_COLLECTION in CHAT_KB_FALLBACK_COLLECTIONS
+    assert TPD_EXPERIENCE_COLLECTION in CHAT_KB_FALLBACK_COLLECTIONS
+    for col in PUBLIC_INTEL_COLLECTIONS:
+        assert col in CHAT_KB_FALLBACK_COLLECTIONS
 
 
 def test_merge_chat_kb_fallback_collections_unions_public():

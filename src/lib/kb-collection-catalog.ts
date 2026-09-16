@@ -1,30 +1,40 @@
 /** 知识库 collection 业务展示名（覆盖默认 domain·topic 拼接） */
 export const KB_COLLECTION_DISPLAY: Record<string, string> = {
+  "internal.geelywiki.pages": "内部知识库·GeelyWiki",
   "public.structured_tech.geely_tech": "公开情报·技术库",
-  "internal.structured_tech.tech_points": "内部知识库·技术点",
-  "public.release_assets.speeches": "发布素材·发言稿",
+  "public.public_intel.auto_company_strategy": "公开情报·车企战略",
+  "public.public_intel.vehicle_model_library": "公开情报·车型库",
+  "public.internal_methodology.tpd_experience": "公共知识库·经验库",
+  "internal.structured_tech.tech_points": "内部知识库·技术点（历史）",
+  "public.release_assets.speeches": "发布素材·发言稿（历史）",
 };
 
 /** collection 业务说明（UI tooltip / 编排提示） */
 export const KB_COLLECTION_DESCRIPTIONS: Record<string, string> = {
+  "internal.geelywiki.pages":
+    "GeelyWiki 内部 LLMwiki 归档（全文 + claims），真源信息，冲突时优先遵守和采纳。",
   "public.structured_tech.geely_tech":
     "来自互联网检索的结构化技术点信息，供参考与补充，冲突时以真源集合为准。",
+  "public.public_intel.auto_company_strategy":
+    "公开情报·车企战略，向量+图谱补充，不得覆盖内部 Wiki 搭载。",
+  "public.public_intel.vehicle_model_library":
+    "公开情报·车型库（竞品/行业），向量+图谱补充。",
+  "public.internal_methodology.tpd_experience":
+    "对话与反馈沉淀的经验库，可检索可图谱化，权威低于内部 Wiki。",
   "internal.structured_tech.tech_points":
-    "内部官方技术点汇编（JLGF），真源信息，优先遵守和采纳。",
+    "历史 myKW 直推技术点（已停用直推；现行真源为 GeelyWiki）。",
   "public.release_assets.speeches":
-    "发言稿与发布口径，真源信息，优先遵守和采纳。",
+    "历史发言稿集合（现行发布口径编入 GeelyWiki 后随内部 Wiki 检索）。",
 };
 
 /** 真源集合：Agent 与写作场景冲突时优先采纳 */
 export const KB_AUTHORITATIVE_COLLECTIONS: readonly string[] = [
-  "internal.structured_tech.tech_points",
-  "public.release_assets.speeches",
+  "internal.geelywiki.pages",
 ];
 
-/** 「内部知识库」区块展示顺序（发言稿虽为 public.*，与真源技术点同区展示） */
+/** 「内部知识库」区块展示顺序 */
 export const KB_INTERNAL_SECTION_ORDER: readonly string[] = [
-  "internal.structured_tech.tech_points",
-  "public.release_assets.speeches",
+  "internal.geelywiki.pages",
 ];
 
 /** 浏览 UI 隐藏的集合（联调 / smoke 等） */
@@ -51,7 +61,7 @@ export function isKbCollectionHidden(name: string): boolean {
   return KB_HIDDEN_COLLECTIONS.has(name.trim());
 }
 
-/** 是否在「内部知识库」按钮区展示（含真源发言稿） */
+/** 是否在「内部知识库」按钮区展示 */
 export function isInternalSectionCollection(name: string): boolean {
   const key = name.trim();
   if (isKbCollectionHidden(key)) return false;

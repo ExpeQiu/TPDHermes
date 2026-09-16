@@ -182,7 +182,7 @@ def _add_kb_harvest_entry_sync_inner(
         "domain": dom,
         "folder_path": "conversation_harvest",
         "source": source,
-        "source_type": "conversation_harvest",
+        "source_type": str(meta.get("source_type") or "conversation_harvest"),
         "published": bool(published),
         "tags": list(tags or []),
         "dedupe_key": dedupe_key,

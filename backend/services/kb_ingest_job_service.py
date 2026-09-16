@@ -230,6 +230,15 @@ async def process_ingest_job(job_id: str) -> dict[str, Any] | None:
         else:
             report["cache_sync_triggered"] = False
         final_status = str(report.get("status") or "completed")
+        if final_status != "failed":
+            try:
+                from backend.services.public_intel_ingest import graph_after_public_ingest
+
+                kg_report = await graph_after_public_ingest(collection, manifest)
+                if not kg_report.get("skipped"):
+                    report["kg"] = kg_report
+            except Exception:
+                log.exception("kb_ingest graph hook failed job=%s collection=%s", job_id, collection)
     except Exception as e:
         log.exception("kb_ingest failed job=%s", job_id)
         report = {

@@ -13,7 +13,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from backend.models.output_asset import OutputAsset
 from backend.models.project_attachment import ProjectAttachment
 from backend.models.project_config import ProjectConfig
-from backend.services.kb_contract import KB_AUTHORITATIVE_COLLECTIONS
+from backend.services.kb_contract import (
+    KB_AUTHORITATIVE_ORDER,
+    PUBLIC_INTEL_COLLECTIONS,
+    TPD_EXPERIENCE_COLLECTION,
+)
 
 logger = logging.getLogger("tpdx.hermes.project_kb")
 
@@ -54,8 +58,9 @@ def output_doc_id(output_id: str) -> str:
 
 # /chat 绑定项目但项目 KB 无索引时，补充的公共检索范围
 CHAT_KB_FALLBACK_COLLECTIONS: tuple[str, ...] = (
-    *sorted(KB_AUTHORITATIVE_COLLECTIONS),
-    "public.structured_tech.geely_tech",
+    *KB_AUTHORITATIVE_ORDER,
+    *PUBLIC_INTEL_COLLECTIONS,
+    TPD_EXPERIENCE_COLLECTION,
 )
 
 

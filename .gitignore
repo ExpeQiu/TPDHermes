@@ -32,8 +32,11 @@ out/
 tmp/
 *.tmp
 
-# Hermes 源码 zip（解压到 hermes-agent/hermes-agent-main/ 后勿提交压缩包）
+# Hermes 源码压缩包（解压到 hermes-agent/hermes-agent-main/ 后勿提交）
 hermes-agent/*.zip
+hermes-agent/*.tar.gz
+hermes-agent/*.tgz
+hermes-agent/hermes-agent-main.old-*
 
 # 本地数据与文档（不上传 GitHub）
 data/

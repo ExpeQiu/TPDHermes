@@ -25,4 +25,5 @@ class ExperienceEntry(Base):
     published = Column(String, default="false")
     kb_doc_id = Column(String)
     collection_name = Column(String)
+    kg_node_id = Column(String)
     created_at = Column(String, default=lambda: datetime.now().isoformat())
