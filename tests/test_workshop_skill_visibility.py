@@ -12,9 +12,10 @@ from fastapi.testclient import TestClient
 
 from backend import app
 from backend.db import async_session_maker
-from backend.services.run_log_service import create_run
+from backend.services.run_log_service import create_run, pop_issued_execution_token
 from backend.services.skill_loader import get_loader
 from backend.services.skill_version import SkillVersionService
+from backend.services.workshop_guard import require_workshop_invocation
 from backend.tools.workshop_tools import workshop_generate, workshop_list_skills
 
 
@@ -92,12 +93,36 @@ async def test_workshop_generate_blocks_foreign_uploaded_skill_by_run_user():
                     snapshot_json="{}",
                 )
 
-            ok = await workshop_generate(skill_name, {"tphermes_run_id": owner_run_id})
-            denied = await workshop_generate(skill_name, {"tphermes_run_id": foreign_run_id})
+            owner_token = pop_issued_execution_token(owner_run_id)
+            foreign_token = pop_issued_execution_token(foreign_run_id)
+            assert owner_token and foreign_token and owner_token != foreign_token
 
+            missing = await workshop_generate(skill_name, {"tphermes_run_id": owner_run_id})
+            ok = await workshop_generate(
+                skill_name,
+                {"tphermes_run_id": owner_run_id, "execution_token": owner_token},
+            )
+            crossed = await workshop_generate(
+                skill_name,
+                {"tphermes_run_id": owner_run_id, "execution_token": foreign_token},
+            )
+            denied = await workshop_generate(skill_name, {"tphermes_run_id": foreign_run_id})
+            async with async_session_maker() as db:
+                http_owner = await require_workshop_invocation(
+                    db,
+                    tphermes_run_id=owner_run_id,
+                    skill_name=skill_name,
+                    viewer_user_id=owner_id,
+                )
+
+            assert missing.get("success") is False
+            assert "缺少执行凭证" in str(missing.get("error") or "")
             assert ok.get("success") is True
+            assert crossed.get("success") is False
+            assert "执行凭证无效" in str(crossed.get("error") or "")
             assert denied.get("success") is False
             assert "技能不可用或不可见" in str(denied.get("error") or "")
+            assert http_owner.run_id == owner_run_id
     finally:
         with TestClient(app) as client:
             client.delete(f"/api/v1/skills/{skill_name}", headers={"X-User-ID": owner_id})

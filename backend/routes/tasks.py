@@ -40,23 +40,33 @@ from backend.services.orchestration_service import (
 from backend.services.project_kb import merge_project_kb_collections, output_doc_id, project_kb_collection
 from backend.services.project_kb_ingest import schedule_ingest_output
 from backend.services.project_access import require_project_for_user
-from backend.services.run_log_service import create_run, finalize_run, mark_run_failed, mark_run_failed_if_running
+from backend.services.run_log_service import (
+    create_run,
+    finalize_run,
+    mark_run_failed,
+    mark_run_failed_if_running,
+    pop_issued_execution_token,
+)
 from backend.services.template_service import extract_required_sections, get_template_by_id, validate_markdown_sections
 from backend.services.workshop_guard import (
     WorkshopGuardError,
+    assert_skill_contract,
     ensure_single_workshop_skill_contract,
     require_workshop_collection_for_user,
     require_workshop_skill_for_user,
 )
 from backend.services.workshop_task_runner import (
+    WorkshopSkillOutcome,
     _parse_workshop_context,
-    run_workshop_skill_async,
+    run_workshop_skill_outcome,
+    sse_content_replace,
     sse_error_event,
     sse_meta_event,
-    sse_openai_delta,
 )
 from backend.services.workshop_execution import (
     primary_text_from_capture,
+    skill_calls_from_capture,
+    skills_from_capture,
     workshop_agent_fallback_direct,
     workshop_execution_mode,
 )
@@ -299,6 +309,11 @@ async def _validate_task_request(
                 viewer_user_id=effective_uid,
                 skill_name=skill_name,
             )
+            assert_skill_contract(
+                skill_name=skill_name,
+                skills_policy_json=json.dumps(payload.skills.model_dump(), ensure_ascii=False),
+                enforce_terminal=False,
+            )
             for collection_name in payload.knowledge.collections:
                 await require_workshop_collection_for_user(
                     db,
@@ -307,6 +322,30 @@ async def _validate_task_request(
                     project_id=request.project_id,
                 )
         except WorkshopGuardError as exc:
+            raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+
+    if request.entrypoint == "chat" and _chat_force_skill_mode(
+        payload, chat_mode=request.chat_mode
+    ):
+        forced = next((item for item in payload.skills.allowed if str(item or "").strip()), "")
+        try:
+            await require_workshop_skill_for_user(
+                db,
+                viewer_user_id=effective_uid,
+                skill_name=forced,
+            )
+            assert_skill_contract(
+                skill_name=forced,
+                skills_policy_json=json.dumps(payload.skills.model_dump(), ensure_ascii=False),
+                enforce_terminal=False,
+            )
+        except WorkshopGuardError as exc:
+            logger.warning(
+                "chat direct skill rejected user_id=%s skill=%s detail=%s",
+                effective_uid,
+                forced,
+                exc.detail,
+            )
             raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
 
     if payload.output.must_follow_template and payload.output.template_id:
@@ -329,6 +368,9 @@ def _response_meta(
     execution_mode: str | None = None,
     tool_capture_hit: bool = False,
     citations_meta: dict[str, Any] | None = None,
+    delivery_status: str | None = None,
+    fallback_reason: str | None = None,
+    skill_calls: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     meta: dict[str, Any] = {
         "used_skills": used_skills or [],
@@ -343,7 +385,38 @@ def _response_meta(
     if citations_meta:
         meta["citations_count"] = citations_meta.get("citations_count", 0)
         meta["unresolved_refs"] = citations_meta.get("unresolved_refs") or []
+    if delivery_status:
+        meta["delivery_status"] = delivery_status
+    if fallback_reason:
+        meta["fallback_reason"] = fallback_reason
+    if skill_calls:
+        meta["skill_calls"] = skill_calls
     return meta
+
+
+def _delivery_from_outcome(
+    outcome: WorkshopSkillOutcome,
+    *,
+    agent_miss: bool = False,
+) -> dict[str, Any]:
+    reason = outcome.fallback_reason
+    status = outcome.status
+    if agent_miss:
+        status = "degraded"
+        reason = "agent_tool_miss" if not reason else f"agent_tool_miss; {reason}"
+    if status == "degraded":
+        logger.warning(
+            "skill delivery degraded skill=%s version=%s reason=%s execution_type=%s",
+            outcome.skill_name,
+            outcome.skill_version,
+            reason,
+            outcome.execution_type,
+        )
+    return {
+        "delivery_status": status,
+        "fallback_reason": reason,
+        "skill_calls": [outcome.call_record()],
+    }
 
 
 def _must_have_headings(payload: OrchestrationPayload) -> bool:
@@ -354,7 +427,11 @@ def _must_have_headings(payload: OrchestrationPayload) -> bool:
 def _workshop_skill_context(user_text: str, task_input: TaskInputPayload | None) -> dict[str, Any]:
     context = _parse_workshop_context(user_text)
     if task_input is not None:
-        context["task_input"] = task_input.model_dump(exclude_none=True)
+        dumped = task_input.model_dump(exclude_none=True)
+        context["task_input"] = dumped
+        material = dumped.get("source_material")
+        if material and not str(context.get("source_material") or "").strip():
+            context["source_material"] = material
     return context
 
 
@@ -362,9 +439,9 @@ async def _run_workshop_direct_text(
     skill_name: str,
     user_text: str,
     task_input: TaskInputPayload | None,
-) -> str:
+) -> WorkshopSkillOutcome:
     context = _workshop_skill_context(user_text, task_input)
-    return await run_workshop_skill_async(skill_name, context)
+    return await run_workshop_skill_outcome(skill_name, context)
 
 
 async def _resolve_workshop_agent_output(
@@ -383,7 +460,14 @@ async def _resolve_workshop_agent_output(
         capture = await load_workshop_tool_capture(db, run_id)
     text = primary_text_from_capture(capture)
     if text.strip():
-        return text, True, "agent"
+        calls = skill_calls_from_capture(capture)
+        degraded = any(item.get("status") == "degraded" for item in calls)
+        reason = next((item.get("fallback_reason") for item in calls if item.get("fallback_reason")), None)
+        return text, True, "agent", {
+            "delivery_status": "degraded" if degraded else "succeeded",
+            "fallback_reason": reason,
+            "skill_calls": calls,
+        }
 
     if workshop_agent_fallback_direct():
         logger.warning(
@@ -393,13 +477,13 @@ async def _resolve_workshop_agent_output(
             len(sse_fallback),
         )
         try:
-            direct_text = await _run_workshop_direct_text(skill_name, user_text, task_input)
+            outcome = await _run_workshop_direct_text(skill_name, user_text, task_input)
         except RuntimeError as exc:
             raise HTTPException(
                 status_code=424,
                 detail=f"Agent 未调用 workshop 工具且直连降级失败: {exc}",
             ) from exc
-        return direct_text, False, "direct"
+        return outcome.text, False, "direct", _delivery_from_outcome(outcome, agent_miss=True)
 
     detail = (
         "Agent 未调用 workshop_generate / workshop_generate_from_kb，无法获取产出正文。"
@@ -455,8 +539,15 @@ async def _resolve_chat_skill_output(
         capture = await load_workshop_tool_capture(db, run_id)
     captured_text = primary_text_from_capture(capture)
     if captured_text.strip():
-        used = allowed[:1] if allowed else None
-        return captured_text, True, "agent_tool", used
+        used = skills_from_capture(capture) or None
+        calls = skill_calls_from_capture(capture)
+        degraded = any(item.get("status") == "degraded" for item in calls)
+        reason = next((item.get("fallback_reason") for item in calls if item.get("fallback_reason")), None)
+        return captured_text, True, "agent_tool", used, {
+            "delivery_status": "degraded" if degraded else "succeeded",
+            "fallback_reason": reason,
+            "skill_calls": calls,
+        }
 
     if _chat_force_skill_mode(payload, chat_mode=chat_mode):
         skill_name = allowed[0]
@@ -466,15 +557,20 @@ async def _resolve_chat_skill_output(
             skill_name,
         )
         try:
-            direct_text = await _run_workshop_direct_text(skill_name, user_text, task_input)
+            outcome = await _run_workshop_direct_text(skill_name, user_text, task_input)
         except RuntimeError as exc:
             raise HTTPException(
                 status_code=424,
                 detail=f"Chat 未命中技能工具且直连降级失败: {exc}",
             ) from exc
-        return direct_text, False, "direct_skill_fallback", [skill_name]
+        delivery = _delivery_from_outcome(outcome, agent_miss=True)
+        return outcome.text, False, "direct_skill_fallback", [skill_name], delivery
 
-    return sse_fallback, False, "agent_text", None
+    return sse_fallback, False, "agent_text", None, {
+        "delivery_status": "succeeded",
+        "fallback_reason": None,
+        "skill_calls": [],
+    }
 
 
 @router.post("/execute")
@@ -655,6 +751,7 @@ async def execute_task(req: Request, task_req: TaskExecuteRequest, db: AsyncSess
         snapshot_json=json.dumps(snapshot, ensure_ascii=False),
         skills_policy_json=json.dumps(payload.skills.model_dump(), ensure_ascii=False),
     )
+    exec_token = pop_issued_execution_token(run_id)
 
     payload = payload.model_copy(
         update={"execution": payload.execution.model_copy(update={"run_id": run_id})}
@@ -681,7 +778,7 @@ async def execute_task(req: Request, task_req: TaskExecuteRequest, db: AsyncSess
         if not eff_request.stream:
             t0 = time.perf_counter()
             try:
-                text = await _run_workshop_direct_text(
+                outcome = await _run_workshop_direct_text(
                     workshop_skill,
                     user_text_ws,
                     eff_request.task_input,
@@ -689,6 +786,8 @@ async def execute_task(req: Request, task_req: TaskExecuteRequest, db: AsyncSess
             except RuntimeError as exc:
                 await mark_run_failed(db, run_id, str(exc))
                 raise HTTPException(status_code=400, detail=str(exc)) from exc
+            text = outcome.text
+            delivery = _delivery_from_outcome(outcome)
             duration_ms = int((time.perf_counter() - t0) * 1000)
             validation = validate_markdown_sections(
                 text,
@@ -707,6 +806,9 @@ async def execute_task(req: Request, task_req: TaskExecuteRequest, db: AsyncSess
                         used_skills=[workshop_skill],
                         execution_mode="direct",
                         tool_capture_hit=False,
+                        delivery_status=delivery["delivery_status"],
+                        fallback_reason=delivery["fallback_reason"],
+                        skill_calls=delivery["skill_calls"],
                     ),
                     validation=validation,
                     error_message=None,
@@ -726,13 +828,15 @@ async def execute_task(req: Request, task_req: TaskExecuteRequest, db: AsyncSess
                     "content": text,
                     "used_skills": [workshop_skill],
                     "execution_mode": "direct",
+                    "delivery_status": delivery["delivery_status"],
+                    "fallback_reason": delivery["fallback_reason"],
                 }
             )
 
         async def workshop_direct_stream() -> AsyncGenerator[str, None]:
             t0 = time.perf_counter()
             try:
-                text = await _run_workshop_direct_text(
+                outcome = await _run_workshop_direct_text(
                     workshop_skill,
                     user_text_ws,
                     eff_request.task_input,
@@ -742,9 +846,17 @@ async def execute_task(req: Request, task_req: TaskExecuteRequest, db: AsyncSess
                     await mark_run_failed(s, run_id, str(exc))
                 yield sse_error_event(str(exc), code="workshop_direct_failed")
                 return
-
-            for line in text.splitlines(keepends=True):
-                yield sse_openai_delta(line)
+            text = outcome.text
+            delivery = _delivery_from_outcome(outcome)
+            yield sse_content_replace(
+                text,
+                delivery={
+                    "phase": "direct_delivery",
+                    "status": delivery["delivery_status"],
+                    "fallback_reason": delivery["fallback_reason"],
+                    "execution_mode": "direct",
+                },
+            )
 
             duration_ms = int((time.perf_counter() - t0) * 1000)
             validation = validate_markdown_sections(
@@ -766,6 +878,9 @@ async def execute_task(req: Request, task_req: TaskExecuteRequest, db: AsyncSess
                             used_skills=[workshop_skill],
                             execution_mode="direct",
                             tool_capture_hit=False,
+                            delivery_status=delivery["delivery_status"],
+                            fallback_reason=delivery["fallback_reason"],
+                            skill_calls=delivery["skill_calls"],
                         ),
                         validation=validation,
                         error_message=None,
@@ -793,6 +908,8 @@ async def execute_task(req: Request, task_req: TaskExecuteRequest, db: AsyncSess
                     "output_id": output_id,
                     "validation": validation,
                     "execution_mode": "direct",
+                    "delivery_status": delivery["delivery_status"],
+                    "fallback_reason": delivery["fallback_reason"],
                 }
             }
             yield sse_meta_event(meta)
@@ -822,7 +939,7 @@ async def execute_task(req: Request, task_req: TaskExecuteRequest, db: AsyncSess
         if not eff_request.stream:
             t0 = time.perf_counter()
             try:
-                text = await _run_workshop_direct_text(
+                outcome = await _run_workshop_direct_text(
                     forced_skill,
                     user_text,
                     eff_request.task_input,
@@ -830,6 +947,8 @@ async def execute_task(req: Request, task_req: TaskExecuteRequest, db: AsyncSess
             except RuntimeError as exc:
                 await mark_run_failed(db, run_id, str(exc))
                 raise HTTPException(status_code=400, detail=str(exc)) from exc
+            text = outcome.text
+            delivery = _delivery_from_outcome(outcome)
             duration_ms = int((time.perf_counter() - t0) * 1000)
             validation = validate_markdown_sections(
                 text,
@@ -848,6 +967,9 @@ async def execute_task(req: Request, task_req: TaskExecuteRequest, db: AsyncSess
                         used_skills=[forced_skill],
                         execution_mode="direct_skill_forced",
                         tool_capture_hit=False,
+                        delivery_status=delivery["delivery_status"],
+                        fallback_reason=delivery["fallback_reason"],
+                        skill_calls=delivery["skill_calls"],
                     ),
                     validation=validation,
                     error_message=None,
@@ -868,13 +990,15 @@ async def execute_task(req: Request, task_req: TaskExecuteRequest, db: AsyncSess
                     "execution_mode": "direct_skill_forced",
                     "tool_capture_hit": False,
                     "used_skills": [forced_skill],
+                    "delivery_status": delivery["delivery_status"],
+                    "fallback_reason": delivery["fallback_reason"],
                 }
             )
 
         async def chat_forced_skill_stream() -> AsyncGenerator[str, None]:
             t0 = time.perf_counter()
             try:
-                text = await _run_workshop_direct_text(
+                outcome = await _run_workshop_direct_text(
                     forced_skill,
                     user_text,
                     eff_request.task_input,
@@ -884,9 +1008,17 @@ async def execute_task(req: Request, task_req: TaskExecuteRequest, db: AsyncSess
                     await mark_run_failed(s, run_id, str(exc))
                 yield sse_error_event(str(exc), code="chat_forced_skill_failed")
                 return
-
-            for line in text.splitlines(keepends=True):
-                yield sse_openai_delta(line)
+            text = outcome.text
+            delivery = _delivery_from_outcome(outcome)
+            yield sse_content_replace(
+                text,
+                delivery={
+                    "phase": "direct_delivery",
+                    "status": delivery["delivery_status"],
+                    "fallback_reason": delivery["fallback_reason"],
+                    "execution_mode": "direct_skill_forced",
+                },
+            )
 
             duration_ms = int((time.perf_counter() - t0) * 1000)
             validation = validate_markdown_sections(
@@ -908,6 +1040,9 @@ async def execute_task(req: Request, task_req: TaskExecuteRequest, db: AsyncSess
                             used_skills=[forced_skill],
                             execution_mode="direct_skill_forced",
                             tool_capture_hit=False,
+                            delivery_status=delivery["delivery_status"],
+                            fallback_reason=delivery["fallback_reason"],
+                            skill_calls=delivery["skill_calls"],
                         ),
                         validation=validation,
                         error_message=None,
@@ -937,6 +1072,8 @@ async def execute_task(req: Request, task_req: TaskExecuteRequest, db: AsyncSess
                     "execution_mode": "direct_skill_forced",
                     "tool_capture_hit": False,
                     "used_skills": [forced_skill],
+                    "delivery_status": delivery["delivery_status"],
+                    "fallback_reason": delivery["fallback_reason"],
                 }
             }
             yield sse_meta_event(meta)
@@ -1004,6 +1141,7 @@ async def execute_task(req: Request, task_req: TaskExecuteRequest, db: AsyncSess
             task_input=eff_request.task_input if is_workshop else None,
             kb_prefetch_block=kb_prefetch_block or None,
             lightweight_mode=chat_lightweight,
+            execution_token=exec_token,
         )
         _apply_chat_generation_limits(
             upstream_body,
@@ -1044,9 +1182,10 @@ async def execute_task(req: Request, task_req: TaskExecuteRequest, db: AsyncSess
         exec_mode = "agent"
         capture_hit = False
         used_skills: list[str] | None = None
+        delivery: dict[str, Any] = {}
         if is_workshop and workshop_skill:
             try:
-                text, capture_hit, exec_mode = await _resolve_workshop_agent_output(
+                text, capture_hit, exec_mode, delivery = await _resolve_workshop_agent_output(
                     run_id=run_id,
                     sse_fallback=text,
                     skill_name=workshop_skill,
@@ -1059,7 +1198,7 @@ async def execute_task(req: Request, task_req: TaskExecuteRequest, db: AsyncSess
             used_skills = [workshop_skill]
         elif payload.entrypoint == "chat":
             try:
-                text, capture_hit, exec_mode, used_skills = await _resolve_chat_skill_output(
+                text, capture_hit, exec_mode, used_skills, delivery = await _resolve_chat_skill_output(
                     run_id=run_id,
                     payload=payload,
                     sse_fallback=text,
@@ -1094,6 +1233,9 @@ async def execute_task(req: Request, task_req: TaskExecuteRequest, db: AsyncSess
                     used_skills=used_skills,
                     execution_mode=exec_mode if (is_workshop or used_skills or capture_hit) else None,
                     tool_capture_hit=capture_hit,
+                    delivery_status=delivery.get("delivery_status"),
+                    fallback_reason=delivery.get("fallback_reason"),
+                    skill_calls=delivery.get("skill_calls"),
                 ),
                 validation=validation,
                 error_message=stream_error,
@@ -1112,6 +1254,10 @@ async def execute_task(req: Request, task_req: TaskExecuteRequest, db: AsyncSess
             "validation": validation,
             "content": text,
         }
+        if delivery.get("delivery_status"):
+            body["delivery_status"] = delivery["delivery_status"]
+        if delivery.get("fallback_reason"):
+            body["fallback_reason"] = delivery["fallback_reason"]
         if is_workshop:
             body["execution_mode"] = exec_mode
             body["tool_capture_hit"] = capture_hit
@@ -1201,6 +1347,7 @@ async def execute_task(req: Request, task_req: TaskExecuteRequest, db: AsyncSess
             task_input=eff_request.task_input if is_workshop else None,
             kb_prefetch_block=kb_prefetch_block or None,
             lightweight_mode=chat_lightweight,
+            execution_token=exec_token,
         )
         _apply_chat_generation_limits(
             upstream_body,
@@ -1336,10 +1483,11 @@ async def execute_task(req: Request, task_req: TaskExecuteRequest, db: AsyncSess
         exec_mode = "agent"
         capture_hit = False
         used_skills: list[str] | None = None
+        delivery: dict[str, Any] = {}
 
         if is_workshop and workshop_skill:
             try:
-                finalize_text, capture_hit, exec_mode = await _resolve_workshop_agent_output(
+                finalize_text, capture_hit, exec_mode, delivery = await _resolve_workshop_agent_output(
                     run_id=run_id,
                     sse_fallback=full_text,
                     skill_name=workshop_skill,
@@ -1353,11 +1501,18 @@ async def execute_task(req: Request, task_req: TaskExecuteRequest, db: AsyncSess
                 return
             used_skills = [workshop_skill]
             if finalize_text.strip() and finalize_text != full_text:
-                for line in finalize_text.splitlines(keepends=True):
-                    yield sse_openai_delta(line)
+                yield sse_content_replace(
+                    finalize_text,
+                    delivery={
+                        "phase": "content_replace",
+                        "status": delivery.get("delivery_status"),
+                        "fallback_reason": delivery.get("fallback_reason"),
+                        "execution_mode": exec_mode,
+                    },
+                )
         elif payload.entrypoint == "chat":
             try:
-                finalize_text, capture_hit, exec_mode, used_skills = await _resolve_chat_skill_output(
+                finalize_text, capture_hit, exec_mode, used_skills, delivery = await _resolve_chat_skill_output(
                     run_id=run_id,
                     payload=payload,
                     sse_fallback=full_text,
@@ -1371,8 +1526,15 @@ async def execute_task(req: Request, task_req: TaskExecuteRequest, db: AsyncSess
                 yield "data: " + json.dumps({"error": {"message": exc.detail}}, ensure_ascii=False) + "\n\n"
                 return
             if finalize_text.strip() and finalize_text != full_text:
-                for line in finalize_text.splitlines(keepends=True):
-                    yield sse_openai_delta(line)
+                yield sse_content_replace(
+                    finalize_text,
+                    delivery={
+                        "phase": "content_replace",
+                        "status": delivery.get("delivery_status"),
+                        "fallback_reason": delivery.get("fallback_reason"),
+                        "execution_mode": exec_mode,
+                    },
+                )
 
         validation = validate_markdown_sections(
             finalize_text,
@@ -1422,6 +1584,9 @@ async def execute_task(req: Request, task_req: TaskExecuteRequest, db: AsyncSess
                         execution_mode=exec_mode if (is_workshop or used_skills or capture_hit) else None,
                         tool_capture_hit=capture_hit,
                         citations_meta=sources_payload,
+                        delivery_status=delivery.get("delivery_status"),
+                        fallback_reason=delivery.get("fallback_reason"),
+                        skill_calls=delivery.get("skill_calls"),
                     ),
                     validation=validation,
                     error_message=stream_error,
@@ -1450,6 +1615,8 @@ async def execute_task(req: Request, task_req: TaskExecuteRequest, db: AsyncSess
                 "output_id": output_id,
                 "validation": validation,
                 "status": status,
+                "delivery_status": delivery.get("delivery_status"),
+                "fallback_reason": delivery.get("fallback_reason"),
             },
             "tphermes_sources": sources_payload,
         }

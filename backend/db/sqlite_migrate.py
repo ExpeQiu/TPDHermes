@@ -204,6 +204,8 @@ def run_sqlite_migrations(connection: Connection) -> None:
                 ("user_id", "TEXT NOT NULL DEFAULT 'default'"),
                 ("tool_capture_json", "TEXT"),
                 ("kb_source_capture_json", "TEXT"),
+                ("exec_token_hash", "TEXT"),
+                ("exec_token_expires_at", "TEXT"),
             ],
         )
 

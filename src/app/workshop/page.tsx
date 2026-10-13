@@ -176,6 +176,8 @@ function WorkshopPageInner() {
     output_id?: string | null;
     execution_mode?: string;
     tool_capture_hit?: boolean;
+    delivery_status?: string;
+    fallback_reason?: string;
   } | null>(null);
   const [toolProgressLabel, setToolProgressLabel] = useState<string | null>(null);
   const [savedOutputFormat, setSavedOutputFormat] = useState<WorkshopOutputFormat | null>(null);
@@ -855,19 +857,26 @@ function WorkshopPageInner() {
                   const tt = event.tphermes_task;
                   if (tt && typeof tt === "object") {
                     const m = tt as Record<string, unknown>;
-                    setLastRunMeta({
-                      run_id: typeof m.run_id === "string" ? m.run_id : undefined,
+                    setLastRunMeta((prev) => ({
+                      run_id: typeof m.run_id === "string" ? m.run_id : prev?.run_id,
                       output_id:
                         typeof m.output_id === "string"
                           ? m.output_id
                           : m.output_id === null
                             ? null
-                            : undefined,
+                            : prev?.output_id,
                       execution_mode:
-                        typeof m.execution_mode === "string" ? m.execution_mode : undefined,
+                        typeof m.execution_mode === "string" ? m.execution_mode : prev?.execution_mode,
                       tool_capture_hit:
-                        typeof m.tool_capture_hit === "boolean" ? m.tool_capture_hit : undefined,
-                    });
+                        typeof m.tool_capture_hit === "boolean" ? m.tool_capture_hit : prev?.tool_capture_hit,
+                      delivery_status:
+                        typeof m.delivery_status === "string" ? m.delivery_status : prev?.delivery_status,
+                      fallback_reason:
+                        typeof m.fallback_reason === "string" ? m.fallback_reason : prev?.fallback_reason,
+                    }));
+                    if (typeof m.content_replace === "string") {
+                      setOutput(m.content_replace);
+                    }
                     setToolProgressLabel(null);
                   }
                 } catch {
@@ -1334,6 +1343,9 @@ function WorkshopPageInner() {
                     <span className="text-xs text-slate-500">
                       {lastRunMeta.execution_mode === "agent" ? "Agent" : "直连"}
                       {lastRunMeta.tool_capture_hit ? " · 工具产出" : ""}
+                      {lastRunMeta.delivery_status === "degraded"
+                        ? ` · 降级${lastRunMeta.fallback_reason ? `（${lastRunMeta.fallback_reason}）` : ""}`
+                        : ""}
                     </span>
                   ) : null}
                   {genStatus === "done" && (

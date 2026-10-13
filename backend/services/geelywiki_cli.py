@@ -12,6 +12,7 @@ import logging
 import os
 import shutil
 import subprocess
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -60,26 +61,50 @@ def run_geelywiki_cli(
         cmd.append("--demo")
     cmd.extend(args)
     logger.info("geelywiki cli cmd=%s demo=%s cwd=%s", " ".join(cmd[-4:]), demo, wiki)
+    # Python 3.14 + PIPE 在 ~64KB 截断 stdout（live export ~192KB），落到文件再读。
+    stdout_path: Path | None = None
     try:
-        proc = subprocess.run(
-            cmd,
-            cwd=str(wiki),
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-            check=False,
+        with tempfile.NamedTemporaryFile(
+            prefix="geelywiki-cli-",
+            suffix=".json",
+            delete=False,
+        ) as tmp:
+            stdout_path = Path(tmp.name)
+        try:
+            with stdout_path.open("wb") as stdout_f:
+                proc = subprocess.run(
+                    cmd,
+                    cwd=str(wiki),
+                    stdout=stdout_f,
+                    stderr=subprocess.PIPE,
+                    timeout=timeout,
+                    check=False,
+                )
+        except FileNotFoundError as exc:
+            raise GeelyWikiCliError(f"无法执行 GeelyWiki CLI: {exc}") from exc
+        except subprocess.TimeoutExpired as exc:
+            raise GeelyWikiCliError(f"GeelyWiki CLI 超时: {args}") from exc
+        raw = stdout_path.read_bytes()
+        stderr = (proc.stderr or b"").decode("utf-8", errors="replace")
+        logger.info(
+            "geelywiki cli stdout_bytes=%s exit=%s demo=%s",
+            len(raw),
+            proc.returncode,
+            demo,
         )
-    except FileNotFoundError as exc:
-        raise GeelyWikiCliError(f"无法执行 GeelyWiki CLI: {exc}") from exc
-    except subprocess.TimeoutExpired as exc:
-        raise GeelyWikiCliError(f"GeelyWiki CLI 超时: {args}") from exc
+    finally:
+        if stdout_path is not None:
+            stdout_path.unlink(missing_ok=True)
     if proc.returncode not in (0, 2):
         raise GeelyWikiCliError(
             f"GeelyWiki CLI 失败 exit={proc.returncode} args={args}",
             exit_code=proc.returncode,
-            stderr=(proc.stderr or "")[-800:],
+            stderr=stderr[-800:],
         )
-    stdout = (proc.stdout or "").strip()
+    try:
+        stdout = raw.decode("utf-8").strip()
+    except UnicodeDecodeError as exc:
+        raise GeelyWikiCliError(f"GeelyWiki CLI 非 UTF-8: {exc}") from exc
     if not stdout:
         if proc.returncode == 2:
             return {"module": "empty", "pages": [], "items": [], "count": 0}

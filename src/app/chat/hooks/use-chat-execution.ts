@@ -18,7 +18,7 @@ import {
 } from "@/lib/chat-context";
 import { ensureDerivedUserId, getEffectiveUserIdSync } from "@/lib/user-id";
 import { formatApiError } from "@/lib/api";
-import { fetchRunKbSources, parseTpHermesStreamMeta } from "@/lib/chat-citations";
+import { fetchRunKbSources, mergeStreamContent, parseTpHermesStreamMeta } from "@/lib/chat-citations";
 
 import type {
   AssistantFileToolEvent,
@@ -609,9 +609,10 @@ export function useChatExecution(options: UseChatExecutionOptions) {
                 }
                 const part = parseSSEDataPayload(data);
                 if (part.errorText) throw new Error(part.errorText);
-                if (part.content) {
+                const nextContent = mergeStreamContent(fullContent, meta, part.content);
+                if (nextContent !== fullContent) {
                   markFirstToken();
-                  fullContent += part.content;
+                  fullContent = nextContent;
                   updateSession(sessionId, (session) => ({
                     ...session,
                     messages: session.messages.map((message) =>
@@ -673,9 +674,10 @@ export function useChatExecution(options: UseChatExecutionOptions) {
                 }
                 const part = parseSSEDataPayload(parsedBlock.data);
                 if (part.errorText) throw new Error(part.errorText);
-                if (part.content) {
+                const nextContent = mergeStreamContent(fullContent, meta, part.content);
+                if (nextContent !== fullContent) {
                   markFirstToken();
-                  fullContent += part.content;
+                  fullContent = nextContent;
                 }
               }
             }
@@ -781,13 +783,15 @@ export function useChatExecution(options: UseChatExecutionOptions) {
                   if (toolEvent) applyToolEvent(toolEvent);
                   continue;
                 }
+                const streamMeta = parseTpHermesStreamMeta(parsedBlock.data);
                 const part = parseSSEDataPayload(parsedBlock.data);
                 if (part.errorText) throw new Error(part.errorText);
                 if (part.finishReason) roundFinish = part.finishReason;
-                if (part.content) {
+                const nextContent = mergeStreamContent(fullContent, streamMeta, part.content);
+                if (nextContent !== fullContent) {
                   markFirstToken();
-                  if (fastPathEnabled) setStreamingPhase("fast_path_streaming");
-                  fullContent += part.content;
+                  if (fastPathEnabled && !streamMeta?.contentReplace) setStreamingPhase("fast_path_streaming");
+                  fullContent = nextContent;
                   updateSession(sessionId, (session) => ({
                     ...session,
                     messages: session.messages.map((message) =>
@@ -808,13 +812,15 @@ export function useChatExecution(options: UseChatExecutionOptions) {
                 const toolEvent = parseHermesToolProgressEvent(parsedBlock.data);
                 if (toolEvent) applyToolEvent(toolEvent);
               } else if (parsedBlock) {
+                const streamMeta = parseTpHermesStreamMeta(parsedBlock.data);
                 const part = parseSSEDataPayload(parsedBlock.data);
                 if (part.errorText) throw new Error(part.errorText);
                 if (part.finishReason) roundFinish = part.finishReason;
-                if (part.content) {
+                const nextContent = mergeStreamContent(fullContent, streamMeta, part.content);
+                if (nextContent !== fullContent) {
                   markFirstToken();
-                  if (fastPathEnabled) setStreamingPhase("fast_path_streaming");
-                  fullContent += part.content;
+                  if (fastPathEnabled && !streamMeta?.contentReplace) setStreamingPhase("fast_path_streaming");
+                  fullContent = nextContent;
                 }
               }
             }

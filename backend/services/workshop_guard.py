@@ -2,15 +2,22 @@
 
 from __future__ import annotations
 
+import json
+import logging
 from dataclasses import dataclass
 
 from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.models.orchestration_run import OrchestrationRun
+from backend.schemas.orchestration import normalize_skills_mode
 from backend.services.project_access import require_project_for_user
 from backend.services.project_kb import project_id_from_kb_collection
 from backend.services.workshop_skill_access import workshop_skill_accessible
+
+logger = logging.getLogger("tpdx.hermes.workshop_guard")
+
+_TERMINAL_RUN_STATUSES = frozenset({"completed", "failed", "draft", "approved"})
 
 
 class WorkshopGuardError(Exception):
@@ -108,6 +115,71 @@ async def require_workshop_collection_for_user(
     return name
 
 
+def _policy_names(values: object) -> list[str]:
+    if not isinstance(values, list):
+        return []
+    names: list[str] = []
+    for item in values:
+        name = str(item or "").strip()
+        if name and name not in names:
+            names.append(name)
+    return names
+
+
+def assert_skill_contract(
+    *,
+    skill_name: str,
+    status: str | None = None,
+    skills_policy_json: str | None = None,
+    enforce_terminal: bool = True,
+) -> None:
+    """按运行快照拒绝越合同、已结束运行上的技能执行。无快照时只依赖可见性校验。"""
+    if enforce_terminal:
+        run_status = str(status or "").strip().lower()
+        if run_status in _TERMINAL_RUN_STATUSES:
+            raise WorkshopGuardError(
+                f"运行已结束，不能继续执行技能: {run_status}",
+                status_code=409,
+            )
+
+    raw = str(skills_policy_json or "").strip()
+    if not raw:
+        return
+    try:
+        policy = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise WorkshopGuardError("运行技能合同无法解析", status_code=400) from exc
+    if not isinstance(policy, dict) or not policy:
+        return
+
+    name = str(skill_name or "").strip()
+    forbidden = _policy_names(policy.get("forbidden"))
+    allowed = _policy_names(policy.get("allowed"))
+    preferred = _policy_names(policy.get("preferred"))
+    mode = normalize_skills_mode(str(policy.get("mode") or ""))
+    free_choice = bool(policy.get("allow_agent_free_choice"))
+
+    if name in forbidden:
+        raise WorkshopGuardError(f"技能被本次运行合同禁止: {name}", status_code=403)
+    if mode == "manual_only":
+        if name not in allowed:
+            raise WorkshopGuardError(f"手工模式仅允许已绑定技能，拒绝: {name}", status_code=403)
+        return
+    if mode == "allowed_list":
+        if name not in allowed:
+            detail = (
+                f"技能不在本次允许名单: {name}"
+                if allowed
+                else "允许名单为空，不能执行技能"
+            )
+            raise WorkshopGuardError(detail, status_code=403)
+        return
+    if mode == "preferred_list" and not free_choice:
+        bound = preferred or allowed
+        if name not in bound:
+            raise WorkshopGuardError(f"当前合同未开放自由选择，拒绝: {name}", status_code=403)
+
+
 def ensure_single_workshop_skill_contract(skills: list[str] | None) -> str:
     names = [str(item or "").strip() for item in (skills or []) if str(item or "").strip()]
     if len(names) != 1:
@@ -118,6 +190,28 @@ def ensure_single_workshop_skill_contract(skills: list[str] | None) -> str:
     return names[0]
 
 
+async def _record_skill_rejection(
+    db: AsyncSession,
+    run_id: str,
+    skill_name: str,
+    reason: str,
+) -> None:
+    from backend.services.workshop_tool_capture import append_workshop_tool_capture
+
+    await append_workshop_tool_capture(
+        db,
+        run_id=run_id,
+        tool_name="workshop_contract_reject",
+        payload={
+            "success": False,
+            "status": "rejected",
+            "skill": skill_name,
+            "error": reason,
+        },
+        skill_name=skill_name,
+    )
+
+
 async def require_workshop_invocation(
     db: AsyncSession,
     *,
@@ -126,6 +220,7 @@ async def require_workshop_invocation(
     viewer_user_id: str | None = None,
     project_id: str | None = None,
     collection_name: str | None = None,
+    execution_token: str | None = None,
 ) -> WorkshopInvocation:
     run_id = require_tphermes_run_id(tphermes_run_id)
     run = await require_workshop_run_for_user(
@@ -154,11 +249,46 @@ async def require_workshop_invocation(
             detail="项目不存在",
         )
 
-    await require_workshop_skill_for_user(
-        db,
-        viewer_user_id=owner,
-        skill_name=skill_name,
-    )
+    try:
+        await require_workshop_skill_for_user(
+            db,
+            viewer_user_id=owner,
+            skill_name=skill_name,
+        )
+        assert_skill_contract(
+            skill_name=skill_name,
+            status=str(run.status or ""),
+            skills_policy_json=run.skills_policy_json,
+        )
+    except WorkshopGuardError as exc:
+        logger.warning(
+            "workshop skill rejected run_id=%s skill=%s status=%s detail=%s",
+            run_id,
+            skill_name,
+            run.status,
+            exc.detail,
+        )
+        await _record_skill_rejection(db, run_id, skill_name, exc.detail)
+        raise
+
+    http_uid = str(viewer_user_id or "").strip()
+    if not (http_uid and http_uid == owner):
+        from backend.services.execution_grant import execution_grant_matches
+
+        grant_error = execution_grant_matches(
+            getattr(run, "exec_token_hash", None),
+            getattr(run, "exec_token_expires_at", None),
+            execution_token,
+        )
+        if grant_error:
+            logger.warning(
+                "workshop exec grant rejected run_id=%s skill=%s detail=%s",
+                run_id,
+                skill_name,
+                grant_error,
+            )
+            await _record_skill_rejection(db, run_id, skill_name, grant_error)
+            raise WorkshopGuardError(grant_error, status_code=401)
 
     checked_collection: str | None = None
     if collection_name is not None:

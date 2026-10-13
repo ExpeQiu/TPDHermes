@@ -7,8 +7,6 @@ SSE 端点 /ws/generate，接收 skill_name + context，
 
 from __future__ import annotations
 
-import asyncio
-import json
 import logging
 from typing import Any, AsyncGenerator, Dict
 
@@ -31,7 +29,13 @@ from backend.services.workshop_guard import (
     require_workshop_invocation,
 )
 from backend.services.workshop_skill_access import visible_workshop_skill_names
-from backend.services.workshop_task_runner import sse_error_event, sse_meta_event, sse_openai_delta
+from backend.services.workshop_llm_generator import execute_workshop_skill_generate
+from backend.services.workshop_task_runner import (
+    _skill_result_to_text,
+    sse_content_replace,
+    sse_error_event,
+    sse_meta_event,
+)
 
 router = APIRouter(prefix="/ws", tags=["workshop"])
 logger = logging.getLogger("tpdx.hermes.workshop")
@@ -68,10 +72,9 @@ async def _generate_stream(
     """
     核心流生成逻辑：
     1. 加载 Skill
-    2. 先发送 start 事件
-    3. 在线程池中执行同步 Skill.generate()（支持协程生成器）
-    4. 分片发送 chunk 事件
-    5. 发送 done / error 事件
+    2. 经统一执行入口校验输入并按 execution.type 生成
+    3. 失败直接返回错误事件，不再把失败包装成正文
+    4. 分片发送最终正文
     """
     # ── 加载 Skill ────────────────────────────────────────────────────────────
     try:
@@ -84,32 +87,41 @@ async def _generate_stream(
         return
 
     try:
-        result = await asyncio.to_thread(skill.generate, context)
+        result = await execute_workshop_skill_generate(skill, context)
     except Exception as e:
         yield sse_error_event(f"Generation failed: {e}", code="workshop_generation_failed")
         return
 
-    # ── 统一为 OpenAI 兼容 delta 事件 ───────────────────────────────────────
-    if isinstance(result, str):
-        for line in result.splitlines(keepends=True):
-            yield sse_openai_delta(line)
-    elif isinstance(result, dict):
-        yield sse_openai_delta(json.dumps(result, ensure_ascii=False, indent=2))
-    elif isinstance(result, list):
-        for item in result:
-            if isinstance(item, str):
-                yield sse_openai_delta(item)
-            else:
-                yield sse_openai_delta(json.dumps(item, ensure_ascii=False))
-    else:
-        yield sse_openai_delta(str(result))
+    if isinstance(result, dict) and (
+        result.get("success") is False or result.get("status") == "failed"
+    ):
+        yield sse_error_event(
+            str(result.get("error") or "Generation failed"),
+            code="workshop_generation_failed",
+        )
+        return
 
+    text = _skill_result_to_text(result)
+    yield sse_content_replace(
+        text,
+        delivery={
+            "phase": "direct_delivery",
+            "status": result.get("status") if isinstance(result, dict) else "succeeded",
+            "fallback_reason": result.get("fallback_reason") if isinstance(result, dict) else None,
+        },
+    )
+
+    delivery_status = "completed"
+    if isinstance(result, dict) and result.get("status") == "degraded":
+        delivery_status = "degraded"
     yield sse_meta_event(
         {
             "tphermes_task": {
                 "run_id": tphermes_run_id,
                 "skill": skill_name,
-                "status": "completed",
+                "status": delivery_status,
+                "execution_type": result.get("execution_type") if isinstance(result, dict) else None,
+                "fallback_reason": result.get("fallback_reason") if isinstance(result, dict) else None,
             }
         }
     )

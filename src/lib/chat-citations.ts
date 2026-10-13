@@ -101,6 +101,10 @@ export interface TpHermesStreamMeta {
   runStatus?: string;
   fileActions?: Array<Record<string, unknown>>;
   toolEvents?: AssistantToolEvent[];
+  /** 用整段正文替换已拼接内容，而不是再追加一份 */
+  contentReplace?: string;
+  deliveryStatus?: string;
+  fallbackReason?: string;
 }
 
 const KNOWN_TOOL_NAMES = new Set([
@@ -202,6 +206,17 @@ export function mapApiSourcesPayload(raw: unknown): {
   return { citations, unresolvedCitationRefs: unresolved };
 }
 
+/** 流式正文：content_replace 覆盖已显示内容，普通 delta 才追加。 */
+export function mergeStreamContent(
+  current: string,
+  meta: TpHermesStreamMeta | null,
+  delta: string,
+): string {
+  if (typeof meta?.contentReplace === "string") return meta.contentReplace;
+  if (delta) return current + delta;
+  return current;
+}
+
 /** 解析 SSE data 中的 tphermes_task / tphermes_sources。 */
 export function parseTpHermesStreamMeta(data: string): TpHermesStreamMeta | null {
   if (!data || data === "[DONE]") return null;
@@ -220,6 +235,9 @@ export function parseTpHermesStreamMeta(data: string): TpHermesStreamMeta | null
       task?.empty_content === true ||
       typeof task?.stream_error === "string" ||
       typeof task?.status === "string" ||
+      typeof task?.content_replace === "string" ||
+      typeof task?.delivery_status === "string" ||
+      typeof task?.fallback_reason === "string" ||
       Array.isArray(task?.file_actions) ||
       Array.isArray(task?.tool_events);
     if (!hasTaskPayload && mapped.citations.length === 0 && mapped.unresolvedCitationRefs.length === 0) {
@@ -249,6 +267,9 @@ export function parseTpHermesStreamMeta(data: string): TpHermesStreamMeta | null
       emptyContent: task?.empty_content === true ? true : undefined,
       streamError: typeof task?.stream_error === "string" ? task.stream_error : undefined,
       runStatus: typeof task?.status === "string" ? task.status : undefined,
+      contentReplace: typeof task?.content_replace === "string" ? task.content_replace : undefined,
+      deliveryStatus: typeof task?.delivery_status === "string" ? task.delivery_status : undefined,
+      fallbackReason: typeof task?.fallback_reason === "string" ? task.fallback_reason : undefined,
     };
   } catch {
     return null;

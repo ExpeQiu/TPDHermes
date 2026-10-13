@@ -83,6 +83,7 @@ def _build_orchestration_guidance(
     payload: OrchestrationPayload,
     *,
     kb_prefetch_block: str = "",
+    execution_token: str = "",
 ) -> str:
     knowledge_collections = [c for c in payload.knowledge.collections if c]
     preferred_skills = [s for s in payload.skills.preferred if s]
@@ -258,6 +259,12 @@ def _build_orchestration_guidance(
                 "无检索依据的内容不得添加 [^N]；同一 chunk 复用同一 ref；不要自行编写来源脚注正文。",
             ]
         )
+        grant = (execution_token or "").strip()
+        if grant:
+            lines.append(
+                f"调用 workshop_generate 或 workshop_generate_from_kb 时必须原样传入服务端签发的 execution_token={grant}。"
+                "不得自拟、改写或省略；不要在面向用户的回复中重复该凭证。"
+            )
     session_id = (payload.execution.session_id or "").strip()
     if session_id:
         lines.append(f"TPDHermes session_id={session_id}（仅用于关联日志，勿当成 Hermes 会话密钥）。")
@@ -271,6 +278,7 @@ def _build_workshop_agent_guidance(
     skill_name: str,
     run_id: str,
     task_input: dict[str, Any] | None = None,
+    execution_token: str = "",
 ) -> str:
     knowledge_collections = [c for c in payload.knowledge.collections if c]
     project_id = payload.project.id if payload.project.id != "none" else ""
@@ -280,6 +288,12 @@ def _build_workshop_agent_guidance(
         f"调用 workshop_generate 或 workshop_generate_from_kb 时，必须传入 tphermes_run_id={run_id}（工具顶层参数或 context 字段），"
         f"并包含 project_id={project_id}、scenario_id={payload.scenario.id}。",
     ]
+    grant = (execution_token or "").strip()
+    if grant:
+        lines.append(
+            f"必须同时传入 execution_token={grant}（工具顶层参数或 context 字段）。"
+            "该凭证由服务端签发且仅对本次 run_id 有效，不得自拟或写入用户可见回复。"
+        )
     if task_input:
         lines.append("context 还须包含 task_input 对象（与编排合同一致）。")
     if knowledge_collections:
@@ -307,6 +321,7 @@ def build_chat_completion_body(
     task_input: TaskInputPayload | None = None,
     kb_prefetch_block: str | None = None,
     lightweight_mode: bool = False,
+    execution_token: str | None = None,
 ) -> dict[str, Any]:
     """
     构造转发给上游的 JSON body。
@@ -317,12 +332,14 @@ def build_chat_completion_body(
     mode = orchestration_mode()
     model_name = model or os.getenv("HERMES_CHAT_MODEL", "hermes-agent")
 
+    grant = (execution_token or "").strip()
     if lightweight_mode and payload.entrypoint == "chat":
         system_intro = _build_lightweight_chat_guidance(payload)
     else:
         system_intro = _build_orchestration_guidance(
             payload,
             kb_prefetch_block=kb_prefetch_block or "",
+            execution_token=grant,
         )
     if payload.entrypoint == "workshop" and workshop_skill_name and payload.execution.run_id:
         ti_dict = task_input.model_dump(exclude_none=True) if task_input else None
@@ -334,6 +351,7 @@ def build_chat_completion_body(
                 skill_name=workshop_skill_name,
                 run_id=payload.execution.run_id,
                 task_input=ti_dict,
+                execution_token=grant,
             )
         )
 

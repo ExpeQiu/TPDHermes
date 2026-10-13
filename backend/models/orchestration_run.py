@@ -29,5 +29,7 @@ class OrchestrationRun(Base):
     error_message = Column(Text)
     duration_ms = Column(Integer)
     user_id = Column(String, default="default")
+    exec_token_hash = Column(Text)
+    exec_token_expires_at = Column(String)
     created_at = Column(String, default=lambda: datetime.now().isoformat())
     updated_at = Column(String, default=lambda: datetime.now().isoformat())

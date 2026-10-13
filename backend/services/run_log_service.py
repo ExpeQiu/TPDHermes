@@ -14,8 +14,16 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.models.orchestration_run import OrchestrationRun
 from backend.models.output_asset import OutputAsset
+from backend.services.execution_grant import issue_execution_grant
 
 logger = logging.getLogger("tpdx.hermes")
+
+_issued_exec_tokens: dict[str, str] = {}
+
+
+def pop_issued_execution_token(run_id: str) -> str:
+    """取回 create_run 刚签发的明文凭证。只应在创建运行的同一请求里调用一次。"""
+    return _issued_exec_tokens.pop(str(run_id or "").strip(), "")
 
 
 async def create_run(
@@ -30,6 +38,7 @@ async def create_run(
     snapshot_json: str,
     skills_policy_json: str | None = None,
 ) -> OrchestrationRun:
+    token, digest, expires = issue_execution_grant()
     row = OrchestrationRun(
         id=run_id,
         project_id=project_id,
@@ -40,13 +49,16 @@ async def create_run(
         request_json=request_json,
         snapshot_json=snapshot_json,
         skills_policy_json=skills_policy_json,
+        exec_token_hash=digest,
+        exec_token_expires_at=expires,
         created_at=datetime.now().isoformat(),
         updated_at=datetime.now().isoformat(),
     )
     db.add(row)
     await db.commit()
     await db.refresh(row)
-    logger.info("run_log created run_id=%s entrypoint=%s", run_id, entrypoint)
+    _issued_exec_tokens[run_id] = token
+    logger.info("run_log created run_id=%s entrypoint=%s exec_grant=issued", run_id, entrypoint)
     return row
 
 
@@ -77,7 +89,29 @@ async def finalize_run(
 
     res.assistant_content = assistant_content
     res.status = status
-    res.response_metadata_json = json.dumps(response_metadata or {}, ensure_ascii=False)
+    meta = dict(response_metadata or {})
+    if res.tool_capture_json:
+        try:
+            capture = json.loads(res.tool_capture_json)
+        except json.JSONDecodeError:
+            capture = None
+        if isinstance(capture, dict):
+            from backend.services.workshop_execution import (
+                skill_calls_from_capture,
+                skill_violations_from_capture,
+                skills_from_capture,
+            )
+
+            violations = skill_violations_from_capture(capture)
+            if violations:
+                meta["skills_violations"] = violations
+            captured_skills = skills_from_capture(capture)
+            if captured_skills:
+                meta["used_skills"] = captured_skills
+            skill_calls = skill_calls_from_capture(capture)
+            if skill_calls:
+                meta["skill_calls"] = skill_calls
+    res.response_metadata_json = json.dumps(meta, ensure_ascii=False)
     res.validation_json = json.dumps(validation or {}, ensure_ascii=False)
     res.error_message = error_message
     res.duration_ms = duration_ms

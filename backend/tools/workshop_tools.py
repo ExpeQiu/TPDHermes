@@ -150,6 +150,7 @@ async def workshop_generate(skill_name: str, context: dict) -> dict:
                 tphermes_run_id=str((context or {}).get("tphermes_run_id") or ""),
                 skill_name=skill_name,
                 project_id=(context or {}).get("project_id"),
+                execution_token=(context or {}).get("execution_token"),
             )
     except WorkshopGuardError as exc:
         return {
@@ -178,11 +179,16 @@ async def workshop_generate(skill_name: str, context: dict) -> dict:
 
     try:
         result = await execute_workshop_skill_generate(skill, context)
+        inner_status = result.get("status") if isinstance(result, dict) else None
+        inner_failed = isinstance(result, dict) and (
+            result.get("success") is False or inner_status == "failed"
+        )
         payload = {
-            "success": True,
-            "content": result,
-            "error": None,
+            "success": not inner_failed,
+            "content": None if inner_failed else result,
+            "error": result.get("error") if inner_failed and isinstance(result, dict) else None,
             "skill": skill_name,
+            "status": inner_status or ("failed" if inner_failed else "succeeded"),
         }
         from backend.services.workshop_tool_capture import save_workshop_tool_capture_for_context
 
@@ -224,6 +230,7 @@ async def workshop_generate_from_kb(
                 skill_name=skill_name,
                 project_id=project_id or ctx.get("project_id"),
                 collection_name=collection_name,
+                execution_token=ctx.get("execution_token"),
             )
     except WorkshopGuardError as exc:
         return {

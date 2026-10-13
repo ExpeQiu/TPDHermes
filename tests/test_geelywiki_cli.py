@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 
 import pytest
@@ -97,3 +98,23 @@ def test_live_demo_export_has_body_and_claims():
     assert xing.get("body")
     assert any(c.get("id") == "demo-price" and c.get("usage") == "historical" for c in xing.get("claims") or [])
     assert xing.get("equipped_with")
+
+
+def test_run_cli_reads_stdout_larger_than_64kb(tmp_path: Path, monkeypatch):
+    """Python 3.14 PIPE 会在 64KB 截断；客户端必须读全量。"""
+    script = tmp_path / "big_cli.py"
+    script.write_text(
+        "\n".join(
+            [
+                "import json, sys",
+                "blob = '速' * 40000",
+                "sys.stdout.write(json.dumps({'module': 'pages-export', 'pages': [{'slug': 'big', 'body': blob}]}))",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("GEELYWIKI_CLI", f"{sys.executable} {script}")
+    payload = run_geelywiki_cli(["pages", "export"], root=tmp_path)
+    body = payload["pages"][0]["body"]
+    assert len(body.encode("utf-8")) > 65536
+    assert payload["pages"][0]["slug"] == "big"

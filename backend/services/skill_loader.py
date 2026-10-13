@@ -12,12 +12,14 @@ SkillLoader - 动态加载外部 Skill 模块的抽象层
 
 from __future__ import annotations
 
+import hashlib
 import importlib
 import importlib.util
 import json
 import logging
 import os
 import re
+import shutil
 import sys
 from abc import ABC, abstractmethod
 from pathlib import Path
@@ -82,6 +84,36 @@ class SkillLoader:
             self.skills_root = Path(skills_root)
 
         self._cache: Dict[str, Skill] = {}
+
+    def package_fingerprint(self, skill_path: Path) -> str:
+        """技能包内容摘要。文件变化后缓存必须失效，不能只靠进程内删除。"""
+        digest = hashlib.sha256()
+        for rel in ("skill.json", "__init__.py", "template.md"):
+            digest.update(rel.encode())
+            path = skill_path / rel
+            if path.is_file():
+                digest.update(path.read_bytes())
+            else:
+                digest.update(b"-")
+        return digest.hexdigest()[:16]
+
+    def _apply_package_identity(self, instance: Skill, skill_path: Path, *, version_pinned: bool) -> None:
+        meta = getattr(instance, "skill_meta", None)
+        version = ""
+        if isinstance(meta, dict):
+            version = str(meta.get("version") or "").strip()
+        instance.loaded_version = version or "unknown"
+        instance.package_fingerprint = self.package_fingerprint(skill_path)
+        instance.version_pinned = version_pinned
+        if version and not version_pinned:
+            snap = self.skills_root / ".versions" / instance.name / version
+            if snap.is_dir() and self.package_fingerprint(snap) != instance.package_fingerprint:
+                logger.warning(
+                    "skill version diverged name=%s version=%s fingerprint=%s",
+                    instance.name,
+                    version,
+                    instance.package_fingerprint,
+                )
 
     # ── 公开 API ──────────────────────────────────────────────────────────────
 
@@ -285,10 +317,21 @@ class SkillLoader:
         Raises:
             SkillNotFoundError / SkillLoadError
         """
-        if name in self._cache:
-            return self._cache[name]
-
         skill_path = self.skills_root / name
+        if skill_path.is_dir():
+            fingerprint = self.package_fingerprint(skill_path)
+            cached = self._cache.get(name)
+            if cached is not None and getattr(cached, "package_fingerprint", None) == fingerprint:
+                return cached
+            if cached is not None:
+                logger.info(
+                    "skill cache stale name=%s cached_fp=%s live_fp=%s",
+                    name,
+                    getattr(cached, "package_fingerprint", None),
+                    fingerprint,
+                )
+                self._cache.pop(name, None)
+
         if not skill_path.is_dir():
             raise SkillNotFoundError(f"Skill '{name}' not found at {skill_path}")
 
@@ -296,8 +339,16 @@ class SkillLoader:
         if not init_file.exists():
             raise SkillNotFoundError(f"Skill '{name}' has no __init__.py")
 
-        # 动态导入
-        module_name = f"skills.{name}"
+        # 模块名带内容摘要，文件变化后不会复用已经执行过的旧模块。
+        fingerprint = self.package_fingerprint(skill_path)
+        stale_prefix = f"tpdx_skill_{name}_"
+        for loaded_name in [key for key in sys.modules if key.startswith(stale_prefix)]:
+            sys.modules.pop(loaded_name, None)
+        pycache = skill_path / "__pycache__"
+        if pycache.is_dir():
+            shutil.rmtree(pycache, ignore_errors=True)
+        importlib.invalidate_caches()
+        module_name = f"{stale_prefix}{fingerprint}"
         try:
             spec = importlib.util.spec_from_file_location(
                 f"{module_name}.__init__", init_file
@@ -330,6 +381,18 @@ class SkillLoader:
             except Exception:
                 pass
 
+        version = ""
+        meta = getattr(instance, "skill_meta", None)
+        if isinstance(meta, dict):
+            version = str(meta.get("version") or "").strip()
+        snap = self.skills_root / ".versions" / name / version if version else None
+        pinned = bool(
+            version
+            and snap is not None
+            and snap.is_dir()
+            and self.package_fingerprint(snap) == self.package_fingerprint(skill_path)
+        )
+        self._apply_package_identity(instance, skill_path, version_pinned=pinned)
         self._cache[name] = instance
         return instance
 
@@ -399,6 +462,14 @@ class SkillLoader:
 
         skill_cls = self._find_skill_class(module, logical_name)
         instance = skill_cls()
+        instance.skill_path = package_root
+        meta_path = package_root / "skill.json"
+        if meta_path.is_file():
+            try:
+                instance.skill_meta = json.loads(meta_path.read_text(encoding="utf-8"))
+            except (json.JSONDecodeError, OSError):
+                instance.skill_meta = {}
+        self._apply_package_identity(instance, package_root, version_pinned=True)
         self._cache[cache_key] = instance
         return instance
 
@@ -407,7 +478,7 @@ class SkillLoader:
         return {name: self.load(name) for name in self.discover()}
 
     def call(self, name: str, context: Dict[str, Any]) -> Dict[str, Any]:
-        """加载并调用 Skill.generate()，包含输入校验"""
+        """加载并调用 Skill.generate()，包含输入校验。内层 success=False 不再被外层改写成成功。"""
         skill = self.load(name)
         if not skill.validate_input(context):
             return {
@@ -416,7 +487,7 @@ class SkillLoader:
                 "error": f"Invalid input for skill '{name}'"
             }
         try:
-            return {"success": True, "content": skill.generate(context), "error": None}
+            return unwrap_skill_call_result(name, skill.generate(context))
         except Exception as e:
             return {"success": False, "content": None, "error": str(e)}
 
@@ -432,6 +503,18 @@ class SkillLoader:
             f"Skill '{name}' module has no Skill subclass. "
             "Make sure your __init__.py exports a class that inherits from Skill."
         )
+
+
+def unwrap_skill_call_result(name: str, generated: Any) -> Dict[str, Any]:
+    """技能明确返回 success=False 时保持失败，避免外层一律记为成功。"""
+    if isinstance(generated, dict) and generated.get("success") is False:
+        error = generated.get("error") or f"Skill '{name}' reported failure"
+        return {
+            "success": False,
+            "content": generated.get("content"),
+            "error": str(error),
+        }
+    return {"success": True, "content": generated, "error": None}
 
 
 # ─── 异常 ─────────────────────────────────────────────────────────────────────

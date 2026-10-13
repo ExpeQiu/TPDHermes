@@ -23,11 +23,39 @@ def workshop_llm_generation_enabled() -> bool:
     return raw not in ("0", "false", "no", "off")
 
 
+_DECLARED_EXECUTION_TYPES = frozenset({"python", "llm_template", "agent_instructions"})
+_INPUT_TEXT_BUDGET = 4000
+
+
+def resolve_execution_type(skill: Skill) -> tuple[str, str]:
+    """返回 (execution.type, declared|legacy_inferred)。未声明时模板技能仍临时推断为 llm_template。"""
+    meta = getattr(skill, "skill_meta", None)
+    declared = ""
+    if isinstance(meta, dict):
+        execution = meta.get("execution")
+        if isinstance(execution, dict):
+            declared = str(execution.get("type") or "").strip()
+        elif isinstance(meta.get("execution_type"), str):
+            declared = str(meta.get("execution_type") or "").strip()
+    if declared in _DECLARED_EXECUTION_TYPES:
+        return declared, "declared"
+    template = skill.get_template()
+    if template and str(template).strip():
+        return "llm_template", "legacy_inferred"
+    return "python", "legacy_inferred"
+
+
 def should_generate_llm_deliverable(skill: Skill) -> bool:
     if not workshop_llm_generation_enabled():
         return False
-    template = skill.get_template()
-    return bool(template and str(template).strip())
+    execution_type, _source = resolve_execution_type(skill)
+    return execution_type == "llm_template"
+
+
+def _budget_text(text: str, limit: int = _INPUT_TEXT_BUDGET) -> tuple[str, bool]:
+    if len(text) <= limit:
+        return text, False
+    return f"{text[:limit]}\n\n[truncated original_chars={len(text)}]", True
 
 
 def _skill_description(skill: Skill) -> str:
@@ -100,11 +128,34 @@ def _format_task_input(context: dict[str, Any]) -> str:
     return "\n".join(parts)
 
 
-def _build_llm_prompt(skill: Skill, context: dict[str, Any]) -> tuple[str, str]:
+def _context_user_message(context: dict[str, Any]) -> str:
+    message = str(context.get("user_message") or "").strip()
+    if message:
+        return message
+    return str(context.get("_raw_user_message") or "").strip()
+
+
+def _context_source_material(context: dict[str, Any]) -> str:
+    task_input = context.get("task_input")
+    if isinstance(task_input, dict):
+        material = str(task_input.get("source_material") or "").strip()
+        if material:
+            return material
+    return str(context.get("source_material") or "").strip()
+
+
+def _build_llm_prompt(skill: Skill, context: dict[str, Any]) -> tuple[str, str, list[str]]:
     template = skill.get_template() or ""
     template_hint = _truncate(template.replace("```", "\n"), 900)
     kb_block = _format_kb_block(context)
     task_block = _format_task_input(context)
+    truncation: list[str] = []
+    user_message, message_cut = _budget_text(_context_user_message(context))
+    source_material, source_cut = _budget_text(_context_source_material(context))
+    if message_cut:
+        truncation.append("user_message")
+    if source_cut:
+        truncation.append("source_material")
     title = (
         str(context.get("title") or "").strip()
         or str(context.get("tech_name") or "").strip()
@@ -123,6 +174,10 @@ def _build_llm_prompt(skill: Skill, context: dict[str, Any]) -> tuple[str, str]:
         f"技能：{skill.name}（{_skill_description(skill)}）",
         f"建议标题：{title}",
     ]
+    if user_message:
+        user_parts.append(f"原始要求：\n{user_message}")
+    if source_material:
+        user_parts.append(f"待优化原文：\n{source_material}")
     if task_block:
         user_parts.append(f"任务信息：\n{task_block}")
     if kb_block:
@@ -157,7 +212,7 @@ def _build_llm_prompt(skill: Skill, context: dict[str, Any]) -> tuple[str, str]:
         "3. 只输出 Markdown 正文，不要代码块包裹全文\n"
         "4. 不要出现「模板」「结构框架」「注意事项」等字样"
     )
-    return system, "\n\n".join(user_parts)
+    return system, "\n\n".join(user_parts), truncation
 
 
 def _strip_code_fence(text: str) -> str:
@@ -289,14 +344,38 @@ async def _call_llm(system: str, user: str) -> str:
     return _strip_code_fence(_extract_completion_text(data))
 
 
+def _deny_llm_fallback(exc: Exception) -> bool:
+    text = str(exc)
+    if text.startswith("llm_http_401") or text.startswith("llm_http_403"):
+        return True
+    if allow_missing_chat_upstream():
+        return False
+    return True
+
+
+def _failed_generation(skill: Skill, error: str) -> dict[str, Any]:
+    logger.warning("[workshop-llm] failed skill=%s err=%s", skill.name, error)
+    return {
+        "success": False,
+        "status": "failed",
+        "skill": skill.name,
+        "content": None,
+        "error": error,
+        "generation_mode": "failed",
+        "fallback_reason": None,
+        "execution_type": "llm_template",
+    }
+
+
 async def generate_workshop_deliverable(skill: Skill, context: dict[str, Any]) -> dict[str, Any]:
     """
-    模版类技能：LLM 生成成稿；失败或无上游时结构化兜底。
-    返回与 skill.generate 兼容的字典，content 为 Markdown 字符串。
+    模版类技能：LLM 生成成稿。鉴权失败与生产环境模型错误不再伪装成通用成稿。
+    本地缺少上游时仍可降级，并标记 degraded。
     """
-    system, user = _build_llm_prompt(skill, context)
+    system, user, truncation = _build_llm_prompt(skill, context)
     mode = "fallback"
     body = ""
+    fallback_reason: str | None = None
 
     try:
         if _resolve_chat_target():
@@ -304,9 +383,12 @@ async def generate_workshop_deliverable(skill: Skill, context: dict[str, Any]) -
             mode = "llm"
         elif allow_missing_chat_upstream():
             body = _compose_fallback_deliverable(skill, context)
+            fallback_reason = "chat_upstream_not_configured"
         else:
             raise RuntimeError("chat_upstream_not_configured")
     except Exception as exc:
+        if _deny_llm_fallback(exc):
+            return _failed_generation(skill, str(exc))
         logger.warning(
             "[workshop-llm] generation failed skill=%s err=%s fallback=compose",
             skill.name,
@@ -314,28 +396,114 @@ async def generate_workshop_deliverable(skill: Skill, context: dict[str, Any]) -
         )
         body = _compose_fallback_deliverable(skill, context)
         mode = "fallback"
+        fallback_reason = str(exc)
 
     body = body.strip()
     if not body:
+        if not allow_missing_chat_upstream():
+            return _failed_generation(skill, "empty_llm_response")
         body = _compose_fallback_deliverable(skill, context)
         mode = "fallback"
+        fallback_reason = fallback_reason or "empty_llm_response"
 
+    status = "degraded" if mode == "fallback" else "succeeded"
     logger.info(
-        "[workshop-llm] done skill=%s mode=%s chars=%s",
+        "[workshop-llm] done skill=%s mode=%s status=%s chars=%s truncation=%s",
         skill.name,
         mode,
+        status,
         len(body),
+        ",".join(truncation) or "-",
     )
     return {
         "skill": skill.name,
         "content": body,
         "word_count": len(re.sub(r"\s", "", body)),
         "generation_mode": mode,
+        "status": status,
+        "fallback_reason": fallback_reason,
+        "execution_type": "llm_template",
+        "input_truncation": truncation,
     }
 
 
+def _reject_invalid_input(skill: Skill, context: dict[str, Any]) -> dict[str, Any] | None:
+    try:
+        accepted = bool(skill.validate_input(context))
+    except Exception as exc:
+        logger.warning("workshop input validation error skill=%s err=%s", skill.name, exc)
+        return {
+            "success": False,
+            "status": "failed",
+            "skill": skill.name,
+            "content": None,
+            "error": f"input_validation_error: {exc}",
+        }
+    if accepted:
+        return None
+    logger.info("workshop input rejected skill=%s", skill.name)
+    return {
+        "success": False,
+        "status": "failed",
+        "skill": skill.name,
+        "content": None,
+        "error": f"Invalid input for skill '{skill.name}'",
+    }
+
+
+def _annotate_execution(
+    result: Any,
+    skill: Skill,
+    *,
+    execution_type: str,
+    execution_source: str,
+) -> Any:
+    if not isinstance(result, dict):
+        return result
+    annotated = dict(result)
+    annotated.setdefault("execution_type", execution_type)
+    annotated["execution_source"] = execution_source
+    annotated.setdefault("skill_version", str(getattr(skill, "loaded_version", "") or "unknown"))
+    annotated.setdefault("package_fingerprint", str(getattr(skill, "package_fingerprint", "") or ""))
+    annotated["version_pinned"] = bool(getattr(skill, "version_pinned", False))
+    if annotated.get("success") is False:
+        annotated["status"] = "failed"
+    elif "status" not in annotated:
+        annotated["status"] = "succeeded"
+    return annotated
+
+
 async def execute_workshop_skill_generate(skill: Skill, context: dict[str, Any]) -> dict[str, Any]:
-    """统一工坊技能执行入口：模版类走 LLM 成稿，其余走原 generate。"""
-    if should_generate_llm_deliverable(skill):
-        return await generate_workshop_deliverable(skill, context)
-    return await asyncio.to_thread(skill.generate, context)
+    """统一工坊技能执行入口：按 execution.type 分派，输入不合法则不调用 generate。"""
+    rejected = _reject_invalid_input(skill, context)
+    if rejected is not None:
+        return rejected
+
+    execution_type, execution_source = resolve_execution_type(skill)
+    logger.info(
+        "workshop execute skill=%s execution_type=%s execution_source=%s",
+        skill.name,
+        execution_type,
+        execution_source,
+    )
+    if execution_type == "agent_instructions":
+        return {
+            "success": False,
+            "status": "failed",
+            "skill": skill.name,
+            "content": None,
+            "error": "agent_instructions 尚未开放执行",
+            "execution_type": execution_type,
+            "execution_source": execution_source,
+        }
+    if execution_type == "llm_template" and workshop_llm_generation_enabled():
+        result = await generate_workshop_deliverable(skill, context)
+    else:
+        result = await asyncio.to_thread(skill.generate, context)
+    annotated = _annotate_execution(
+        result,
+        skill,
+        execution_type=execution_type,
+        execution_source=execution_source,
+    )
+    return annotated if isinstance(annotated, dict) else {"content": annotated, "status": "succeeded"}

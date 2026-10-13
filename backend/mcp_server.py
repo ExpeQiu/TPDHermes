@@ -145,19 +145,23 @@ async def workshop_get_skill_info(skill_name: str, user_id: str | None = None) -
     title="Workshop Generate",
     description=(
         "Execute a Skill's generate() method with the given context and return the result. "
-        "When invoked from TPDHermes workshop agent flow, tphermes_run_id is required."
+        "When invoked from TPDHermes workshop agent flow, tphermes_run_id and the "
+        "server-issued execution_token are required. Copy the token exactly; do not invent one."
     ),
 )
 async def workshop_generate(
     skill_name: str,
     context: dict[str, Any] | str | None = None,
     tphermes_run_id: str = "",
+    execution_token: str = "",
 ) -> dict:
     """Execute a Skill."""
     from backend.tools.workshop_tools import workshop_generate as _gen
 
     ctx = coerce_tool_context(context)
-    ctx["tphermes_run_id"] = tphermes_run_id
+    ctx["tphermes_run_id"] = tphermes_run_id or ctx.get("tphermes_run_id") or ""
+    if str(execution_token or "").strip():
+        ctx["execution_token"] = str(execution_token).strip()
     return await _gen(skill_name, ctx)
 
 
@@ -176,12 +180,15 @@ async def workshop_generate_from_kb(
     project_id: str | None = None,
     context: dict[str, Any] | str | None = None,
     tphermes_run_id: str = "",
+    execution_token: str = "",
 ) -> dict:
     """Execute a Skill with KB-augmented context."""
     from backend.tools.workshop_tools import workshop_generate_from_kb as _gen_from_kb
 
     ctx = coerce_tool_context(context)
-    ctx["tphermes_run_id"] = tphermes_run_id
+    ctx["tphermes_run_id"] = tphermes_run_id or ctx.get("tphermes_run_id") or ""
+    if str(execution_token or "").strip():
+        ctx["execution_token"] = str(execution_token).strip()
     return await _gen_from_kb(
         skill_name=skill_name,
         query=query,

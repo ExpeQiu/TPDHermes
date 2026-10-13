@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { parseTpHermesStreamMeta } from "@/lib/chat-citations";
+import { mergeStreamContent, parseTpHermesStreamMeta } from "@/lib/chat-citations";
 
 describe("parseTpHermesStreamMeta", () => {
   it("maps file tool events from tphermes_task meta", () => {
@@ -70,5 +70,20 @@ describe("parseTpHermesStreamMeta", () => {
     expect(meta?.emptyContent).toBe(true);
     expect(meta?.streamError).toBe("Agent 未返回可见正文");
     expect(meta?.runStatus).toBe("failed");
+  });
+
+  it("replaces streamed text instead of appending a second body", () => {
+    const meta = parseTpHermesStreamMeta(
+      JSON.stringify({
+        tphermes_task: {
+          content_replace: "最终成稿",
+          delivery_status: "degraded",
+          fallback_reason: "agent_tool_miss",
+        },
+      }),
+    );
+    expect(mergeStreamContent("Agent 先说了一段", meta, "")).toBe("最终成稿");
+    expect(meta?.deliveryStatus).toBe("degraded");
+    expect(meta?.fallbackReason).toBe("agent_tool_miss");
   });
 });

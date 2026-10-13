@@ -452,6 +452,8 @@ class SkillLifecycleService:
         skill.updated_at = datetime.now().isoformat()
         await self.db.commit()
         await self.db.refresh(skill)
+        self.loader._cache.pop(name, None)
+        logger.info("skill cache dropped after version update name=%s version=%s", name, version)
         return self._skill_to_dict(skill)
 
     async def set_enabled(self, name: str, enabled: bool) -> Dict[str, Any]:
