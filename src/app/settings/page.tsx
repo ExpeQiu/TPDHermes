@@ -25,6 +25,8 @@ import { fetchUserAccess, type UserAccessState } from "@/lib/rbac";
 import { isSystemAdminRole } from "@/lib/user-admin";
 import { CONTENT_MAX_CLASS } from "@/lib/content-shell";
 import McpManagementPanel from "@/components/settings/McpManagementPanel";
+import RuntimeConfigPanel from "@/components/settings/RuntimeConfigPanel";
+import CliCapabilitiesPanel from "@/components/settings/CliCapabilitiesPanel";
 import PackManagementPanel from "@/components/settings/PackManagementPanel";
 import RoleManagementPanel from "@/components/settings/RoleManagementPanel";
 import UserGroupManagementPanel from "@/components/settings/UserGroupManagementPanel";
@@ -40,9 +42,20 @@ interface MeResponse {
   avatar_url: string | null;
 }
 
-type SettingsTab = "theme" | "identity" | "mcp" | "pteam" | "roles";
+type SettingsTab = "runtime" | "cli" | "theme" | "identity" | "mcp" | "pteam" | "roles";
 
 const SETTINGS_TABS: { id: SettingsTab; label: string; description: string }[] = [
+  {
+    id: "runtime",
+    label: "运行配置",
+    description: "当前进程的有效配置。对话上游、模型、Wiki 与 Mock 在此查看，密钥不展示。",
+  },
+  {
+    id: "cli",
+    label: "工作台 CLI",
+    description:
+      "其他 Agent 凭接入 Token 通过 CLI 连接本系统，并执行已开放的指令。每个子功能可单独开关。",
+  },
   {
     id: "identity",
     label: "用户与身份",
@@ -76,10 +89,18 @@ const THEME_OPTIONS: { value: "light" | "dark"; label: string }[] = [
 ];
 
 function parseTab(raw: string | null): SettingsTab {
-  if (raw === "identity" || raw === "mcp" || raw === "pteam" || raw === "roles" || raw === "theme") {
+  if (
+    raw === "runtime" ||
+    raw === "cli" ||
+    raw === "identity" ||
+    raw === "mcp" ||
+    raw === "pteam" ||
+    raw === "roles" ||
+    raw === "theme"
+  ) {
     return raw;
   }
-  return "identity";
+  return "runtime";
 }
 
 export default function SettingsPage() {
@@ -88,7 +109,7 @@ export default function SettingsPage() {
       fallback={
         <main className="min-h-screen p-4 sm:p-8">
           <div className={CONTENT_MAX_CLASS}>
-            <p className="text-sm text-slate-500">加载设置…</p>
+            <p className="text-sm text-slate-500">加载配置…</p>
           </div>
         </main>
       }
@@ -180,11 +201,11 @@ function SettingsPageContent() {
         >
           ← 返回首页
         </Link>
-        <h1 className="mt-4 text-3xl font-bold text-slate-900 dark:text-white sm:text-4xl">设置</h1>
+        <h1 className="mt-4 text-3xl font-bold text-slate-900 dark:text-white sm:text-4xl">配置</h1>
 
         <div
           role="tablist"
-          aria-label="设置分类"
+          aria-label="配置分类"
           className="mt-8 flex flex-wrap gap-2 border-b border-slate-200 dark:border-slate-800"
         >
           {SETTINGS_TABS.map((tab) => {
@@ -217,6 +238,10 @@ function SettingsPageContent() {
           className="mt-6"
         >
           <p className="text-sm text-slate-500 dark:text-slate-400">{currentTab.description}</p>
+
+          {activeTab === "runtime" && <RuntimeConfigPanel />}
+
+          {activeTab === "cli" && <CliCapabilitiesPanel />}
 
           {activeTab === "theme" && (
             <div className="mt-4 max-w-lg">

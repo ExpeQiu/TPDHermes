@@ -79,6 +79,32 @@ def _build_lightweight_chat_guidance(payload: OrchestrationPayload) -> str:
     return " ".join(lines)
 
 
+def hermes_project_scratch_dir(project_id: str, run_id: str = "") -> str:
+    """Hermes 临时工作区：按项目和运行隔离，不是交付真源。"""
+    pid = (project_id or "").strip() or "none"
+    rid = (run_id or "").strip() or "norun"
+    return f"/opt/data/projects/{pid}/runs/{rid}"
+
+
+def _file_proposal_guidance(project_id: str, run_id: str) -> list[str]:
+    scratch = hermes_project_scratch_dir(project_id, run_id)
+    return [
+        "交付真源是数据库 outputs 表。不要先 write_file/patch 再同步，也不要覆盖正式文件。",
+        "需要新建或修改项目文件时，在回复末尾输出 tphermes_file_actions 提案；"
+        "是否落库由服务端按审阅或自动应用决定。",
+        "该代码块格式为：```tphermes_file_actions {\"actions\":[...]} ```；"
+        "create 动作至少包含 type、fileName、path、content。",
+        "tphermes_file_actions 中 path 使用项目虚拟路径 `/输出/{fileName}`。",
+        "长文稿正文应写在回复正文中；tphermes_file_actions 内 content 须与正文一致且为合法 JSON。",
+        "patch 动作支持三种 editMode：full（整篇 after）、search_replace（oldString+newString，须唯一匹配）、"
+        "line_range（startLine/endLine+newText，用于选段改写）。",
+        "当用户消息含文件选段引用时，必须使用 search_replace 或 line_range，禁止无关全文重写。",
+        f"若工具必须产生临时文件，只能写在 `{scratch}/` 下；"
+        "禁止写入共享目录 `/opt/data/输出/`、`/输出/` 根路径、`/opt/hermes/output` 或 `/Users/…`。",
+        "若本轮只是分析或问答，没有文件提案，则不要输出 `tphermes_file_actions`。",
+    ]
+
+
 def _build_orchestration_guidance(
     payload: OrchestrationPayload,
     *,
@@ -218,6 +244,7 @@ def _build_orchestration_guidance(
             + ", ".join(payload.output.required_sections)
             + "。"
         )
+    run_id = (payload.execution.run_id or "").strip()
     if payload.entrypoint == "chat" and payload.project.id != "none":
         mode = (payload.co_create_agent_mode or "").strip()
         if mode == "ask":
@@ -225,29 +252,19 @@ def _build_orchestration_guidance(
         elif mode == "plan":
             lines.extend(
                 [
-                    "Plan 未确认执行前不要写文件；确认执行后，落库协议与 Agent 模式相同："
-                    "优先 write_file/patch，并用 tphermes_file_actions 同步到 TPD outputs。",
+                    "Plan 未确认执行前不要写文件，也不要输出 tphermes_file_actions。",
+                    "用户确认计划并进入执行后，按提案协议提交变更，不要先写正式文件：",
                 ]
             )
+            lines.extend(_file_proposal_guidance(payload.project.id, run_id))
         else:
             lines.extend(
                 [
-                    "当任务涉及在项目内新建文稿、改写已有输出物或直接落成文件时，优先调用 `write_file` 或 `patch` 真正执行文件创建/编辑，不要只停留在口头建议。",
-                    "默认输出物经 tphermes_file_actions 落库到 TPD 真存储：数据库 outputs 表 content 字段；"
-                    "虚拟路径 `/输出/{fileName}`；共创右侧文件栏「输出物」列表展示。",
-                    "write_file/patch 的物理路径必须使用 HERMES_HOME 下可写目录：`/opt/data/输出/{fileName}` 或相对路径 `输出/{fileName}`；"
-                    "禁止把 `/输出/` 当容器根目录写入、`/opt/hermes/output`（代码目录不存在）或 `/Users/…`。",
-                    "若你执行了 `write_file` 或 `patch`，最终回复末尾必须追加一个 `tphermes_file_actions` JSON 代码块，用于将实际结果同步回 TPDHermes 的 OutputAsset。",
-                    "该代码块格式为：```tphermes_file_actions {\"actions\":[...]} ```；create 动作至少包含 type、fileName、path、content。",
-                    "tphermes_file_actions 中 create 的 path 使用项目虚拟路径 `/输出/{fileName}`（与 write_file 物理路径不同，仅用于 TPD 落库）。",
-                    "长文稿正文应写在回复正文中；tphermes_file_actions 内 content 须与正文一致且为合法 JSON，避免在 JSON 中塞入未转义超长正文导致截断。",
-                    "patch 动作支持三种 editMode：full（整篇 after）、search_replace（oldString+newString，须唯一匹配）、line_range（startLine/endLine+newText，用于选段改写）。",
-                    "当用户消息含文件选段引用时，必须使用 search_replace 或 line_range，禁止无关全文重写。",
-                    "若本轮只是分析或问答，没有真实文件落地，则不要输出 `tphermes_file_actions`。",
+                    "当任务涉及在项目内新建文稿或改写已有输出物时，提交文件提案，不要只停留在口头建议。",
                 ]
             )
+            lines.extend(_file_proposal_guidance(payload.project.id, run_id))
 
-    run_id = (payload.execution.run_id or "").strip()
     if run_id:
         lines.extend(
             [

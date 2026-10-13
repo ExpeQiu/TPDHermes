@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import re
@@ -9,14 +10,71 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import select, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.models.output_asset import OutputAsset
+from backend.models.project_file_domain import ProjectFileActionLog
 from backend.services.file_patch_utils import normalize_patch_action_fields, resolve_patch_content
 from backend.services.project_kb_ingest import schedule_ingest_output
 
 logger = logging.getLogger("tpdx.hermes.file_actions")
+
+
+class FileActionConflict(Exception):
+    def __init__(self, current_version: str = "", *, reason: str = "version"):
+        self.current_version = current_version
+        self.reason = reason
+        message = "文件版本已变化" if reason == "version" else "相同提案标识对应了不同内容"
+        super().__init__(message)
+
+
+class FileNameConflict(Exception):
+    def __init__(self, file_id: str, title: str):
+        self.file_id = file_id
+        self.title = title
+        super().__init__(f"同名文件已存在: {title}")
+
+
+def _client_expected_version(action: dict[str, Any]) -> str | None:
+    raw = action.get("base_version")
+    if raw is None:
+        raw = action.get("expected_version")
+    if raw is None:
+        return None
+    text = str(raw).strip()
+    return text or None
+
+
+async def _claim_output_version(
+    db: AsyncSession,
+    *,
+    file_id: str,
+    project_id: str,
+    version: str,
+) -> None:
+    """把版本比较和后续写入放在同一事务里：版本已变则本语句匹配 0 行。"""
+    result = await db.execute(
+        update(OutputAsset)
+        .where(
+            OutputAsset.id == file_id,
+            OutputAsset.project_id == project_id,
+            OutputAsset.version == version,
+        )
+        .values(version=version)
+    )
+    if result.rowcount == 0:
+        fresh = await db.get(OutputAsset, file_id)
+        current = str(fresh.version or "1") if fresh else "missing"
+        logger.info(
+            "[file-actions] version conflict project_id=%s output_id=%s expected=%s current=%s",
+            project_id,
+            file_id,
+            version,
+            current,
+        )
+        raise FileActionConflict(current)
 
 FILE_ACTIONS_BLOCK_RE = re.compile(
     r"```tphermes_file_actions\s*\n([\s\S]*?)```",
@@ -111,7 +169,7 @@ def _parse_version_num(raw: str | None) -> int:
 
 
 def normalize_output_title(file_name: str) -> str:
-    """create 落库 title 规范化，便于同项目同名 upsert。"""
+    """create 落库 title 规范化，便于同项目同名冲突判断。"""
     title = (file_name or "新文件.md").strip() or "新文件.md"
     if not title.lower().endswith(".md"):
         title = f"{title}.md"
@@ -187,15 +245,51 @@ def _build_output_row(
         owner_id=effective_uid or getattr(prev, "owner_id", None) or "default",
         created_at=now,
         updated_at=now,
+        lineage_id=getattr(prev, "lineage_id", None) or prev.id,
     )
 
 
-async def _reload_output_after_commit(db: AsyncSession, output_id: str) -> OutputAsset:
-    """commit 后重新加载行，避免 aiosqlite 下 db.refresh 偶发失败。"""
-    row = await db.get(OutputAsset, output_id)
-    if not row:
-        raise ValueError(f"文件落库后读取失败: {output_id}")
-    return row
+def _action_hash(action: dict[str, Any]) -> str:
+    raw = json.dumps(action, ensure_ascii=False, sort_keys=True, default=str)
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+
+def _explicit_overwrite(action: dict[str, Any]) -> bool:
+    if action.get("on_conflict") == "overwrite":
+        return True
+    flag = action.get("overwrite")
+    return flag is True or str(flag).lower() == "true"
+
+
+def _lineage_of(row: OutputAsset) -> str:
+    return str(getattr(row, "lineage_id", None) or row.id)
+
+
+def _action_result(
+    *,
+    operation: str,
+    save_mode: str,
+    source_file_id: str | None,
+    result_file_id: str,
+    previous_version: str | None,
+    result_version: str,
+    title: str | None,
+    previous_title: str | None = None,
+) -> dict[str, Any]:
+    return {
+        "ok": True,
+        "operation": operation,
+        "save_mode": save_mode,
+        "source_file_id": source_file_id,
+        "result_file_id": result_file_id,
+        "file_id": result_file_id,
+        "previous_version": previous_version,
+        "result_version": result_version,
+        "version": result_version,
+        "kind": "output",
+        "title": title,
+        "previous_title": previous_title,
+    }
 
 
 async def _persist_patched_output(
@@ -209,8 +303,28 @@ async def _persist_patched_output(
     now: str,
 ) -> dict[str, Any]:
     save_mode = str(action.get("save_mode") or "overwrite").strip()
+    current_version = str(prev.version or "1")
+    expected = _client_expected_version(action)
+    if expected is not None and expected != current_version:
+        logger.info(
+            "[file-actions] version conflict project_id=%s output_id=%s expected=%s current=%s",
+            project_id,
+            prev.id,
+            expected,
+            current_version,
+        )
+        raise FileActionConflict(current_version, reason="version")
+    await _claim_output_version(
+        db,
+        file_id=prev.id,
+        project_id=project_id,
+        version=current_version,
+    )
+    if not prev.lineage_id:
+        prev.lineage_id = prev.id
     if save_mode == "overwrite":
         previous_content = prev.content or ""
+        previous_title = prev.title
         file_id = prev.id
         next_version = prev.version or "1"
         raw_title = action.get("file_name") or action.get("fileName")
@@ -250,16 +364,17 @@ async def _persist_patched_output(
                 new_title,
                 project_id,
             )
-        await db.commit()
-        persisted = await _reload_output_after_commit(db, file_id)
-        schedule_ingest_output(persisted.id)
-        return {
-            "ok": True,
-            "file_id": persisted.id,
-            "kind": "output",
-            "version": persisted.version or next_version,
-            "title": persisted.title,
-        }
+        await db.flush()
+        return _action_result(
+            operation="patch",
+            save_mode="overwrite",
+            source_file_id=file_id,
+            result_file_id=file_id,
+            previous_version=current_version if (content_changed or title_changed) else current_version,
+            result_version=str(prev.version or next_version),
+            title=prev.title,
+            previous_title=previous_title,
+        )
     vnum = _parse_version_num(prev.version) + 1
     title = str(action.get("file_name") or action.get("fileName") or prev.title or "未命名")
     if save_mode == "copy":
@@ -274,12 +389,105 @@ async def _persist_patched_output(
         now=now,
         title=title,
     )
+    if save_mode == "copy":
+        new_row.lineage_id = new_row.id
     new_id = new_row.id
     db.add(new_row)
-    await db.commit()
-    persisted = await _reload_output_after_commit(db, new_id)
-    schedule_ingest_output(persisted.id)
-    return {"ok": True, "file_id": persisted.id, "kind": "output", "version": persisted.version}
+    await db.flush()
+    return _action_result(
+        operation="patch",
+        save_mode=save_mode,
+        source_file_id=prev.id,
+        result_file_id=new_id,
+        previous_version=current_version,
+        result_version=str(new_row.version or vnum),
+        title=new_row.title,
+        previous_title=prev.title,
+    )
+
+
+async def _replay_proposal(
+    db: AsyncSession,
+    *,
+    project_id: str,
+    proposal_id: str,
+    payload_hash: str,
+) -> dict[str, Any] | None:
+    row = (
+        await db.execute(
+            select(ProjectFileActionLog).where(
+                ProjectFileActionLog.project_id == project_id,
+                ProjectFileActionLog.proposal_id == proposal_id,
+            )
+        )
+    ).scalar_one_or_none()
+    if row is None:
+        return None
+    if (row.payload_hash or "") != payload_hash:
+        logger.info(
+            "[file-actions] proposal payload conflict project_id=%s proposal_id=%s",
+            project_id,
+            proposal_id,
+        )
+        raise FileActionConflict(reason="payload")
+    if row.result_json:
+        stored = json.loads(row.result_json)
+        if isinstance(stored, dict):
+            stored["action_id"] = row.id
+            stored["idempotent_replay"] = True
+            return stored
+    return {"ok": True, "action_id": row.id, "idempotent_replay": True}
+
+
+async def _claim_proposal(
+    db: AsyncSession,
+    *,
+    project_id: str,
+    proposal_id: str,
+    payload_hash: str,
+    action: dict[str, Any],
+    effective_uid: str,
+    session_id: str | None,
+    message_id: str | None,
+    now: str,
+) -> ProjectFileActionLog | dict[str, Any]:
+    replay = await _replay_proposal(
+        db,
+        project_id=project_id,
+        proposal_id=proposal_id,
+        payload_hash=payload_hash,
+    )
+    if replay is not None:
+        return replay
+    row = ProjectFileActionLog(
+        id=str(uuid.uuid4()),
+        project_id=project_id,
+        session_id=session_id,
+        message_id=message_id,
+        proposal_id=proposal_id,
+        action_type=str(action.get("type") or ""),
+        target_file_id=str(action.get("target_file_id") or action.get("file_id") or "") or None,
+        payload_json=json.dumps(action, ensure_ascii=False, default=str),
+        payload_hash=payload_hash,
+        status="pending",
+        created_by=effective_uid or "default",
+        created_at=now,
+    )
+    db.add(row)
+    try:
+        await db.flush()
+    except IntegrityError:
+        await db.rollback()
+        replay = await _replay_proposal(
+            db,
+            project_id=project_id,
+            proposal_id=proposal_id,
+            payload_hash=payload_hash,
+        )
+        if replay is not None:
+            return replay
+        raise FileActionConflict(reason="payload")
+    return row
 
 
 async def apply_file_action(
@@ -303,6 +511,30 @@ async def apply_file_action(
         proposal_id,
         session_id,
     )
+    proposal = (proposal_id or "").strip()
+    payload_hash = _action_hash(action if isinstance(action, dict) else {})
+    claimed: ProjectFileActionLog | None = None
+    if proposal:
+        claimed_or_replay = await _claim_proposal(
+            db,
+            project_id=project_id,
+            proposal_id=proposal,
+            payload_hash=payload_hash,
+            action=action,
+            effective_uid=effective_uid,
+            session_id=session_id,
+            message_id=message_id,
+            now=now,
+        )
+        if isinstance(claimed_or_replay, dict):
+            logger.info(
+                "[file-actions] idempotent replay project_id=%s proposal_id=%s action_id=%s",
+                project_id,
+                proposal,
+                claimed_or_replay.get("action_id"),
+            )
+            return claimed_or_replay
+        claimed = claimed_or_replay
 
     if action_type == "create":
         content = str(action.get("content") or "").strip()
@@ -310,24 +542,32 @@ async def apply_file_action(
             raise ValueError("创建文件内容不能为空")
         title = normalize_output_title(str(action.get("file_name") or action.get("fileName") or "新文件.md"))
         existing = await find_active_output_by_title(db, project_id, title)
-        if existing:
-            if (existing.title or "").strip() != title:
-                existing.title = title
+        if existing and not _explicit_overwrite(action):
             logger.info(
-                "[file-actions] create upsert project_id=%s title=%s output_id=%s proposal_id=%s",
+                "[file-actions] create name conflict project_id=%s title=%s output_id=%s proposal_id=%s",
                 project_id,
                 title,
                 existing.id,
                 proposal_id,
             )
-            return await _persist_patched_output(
+            raise FileNameConflict(existing.id, existing.title or title)
+        if existing:
+            result = await _persist_patched_output(
                 db,
                 prev=existing,
                 project_id=project_id,
                 content=content,
-                action={"save_mode": "overwrite", "file_name": title},
+                action={"save_mode": "overwrite", "file_name": title, "on_conflict": "overwrite"},
                 effective_uid=effective_uid,
                 now=now,
+            )
+            result["operation"] = "create"
+            return await _finish_file_action(
+                db,
+                claimed=claimed,
+                result=result,
+                project_id=project_id,
+                proposal_id=proposal,
             )
         row = OutputAsset(
             id=str(uuid.uuid4()),
@@ -337,23 +577,38 @@ async def apply_file_action(
             content=content,
             content_format="markdown",
             status="draft",
+            version="1",
             owner_id=effective_uid or "default",
             created_at=now,
             updated_at=now,
+            lineage_id=None,
         )
-        row_id = row.id
+        row.lineage_id = row.id
         db.add(row)
-        await db.commit()
-        persisted = await _reload_output_after_commit(db, row_id)
-        schedule_ingest_output(persisted.id)
+        await db.flush()
         logger.info(
             "[file-actions] create insert project_id=%s title=%s output_id=%s proposal_id=%s",
             project_id,
             title,
-            persisted.id,
+            row.id,
             proposal_id,
         )
-        return {"ok": True, "file_id": persisted.id, "kind": "output", "version": persisted.version}
+        result = _action_result(
+            operation="create",
+            save_mode="create",
+            source_file_id=None,
+            result_file_id=row.id,
+            previous_version=None,
+            result_version=str(row.version or "1"),
+            title=row.title,
+        )
+        return await _finish_file_action(
+            db,
+            claimed=claimed,
+            result=result,
+            project_id=project_id,
+            proposal_id=proposal,
+        )
 
     if action_type == "patch":
         target_kind = str(
@@ -375,7 +630,7 @@ async def apply_file_action(
             raise ValueError(f"目标输出不存在: {file_id}")
         previous_content = prev.content or ""
         content = resolve_patch_content(previous_content, action)
-        return await _persist_patched_output(
+        result = await _persist_patched_output(
             db,
             prev=prev,
             project_id=project_id,
@@ -384,5 +639,121 @@ async def apply_file_action(
             effective_uid=effective_uid,
             now=now,
         )
+        return await _finish_file_action(
+            db,
+            claimed=claimed,
+            result=result,
+            project_id=project_id,
+            proposal_id=proposal,
+        )
 
     raise ValueError(f"不支持的动作类型: {action_type}")
+
+
+async def _finish_file_action(
+    db: AsyncSession,
+    *,
+    claimed: ProjectFileActionLog | None,
+    result: dict[str, Any],
+    project_id: str,
+    proposal_id: str,
+) -> dict[str, Any]:
+    if claimed is not None:
+        claimed.status = "applied"
+        claimed.result_file_id = result.get("result_file_id")
+        claimed.target_file_id = result.get("source_file_id") or claimed.target_file_id
+        result["action_id"] = claimed.id
+        claimed.result_json = json.dumps(result, ensure_ascii=False)
+    await db.commit()
+    result_file_id = str(result.get("result_file_id") or "")
+    if result_file_id:
+        schedule_ingest_output(result_file_id)
+    logger.info(
+        "[file-actions] applied project_id=%s proposal_id=%s operation=%s result_file_id=%s version=%s",
+        project_id,
+        proposal_id,
+        result.get("operation"),
+        result_file_id,
+        result.get("result_version"),
+    )
+    return result
+
+
+async def undo_file_action(
+    db: AsyncSession,
+    project_id: str,
+    action_id: str,
+    *,
+    effective_uid: str,
+) -> dict[str, Any]:
+    row = await db.get(ProjectFileActionLog, action_id)
+    if row is None or row.project_id != project_id:
+        raise ValueError("动作不存在")
+    if row.status == "undone":
+        return {"ok": True, "action_id": action_id, "already_undone": True}
+    if row.status != "applied" or not row.result_json:
+        raise ValueError("动作尚未完成，不能撤销")
+    result = json.loads(row.result_json)
+    if not isinstance(result, dict):
+        raise ValueError("动作结果无法撤销")
+    result_file_id = str(result.get("result_file_id") or "")
+    result_version = str(result.get("result_version") or "")
+    target = await db.get(OutputAsset, result_file_id)
+    if target is None or target.project_id != project_id:
+        raise ValueError("撤销目标不存在")
+    current_version = str(target.version or "1")
+    if current_version != result_version:
+        logger.info(
+            "[file-actions] undo conflict project_id=%s action_id=%s expected=%s current=%s",
+            project_id,
+            action_id,
+            result_version,
+            current_version,
+        )
+        raise FileActionConflict(current_version)
+    now = datetime.now().isoformat()
+    operation = str(result.get("operation") or "")
+    save_mode = str(result.get("save_mode") or "")
+    if operation == "create" or save_mode in {"copy", "new_version"}:
+        target.status = "archived"
+        target.updated_at = now
+    else:
+        lineage = _lineage_of(target)
+        previous_version = str(result.get("previous_version") or "")
+        snap = (
+            await db.execute(
+                select(OutputAsset)
+                .where(
+                    OutputAsset.project_id == project_id,
+                    OutputAsset.lineage_id == lineage,
+                    OutputAsset.version == previous_version,
+                    OutputAsset.status == "archived",
+                )
+                .order_by(OutputAsset.created_at.desc())
+            )
+        ).scalars().first()
+        restored = snap.content if snap is not None else (target.content or "")
+        previous_title = str(result.get("previous_title") or target.title or "")
+        await _persist_patched_output(
+            db,
+            prev=target,
+            project_id=project_id,
+            content=restored,
+            action={
+                "save_mode": "overwrite",
+                "file_name": previous_title,
+                "base_version": result_version,
+            },
+            effective_uid=effective_uid,
+            now=now,
+        )
+    row.status = "undone"
+    await db.commit()
+    logger.info(
+        "[file-actions] undone project_id=%s action_id=%s operation=%s result_file_id=%s",
+        project_id,
+        action_id,
+        operation,
+        result_file_id,
+    )
+    return {"ok": True, "action_id": action_id, "undone": True, "result_file_id": result_file_id}

@@ -5,7 +5,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Column, ForeignKey, String, Text
+from sqlalchemy import Column, ForeignKey, String, Text, UniqueConstraint
 
 from backend.db import Base
 
@@ -52,6 +52,9 @@ class ProjectSessionFileRef(Base):
 
 class ProjectFileActionLog(Base):
     __tablename__ = "project_file_action_logs"
+    __table_args__ = (
+        UniqueConstraint("project_id", "proposal_id", name="uq_file_action_project_proposal"),
+    )
 
     id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
     project_id = Column(String, ForeignKey("projects.id", ondelete="CASCADE"), nullable=False)
@@ -62,5 +65,8 @@ class ProjectFileActionLog(Base):
     target_file_id = Column(String)
     result_file_id = Column(String)
     payload_json = Column(Text)
+    payload_hash = Column(String)
+    result_json = Column(Text)
+    status = Column(String, default="applied")
     created_by = Column(String, default="default")
     created_at = Column(String, default=lambda: datetime.now().isoformat())

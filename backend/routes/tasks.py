@@ -725,6 +725,8 @@ async def execute_task(req: Request, task_req: TaskExecuteRequest, db: AsyncSess
         snapshot = {**snapshot, "chat_mode": eff_request.chat_mode}
     if eff_request.co_create_agent_mode:
         snapshot = {**snapshot, "co_create_agent_mode": eff_request.co_create_agent_mode}
+    if eff_request.co_create_apply_mode:
+        snapshot = {**snapshot, "co_create_apply_mode": eff_request.co_create_apply_mode}
     if eff_request.session_id:
         snapshot = {**snapshot, "session_id": eff_request.session_id.strip()}
 
@@ -1089,7 +1091,12 @@ async def execute_task(req: Request, task_req: TaskExecuteRequest, db: AsyncSess
         )
 
     messages = _trim_chat_messages(merge_chat_messages(eff_request.messages, user_text))
-    chat_lightweight = payload.entrypoint == "chat" and is_lightweight_chat_message(user_text)
+    agent_mode = (eff_request.co_create_agent_mode or "").strip()
+    chat_lightweight = (
+        payload.entrypoint == "chat"
+        and is_lightweight_chat_message(user_text)
+        and agent_mode != "plan"
+    )
     skip_kb_prefetch = payload.entrypoint == "chat" and should_skip_kb_prefetch_for_co_create_draft(
         user_text
     ) and (eff_request.co_create_agent_mode or "").strip() != "ask"

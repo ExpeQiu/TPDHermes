@@ -104,9 +104,9 @@ export const WORKFLOW_NAV_ITEMS: WorkflowNavItem[] = [
   },
   {
     href: "/settings",
-    label: "用户设置",
-    shortLabel: "设置",
-    description: "用户身份、Hermes-agent MCP 工具白名单。",
+    label: "配置",
+    shortLabel: "配置",
+    description: "运行配置、工作台 CLI、用户身份、MCP、协作包与角色。",
   },
 ];
 

@@ -5,6 +5,7 @@ import {
   inferFileRecommendations,
   isPlanConfirmPrompt,
   parseAgentPlanFromContent,
+  planContractFromPlan,
   resolveExecutionFromAgentMode,
   stripAgentPlanBlock,
 } from "./co-create-agent-utils";
@@ -45,6 +46,32 @@ describe("co-create-agent-utils", () => {
     expect(isPlanConfirmPrompt("开始执行")).toBe(true);
     expect(isPlanConfirmPrompt("确认计划")).toBe(true);
     expect(isPlanConfirmPrompt("请改成三段式")).toBe(false);
+  });
+
+  it("计划内容变化后确认版本不再相同", () => {
+    const first = planContractFromPlan({
+      title: "发布稿",
+      steps: [{ id: "1", title: "检索" }],
+    });
+    const revised = planContractFromPlan({
+      title: "发布稿",
+      steps: [{ id: "1", title: "改成三段" }],
+    });
+    expect(first.planVersion).not.toBe(revised.planVersion);
+    expect(first.planId).toBe(`plan-${first.planVersion}`);
+  });
+
+  it("有文件上下文时不走快速路径", () => {
+    const withFiles = resolveExecutionFromAgentMode("agent", "fast", { hasFileContext: true });
+    expect(withFiles.useOrchestration).toBe(true);
+    expect(withFiles.skipTools).toBe(false);
+    const greeting = resolveExecutionFromAgentMode("agent", "fast");
+    expect(greeting.useOrchestration).toBe(false);
+    const planning = resolveExecutionFromAgentMode("plan", "fast", { planPhase: "awaiting_confirm" });
+    expect(planning.allowFileWrites).toBe(false);
+    const executing = resolveExecutionFromAgentMode("plan", "research", { planPhase: "executing" });
+    expect(executing.allowFileWrites).toBe(true);
+    expect(executing.useOrchestration).toBe(true);
   });
 
   it("resolveExecutionFromAgentMode ask 保持编排", () => {

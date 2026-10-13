@@ -217,36 +217,18 @@ async def list_output_versions(db: AsyncSession, project_id: str, output_id: str
     base = q.scalar_one_or_none()
     if not base:
         return []
-    title = (base.title or "").strip()
-    if not title:
-        return [
-            {
-                "id": base.id,
-                "version": base.version or "1",
-                "title": base.title,
-                "created_at": base.created_at,
-                "updated_at": base.updated_at,
-            }
-        ]
+    lineage = (getattr(base, "lineage_id", None) or base.id or "").strip()
     q2 = await db.execute(
         select(OutputAsset)
         .where(
             OutputAsset.project_id == project_id,
-            OutputAsset.title == title,
+            OutputAsset.lineage_id == lineage,
         )
         .order_by(OutputAsset.created_at.desc())
     )
-    rows = q2.scalars().all()
-    if len(rows) <= 1:
-        return [
-            {
-                "id": base.id,
-                "version": base.version or "1",
-                "title": base.title,
-                "created_at": base.created_at,
-                "updated_at": base.updated_at,
-            }
-        ]
+    rows = list(q2.scalars().all())
+    if not any(row.id == base.id for row in rows):
+        rows.append(base)
     return [
         {
             "id": r.id,
@@ -296,7 +278,10 @@ async def build_referenced_files_extra(
         out = out_q.scalar_one_or_none()
         if out:
             body, truncated = trim_body(out.content or "", REFERENCED_OUTPUT_MAX_CHARS)
-            chunk = f"\n{label} 输出物《{out.title or fid}》:\n{body}"
+            chunk = (
+                f"\n{label} 输出物 id={out.id} version={out.version or '1'} "
+                f"truncated={'yes' if truncated else 'no'} 《{out.title or fid}》:\n{body}"
+            )
             remain = REFERENCED_TOTAL_MAX_CHARS - total_chars
             if remain <= 0:
                 return
@@ -333,6 +318,7 @@ async def build_referenced_files_extra(
             if truncated:
                 truncated_files += 1
 
+    requested = [fid.strip() for fid in [*(pinned_ids or []), *(file_ids or [])] if fid and fid.strip()]
     for fid in pinned_ids or []:
         await append_file(fid.strip(), "[固定引用]")
     for fid in file_ids or []:
@@ -340,6 +326,9 @@ async def build_referenced_files_extra(
         if not fid or fid in seen:
             continue
         await append_file(fid, "[本轮引用]")
+    omitted = [fid for fid in requested if fid not in seen]
+    if omitted:
+        lines.append("未注入（超出引用预算）：" + ", ".join(omitted))
     if truncated_files > 0 or file_count >= REFERENCED_FILE_LIMIT:
         lines.append(
             f"\n[系统提示] 已注入 {file_count} 个引用文件；为控制首字延迟与上下文规模，部分正文已截断。"

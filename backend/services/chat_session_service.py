@@ -8,6 +8,7 @@ from collections import defaultdict
 from datetime import datetime
 from typing import Any
 
+from fastapi import HTTPException
 from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -33,6 +34,9 @@ MESSAGE_META_KEYS = (
 )
 
 SESSION_KIND_CO_CREATE = "project_co_create"
+ALLOWED_SESSION_KINDS = frozenset(
+    {SESSION_KIND_CHAT, SESSION_KIND_SCENARIO, SESSION_KIND_CO_CREATE}
+)
 
 
 def _json_dump(value: Any) -> str:
@@ -46,6 +50,24 @@ def _json_load(raw: str | None, default: Any) -> Any:
         return json.loads(raw)
     except json.JSONDecodeError:
         return default
+
+
+def resolve_patched_session_kind(
+    payload: dict[str, Any],
+    *,
+    existing_kind: str | None,
+    context: dict[str, Any],
+) -> str:
+    """PATCH 只在显式传入 sessionKind 时改类型；缺省保留库中原值。"""
+    if "sessionKind" in payload:
+        explicit = payload.get("sessionKind")
+        if not isinstance(explicit, str) or explicit not in ALLOWED_SESSION_KINDS:
+            raise HTTPException(status_code=400, detail="无效的 sessionKind")
+        return explicit
+    current = (existing_kind or "").strip()
+    if current:
+        return current
+    return infer_session_kind(context if isinstance(context, dict) else {})
 
 
 def infer_session_kind(context: dict[str, Any]) -> str:
@@ -327,6 +349,109 @@ async def upsert_session_for_user(
     return detail
 
 
+_PLAN_WRITE_PHASES = frozenset({"executing"})
+
+
+def _plan_confirmation_matches(context: dict[str, Any]) -> bool:
+    plan_id = str(context.get("coCreatePlanId") or "").strip()
+    plan_version = str(context.get("coCreatePlanVersion") or "").strip()
+    confirmed_id = str(context.get("coCreateConfirmedPlanId") or "").strip()
+    confirmed_version = str(context.get("coCreateConfirmedPlanVersion") or "").strip()
+    return bool(
+        plan_id
+        and plan_version
+        and plan_id == confirmed_id
+        and plan_version == confirmed_version
+    )
+
+
+def _sync_plan_confirmation(payload: dict[str, Any], previous: dict[str, Any], merged: dict[str, Any]) -> None:
+    """计划版本变化使旧确认失效；未绑定版本不能停在 executing。"""
+    new_version = str(merged.get("coCreatePlanVersion") or "").strip()
+    old_version = str(previous.get("coCreatePlanVersion") or "").strip()
+    version_changed = "coCreatePlanVersion" in payload and new_version != old_version
+    if version_changed:
+        confirmed_version = str(payload.get("coCreateConfirmedPlanVersion") or "").strip()
+        confirmed_id = str(payload.get("coCreateConfirmedPlanId") or "").strip()
+        plan_id = str(merged.get("coCreatePlanId") or "").strip()
+        if confirmed_version != new_version or not confirmed_version or confirmed_id != plan_id:
+            merged["coCreateConfirmedPlanId"] = ""
+            merged["coCreateConfirmedPlanVersion"] = ""
+            logger.info(
+                "plan confirmation invalidated previous=%s next=%s",
+                old_version or "unset",
+                new_version or "unset",
+            )
+    if str(merged.get("coCreateAgentMode") or "") == "plan" and str(merged.get("coCreatePlanPhase") or "") == "executing":
+        if not _plan_confirmation_matches(merged):
+            merged["coCreatePlanPhase"] = "awaiting_confirm"
+            logger.info(
+                "plan executing rejected plan_id=%s plan_version=%s",
+                str(merged.get("coCreatePlanId") or ""),
+                str(merged.get("coCreatePlanVersion") or ""),
+            )
+
+
+async def assert_co_create_file_write_allowed(
+    db: AsyncSession,
+    *,
+    session_id: str | None,
+    user_id: str,
+    project_id: str,
+) -> None:
+    """有会话时，Ask 与未确认 Plan 不能写项目文件；会话必须属于当前用户和项目。"""
+    sid = (session_id or "").strip()
+    if not sid:
+        return
+    row = await get_session_for_user(db, session_id=sid, user_id=user_id)
+    if row is None:
+        logger.warning(
+            "file_write denied reason=session_missing session_id=%s user_id=%s project_id=%s",
+            sid,
+            user_id[:24],
+            project_id,
+        )
+        raise HTTPException(status_code=403, detail="会话不存在或无权访问")
+    context = _json_load(row.context_json, {})
+    if not isinstance(context, dict):
+        context = {}
+    selected = str(context.get("selectedProjectId") or "").strip()
+    if selected and selected != project_id:
+        logger.warning(
+            "file_write denied reason=project_mismatch session_id=%s selected_project_id=%s project_id=%s",
+            sid,
+            selected,
+            project_id,
+        )
+        raise HTTPException(status_code=403, detail="会话不属于当前项目")
+    mode = str(context.get("coCreateAgentMode") or "").strip()
+    phase = str(context.get("coCreatePlanPhase") or "").strip()
+    if mode == "ask":
+        logger.info(
+            "file_write denied reason=ask session_id=%s project_id=%s",
+            sid,
+            project_id,
+        )
+        raise HTTPException(status_code=403, detail="Ask 模式不允许写入项目文件")
+    if mode == "plan" and phase not in _PLAN_WRITE_PHASES:
+        logger.info(
+            "file_write denied reason=plan_unconfirmed session_id=%s project_id=%s plan_phase=%s",
+            sid,
+            project_id,
+            phase or "unset",
+        )
+        raise HTTPException(status_code=403, detail="计划未确认，不允许写入项目文件")
+    if mode == "plan" and not _plan_confirmation_matches(context):
+        logger.info(
+            "file_write denied reason=plan_version session_id=%s project_id=%s plan_id=%s plan_version=%s",
+            sid,
+            project_id,
+            str(context.get("coCreatePlanId") or ""),
+            str(context.get("coCreatePlanVersion") or ""),
+        )
+        raise HTTPException(status_code=403, detail="计划确认已失效")
+
+
 async def patch_session_for_user(
     db: AsyncSession,
     *,
@@ -338,11 +463,20 @@ async def patch_session_for_user(
     if row is None:
         return None
     context = _json_load(row.context_json, {})
+    if not isinstance(context, dict):
+        context = {}
     patch_context = client_session_to_context_fields(payload)
     merged_context = {**context, **patch_context}
+    _sync_plan_confirmation(payload, context, merged_context)
+    previous_kind = row.session_kind
+    next_kind = resolve_patched_session_kind(
+        payload,
+        existing_kind=previous_kind,
+        context=merged_context,
+    )
     if "title" in payload and payload.get("title") is not None:
         row.title = str(payload.get("title") or row.title or "新对话")
-    row.session_kind = str(payload.get("sessionKind") or infer_session_kind(merged_context))
+    row.session_kind = next_kind
     row.context_json = _json_dump(merged_context)
     if "linkedOutputIds" in payload:
         row.linked_output_ids_json = _json_dump(payload.get("linkedOutputIds") or [])
@@ -351,7 +485,13 @@ async def patch_session_for_user(
     row.updated_at = datetime.now().isoformat()
     await db.commit()
     detail = await get_session_detail_for_user(db, session_id=session_id, user_id=user_id)
-    logger.debug("chat_session patch id=%s user_id=%s", session_id, user_id[:24])
+    logger.info(
+        "chat_session patch id=%s user_id=%s session_kind=%s kind_explicit=%s",
+        session_id,
+        user_id[:24],
+        row.session_kind,
+        "sessionKind" in payload,
+    )
     return detail
 
 

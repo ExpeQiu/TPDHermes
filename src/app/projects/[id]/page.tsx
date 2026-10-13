@@ -467,6 +467,21 @@ function buildPasteTextAttachmentFilename(projectName: string, userId: string): 
   return `${sanitizeAttachmentBaseName(projectName)}_${date}_${uid}.md`;
 }
 
+type ProjectDetailTab = "info" | "files" | "members" | "outputs" | "runs" | "feedback";
+
+function parseProjectDetailTab(value: string | null | undefined): ProjectDetailTab {
+  if (
+    value === "files" ||
+    value === "members" ||
+    value === "outputs" ||
+    value === "runs" ||
+    value === "feedback"
+  ) {
+    return value;
+  }
+  return "info";
+}
+
 export default function ProjectDetailPage() {
   const { id } = useParams();
   const searchParams = useSearchParams();
@@ -477,14 +492,7 @@ export default function ProjectDetailPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const initialTab = searchParams?.get("tab");
-  const [activeTab, setActiveTab] = useState<"info" | "outputs" | "runs" | "members" | "feedback">(
-    initialTab === "outputs" ||
-      initialTab === "runs" ||
-      initialTab === "members" ||
-      initialTab === "feedback"
-      ? initialTab
-      : "info",
-  );
+  const [activeTab, setActiveTab] = useState<ProjectDetailTab>(parseProjectDetailTab(initialTab));
   const [selectedOutput, setSelectedOutput] = useState<ProjectOutput | null>(null);
   const [copied, setCopied] = useState(false);
   const [outputFullContent, setOutputFullContent] = useState<string | null>(null);
@@ -1047,6 +1055,7 @@ export default function ProjectDetailPage() {
               {[
                 { key: "info", label: "控制台" },
                 { key: "members", label: "项目成员" },
+                { key: "files", label: "项目文件", badge: attachments.length },
                 { key: "outputs", label: "输出沉淀", badge: outputs.length },
                 ...(canViewRuns
                   ? [{ key: "runs" as const, label: "执行记录", badge: runs.length }]
@@ -1063,7 +1072,7 @@ export default function ProjectDetailPage() {
                       projectId: id ? String(id) : undefined,
                       properties: { tab: tab.key },
                     });
-                    setActiveTab(tab.key as typeof activeTab);
+                    setActiveTab(tab.key as ProjectDetailTab);
                   }}
                   className={`flex items-center gap-1.5 px-4 py-2.5 text-sm font-medium border-b-2 transition whitespace-nowrap ${
                     activeTab === tab.key
@@ -1158,124 +1167,7 @@ export default function ProjectDetailPage() {
                   </div>
                 </div>
 
-                <div className="grid gap-4 lg:grid-cols-2">
-                  <div className="rounded-3xl border border-slate-300 dark:border-slate-700 bg-slate-200 dark:bg-slate-800/50 p-5 sm:p-6">
-                    <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                      <div>
-                        <p className="text-xs uppercase tracking-[0.2em] text-slate-500">项目文件</p>
-                        <h2 className="mt-2 text-xl font-semibold text-slate-900 dark:text-white">项目文件</h2>
-                        <p className="mt-1 text-xs text-slate-500">
-                          上传需求说明、素材等；图片可用「图片 OCR」快速转为 Markdown 文字入库。
-                        </p>
-                      </div>
-                      <div className="flex shrink-0 flex-wrap items-stretch justify-end gap-2">
-                        <input
-                          ref={fileInputRef}
-                          type="file"
-                          className="hidden"
-                          onChange={handleAttachmentFileChange}
-                        />
-                        <input
-                          ref={imageOcrInputRef}
-                          type="file"
-                          accept="image/*"
-                          className="hidden"
-                          onChange={handleImageOcrFileChange}
-                        />
-                        <button
-                          type="button"
-                          onClick={openPasteTextModal}
-                          disabled={attachmentUploading || attachmentOcrUploading}
-                          className="rounded-xl border border-slate-300 bg-white/90 px-4 py-2 text-sm font-medium text-slate-800 transition hover:border-slate-400 hover:bg-slate-100 disabled:opacity-50 dark:border-slate-600 dark:bg-slate-900/60 dark:text-slate-200 dark:hover:bg-slate-800"
-                        >
-                          粘贴说明文字
-                        </button>
-                        <button
-                          type="button"
-                          onClick={handlePickImageOcr}
-                          disabled={attachmentUploading || attachmentOcrUploading}
-                          className="rounded-xl border border-violet-300 bg-violet-50 px-4 py-2 text-sm font-medium text-violet-800 transition hover:border-violet-400 hover:bg-violet-100 disabled:opacity-50 dark:border-violet-500/40 dark:bg-violet-500/10 dark:text-violet-200 dark:hover:bg-violet-500/20"
-                        >
-                          {attachmentOcrUploading ? "识别中…" : "图片 OCR"}
-                        </button>
-                        <button
-                          type="button"
-                          onClick={handlePickAttachment}
-                          disabled={attachmentUploading || attachmentOcrUploading}
-                          className="rounded-xl border border-blue-300 bg-blue-50 px-4 py-2 text-sm font-medium text-blue-800 transition hover:border-blue-400 hover:bg-blue-100 disabled:opacity-50 dark:border-blue-500/40 dark:bg-blue-500/10 dark:text-blue-200 dark:hover:bg-blue-500/20"
-                        >
-                          {attachmentUploading ? "上传中…" : "上传附件"}
-                        </button>
-                      </div>
-                    </div>
-                    {attachmentError ? (
-                      <p className="mt-3 text-sm text-red-400">{attachmentError}</p>
-                    ) : null}
-                    {attachments.length === 0 ? (
-                      <div className="mt-4">
-                        <EmptyState
-                          icon="📎"
-                          title="暂无附件"
-                          description="点击「上传附件」添加项目相关文件。"
-                        />
-                      </div>
-                    ) : (
-                      <ul className="mt-4 max-h-56 space-y-2 overflow-y-auto pr-1">
-                        {attachments.map((a) => (
-                          <li
-                            key={a.id}
-                            className="flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-slate-300 dark:border-slate-700 bg-white/90 dark:bg-slate-900/60 px-3 py-2.5 text-sm"
-                          >
-                            <button
-                              type="button"
-                              onClick={() => setPreviewAttachment(a)}
-                              className="min-w-0 flex-1 rounded-xl text-left transition hover:bg-slate-100/80 dark:hover:bg-slate-800/50"
-                            >
-                              <p
-                                className="truncate font-semibold text-slate-900 dark:text-slate-100"
-                                title={a.original_filename}
-                              >
-                                {a.original_filename}
-                              </p>
-                              <p className="text-xs text-slate-500">
-                                {formatFileSize(a.size_bytes)} · {formatDateTimeShanghai(a.created_at)}
-                              </p>
-                              <div className="mt-1 flex flex-wrap items-center gap-2">
-                                <span className={kbIngestBadgeClass(a.ingest_status)}>
-                                  {kbIngestStatusLabel(a.ingest_status)}
-                                </span>
-                                {a.ingest_error ? (
-                                  <span className="text-xs text-red-400/90 truncate max-w-[12rem]" title={a.ingest_error}>
-                                    {a.ingest_error.slice(0, 80)}
-                                  </span>
-                                ) : null}
-                              </div>
-                            </button>
-                            <div className="flex shrink-0 items-center gap-2">
-                              {(a.ingest_status || "").toLowerCase() === "failed" ? (
-                                <button
-                                  type="button"
-                                  onClick={() => void handleReingestAttachment(a.id)}
-                                  className="rounded-lg border border-amber-300 bg-amber-50 px-2.5 py-1 text-xs text-amber-900 transition hover:bg-amber-100 dark:border-amber-700/50 dark:bg-transparent dark:text-amber-200 dark:hover:bg-amber-950/30"
-                                >
-                                  重试入库
-                                </button>
-                              ) : null}
-                              <button
-                                type="button"
-                                onClick={() => void handleDeleteAttachment(a.id)}
-                                className="rounded-lg border border-red-300 bg-red-50 px-2.5 py-1 text-xs text-red-900 transition hover:bg-red-100 dark:border-red-900/50 dark:bg-transparent dark:text-red-300 dark:hover:bg-red-950/40"
-                              >
-                                删除
-                              </button>
-                            </div>
-                          </li>
-                        ))}
-                      </ul>
-                    )}
-                  </div>
-
-                  <div className="rounded-3xl border border-slate-300 dark:border-slate-700 bg-slate-200 dark:bg-slate-800/50 p-5 sm:p-6">
+                <div className="rounded-3xl border border-slate-300 dark:border-slate-700 bg-slate-200 dark:bg-slate-800/50 p-5 sm:p-6">
                     <div className="flex flex-wrap items-start justify-between gap-2">
                       <div>
                         <p className="text-xs uppercase tracking-[0.2em] text-slate-500">最新输出</p>
@@ -1310,8 +1202,125 @@ export default function ProjectDetailPage() {
                         ))}
                       </div>
                     )}
+                </div>
+              </div>
+            )}
+
+            {activeTab === "files" && (
+              <div className="rounded-3xl border border-slate-300 dark:border-slate-700 bg-slate-200 dark:bg-slate-800/50 p-5 sm:p-6">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                  <div>
+                    <p className="text-xs uppercase tracking-[0.2em] text-slate-500">项目文件</p>
+                    <h2 className="mt-2 text-xl font-semibold text-slate-900 dark:text-white">项目文件</h2>
+                    <p className="mt-1 text-xs text-slate-500">
+                      上传需求说明、素材等；图片可用「图片 OCR」快速转为 Markdown 文字入库。
+                    </p>
+                  </div>
+                  <div className="flex shrink-0 flex-wrap items-stretch justify-end gap-2">
+                    <input
+                      ref={fileInputRef}
+                      type="file"
+                      className="hidden"
+                      onChange={handleAttachmentFileChange}
+                    />
+                    <input
+                      ref={imageOcrInputRef}
+                      type="file"
+                      accept="image/*"
+                      className="hidden"
+                      onChange={handleImageOcrFileChange}
+                    />
+                    <button
+                      type="button"
+                      onClick={openPasteTextModal}
+                      disabled={attachmentUploading || attachmentOcrUploading}
+                      className="rounded-xl border border-slate-300 bg-white/90 px-4 py-2 text-sm font-medium text-slate-800 transition hover:border-slate-400 hover:bg-slate-100 disabled:opacity-50 dark:border-slate-600 dark:bg-slate-900/60 dark:text-slate-200 dark:hover:bg-slate-800"
+                    >
+                      粘贴说明文字
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handlePickImageOcr}
+                      disabled={attachmentUploading || attachmentOcrUploading}
+                      className="rounded-xl border border-violet-300 bg-violet-50 px-4 py-2 text-sm font-medium text-violet-800 transition hover:border-violet-400 hover:bg-violet-100 disabled:opacity-50 dark:border-violet-500/40 dark:bg-violet-500/10 dark:text-violet-200 dark:hover:bg-violet-500/20"
+                    >
+                      {attachmentOcrUploading ? "识别中…" : "图片 OCR"}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handlePickAttachment}
+                      disabled={attachmentUploading || attachmentOcrUploading}
+                      className="rounded-xl border border-blue-300 bg-blue-50 px-4 py-2 text-sm font-medium text-blue-800 transition hover:border-blue-400 hover:bg-blue-100 disabled:opacity-50 dark:border-blue-500/40 dark:bg-blue-500/10 dark:text-blue-200 dark:hover:bg-blue-500/20"
+                    >
+                      {attachmentUploading ? "上传中…" : "上传附件"}
+                    </button>
                   </div>
                 </div>
+                {attachmentError ? (
+                  <p className="mt-3 text-sm text-red-400">{attachmentError}</p>
+                ) : null}
+                {attachments.length === 0 ? (
+                  <div className="mt-4">
+                    <EmptyState
+                      icon="📎"
+                      title="暂无附件"
+                      description="点击「上传附件」添加项目相关文件。"
+                    />
+                  </div>
+                ) : (
+                  <ul className="mt-4 space-y-2">
+                    {attachments.map((a) => (
+                      <li
+                        key={a.id}
+                        className="flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-slate-300 dark:border-slate-700 bg-white/90 dark:bg-slate-900/60 px-3 py-2.5 text-sm"
+                      >
+                        <button
+                          type="button"
+                          onClick={() => setPreviewAttachment(a)}
+                          className="min-w-0 flex-1 rounded-xl text-left transition hover:bg-slate-100/80 dark:hover:bg-slate-800/50"
+                        >
+                          <p
+                            className="truncate font-semibold text-slate-900 dark:text-slate-100"
+                            title={a.original_filename}
+                          >
+                            {a.original_filename}
+                          </p>
+                          <p className="text-xs text-slate-500">
+                            {formatFileSize(a.size_bytes)} · {formatDateTimeShanghai(a.created_at)}
+                          </p>
+                          <div className="mt-1 flex flex-wrap items-center gap-2">
+                            <span className={kbIngestBadgeClass(a.ingest_status)}>
+                              {kbIngestStatusLabel(a.ingest_status)}
+                            </span>
+                            {a.ingest_error ? (
+                              <span className="max-w-[12rem] truncate text-xs text-red-400/90" title={a.ingest_error}>
+                                {a.ingest_error.slice(0, 80)}
+                              </span>
+                            ) : null}
+                          </div>
+                        </button>
+                        <div className="flex shrink-0 items-center gap-2">
+                          {(a.ingest_status || "").toLowerCase() === "failed" ? (
+                            <button
+                              type="button"
+                              onClick={() => void handleReingestAttachment(a.id)}
+                              className="rounded-lg border border-amber-300 bg-amber-50 px-2.5 py-1 text-xs text-amber-900 transition hover:bg-amber-100 dark:border-amber-700/50 dark:bg-transparent dark:text-amber-200 dark:hover:bg-amber-950/30"
+                            >
+                              重试入库
+                            </button>
+                          ) : null}
+                          <button
+                            type="button"
+                            onClick={() => void handleDeleteAttachment(a.id)}
+                            className="rounded-lg border border-red-300 bg-red-50 px-2.5 py-1 text-xs text-red-900 transition hover:bg-red-100 dark:border-red-900/50 dark:bg-transparent dark:text-red-300 dark:hover:bg-red-950/40"
+                          >
+                            删除
+                          </button>
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                )}
               </div>
             )}
 

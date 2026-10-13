@@ -1114,7 +1114,19 @@ async def apply_project_file_action(
     effective_uid: str = Depends(get_effective_user_id),
 ):
     await require_project_for_user(db, project_id, effective_uid, min_perm="write")
-    from backend.services.file_action_service import apply_file_action
+    from backend.services.chat_session_service import assert_co_create_file_write_allowed
+    from backend.services.file_action_service import (
+        FileActionConflict,
+        FileNameConflict,
+        apply_file_action,
+    )
+
+    await assert_co_create_file_write_allowed(
+        db,
+        session_id=body.session_id,
+        user_id=effective_uid,
+        project_id=project_id,
+    )
 
     try:
         result = await apply_file_action(
@@ -1127,6 +1139,47 @@ async def apply_project_file_action(
             proposal_id=body.proposal_id,
         )
         return result
+    except FileActionConflict as exc:
+        if exc.reason == "payload":
+            detail = {"message": str(exc), "code": "proposal_payload"}
+        else:
+            detail = {"message": "文件版本已变化", "current_version": exc.current_version}
+        raise HTTPException(status_code=409, detail=detail) from exc
+    except FileNameConflict as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "message": str(exc),
+                "code": "name_conflict",
+                "existing_file_id": exc.file_id,
+            },
+        ) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/{project_id}/file-actions/{action_id}/undo")
+async def undo_project_file_action(
+    project_id: str,
+    action_id: str,
+    db: AsyncSession = Depends(get_db),
+    effective_uid: str = Depends(get_effective_user_id),
+):
+    await require_project_for_user(db, project_id, effective_uid, min_perm="write")
+    from backend.services.file_action_service import FileActionConflict, undo_file_action
+
+    try:
+        return await undo_file_action(
+            db,
+            project_id,
+            action_id,
+            effective_uid=effective_uid,
+        )
+    except FileActionConflict as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={"message": "文件已被继续修改，不能撤销", "current_version": exc.current_version},
+        ) from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 

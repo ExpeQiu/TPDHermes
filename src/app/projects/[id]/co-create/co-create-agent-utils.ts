@@ -73,6 +73,31 @@ export type PlanModeInstructionContext = {
 const PLAN_CONFIRM_RE =
   /^(确认(执行|计划)?|开始执行|按计划执行|执行计划|继续执行|ok|go|yes)$/i;
 
+export type PlanContract = {
+  planId: string;
+  planVersion: string;
+};
+
+/** 计划正文指纹。内容一变，确认过的版本就对不上。 */
+export function planContractFromPlan(plan: AgentPlan): PlanContract {
+  const body = JSON.stringify({
+    title: plan.title ?? "",
+    steps: plan.steps.map((step) => ({
+      id: step.id,
+      title: step.title,
+      detail: step.detail ?? "",
+      skill: step.skill ?? "",
+    })),
+  });
+  let hash = 2166136261;
+  for (let i = 0; i < body.length; i += 1) {
+    hash ^= body.charCodeAt(i);
+    hash = Math.imul(hash, 16777619);
+  }
+  const planVersion = (hash >>> 0).toString(16);
+  return { planId: `plan-${planVersion}`, planVersion };
+}
+
 export function isPlanConfirmPrompt(text: string): boolean {
   return PLAN_CONFIRM_RE.test(text.trim());
 }
@@ -135,6 +160,7 @@ export function buildAgentModeInstructions(
 export function resolveExecutionFromAgentMode(
   mode: CoCreateAgentMode,
   autoPipeline: CoCreatePipeline,
+  options?: { hasFileContext?: boolean; planPhase?: CoCreatePlanPhase },
 ): {
   useOrchestration: boolean;
   skipTools: boolean;
@@ -152,15 +178,16 @@ export function resolveExecutionFromAgentMode(
     };
   }
   if (mode === "plan") {
+    const executing = options?.planPhase === "executing";
     return {
       useOrchestration: true,
       skipTools: false,
-      allowFileWrites: true,
-      allowAutoDraft: true,
+      allowFileWrites: executing,
+      allowAutoDraft: executing,
       effectivePipeline: autoPipeline === "fast" ? "research" : autoPipeline,
     };
   }
-  const useFast = autoPipeline === "fast";
+  const useFast = autoPipeline === "fast" && !options?.hasFileContext;
   return {
     useOrchestration: !useFast,
     skipTools: useFast,

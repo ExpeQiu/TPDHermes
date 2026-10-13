@@ -230,6 +230,10 @@ class TaskExecuteRequest(BaseModel):
         default=None,
         description="项目共创创作模式：ask/agent/plan",
     )
+    co_create_apply_mode: Literal["auto", "review"] | None = Field(
+        default=None,
+        description="项目共创应用策略：auto 自动应用，review 人工审阅",
+    )
 
 
 class AgentTaskMetadata(BaseModel):

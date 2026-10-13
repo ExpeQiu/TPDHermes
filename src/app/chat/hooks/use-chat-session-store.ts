@@ -169,6 +169,12 @@ function mergeSessionWithLocal(serverSession: ChatSession, localSession?: ChatSe
     coCreateAgentMode: localSession.coCreateAgentMode ?? serverSession.coCreateAgentMode,
     coCreateApplyMode: localSession.coCreateApplyMode ?? serverSession.coCreateApplyMode,
     coCreatePlanPhase: localSession.coCreatePlanPhase ?? serverSession.coCreatePlanPhase,
+    coCreatePlanId: localSession.coCreatePlanId || serverSession.coCreatePlanId,
+    coCreatePlanVersion: localSession.coCreatePlanVersion || serverSession.coCreatePlanVersion,
+    coCreateConfirmedPlanId:
+      localSession.coCreateConfirmedPlanId || serverSession.coCreateConfirmedPlanId,
+    coCreateConfirmedPlanVersion:
+      localSession.coCreateConfirmedPlanVersion || serverSession.coCreateConfirmedPlanVersion,
     coCreatePipelinePreference:
       localSession.coCreatePipelinePreference ?? serverSession.coCreatePipelinePreference,
   };
@@ -289,6 +295,10 @@ export function sessionToPatchPayload(session: ChatSession): Record<string, unkn
     coCreateAgentMode: session.coCreateAgentMode ?? "agent",
     coCreateApplyMode: session.coCreateApplyMode ?? "auto",
     coCreatePlanPhase: session.coCreatePlanPhase ?? "idle",
+    coCreatePlanId: session.coCreatePlanId ?? "",
+    coCreatePlanVersion: session.coCreatePlanVersion ?? "",
+    coCreateConfirmedPlanId: session.coCreateConfirmedPlanId ?? "",
+    coCreateConfirmedPlanVersion: session.coCreateConfirmedPlanVersion ?? "",
     agentUndoStack: session.agentUndoStack ?? [],
     touchedFileIds: session.touchedFileIds ?? [],
     titleManuallySet: session.titleManuallySet ?? false,
@@ -401,6 +411,13 @@ function serverSessionToClient(raw: Record<string, unknown>): ChatSession {
       raw.coCreatePlanPhase === "executing"
         ? raw.coCreatePlanPhase
         : "idle",
+    coCreatePlanId: typeof raw.coCreatePlanId === "string" ? raw.coCreatePlanId : "",
+    coCreatePlanVersion:
+      typeof raw.coCreatePlanVersion === "string" ? raw.coCreatePlanVersion : "",
+    coCreateConfirmedPlanId:
+      typeof raw.coCreateConfirmedPlanId === "string" ? raw.coCreateConfirmedPlanId : "",
+    coCreateConfirmedPlanVersion:
+      typeof raw.coCreateConfirmedPlanVersion === "string" ? raw.coCreateConfirmedPlanVersion : "",
     agentUndoStack: parseAgentUndoStack(raw.agentUndoStack),
     touchedFileIds: Array.isArray(raw.touchedFileIds) ? (raw.touchedFileIds as string[]) : [],
     titleManuallySet: Boolean(raw.titleManuallySet),

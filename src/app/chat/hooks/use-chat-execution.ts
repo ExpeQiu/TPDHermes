@@ -91,6 +91,7 @@ type UseChatExecutionOptions = {
   condenseTopicTitle: (text: string, maxLen?: number) => string;
   coCreateSessionId?: string;
   coCreateAgentMode?: "ask" | "agent" | "plan";
+  coCreateApplyMode?: "auto" | "review";
   projectFileIds?: string[];
   pinnedFileIdsForExecute?: string[];
   onFileActionsFromStream?: (
@@ -313,6 +314,7 @@ export function useChatExecution(options: UseChatExecutionOptions) {
     condenseTopicTitle,
     coCreateSessionId,
     coCreateAgentMode,
+    coCreateApplyMode,
     projectFileIds,
     pinnedFileIdsForExecute,
     onFileActionsFromStream,
@@ -509,6 +511,9 @@ export function useChatExecution(options: UseChatExecutionOptions) {
           if (coCreateSessionId) body.session_id = coCreateSessionId;
           if (chatMode === "co_create" && coCreateAgentMode) {
             body.co_create_agent_mode = coCreateAgentMode;
+          }
+          if (chatMode === "co_create" && coCreateApplyMode) {
+            body.co_create_apply_mode = coCreateApplyMode;
           }
           if (projectFileIds?.length) body.project_file_ids = projectFileIds;
           if (pinnedFileIdsForExecute?.length) body.pinned_file_ids = pinnedFileIdsForExecute;
@@ -909,6 +914,7 @@ export function useChatExecution(options: UseChatExecutionOptions) {
       firstTokenMetricsRef,
       coCreateSessionId,
       coCreateAgentMode,
+      coCreateApplyMode,
     ],
   );
 

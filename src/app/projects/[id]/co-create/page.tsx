@@ -84,6 +84,7 @@ import {
   inferFileRecommendations,
   isPlanConfirmPrompt,
   parseAgentPlanFromContent,
+  planContractFromPlan,
   resolveExecutionFromAgentMode,
   type AgentPlan,
 } from "@/app/projects/[id]/co-create/co-create-agent-utils";
@@ -165,196 +166,16 @@ import {
   upsertFileActionProposal,
 } from "@/app/projects/[id]/co-create/co-create-file-actions";
 import { useFileWorkspace } from "@/app/projects/[id]/co-create/hooks/use-file-workspace";
-
-function decodeFileIds(keys: string[]): string[] {
-  return keys
-    .map((k) => decodeProjectFileSelectValue(k)?.id)
-    .filter((id): id is string => Boolean(id));
-}
-
-const CO_CREATE_FAST_QUERY_MAX_CHARS = 20;
-const CO_CREATE_REWRITE_RE =
-  /\/(生成新文件|改写当前文件)|修改|改写|重写|润色|增加|补充|加入|添加|创建|新建|保存|写入|覆盖|patch|diff|apply/i;
-const CO_CREATE_FILE_TARGET_RE = /文件|文档|附件|输出物|版本|副本/i;
-const CO_CREATE_PROJECT_HEAVY_RE = /当前项目|本项目|这个项目|项目内|项目中|基于项目/i;
-const CO_CREATE_RESEARCH_RE =
-  /研究|分析|深度|拆解|挖掘|对标|矩阵|趋势|策略|行业|市场|用户|竞品|报告/i;
-
-function shouldUseCoCreateFastPath(options: {
-  text: string;
-  pinnedFileCount: number;
-  roundFileCount: number;
-  regionBlockCount: number;
-}) {
-  const compact = options.text.replace(/\s+/g, "");
-  if (!compact) return false;
-  if (isDocumentGenerationPrompt(options.text.trim())) return false;
-  if (options.pinnedFileCount > 0 || options.roundFileCount > 0 || options.regionBlockCount > 0) {
-    return false;
-  }
-  if (compact.length > CO_CREATE_FAST_QUERY_MAX_CHARS) return false;
-  if (CO_CREATE_REWRITE_RE.test(compact) || CO_CREATE_FILE_TARGET_RE.test(compact)) return false;
-  if (CO_CREATE_PROJECT_HEAVY_RE.test(compact)) return false;
-  return true;
-}
-
-function resolveCoCreatePipeline(options: {
-  text: string;
-  pinnedFileCount: number;
-  roundFileCount: number;
-  regionBlockCount: number;
-  hasPendingFileActions?: boolean;
-}): CoCreatePipeline {
-  const compact = options.text.replace(/\s+/g, "");
-  if (options.hasPendingFileActions) return "rewrite";
-  if (CO_CREATE_REWRITE_RE.test(compact)) return "rewrite";
-  if (
-    (options.roundFileCount > 0 || options.pinnedFileCount > 0) &&
-    isRewritePrompt(options.text.trim(), { hasTargetFile: true })
-  ) {
-    return "rewrite";
-  }
-  if (isDocumentGenerationPrompt(options.text.trim())) return "co_create";
-  if (shouldUseCoCreateFastPath(options)) return "fast";
-  if (
-    CO_CREATE_RESEARCH_RE.test(compact) ||
-    CO_CREATE_PROJECT_HEAVY_RE.test(compact) ||
-    compact.length > 40
-  ) {
-    return "research";
-  }
-  return "co_create";
-}
-
-function regionBlockFileName(
-  files: ProjectFileItem[],
-  fileKey: string,
-  tabLabels: Record<string, string>,
-): string {
-  const decoded = decodeProjectFileSelectValue(fileKey);
-  if (!decoded) return tabLabels[fileKey] ?? "文件";
-  const file = files.find((f) => f.id === decoded.id && f.kind === decoded.kind);
-  const pathName = file?.path?.split("/").filter(Boolean).pop();
-  return pathName || file?.title || tabLabels[fileKey] || "文件";
-}
-
-function parsePatchEditMode(raw: unknown): PatchEditMode {
-  const value = String(raw ?? "full");
-  if (value === "search_replace" || value === "line_range" || value === "full") return value;
-  return "full";
-}
-
-function parseOptionalInt(raw: unknown): number | undefined {
-  if (typeof raw === "number" && Number.isFinite(raw)) return raw;
-  if (typeof raw === "string" && raw.trim()) {
-    const n = Number(raw);
-    if (Number.isFinite(n)) return n;
-  }
-  return undefined;
-}
-
-function mapStreamActions(raw: Array<Record<string, unknown>>): FileActionProposal[] {
-  const out: FileActionProposal[] = [];
-  for (const item of raw) {
-    const proposalId = String(item.proposal_id || item.proposalId || randomUUID());
-    const type = String(item.type || "");
-    if (type === "create") {
-      const fileName = String(item.file_name || item.fileName || "新文件.md");
-      out.push({
-        type: "create",
-        proposalId,
-        fileName,
-        path: normalizeCreateFilePath(fileName, String(item.path || "/")),
-        content: String(item.content || ""),
-        status: "proposed",
-      });
-    } else if (type === "patch") {
-      const editMode = parsePatchEditMode(item.edit_mode ?? item.editMode);
-      const oldString = String(item.old_string ?? item.oldString ?? "");
-      const newString = String(item.new_string ?? item.newString ?? "");
-      const newText = String(item.new_text ?? item.newText ?? "");
-      const startLine = parseOptionalInt(item.start_line ?? item.startLine);
-      const endLine = parseOptionalInt(item.end_line ?? item.endLine);
-      let after = String(item.after || item.content || "");
-      if (!after && editMode === "search_replace") after = newString;
-      if (!after && editMode === "line_range") after = newText;
-      out.push({
-        type: "patch",
-        proposalId,
-        fileId: String(item.file_id || item.fileId || ""),
-        fileKind: (item.file_kind || item.fileKind || "output") as "output" | "attachment",
-        fileName: String(item.file_name || item.fileName || "文件"),
-        summary: String(item.summary || "文件修改"),
-        before: String(item.before || ""),
-        after,
-        status: "proposed",
-        editMode,
-        oldString: oldString || undefined,
-        newString: newString || undefined,
-        replaceAll: Boolean(item.replace_all ?? item.replaceAll),
-        startLine,
-        endLine,
-        newText: newText || undefined,
-      });
-    }
-  }
-  return out;
-}
-
-function resolveAutoPatchTargetFile(
-  pinnedFileKeys: string[],
-  roundFileKeys: string[],
-  files: ProjectFileItem[],
-  tabLabels: Record<string, string>,
-): AutoPatchTargetFile | null {
-  for (const fileKey of [...roundFileKeys, ...pinnedFileKeys]) {
-    const decoded = decodeProjectFileSelectValue(fileKey);
-    if (!decoded || !isCoCreateWritableFileKind(decoded.kind)) continue;
-    return {
-      fileKey,
-      fileId: decoded.id,
-      fileKind: decoded.kind,
-      fileName: regionBlockFileName(files, fileKey, tabLabels),
-    };
-  }
-  return null;
-}
-
-async function resolveFileBeforeContent(
-  projectId: string,
-  target: AutoPatchTargetFile,
-  activeFileKey: string | null,
-  previewContent: string | undefined,
-): Promise<string> {
-  if (activeFileKey === target.fileKey && previewContent?.trim()) {
-    return previewContent;
-  }
-  const detail = await fetchProjectFileDetail(projectId, target.fileId, target.fileKind);
-  return detail.content ?? "";
-}
-
-function updateProposalStatus(
-  proposalId: string,
-  status: FileActionProposal["status"],
-  actions: FileActionProposal[],
-  patch?: { applyError?: string },
-): FileActionProposal[] {
-  return actions.map((proposal) => {
-    if (proposal.proposalId !== proposalId) return proposal;
-    return { ...proposal, status, ...patch };
-  });
-}
-
-function findAssistantContentForProposal(
-  session: { messages: Message[] } | undefined,
-  proposalId: string,
-): string {
-  if (!session) return "";
-  const hostMessage = session.messages.find((message) =>
-    message.fileActions?.some((fa) => fa.proposalId === proposalId),
-  );
-  return hostMessage?.content ?? "";
-}
+import {
+  decodeFileIds,
+  findAssistantContentForProposal,
+  mapStreamActions,
+  regionBlockFileName,
+  resolveAutoPatchTargetFile,
+  resolveCoCreatePipeline,
+  resolveFileBeforeContent,
+  updateProposalStatus,
+} from "@/app/projects/[id]/co-create/co-create-page-model";
 
 import {
   clearEntryCreateGuard,
@@ -506,8 +327,6 @@ function CoCreatePageInner() {
 
   useEffect(() => {
     if (streaming || preparingContext || agentMode !== "plan" || !activeId) return;
-    const phase = activeSession?.coCreatePlanPhase ?? "idle";
-    if (phase === "executing") return;
 
     const messages = activeSession?.messages ?? [];
     const latestAssistant = [...messages].reverse().find((m) => m.role === "assistant");
@@ -515,15 +334,29 @@ function CoCreatePageInner() {
 
     const plan = latestAssistant.agentPlan ?? parseAgentPlanFromContent(latestAssistant.content);
     if (!plan) return;
+    const contract = planContractFromPlan(plan);
+    const phase = activeSession?.coCreatePlanPhase ?? "idle";
+    const versionChanged = activeSession?.coCreatePlanVersion !== contract.planVersion;
+    if (
+      phase === "executing" &&
+      !versionChanged &&
+      activeSession?.coCreateConfirmedPlanVersion === contract.planVersion
+    ) {
+      return;
+    }
 
     const needsPlanAttach = !latestAssistant.agentPlan;
-    const needsPhase = phase !== "awaiting_confirm";
-
+    const needsPhase = phase !== "awaiting_confirm" || versionChanged;
     if (!needsPlanAttach && !needsPhase) return;
 
     updateSession(activeId, (session) => ({
       ...session,
       coCreatePlanPhase: "awaiting_confirm",
+      coCreatePlanId: contract.planId,
+      coCreatePlanVersion: contract.planVersion,
+      ...(versionChanged
+        ? { coCreateConfirmedPlanId: "", coCreateConfirmedPlanVersion: "" }
+        : {}),
       messages: session.messages.map((message) =>
         message.id === latestAssistant.id
           ? { ...message, agentPlan: plan }
@@ -532,10 +365,17 @@ function CoCreatePageInner() {
     }));
     const updated = sessionsRef.current.find((session) => session.id === activeId);
     if (updated) queueSessionPatch(activeId, sessionToPatchPayload(updated));
-    console.info("[co-create] Plan 计划已就绪，等待确认", { stepCount: plan.steps.length });
+    console.info("[co-create] Plan 计划已就绪，等待确认", {
+      stepCount: plan.steps.length,
+      planId: contract.planId,
+      planVersion: contract.planVersion,
+      versionChanged,
+    });
   }, [
     activeId,
+    activeSession?.coCreateConfirmedPlanVersion,
     activeSession?.coCreatePlanPhase,
+    activeSession?.coCreatePlanVersion,
     activeSession?.messages,
     agentMode,
     preparingContext,
@@ -544,19 +384,6 @@ function CoCreatePageInner() {
     streaming,
     updateSession,
   ]);
-
-  const persistPlanPhase = useCallback(
-    (phase: import("@/app/projects/[id]/co-create/co-create-agent-utils").CoCreatePlanPhase) => {
-      if (!activeSession) return;
-      updateSession(activeSession.id, (session) => ({
-        ...session,
-        coCreatePlanPhase: phase,
-      }));
-      const updated = sessionsRef.current.find((session) => session.id === activeSession.id);
-      if (updated) queueSessionPatch(activeSession.id, sessionToPatchPayload(updated));
-    },
-    [activeSession, queueSessionPatch, sessionsRef, updateSession],
-  );
 
   const appendAgentUndoEntry = useCallback(
     (entry: AgentUndoEntry) => {
@@ -1595,6 +1422,7 @@ function CoCreatePageInner() {
     condenseTopicTitle: condenseFromStore,
     coCreateSessionId: activeId ?? undefined,
     coCreateAgentMode: agentMode,
+    coCreateApplyMode: applyMode,
     projectFileIds: projectFileIdsForExecute,
     pinnedFileIdsForExecute: pinnedIdsForExecute,
     onFileActionsFromStream: handleFileActionsFromStream,
@@ -1729,9 +1557,11 @@ function CoCreatePageInner() {
           (proposal) => proposal.status === "applying" || proposal.status === "applied",
         ),
       });
-      const execution = resolveExecutionFromAgentMode(agentMode, autoPipeline);
-
       const planConfirm = agentMode === "plan" && isPlanConfirmPrompt(rawPrompt);
+      const execution = resolveExecutionFromAgentMode(agentMode, autoPipeline, {
+        hasFileContext: hasTargetFile || excerpts.length > 0,
+        planPhase: planConfirm ? "executing" : planPhase,
+      });
       const planInstructionPhase = (() => {
         if (agentMode !== "plan") return undefined;
         if (planConfirm || planPhase === "executing") return "executing" as const;
@@ -1739,9 +1569,19 @@ function CoCreatePageInner() {
         return "planning" as const;
       })();
 
-      if (planConfirm) {
-        persistPlanPhase("executing");
-        console.info("[co-create] Plan 用户确认，进入执行阶段");
+      if (planConfirm && latestConfirmedPlan && activeId) {
+        const contract = planContractFromPlan(latestConfirmedPlan);
+        updateSession(activeId, (session) => ({
+          ...session,
+          coCreatePlanPhase: "executing",
+          coCreatePlanId: contract.planId,
+          coCreatePlanVersion: contract.planVersion,
+          coCreateConfirmedPlanId: contract.planId,
+          coCreateConfirmedPlanVersion: contract.planVersion,
+        }));
+        const updated = sessionsRef.current.find((session) => session.id === activeId);
+        if (updated) queueSessionPatch(activeId, sessionToPatchPayload(updated), 0);
+        console.info("[co-create] Plan 用户确认，进入执行阶段", contract);
       }
 
       if (
@@ -1844,6 +1684,7 @@ function CoCreatePageInner() {
       }
     },
     [
+      activeId,
       agentMode,
       existingOutputTitles,
       fileWorkspace.files,
@@ -1851,12 +1692,14 @@ function CoCreatePageInner() {
       input,
       latestConfirmedPlan,
       pendingActions,
-      persistPlanPhase,
       pinnedFileIds,
       planPhase,
+      queueSessionPatch,
       regionBlocks,
       roundFileIds,
       sendMessage,
+      sessionsRef,
+      updateSession,
       skills,
       tryPendingAutoCreateDraft,
       tryPendingAutoPatch,
@@ -1969,16 +1812,17 @@ function CoCreatePageInner() {
       try {
         let undoEntry: AgentUndoEntry | null = null;
         let previousContent = "";
+        let baseVersion = "";
         if (latestProposal.type === "patch") {
-          previousContent = latestProposal.before ?? "";
-          if (!previousContent.trim()) {
-            const detail = await fetchProjectFileDetail(
-              projectId,
-              latestProposal.fileId,
-              latestProposal.fileKind,
-            );
-            previousContent = detail.content ?? "";
-          }
+          const detail = await fetchProjectFileDetail(
+            projectId,
+            latestProposal.fileId,
+            latestProposal.fileKind,
+          );
+          previousContent = latestProposal.before?.trim()
+            ? latestProposal.before
+            : (detail.content ?? "");
+          baseVersion = detail.version ?? "";
           undoEntry = {
             type: "patch",
             proposalId: latestProposal.proposalId,
@@ -2076,14 +1920,13 @@ function CoCreatePageInner() {
                 };
               })();
         if (createOverwrite && createOverwriteTarget) {
-          previousContent =
-            (
-              await fetchProjectFileDetail(
-                projectId,
-                createOverwriteTarget.outputId,
-                "output",
-              )
-            ).content ?? "";
+          const overwriteDetail = await fetchProjectFileDetail(
+            projectId,
+            createOverwriteTarget.outputId,
+            "output",
+          );
+          previousContent = overwriteDetail.content ?? "";
+          baseVersion = overwriteDetail.version ?? "";
           undoEntry = {
             type: "patch",
             proposalId: latestProposal.proposalId,
@@ -2093,10 +1936,14 @@ function CoCreatePageInner() {
             previousContent,
           };
         }
+        const actionToApply =
+          action.type === "patch" && baseVersion
+            ? { ...action, base_version: baseVersion }
+            : action;
         const result = await applyFileAction(projectId, {
           session_id: activeId ?? undefined,
           proposal_id: latestProposal.proposalId,
-          action,
+          action: actionToApply,
         });
         setPendingActions((prev) =>
           rejectSiblingCreateProposals(
@@ -2120,17 +1967,13 @@ function CoCreatePageInner() {
             })),
           }));
         }
-        const fileKey =
-          createOverwrite && createOverwriteTarget
-            ? encodeProjectFileSelectValue("output", createOverwriteTarget.outputId)
-            : latestProposal.type === "create"
-              ? encodeProjectFileSelectValue(result.kind, result.file_id)
-              : encodeProjectFileSelectValue(latestProposal.fileKind, latestProposal.fileId);
+        const appliedFileId = result.result_file_id || result.file_id;
+        const fileKey = encodeProjectFileSelectValue(result.kind || "output", appliedFileId);
         if (latestProposal.type === "patch" || createOverwrite) {
           undoEntry = undoEntry ?? {
             type: "patch",
             proposalId: latestProposal.proposalId,
-            fileId: createOverwriteTarget?.outputId ?? (latestProposal.type === "patch" ? latestProposal.fileId : ""),
+            fileId: appliedFileId,
             fileKind: "output",
             fileName: createOverwriteTarget?.fileName ?? (latestProposal.type === "patch" ? latestProposal.fileName : ""),
             previousContent,
@@ -2139,7 +1982,7 @@ function CoCreatePageInner() {
           undoEntry = {
             type: "create",
             proposalId: latestProposal.proposalId,
-            fileId: result.file_id,
+            fileId: appliedFileId,
             fileName: latestProposal.fileName,
           };
         }
@@ -2148,7 +1991,7 @@ function CoCreatePageInner() {
           proposalId: latestProposal.proposalId,
           type: latestProposal.type,
           mode: createOverwrite ? "create_overwrite_output" : latestProposal.type,
-          fileId: createOverwriteTarget?.outputId ?? result.file_id,
+          fileId: appliedFileId,
           contentLength:
             latestProposal.type === "create"
               ? action.content?.length ?? 0
@@ -2662,7 +2505,7 @@ function CoCreatePageInner() {
             返回项目中心
           </Link>
           <Link
-            href="/settings"
+            href="/settings?tab=identity"
             className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-100 dark:border-slate-600 dark:text-slate-200 dark:hover:bg-slate-800"
           >
             查看 User ID 设置

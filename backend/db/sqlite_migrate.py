@@ -412,6 +412,42 @@ def run_sqlite_migrations(connection: Connection) -> None:
     _fail_stale_running_runs(connection)
     _normalize_learning_signal_counts(connection)
     _drop_redundant_chat_indexes(connection)
+    _ensure_output_lineage_and_action_log(connection)
+
+
+def _ensure_output_lineage_and_action_log(connection: Connection) -> None:
+    """版本链按 lineage_id 关联；同一项目的 proposal_id 只能成功一次。"""
+    names = _table_names(connection)
+    if "outputs" in names:
+        _add_columns(connection, "outputs", [("lineage_id", "TEXT")])
+        connection.execute(
+            text(
+                "UPDATE outputs SET lineage_id = id "
+                "WHERE lineage_id IS NULL OR lineage_id = ''"
+            )
+        )
+        connection.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS idx_outputs_project_lineage "
+                "ON outputs (project_id, lineage_id)"
+            )
+        )
+    if "project_file_action_logs" in names:
+        _add_columns(
+            connection,
+            "project_file_action_logs",
+            [
+                ("payload_hash", "TEXT"),
+                ("result_json", "TEXT"),
+                ("status", "TEXT DEFAULT 'applied'"),
+            ],
+        )
+        connection.execute(
+            text(
+                "CREATE UNIQUE INDEX IF NOT EXISTS uq_file_action_project_proposal "
+                "ON project_file_action_logs (project_id, proposal_id)"
+            )
+        )
 
 
 def _ensure_growth_tables(connection: Connection) -> None:

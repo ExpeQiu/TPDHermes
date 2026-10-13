@@ -23,6 +23,7 @@ class OutputAsset(Base):
     content = Column(Text, nullable=False)
     content_format = Column(String, default="markdown")
     version = Column(String, default="1")
+    lineage_id = Column(String)
     status = Column(String, nullable=False, default="draft")
     citations_json = Column(Text)
     owner_id = Column(String, default="default")

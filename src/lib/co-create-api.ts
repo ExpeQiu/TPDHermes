@@ -57,6 +57,7 @@ export interface FileActionApplyRequest {
     end_line?: number;
     new_text?: string;
     after?: string;
+    base_version?: string;
   };
 }
 
@@ -65,6 +66,11 @@ export interface FileActionApplyResponse {
   file_id: string;
   kind: ProjectFileKind;
   version?: string | null;
+  action_id?: string;
+  operation?: string;
+  source_file_id?: string | null;
+  result_file_id?: string;
+  result_version?: string | null;
 }
 
 export async function fetchProjectFilesUnified(projectId: string): Promise<ProjectFileItem[]> {

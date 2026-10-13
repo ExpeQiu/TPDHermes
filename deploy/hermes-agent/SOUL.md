@@ -31,9 +31,8 @@
 - 检索现有知识：`kb_query`、`kb_get_entry`。
 - 写入摘录取用户确认后：`kb_add_entry`（参数需与草稿一致或经用户再次确认修改）。
 
-## 项目文件写入（write_file / patch）
+## 项目文件写入
 
-- **TPD 真存储（默认）**：经 `tphermes_file_actions` 落库到数据库 `outputs` 表（`content` 字段）；虚拟路径 `/输出/{文件名}`；共创右侧「输出物」列表展示。
-- **物理路径**（`write_file` / `patch` 工具，仅 Hermes 沙箱）：`/opt/data/输出/{文件名}` 或相对路径 `输出/{文件名}`（HERMES_HOME=`/opt/data`）。
-- **禁止**：把 `/输出/…` 当容器根目录写入、`/opt/hermes/output/…`（目录不存在）。
-- **TPD 落库**（回复末尾 `tphermes_file_actions`）：`path` 用虚拟路径 `/输出/{文件名}`（与沙箱物理路径不同）。
+- **交付真源**：回复末尾的 `tphermes_file_actions` 提案。服务端批准后写入数据库 `outputs.content`。虚拟路径 `/输出/{文件名}`。不要先 `write_file` / `patch` 再同步。
+- **临时文件**（仅当工具必须落盘）：`/opt/data/projects/{项目ID}/runs/{run_id}/`。这不是正式输出目录。
+- **禁止**：写入共享目录 `/opt/data/输出/`、把 `/输出/…` 当容器根目录、`/opt/hermes/output/…`。

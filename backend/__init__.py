@@ -22,7 +22,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.exceptions import RequestValidationError
 from fastapi.routing import APIRoute
 
-from backend.middleware import ExceptionHandlerMiddleware, RequestLoggerMiddleware
+from backend.middleware import AgentCliAuthMiddleware, ExceptionHandlerMiddleware, RequestLoggerMiddleware
 from backend.middleware.exception_handler import http_not_found_handler
 from backend.models.response import APIResponse
 from backend.db import engine, Base
@@ -129,6 +129,8 @@ app.add_middleware(
 app.add_middleware(RequestLoggerMiddleware)
 # 3. 全局异常处理
 app.add_middleware(ExceptionHandlerMiddleware)
+# 4. CLI Agent 接入 Token（仅 X-TPDHermes-Client: cli）
+app.add_middleware(AgentCliAuthMiddleware)
 
 
 # ── 全局 404 处理 ──────────────────────────────────────────
@@ -178,6 +180,7 @@ from backend.routes.mcp import router as mcp_router
 from backend.routes.metrics import router as metrics_router
 from backend.routes.feedback import router as feedback_router, learning_router
 from backend.routes.brainstorm import router as brainstorm_router
+from backend.routes.system_config import router as system_config_router
 
 include_router_with_version(me_router)
 include_router_with_version(mcp_router, strip_prefix="/mcp")
@@ -201,6 +204,7 @@ include_router_with_version(metrics_router, strip_prefix="/metrics")
 include_router_with_version(feedback_router, strip_prefix="/feedback")
 include_router_with_version(learning_router, strip_prefix="/learning")
 include_router_with_version(brainstorm_router, strip_prefix="/brainstorm")
+include_router_with_version(system_config_router, strip_prefix="/system")
 
 
 # ── 根路径 & 健康检查 ───────────────────────────────────────
