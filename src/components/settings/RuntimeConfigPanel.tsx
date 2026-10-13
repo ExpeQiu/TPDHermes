@@ -13,11 +13,17 @@ type RuntimeConfig = {
     model: string;
   };
   wiki: {
-    root: string;
-    cli_override: boolean;
+    url: string;
+    url_source?: string;
   };
   warnings: string[];
 };
+
+function sourceLabel(source: string | undefined): string {
+  if (source === "saved") return "页面保存";
+  if (source === "env") return "环境变量";
+  return "默认";
+}
 
 function Row({ label, value }: { label: string; value: string }) {
   return (
@@ -60,8 +66,7 @@ export default function RuntimeConfigPanel() {
         <Row label="Mock" value={config.mock_mode ? "开启" : "关闭"} />
         <Row label="对话上游" value={config.chat.available ? config.chat.target || "已配置" : "未配置"} />
         <Row label="模型" value={config.chat.model} />
-        <Row label="Wiki 根目录" value={config.wiki.root} />
-        <Row label="Wiki CLI" value={config.wiki.cli_override ? "使用 GEELYWIKI_CLI" : "使用仓库 bin/geelywiki.mjs"} />
+        <Row label="Wiki MCP" value={`${config.wiki.url}（${sourceLabel(config.wiki.url_source)}）`} />
       </dl>
       {config.warnings.length > 0 && (
         <ul className="mt-4 space-y-1 text-sm text-amber-700 dark:text-amber-300">

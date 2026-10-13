@@ -7,7 +7,7 @@ import os
 from typing import Any
 from urllib.parse import urlparse
 
-from backend.services.geelywiki_cli import geelywiki_root
+from backend.services.geelywiki_cli_config import resolve_wiki_mcp
 
 logger = logging.getLogger("tpdx.hermes.runtime_config")
 
@@ -31,7 +31,8 @@ def build_runtime_config() -> dict[str, Any]:
     """当前进程读到的有效配置。尚未有页面保存行时 data_source 为 env。"""
     chat_url = _public_url(os.getenv("HERMES_CHAT_API_URL", ""))
     model = os.getenv("HERMES_CHAT_MODEL", "").strip() or "hermes-agent"
-    wiki_root = str(geelywiki_root())
+    wiki = resolve_wiki_mcp()
+    wiki_url = str(wiki["url"])
     payload: dict[str, Any] = {
         "module": "system-config",
         "version": "0.1.0",
@@ -43,18 +44,18 @@ def build_runtime_config() -> dict[str, Any]:
             "model": model,
         },
         "wiki": {
-            "root": wiki_root,
-            "cli_override": bool(os.getenv("GEELYWIKI_CLI", "").strip()),
+            "url": wiki_url,
+            "url_source": wiki["url_source"],
         },
         "warnings": [],
     }
     if not chat_url:
         payload["warnings"].append("HERMES_CHAT_API_URL 未配置，对话上游不可用")
     logger.info(
-        "runtime config shown data_source=%s mock=%s chat_available=%s wiki_root=%s",
+        "runtime config shown data_source=%s mock=%s chat_available=%s wiki_url=%s",
         payload["data_source"],
         payload["mock_mode"],
         payload["chat"]["available"],
-        wiki_root,
+        wiki_url,
     )
     return payload

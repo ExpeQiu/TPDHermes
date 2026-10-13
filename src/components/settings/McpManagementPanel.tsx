@@ -220,38 +220,37 @@ export default function McpManagementPanel() {
 
   return (
     <div>
-      <div className="mb-4 flex flex-wrap items-center justify-end gap-3">
-        <button
-          type="button"
-          onClick={load}
-          className="rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-700 hover:border-slate-400 dark:border-slate-700 dark:text-slate-200 dark:hover:border-slate-500"
-        >
-          刷新
-        </button>
-      </div>
-
       {loading && <p className="text-sm text-slate-500">加载中…</p>}
       {error && <p className="text-sm text-red-500 dark:text-red-400">{error}</p>}
       {actionMsg && <p className="mt-4 text-sm text-emerald-600 dark:text-emerald-400">{actionMsg}</p>}
 
       {data && (
         <div className="space-y-4">
-          <div className="rounded-xl border border-slate-200 bg-white/80 p-4 text-sm text-slate-600 dark:border-slate-800 dark:bg-slate-900/40 dark:text-slate-400">
-            <p>
-              配置文件：<span className="text-slate-800 dark:text-slate-200">{data.config_path}</span>
-              {!data.config_exists && "（未找到）"}
-            </p>
-            <p className="mt-1">
-              Tavily 代理：
-              {data.tavily_mounted ? (
-                <span className="text-emerald-600 dark:text-emerald-400">已配置 API Key，经 tphermes-mcp 挂载</span>
-              ) : (
-                <span className="text-amber-600 dark:text-amber-400">未配置 TAVILY_API_KEY，联网工具不可用</span>
+          <div className="flex items-start justify-between gap-4 rounded-xl border border-slate-200 bg-white/80 p-4 text-sm text-slate-600 dark:border-slate-800 dark:bg-slate-900/40 dark:text-slate-400">
+            <div className="min-w-0">
+              <p>
+                配置文件：<span className="break-all text-slate-800 dark:text-slate-200">{data.config_path}</span>
+                {!data.config_exists && "（未找到）"}
+              </p>
+              <p className="mt-1">
+                Tavily 代理：
+                {data.tavily_mounted ? (
+                  <span className="text-emerald-600 dark:text-emerald-400">已配置 API Key，经 tphermes-mcp 挂载</span>
+                ) : (
+                  <span className="text-amber-600 dark:text-amber-400">未配置 TAVILY_API_KEY，联网工具不可用</span>
+                )}
+              </p>
+              {!data.writable && (
+                <p className="mt-1 text-amber-600 dark:text-amber-400">当前环境对配置目录不可写，只能查看不能保存。</p>
               )}
-            </p>
-            {!data.writable && (
-              <p className="mt-1 text-amber-600 dark:text-amber-400">当前环境对配置目录不可写，只能查看不能保存。</p>
-            )}
+            </div>
+            <button
+              type="button"
+              onClick={load}
+              className="shrink-0 rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-700 hover:border-slate-400 dark:border-slate-700 dark:text-slate-200 dark:hover:border-slate-500"
+            >
+              刷新
+            </button>
           </div>
 
           {data.servers.length === 0 && (

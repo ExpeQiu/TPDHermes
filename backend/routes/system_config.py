@@ -2,10 +2,16 @@
 
 from __future__ import annotations
 
+import logging
+
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
+logger = logging.getLogger("tpdx.hermes.system_config")
+
 from backend.services.cli_token import accept_agent_token, verify_access_token
+from backend.services.external_mcp import probe_external_mcp, resolve_external_mcp, save_external_mcp
+from backend.services.geelywiki_cli_config import probe_wiki_mcp, resolve_wiki_mcp, save_wiki_mcp
 from backend.services.runtime_config import build_runtime_config
 from tpdhermes.capabilities import public_config, resolve_token, save_document
 
@@ -28,6 +34,18 @@ class CliConfigPatch(BaseModel):
 
 class CliTokenVerifyIn(BaseModel):
     token: str | None = None
+
+
+class WikiMcpSave(BaseModel):
+    url: str = ""
+
+
+class WikiMcpProbe(BaseModel):
+    url: str = ""
+
+
+class ExternalMcpSave(BaseModel):
+    mcp_url: str = ""
 
 
 @router.get("/config")
@@ -64,3 +82,50 @@ def update_cli_capabilities(body: CliConfigPatch) -> dict:
 def verify_cli_token(body: CliTokenVerifyIn) -> dict:
     token = body.token if body.token is not None else resolve_token()
     return verify_access_token(token)
+
+
+@router.get("/wiki-mcp")
+def get_wiki_mcp() -> dict:
+    return resolve_wiki_mcp()
+
+
+@router.put("/wiki-mcp")
+def update_wiki_mcp(body: WikiMcpSave) -> dict:
+    try:
+        saved = save_wiki_mcp(url=body.url)
+    except OSError as exc:
+        logger.error("geelywiki mcp config write failed err=%s", exc)
+        raise HTTPException(status_code=500, detail=f"无法写入配置文件: {exc}") from exc
+    logger.info("geelywiki mcp config updated url_source=%s", saved["url_source"])
+    return saved
+
+
+@router.post("/wiki-mcp/probe")
+def probe_wiki_mcp_route(body: WikiMcpProbe) -> dict:
+    return probe_wiki_mcp(url=body.url)
+
+
+@router.get("/external-mcp")
+def get_external_mcp() -> dict:
+    return resolve_external_mcp()
+
+
+@router.put("/external-mcp/{provider_id}")
+def update_external_mcp(provider_id: str, body: ExternalMcpSave) -> dict:
+    try:
+        saved = save_external_mcp(provider_id, mcp_url=body.mcp_url)
+    except KeyError:
+        raise HTTPException(status_code=404, detail=f"未知三方 MCP: {provider_id}") from None
+    except OSError as exc:
+        logger.error("external mcp config write failed provider=%s err=%s", provider_id, exc)
+        raise HTTPException(status_code=500, detail=f"无法写入配置文件: {exc}") from exc
+    logger.info("external mcp updated provider=%s", provider_id)
+    return saved
+
+
+@router.post("/external-mcp/{provider_id}/probe")
+def probe_external_mcp_route(provider_id: str, body: ExternalMcpSave) -> dict:
+    try:
+        return probe_external_mcp(provider_id, mcp_url=body.mcp_url)
+    except KeyError:
+        raise HTTPException(status_code=404, detail=f"未知三方 MCP: {provider_id}") from None

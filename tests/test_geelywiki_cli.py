@@ -8,6 +8,11 @@ from pathlib import Path
 import pytest
 
 from backend.services.geelywiki_cli import GeelyWikiCliError, fetch_pages_via_cli, run_geelywiki_cli
+
+
+@pytest.fixture(autouse=True)
+def _isolate_wiki_cli_config(tmp_path, monkeypatch):
+    monkeypatch.setenv("TPDHERMES_GEELYWIKI_CLI_CONFIG", str(tmp_path / "absent-geelywiki-cli.json"))
 from backend.services.geelywiki_ingest import ingest_geelywiki
 from backend.services.kb_contract import GEELYWIKI_PAGES_COLLECTION
 
@@ -66,10 +71,14 @@ def test_fetch_pages_via_cli_falls_back_to_list_get(monkeypatch):
     assert payload["pages"][0]["slug"] == "demo-xingyao"
 
 
-def test_ingest_from_cli_demo_dry_run(tmp_path: Path, monkeypatch):
+def test_ingest_from_mcp_demo_dry_run(tmp_path: Path, monkeypatch):
     monkeypatch.setattr(
-        "backend.services.geelywiki_cli.run_geelywiki_cli",
-        lambda args, **kwargs: EXPORT,
+        "backend.services.geelywiki_mcp.fetch_pages_via_mcp",
+        lambda **kwargs: {
+            "publish_scope": "internal",
+            "data_source": "demo",
+            "pages": EXPORT["pages"],
+        },
     )
     report = ingest_geelywiki(
         archive_root=tmp_path / "archive",
@@ -78,7 +87,7 @@ def test_ingest_from_cli_demo_dry_run(tmp_path: Path, monkeypatch):
         demo=True,
     )
     assert report["ok"] is True
-    assert str(report["source"]).startswith("cli:")
+    assert str(report["source"]).startswith("mcp:")
     assert report["ingest"]["collection"] == GEELYWIKI_PAGES_COLLECTION
     assert report["claim_docs"] >= 1
     snap = Path(report["snapshot"]) / "pages.json"

@@ -24,6 +24,8 @@ import {
 import { fetchUserAccess, type UserAccessState } from "@/lib/rbac";
 import { isSystemAdminRole } from "@/lib/user-admin";
 import { CONTENT_MAX_CLASS } from "@/lib/content-shell";
+import ExternalMcpPanel from "@/components/settings/ExternalMcpPanel";
+import GeelyWikiMcpPanel from "@/components/settings/GeelyWikiMcpPanel";
 import McpManagementPanel from "@/components/settings/McpManagementPanel";
 import RuntimeConfigPanel from "@/components/settings/RuntimeConfigPanel";
 import CliCapabilitiesPanel from "@/components/settings/CliCapabilitiesPanel";
@@ -46,6 +48,12 @@ type SettingsTab = "runtime" | "cli" | "theme" | "identity" | "mcp" | "pteam" | 
 
 const SETTINGS_TABS: { id: SettingsTab; label: string; description: string }[] = [
   {
+    id: "identity",
+    label: "用户与身份",
+    description:
+      "统一 User ID 用于跨 PC 同步对话与场景记录；飞书登录自动绑定 feishu:*，也可生成或填写自定义 ID。",
+  },
+  {
     id: "runtime",
     label: "运行配置",
     description: "当前进程的有效配置。对话上游、模型、Wiki 与 Mock 在此查看，密钥不展示。",
@@ -57,16 +65,10 @@ const SETTINGS_TABS: { id: SettingsTab; label: string; description: string }[] =
       "其他 Agent 凭接入 Token 通过 CLI 连接本系统，并执行已开放的指令。每个子功能可单独开关。",
   },
   {
-    id: "identity",
-    label: "用户与身份",
-    description:
-      "统一 User ID 用于跨 PC 同步对话与场景记录；飞书登录自动绑定 feishu:*，也可生成或填写自定义 ID。",
-  },
-  {
     id: "mcp",
     label: "MCP 管理",
     description:
-      "管理 Hermes-agent 可调用的 MCP 服务与工具白名单；配置写入 deploy/hermes-agent/config.yaml，修改后需重启 hermes-agent。",
+      "管理 Hermes-agent 的 MCP 服务。GeelyWiki 与 Autocar Wiki 在同一块里切换；地址单独保存，不写入 mcp_servers。Hermes MCP 修改写入 deploy/hermes-agent/config.yaml，需重启 hermes-agent。",
   },
   {
     id: "pteam",
@@ -89,6 +91,7 @@ const THEME_OPTIONS: { value: "light" | "dark"; label: string }[] = [
 ];
 
 function parseTab(raw: string | null): SettingsTab {
+  if (raw === "external") return "mcp";
   if (
     raw === "runtime" ||
     raw === "cli" ||
@@ -123,6 +126,9 @@ function SettingsPageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const activeTab = parseTab(searchParams.get("tab"));
+  const [wikiPane, setWikiPane] = useState<"geely" | "autocar">(
+    searchParams.get("tab") === "external" ? "autocar" : "geely",
+  );
 
   const [userId, setUserId] = useState("");
   const [access, setAccess] = useState<UserAccessState | null>(null);
@@ -349,7 +355,38 @@ function SettingsPageContent() {
           )}
 
           {activeTab === "mcp" && (
-            <div className="mt-4">
+            <div className="mt-4 space-y-8">
+              <div>
+                <div role="tablist" aria-label="知识 MCP" className="flex flex-wrap gap-2">
+                  {(
+                    [
+                      ["geely", "GeelyWiki"],
+                      ["autocar", "Autocar Wiki"],
+                    ] as const
+                  ).map(([id, label]) => {
+                    const selected = wikiPane === id;
+                    return (
+                      <button
+                        key={id}
+                        type="button"
+                        role="tab"
+                        aria-selected={selected}
+                        onClick={() => setWikiPane(id)}
+                        className={`rounded-lg px-3 py-1.5 text-sm font-medium transition ${
+                          selected
+                            ? "bg-slate-900 text-white dark:bg-white dark:text-slate-900"
+                            : "text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-200"
+                        }`}
+                      >
+                        {label}
+                      </button>
+                    );
+                  })}
+                </div>
+                <div className="mt-4">
+                  {wikiPane === "geely" ? <GeelyWikiMcpPanel /> : <ExternalMcpPanel />}
+                </div>
+              </div>
               <McpManagementPanel />
             </div>
           )}

@@ -377,14 +377,14 @@ def ingest_geelywiki(
     arch = geelywiki_archive_root(str(archive_root) if archive_root else None)
     source_label = "cli"
     if from_cli or demo:
-        from backend.services.geelywiki_cli import GeelyWikiCliError, fetch_pages_via_cli
+        from backend.services.geelywiki_mcp import GeelyWikiMcpError, fetch_pages_via_mcp
 
         try:
-            payload = fetch_pages_via_cli(demo=demo)
-        except GeelyWikiCliError as exc:
-            logger.exception("geelywiki cli fetch failed")
-            return {"ok": False, "error": str(exc), "source": "cli"}
-        source_label = f"cli:{payload.get('data_source') or 'live'}"
+            payload = fetch_pages_via_mcp(demo=demo)
+        except GeelyWikiMcpError as exc:
+            logger.exception("geelywiki mcp fetch failed")
+            return {"ok": False, "error": str(exc), "source": "mcp"}
+        source_label = f"mcp:{payload.get('data_source') or 'live'}"
         snap = snapshot_payload(payload, arch, build_id, source_label=source_label)
         src = snap / "pages.json"
     else:

@@ -8,7 +8,8 @@ from backend import app
 from backend.services.runtime_config import build_runtime_config
 
 
-def test_snapshot_omits_secrets(monkeypatch):
+def test_snapshot_omits_secrets(monkeypatch, tmp_path):
+    monkeypatch.setenv("TPDHERMES_GEELYWIKI_MCP_CONFIG", str(tmp_path / "absent-geelywiki-mcp.json"))
     monkeypatch.setenv("HERMES_CHAT_API_URL", "http://user:secret@127.0.0.1:8642/v1/chat/completions")
     monkeypatch.setenv("HERMES_CHAT_API_KEY", "sk-should-not-leak")
     monkeypatch.setenv("HERMES_CHAT_MODEL", "hermes-agent")
@@ -24,7 +25,7 @@ def test_snapshot_omits_secrets(monkeypatch):
     assert payload["chat"]["target"] == "http://127.0.0.1:8642/v1/chat/completions"
     assert "sk-should-not-leak" not in blob
     assert "secret" not in blob
-    assert "wiki" in payload and payload["wiki"]["root"]
+    assert "wiki" in payload and payload["wiki"]["url"]
 
 
 def test_system_config_route():

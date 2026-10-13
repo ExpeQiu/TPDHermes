@@ -38,8 +38,12 @@ def geelywiki_root(explicit: str | None = None) -> Path:
     return DEFAULT_GEELYWIKI_ROOT
 
 
-def geelywiki_cli_argv(root: Path | None = None) -> list[str]:
-    override = (os.getenv("GEELYWIKI_CLI") or "").strip()
+def geelywiki_cli_argv(root: Path | None = None, *, cli: str | None = None) -> list[str]:
+    """cli 为 None 时读 GEELYWIKI_CLI；传入字符串（含空）则按该值执行。"""
+    if cli is None:
+        override = (os.getenv("GEELYWIKI_CLI") or "").strip()
+    else:
+        override = cli.strip()
     if override:
         return override.split()
     wiki = root or geelywiki_root()
@@ -54,9 +58,10 @@ def run_geelywiki_cli(
     demo: bool = False,
     timeout: float = CLI_TIMEOUT_SEC,
     root: Path | None = None,
+    cli: str | None = None,
 ) -> dict[str, Any]:
     wiki = root or geelywiki_root()
-    cmd = [*geelywiki_cli_argv(wiki), "--format", "json", "-q"]
+    cmd = [*geelywiki_cli_argv(wiki, cli=cli), "--format", "json", "-q"]
     if demo:
         cmd.append("--demo")
     cmd.extend(args)
