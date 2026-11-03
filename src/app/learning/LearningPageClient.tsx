@@ -38,6 +38,17 @@ type WeeklyReportSummary = {
   generated_at?: string;
 };
 
+type SkillChange = {
+  skill: string;
+  action: "patched" | "created" | "restored" | string;
+  version?: string;
+  at?: string;
+  source?: string;
+  rule_id?: string;
+  support?: number;
+  rule?: string;
+};
+
 type FeedbackStats = {
   days: number;
   total: number;
@@ -58,6 +69,15 @@ function MetricCard({ label, value, hint }: { label: string; value: string; hint
       {hint ? <p className="mt-1 text-xs text-slate-500">{hint}</p> : null}
     </div>
   );
+}
+
+function changeActionLabel(action: string): string {
+  const map: Record<string, string> = {
+    patched: "已改写",
+    created: "新建",
+    restored: "已回滚",
+  };
+  return map[action] ?? action;
 }
 
 function signalTypeLabel(t: string): string {
@@ -106,6 +126,7 @@ export default function LearningPageClient() {
   const [error, setError] = useState("");
   const [stats, setStats] = useState<FeedbackStats | null>(null);
   const [signals, setSignals] = useState<LearningSignal[]>([]);
+  const [changes, setChanges] = useState<SkillChange[]>([]);
   const [report, setReport] = useState<WeeklyReportSummary | null>(null);
   const [reportMeta, setReportMeta] = useState<{ id?: string; week_start?: string; created_at?: string } | null>(
     null,
@@ -116,9 +137,10 @@ export default function LearningPageClient() {
     setLoading(true);
     setError("");
     try {
-      const [statsRes, signalsRes, reportRes] = await Promise.all([
+      const [statsRes, signalsRes, changesRes, reportRes] = await Promise.all([
         apiGet<FeedbackStats>(`/feedback/stats?days=${days}`),
         apiGet<{ items: LearningSignal[] }>("/learning/signals?limit=50"),
+        apiGet<{ items: SkillChange[] }>(`/learning/changes?days=${days}&limit=50`),
         apiGet<{
           report: {
             id: string;
@@ -130,6 +152,7 @@ export default function LearningPageClient() {
       ]);
       setStats(statsRes);
       setSignals(signalsRes.items ?? []);
+      setChanges(changesRes.items ?? []);
       if (reportRes.report) {
         setReport(reportRes.report.summary ?? null);
         setReportMeta({
@@ -159,6 +182,19 @@ export default function LearningPageClient() {
       await load();
     } catch (e) {
       setError(e instanceof Error ? e.message : "分析失败");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const runEvolve = async () => {
+    setBusy(true);
+    setError("");
+    try {
+      await apiPost(`/learning/evolve?days=${days}`, {});
+      await load();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "复盘失败");
     } finally {
       setBusy(false);
     }
@@ -208,7 +244,7 @@ export default function LearningPageClient() {
             <p className="text-xs uppercase tracking-[0.2em] text-slate-500">系统成长性</p>
             <h1 className="mt-2 text-3xl font-bold">学习中心</h1>
             <p className="mt-2 max-w-2xl text-sm text-slate-500">
-              汇总 Chat 反馈产生的学习信号与周报摘要。经验正文请在{" "}
+              汇总反馈信号、周报，以及静默复盘写进技能的改写、新建和回滚。经验正文请在{" "}
               <Link href="/knowledge?mode=experience" className="text-blue-600 hover:underline dark:text-blue-400">
                 知识库 · 经验库
               </Link>{" "}
@@ -244,6 +280,14 @@ export default function LearningPageClient() {
             <button
               type="button"
               disabled={busy}
+              onClick={() => void runEvolve()}
+              className="rounded-lg bg-emerald-700 px-3 py-2 text-sm text-white hover:bg-emerald-600 disabled:opacity-50"
+            >
+              复盘对话
+            </button>
+            <button
+              type="button"
+              disabled={busy}
               onClick={() => void runWeeklyReport()}
               className="rounded-lg bg-blue-600 px-3 py-2 text-sm text-white hover:bg-blue-500"
             >
@@ -271,6 +315,47 @@ export default function LearningPageClient() {
                 value={pct(stats?.kb_miss_rate)}
                 hint="相对反馈量的 miss 信号"
               />
+            </section>
+
+            <section className="mb-6 rounded-2xl border border-slate-200 bg-white/80 p-5 dark:border-slate-800 dark:bg-slate-900/50">
+              <h2 className="text-lg font-semibold">技能变化</h2>
+              <p className="mt-1 text-xs text-slate-500">近 {days} 天 · {changes.length} 条</p>
+              <ul className="mt-4 max-h-96 space-y-3 overflow-y-auto text-sm">
+                {changes.length === 0 ? (
+                  <li className="text-slate-500">这段时间还没有写进技能的变化</li>
+                ) : (
+                  changes.map((item, index) => (
+                    <li
+                      key={`${item.skill}-${item.version}-${item.rule_id}-${item.at}-${index}`}
+                      className="rounded-lg border border-slate-200 px-3 py-2 dark:border-slate-700"
+                    >
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="rounded bg-emerald-50 px-2 py-0.5 text-xs text-emerald-800 dark:bg-emerald-950/50 dark:text-emerald-300">
+                          {changeActionLabel(item.action)}
+                        </span>
+                        <Link
+                          href={`/skills/${encodeURIComponent(item.skill)}`}
+                          className="font-medium text-blue-600 hover:underline dark:text-blue-400"
+                        >
+                          {item.skill}
+                        </Link>
+                        {item.version ? (
+                          <span className="text-xs text-slate-500">v{item.version}</span>
+                        ) : null}
+                        {item.support ? (
+                          <span className="text-xs text-slate-500">依据 {item.support} 次</span>
+                        ) : null}
+                        {item.at ? (
+                          <span className="text-xs text-slate-400">{item.at.slice(0, 19)}</span>
+                        ) : null}
+                      </div>
+                      {item.rule ? (
+                        <p className="mt-1 text-slate-700 dark:text-slate-300">{item.rule}</p>
+                      ) : null}
+                    </li>
+                  ))
+                )}
+              </ul>
             </section>
 
             <div className="grid gap-6 lg:grid-cols-2">

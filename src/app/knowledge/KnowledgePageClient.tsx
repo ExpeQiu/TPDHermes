@@ -24,6 +24,7 @@ import KnowledgeIngestWorkspace, {
   type KnowledgeIngestPrefill,
 } from "@/app/knowledge/components/KnowledgeIngestWorkspace";
 import KnowledgeAutoGovern from "@/app/knowledge/components/KnowledgeAutoGovern";
+import KnowledgeCatalogPanel from "@/app/knowledge/components/KnowledgeCatalogPanel";
 import KnowledgePolicyDomain from "@/app/knowledge/components/KnowledgePolicyDomain";
 import { getKnowledgeQueryCache } from "@/app/knowledge/knowledge-query-cache";
 import {
@@ -968,6 +969,9 @@ function CollectionGovernPanel({
   busy,
   message,
   onClear,
+  onDelete,
+  projects,
+  onReload,
 }: {
   collections: Collection[];
   projectNames: Record<string, string>;
@@ -976,6 +980,9 @@ function CollectionGovernPanel({
   busy: boolean;
   message: string | null;
   onClear: (name: string, label: string, count: number) => void;
+  onDelete: (name: string, label: string, count: number) => void;
+  projects: ProjectLite[];
+  onReload: () => void;
 }) {
   const [policyId, setPolicyId] = useState<string | null>(null);
   const [allowed, setAllowed] = useState<string[] | null>(null);
@@ -1044,7 +1051,7 @@ function CollectionGovernPanel({
       <div className="rounded-2xl border border-slate-200 bg-white p-4 dark:border-slate-700 dark:bg-slate-900/50">
         <p className="text-sm font-medium text-slate-900 dark:text-white">合集清理与写入权限</p>
         <p className="mt-1 text-sm leading-6 text-slate-500">
-          针对单个合集清空内容，或按已发布策略切换它能不能被写入。
+          清空只删合集里的知识，合集还在。删除会先清空里面的知识，再把合集本身去掉。也可以按已发布策略切换能不能写入。
         </p>
         <label className="mt-3 block text-xs">
           <span className="text-slate-500">合集</span>
@@ -1087,6 +1094,21 @@ function CollectionGovernPanel({
           </button>
           <button
             type="button"
+            disabled={!current || busy}
+            onClick={() =>
+              current &&
+              onDelete(
+                current.name,
+                kbCollectionLabel(current.name, { projectNames }),
+                current.entry_count,
+              )
+            }
+            className="rounded-lg bg-rose-600 px-3 py-1.5 text-sm text-white hover:bg-rose-500 disabled:opacity-40"
+          >
+            删除合集
+          </button>
+          <button
+            type="button"
             disabled={!current || permBusy || !policyId || allowed == null}
             onClick={() => void toggleWrite()}
             className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm text-slate-800 hover:bg-slate-100 disabled:opacity-40 dark:border-slate-600 dark:text-slate-200"
@@ -1096,7 +1118,7 @@ function CollectionGovernPanel({
         </div>
         {!policyId ? (
           <p className="mt-3 text-xs text-amber-800 dark:text-amber-200">
-            还没有已发布策略，写入权限先不能改。清空合集仍然可用。
+            还没有已发布策略，写入权限先不能改。清空和删除合集仍然可用。
           </p>
         ) : allowed == null ? (
           <p className="mt-3 text-xs text-slate-500">当前策略没有写入白名单，合集默认可写。</p>
@@ -1108,6 +1130,14 @@ function CollectionGovernPanel({
         {permMessage ? <p className="mt-2 text-xs text-slate-600 dark:text-slate-300">{permMessage}</p> : null}
         {message ? <p className="mt-2 text-xs text-amber-800 dark:text-amber-200">{message}</p> : null}
       </div>
+      <KnowledgeCatalogPanel
+        collections={visible}
+        projects={projects}
+        projectNames={projectNames}
+        busy={busy}
+        onDeleteCollection={onDelete}
+        onReload={onReload}
+      />
     </div>
   );
 }
@@ -2186,17 +2216,24 @@ export default function KnowledgePageClient({
     );
   };
 
+  const confirmCollectionName = (collectionName: string, notice: string) => {
+    if (!window.confirm(notice)) return "cancel" as const;
+    const typed = window.prompt(
+      `二次确认：请原样输入内部合集名 “${collectionName}”`,
+    );
+    if (typed == null) return "cancel" as const;
+    if (typed.trim() !== collectionName) return "mismatch" as const;
+    return "ok" as const;
+  };
+
   const deleteCollectionAll = async (collectionName: string, label: string, count: number) => {
     if (USE_MOCK_KB || entryManageBusy) return;
-    if (
-      !window.confirm(
-        `确定删除合集「${label}」下的全部内容？\n约 ${count} 条缓存 / 全部 Chroma chunk，不可恢复。`,
-      )
-    ) {
-      return;
-    }
-    const typed = window.prompt(`二次确认：请输入合集名 "${collectionName}" 以继续删除`);
-    if (typed?.trim() !== collectionName) {
+    const gate = confirmCollectionName(
+      collectionName,
+      `确定清空合集「${label}」下的全部内容？\n约 ${count} 条缓存 / 全部 Chroma chunk，合集本身会保留，内容不可恢复。`,
+    );
+    if (gate === "cancel") return;
+    if (gate === "mismatch") {
       setEntryManageMessage("合集名不匹配，已取消删除。");
       return;
     }
@@ -2216,10 +2253,56 @@ export default function KnowledgePageClient({
       setTreeNodeDocFilter(null);
       await reloadKbBrowse({ force: true });
       await reloadBrowseTree({ force: true });
-      setEntryManageMessage(`已删除合集：${label}`);
+      setEntryManageMessage(`已清空合集内容：${label}`);
     } catch (e) {
       const msg = e instanceof Error ? e.message : "合集删除失败";
       setEntryManageMessage(msg.includes("404") ? "合集删除接口不可用，请重启后端。" : msg);
+    } finally {
+      setEntryManageBusy(false);
+    }
+  };
+
+  const deleteCollectionEntity = async (collectionName: string, label: string, count: number) => {
+    if (USE_MOCK_KB || entryManageBusy) return;
+    const gate = confirmCollectionName(
+      collectionName,
+      `确定删除合集「${label}」？\n会先清空其中约 ${count} 条知识，再删除合集本身，不可恢复。`,
+    );
+    if (gate === "cancel") return;
+    if (gate === "mismatch") {
+      setEntryManageMessage("合集名不匹配，已取消删除。");
+      return;
+    }
+    setEntryManageBusy(true);
+    setEntryManageMessage(null);
+    try {
+      await apiDelete(
+        `/kb/collections/${encodeURIComponent(collectionName)}?confirm=true&project_id=__all__`,
+      );
+      if (selectedEntry?.collection === collectionName) {
+        setSelectedEntry(null);
+        setEntryEditing(false);
+      }
+      if (filterCollection === collectionName) {
+        setFilterCollection(null);
+      }
+      if (governCollection === collectionName) {
+        setGovernCollection("");
+      }
+      setTreeNodeDocFilter(null);
+      setCollections((prev) => prev.filter((col) => col.name !== collectionName));
+      await reloadKbBrowse({ force: true });
+      await reloadBrowseTree({ force: true });
+      setEntryManageMessage(`已删除合集：${label}`);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "合集删除失败";
+      if (msg.includes("collection_drop_failed")) {
+        setEntryManageMessage("合集内容已清空，但删除合集本身失败。可以再试一次删除。");
+      } else if (msg.includes("404")) {
+        setEntryManageMessage("删除合集接口不可用，请重启后端。");
+      } else {
+        setEntryManageMessage(msg);
+      }
     } finally {
       setEntryManageBusy(false);
     }
@@ -4897,6 +4980,12 @@ export default function KnowledgePageClient({
           busy={entryManageBusy}
           message={entryManageMessage}
           onClear={(name, label, count) => void deleteCollectionAll(name, label, count)}
+          onDelete={(name, label, count) => void deleteCollectionEntity(name, label, count)}
+          projects={projects}
+          onReload={() => {
+            void reloadKbBrowse({ force: true });
+            void reloadBrowseTree({ force: true });
+          }}
         />
       ) : (
         <KnowledgePolicyDomain active={surface === "govern" && governPane === "policy"} embedded />

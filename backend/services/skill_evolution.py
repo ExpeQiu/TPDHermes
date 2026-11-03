@@ -614,3 +614,104 @@ async def evolve_recent(
         "actions": len(actions),
         **applied,
     }
+
+
+_PATCH_LOG = re.compile(r"^自进化 ([0-9a-f]+) support=(\d+)\s*$")
+_RULE_LINE = re.compile(r"遵循：(.+?)（依据 (\d+) 次） <!-- evolved:([0-9a-f]+) -->")
+_RESTORE_LOG = re.compile(r"^restore from (\S+)\s*$")
+
+
+def _rules_in_skill_md(path: Path) -> dict[str, dict[str, Any]]:
+    if not path.is_file():
+        return {}
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError:
+        return {}
+    found: dict[str, dict[str, Any]] = {}
+    for match in _RULE_LINE.finditer(text):
+        found[match.group(3)] = {"rule": match.group(1).strip(), "support": int(match.group(2))}
+    return found
+
+
+def _history_time(raw: str | None) -> datetime | None:
+    text = (raw or "").strip()
+    if not text:
+        return None
+    try:
+        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is not None:
+        parsed = parsed.replace(tzinfo=None)
+    return parsed
+
+
+async def list_skill_changes(
+    db: AsyncSession,
+    *,
+    days: int = 14,
+    limit: int = 50,
+    loader: SkillLoader | None = None,
+) -> list[dict[str, Any]]:
+    """列出近期技能改写、新建和回滚，供学习中心展示。"""
+    window = max(1, min(int(days), 60))
+    since = datetime.now() - timedelta(days=window)
+    skill_loader = loader or SkillLoader()
+    rows = (await db.execute(select(Skill))).scalars().all()
+    changes: list[dict[str, Any]] = []
+    for skill in rows:
+        try:
+            history = json.loads(skill.version_history or "[]")
+        except json.JSONDecodeError:
+            history = []
+        if not isinstance(history, list):
+            continue
+        rules = _rules_in_skill_md(skill_loader.skills_root / skill.name / "SKILL.md")
+        for entry in history:
+            if not isinstance(entry, dict):
+                continue
+            at_raw = str(entry.get("installed_at") or "")
+            at = _history_time(at_raw)
+            if at is not None and at < since:
+                continue
+            changelog = str(entry.get("changelog") or "")
+            version = str(entry.get("version") or "")
+            base = {
+                "skill": skill.name,
+                "version": version,
+                "at": at_raw,
+                "source": skill.source or "",
+            }
+            patch = _PATCH_LOG.match(changelog)
+            if patch:
+                rule_id = patch.group(1)
+                detail = rules.get(rule_id) or {}
+                changes.append(
+                    {
+                        **base,
+                        "action": "patched",
+                        "rule_id": rule_id,
+                        "support": int(detail.get("support") or patch.group(2)),
+                        "rule": str(detail.get("rule") or ""),
+                    }
+                )
+                continue
+            restored = _RESTORE_LOG.match(changelog)
+            if restored:
+                changes.append({**base, "action": "restored", "rule_id": "", "support": 0, "rule": ""})
+                continue
+            if (skill.source or "") == "learned" and changelog == "Initial install":
+                rule_id, detail = next(iter(rules.items()), ("", {}))
+                changes.append(
+                    {
+                        **base,
+                        "action": "created",
+                        "rule_id": rule_id,
+                        "support": int(detail.get("support") or 0) if isinstance(detail, dict) else 0,
+                        "rule": str(detail.get("rule") or "") if isinstance(detail, dict) else "",
+                    }
+                )
+    changes.sort(key=lambda item: item.get("at") or "", reverse=True)
+    logger.info("skill_evolution changes days=%s count=%s", window, len(changes))
+    return changes[: max(1, min(limit, 100))]

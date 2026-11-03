@@ -38,6 +38,7 @@ from backend.services.kb_entry_manage import (
     create_kb_manual_entry,
     delete_kb_collection,
     delete_kb_entry,
+    drop_kb_collection,
     update_kb_entry,
 )
 from backend.services.kb_write import add_kb_harvest_entry
@@ -321,6 +322,28 @@ async def kb_delete_collection_entries(
     if not confirm:
         raise HTTPException(status_code=400, detail="confirm=true required")
     result = await delete_kb_collection(
+        collection=collection_name,
+        project_id=project_id,
+        chroma_url=chroma_url,
+        sync_cache=sync_cache,
+    )
+    if not result.get("ok"):
+        raise HTTPException(status_code=400, detail=result.get("message") or "delete_failed")
+    return result
+
+
+@router.delete("/collections/{collection_name}")
+async def kb_drop_collection(
+    collection_name: str,
+    confirm: bool = Query(False, description="必须为 true 才执行删除"),
+    project_id: str = Query("__all__"),
+    sync_cache: bool = Query(True),
+    chroma_url: Optional[str] = Query(None),
+):
+    """先清空合集内全部知识，再删除合集本身。"""
+    if not confirm:
+        raise HTTPException(status_code=400, detail="confirm=true required")
+    result = await drop_kb_collection(
         collection=collection_name,
         project_id=project_id,
         chroma_url=chroma_url,

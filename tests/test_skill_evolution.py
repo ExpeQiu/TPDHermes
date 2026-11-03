@@ -21,6 +21,7 @@ from backend.services.skill_evolution import (
     Episode,
     append_evolved_rule,
     evolve_recent,
+    list_skill_changes,
     normalize_rule,
     plan_actions,
     rule_id_for,
@@ -164,6 +165,10 @@ async def test_signal_patches_skill_and_restore_keeps_previous_snapshot(tmp_path
             first = await evolve_recent(db, days=14, loader=loader)
             assert first["patched"][0]["skill"] == name
             assert first["patched"][0]["version"] == "1.0.1"
+            changes = await list_skill_changes(db, days=14, loader=loader)
+            assert changes[0]["action"] == "patched"
+            assert changes[0]["skill"] == name
+            assert "三条要点" in changes[0]["rule"]
             live = (skills / name / "SKILL.md").read_text(encoding="utf-8")
             assert "原步骤" in live
             assert "三条要点" in live

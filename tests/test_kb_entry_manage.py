@@ -63,6 +63,86 @@ async def test_delete_cached_entry_by_id_chunk_ref():
     assert ok is True
 
 
+@patch("backend.services.kb_entry_manage.delete_cached_entries_by_collection")
+@patch("backend.services.kb_entry_manage.ChromaHttpClient")
+@pytest.mark.asyncio
+async def test_drop_kb_collection_purges_then_drops(MockClient, mock_cache):
+    order: list[str] = []
+    client = MockClient.return_value
+    client.heartbeat.return_value = True
+    client.collection_names.return_value = ["public.test.col"]
+    client.list_all_ids.return_value = ["a_chunk_1", "b_chunk_2"]
+
+    def _delete_chunks(*_args, **_kwargs):
+        order.append("chunks")
+
+    def _drop(_name):
+        order.append("drop")
+        return "dropped"
+
+    async def _cache(_name):
+        order.append("cache")
+        return 3
+
+    client.delete.side_effect = _delete_chunks
+    client.drop_collection.side_effect = _drop
+    mock_cache.side_effect = _cache
+
+    from backend.services.kb_entry_manage import drop_kb_collection
+
+    result = await drop_kb_collection(collection="public.test.col", chroma_url="http://chroma")
+
+    assert result["ok"] is True
+    assert result["purged"] is True
+    assert result["dropped"] is True
+    assert result["removed_chunks"] == 2
+    assert result["cache_removed"] == 3
+    assert result["chroma_status"] == "dropped"
+    assert order == ["chunks", "cache", "drop"]
+    client.drop_collection.assert_called_once_with("public.test.col")
+
+
+@patch("backend.services.kb_entry_manage.delete_cached_entries_by_collection", return_value=0)
+@patch("backend.services.kb_entry_manage.ChromaHttpClient")
+@pytest.mark.asyncio
+async def test_drop_kb_collection_stops_when_purge_fails(MockClient, mock_cache):
+    client = MockClient.return_value
+    client.heartbeat.return_value = True
+    client.collection_names.return_value = ["public.test.col"]
+    client.list_all_ids.side_effect = RuntimeError("list failed")
+
+    from backend.services.kb_entry_manage import drop_kb_collection
+
+    result = await drop_kb_collection(collection="public.test.col", chroma_url="http://chroma")
+
+    assert result["ok"] is False
+    client.drop_collection.assert_not_called()
+    mock_cache.assert_not_awaited()
+
+
+@patch("backend.services.kb_entry_manage.delete_cached_entries_by_collection", return_value=1)
+@patch("backend.services.kb_entry_manage.ChromaHttpClient")
+@pytest.mark.asyncio
+async def test_drop_kb_collection_reports_shell_failure_after_purge(MockClient, mock_cache):
+    client = MockClient.return_value
+    client.heartbeat.return_value = True
+    client.collection_names.return_value = ["public.test.col"]
+    client.list_all_ids.return_value = ["a_chunk_1"]
+    client.drop_collection.side_effect = RuntimeError("chroma 500")
+
+    from backend.services.kb_entry_manage import drop_kb_collection
+
+    result = await drop_kb_collection(collection="public.test.col", chroma_url="http://chroma")
+
+    assert result["ok"] is False
+    assert result["message"] == "collection_drop_failed"
+    assert result["purged"] is True
+    assert result["dropped"] is False
+    assert result["cache_removed"] == 1
+    client.delete.assert_called_once()
+    mock_cache.assert_awaited_once()
+
+
 @patch("backend.services.kb_entry_manage.ChromaHttpClient")
 def test_delete_collection_sync(MockClient):
     client = MockClient.return_value

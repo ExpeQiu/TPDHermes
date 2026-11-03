@@ -222,3 +222,24 @@ class ChromaHttpClient:
             timeout=self.timeout,
         )
         r.raise_for_status()
+
+    def drop_collection(self, name: str) -> str:
+        """删除整个 collection。
+
+        Chroma 0.4.x 按 UUID DELETE 会 500，必须用 collection name。
+        返回 dropped 或 gone（404，视为已不存在）。
+        """
+        col = (name or "").strip()
+        if not col:
+            raise ValueError("collection_required")
+        r = httpx.delete(
+            f"{self.base_url}/api/v1/collections/{col}",
+            timeout=self.timeout,
+        )
+        if r.status_code == 404:
+            logger.info("chroma drop_collection already gone name=%s", col)
+            return "gone"
+        if r.status_code not in (200, 204):
+            r.raise_for_status()
+        logger.info("chroma drop_collection name=%s status=%s", col, r.status_code)
+        return "dropped"

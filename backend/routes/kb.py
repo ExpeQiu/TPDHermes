@@ -363,3 +363,89 @@ async def sync_from_external(data: SyncRequest):
         skipped=result["skipped"],
         readonly_mode=kb_cache_service._sync_mode,
     )
+
+
+class CatalogDomainBody(BaseModel):
+    key: str
+    label: str
+
+
+class CatalogDomainLabelBody(BaseModel):
+    label: str
+
+
+class CatalogFolderBody(BaseModel):
+    path: str
+    domain: str
+    scope: str
+    project_id: str = ""
+    collection: str = ""
+
+
+class CatalogFolderRenameBody(BaseModel):
+    path: str
+    new_path: str
+
+
+def _catalog_or_400(result: dict):
+    if not result.get("ok"):
+        raise HTTPException(status_code=400, detail=result.get("message") or "catalog_failed")
+    return result
+
+
+@router.get("/catalog")
+async def kb_catalog_list():
+    """列出知识库范围、业务域和目录路径。"""
+    from backend.services.kb_catalog import list_catalog
+
+    return await list_catalog()
+
+
+@router.post("/catalog/domains")
+async def kb_catalog_create_domain(body: CatalogDomainBody):
+    from backend.services.kb_catalog import create_domain
+
+    return _catalog_or_400(await create_domain(key=body.key, label=body.label))
+
+
+@router.patch("/catalog/domains/{key}")
+async def kb_catalog_update_domain(key: str, body: CatalogDomainLabelBody):
+    from backend.services.kb_catalog import update_domain
+
+    return _catalog_or_400(await update_domain(key=key, label=body.label))
+
+
+@router.delete("/catalog/domains/{key}")
+async def kb_catalog_delete_domain(key: str):
+    from backend.services.kb_catalog import delete_domain
+
+    return _catalog_or_400(await delete_domain(key))
+
+
+@router.post("/catalog/folders")
+async def kb_catalog_create_folder(body: CatalogFolderBody):
+    from backend.services.kb_catalog import create_folder
+
+    return _catalog_or_400(
+        await create_folder(
+            path=body.path,
+            domain=body.domain,
+            scope=body.scope,
+            project_id=body.project_id,
+            collection=body.collection,
+        )
+    )
+
+
+@router.patch("/catalog/folders")
+async def kb_catalog_rename_folder(body: CatalogFolderRenameBody):
+    from backend.services.kb_catalog import rename_folder
+
+    return _catalog_or_400(await rename_folder(path=body.path, new_path=body.new_path))
+
+
+@router.delete("/catalog/folders")
+async def kb_catalog_delete_folder(path: str = Query(...)):
+    from backend.services.kb_catalog import delete_folder
+
+    return _catalog_or_400(await delete_folder(path))

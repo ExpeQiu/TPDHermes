@@ -9,8 +9,7 @@ import json
 import logging
 import uuid
 from datetime import datetime, timezone
-from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 from sqlalchemy import delete, or_, select
 
@@ -416,6 +415,117 @@ async def delete_kb_collection(
     result["cache_removed"] = cache_removed
     result["cache_synced"] = False
     return result
+
+
+def _purge_collection_chunks_sync(*, collection: str, chroma_url: str) -> dict[str, Any]:
+    """清空合集内 chunk。合集本身不存在时视为已经清空。"""
+    client = ChromaHttpClient(chroma_url)
+    if not client.heartbeat():
+        return {"ok": False, "message": "kb_unavailable"}
+    col = collection.strip()
+    if col not in set(client.collection_names()):
+        log.info("kb collection purge skipped absent collection=%s", col)
+        return {
+            "ok": True,
+            "collection": col,
+            "removed_chunks": 0,
+            "removed_docs": 0,
+            "chroma_present": False,
+        }
+    result = _delete_collection_sync(collection=col, chroma_url=chroma_url)
+    if result.get("ok"):
+        result["chroma_present"] = True
+    return result
+
+
+def _drop_collection_shell_sync(*, collection: str, chroma_url: str) -> dict[str, Any]:
+    client = ChromaHttpClient(chroma_url)
+    if not client.heartbeat():
+        return {"ok": False, "message": "kb_unavailable", "dropped": False}
+    col = collection.strip()
+    try:
+        status = client.drop_collection(col)
+    except Exception as exc:
+        log.exception("drop_collection failed collection=%s", col)
+        return {"ok": False, "message": str(exc), "dropped": False, "collection": col}
+    return {"ok": True, "collection": col, "chroma_status": status, "dropped": True}
+
+
+async def drop_kb_collection(
+    *,
+    collection: str,
+    project_id: str = "__all__",
+    chroma_url: str | None = None,
+    sync_cache: bool = True,
+) -> dict[str, Any]:
+    """先清空合集内知识（Chroma chunk 与 kb_cache），再删除合集本身。"""
+    chroma = (chroma_url or CHROMA_HOST).strip()
+    col = collection.strip()
+    if not col:
+        return {"ok": False, "message": "collection_required"}
+
+    purged = await asyncio.to_thread(
+        _purge_collection_chunks_sync,
+        collection=col,
+        chroma_url=chroma,
+    )
+    if not purged.get("ok"):
+        log.warning(
+            "kb collection purge failed collection=%s project_id=%s message=%s",
+            col,
+            project_id,
+            purged.get("message"),
+        )
+        return purged
+
+    cache_removed = 0
+    if sync_cache:
+        cache_removed = await delete_cached_entries_by_collection(col)
+
+    dropped = await asyncio.to_thread(
+        _drop_collection_shell_sync,
+        collection=col,
+        chroma_url=chroma,
+    )
+    if not dropped.get("ok"):
+        log.error(
+            "kb collection drop failed after purge collection=%s project_id=%s removed_chunks=%s cache_removed=%s message=%s",
+            col,
+            project_id,
+            purged.get("removed_chunks"),
+            cache_removed,
+            dropped.get("message"),
+        )
+        return {
+            "ok": False,
+            "message": "collection_drop_failed",
+            "detail": dropped.get("message"),
+            "collection": col,
+            "removed_chunks": purged.get("removed_chunks") or 0,
+            "cache_removed": cache_removed,
+            "purged": True,
+            "dropped": False,
+        }
+
+    log.info(
+        "kb collection dropped collection=%s project_id=%s removed_chunks=%s cache_removed=%s chroma_status=%s",
+        col,
+        project_id,
+        purged.get("removed_chunks"),
+        cache_removed,
+        dropped.get("chroma_status"),
+    )
+    return {
+        "ok": True,
+        "collection": col,
+        "removed_chunks": purged.get("removed_chunks") or 0,
+        "removed_docs": purged.get("removed_docs") or 0,
+        "cache_removed": cache_removed,
+        "cache_synced": False,
+        "purged": True,
+        "dropped": True,
+        "chroma_status": dropped.get("chroma_status"),
+    }
 
 
 def _create_manual_entry_sync(

@@ -218,6 +218,19 @@ async def run_skill_evolution(
     return result
 
 
+@learning_router.get("/changes")
+async def list_learning_changes(
+    days: int = Query(default=14, ge=1, le=60),
+    limit: int = Query(default=50, ge=1, le=100),
+    db: AsyncSession = Depends(get_db),
+):
+    """近期技能改写、新建与回滚。"""
+    from backend.services.skill_evolution import list_skill_changes
+
+    items = await list_skill_changes(db, days=days, limit=limit)
+    return {"items": items, "count": len(items)}
+
+
 @learning_router.get("/signals")
 async def get_learning_signals(
     limit: int = Query(default=50, ge=1, le=100),
