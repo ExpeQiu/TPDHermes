@@ -29,5 +29,8 @@
     "scene_demo": "string (场景演绎描述)",
     "evidence": "string (证据点：数据/认证/对比)",
     "cta": "string (行动号召)"
+  },
+  "execution": {
+    "type": "llm_template"
   }
 }

@@ -302,6 +302,8 @@ class SkillLoader:
                     "triggers": list(disc.get("triggers") or []),
                     "tags": list(disc.get("tags") or []),
                     "selection": str(disc.get("selection") or ""),
+                    "input_schema": meta.get("input_schema") if isinstance(meta.get("input_schema"), dict) else {},
+                    "market_category": str(meta.get("market_category") or ""),
                     "templates": templates,
                 }
             )

@@ -17,6 +17,9 @@ from backend.env_local import load_project_env
 
 load_project_env()
 
+_project_skills = os.path.join(os.path.dirname(os.path.dirname(__file__)), "skills")
+os.environ.setdefault("HERMES_PROJECT_SKILL_ROOTS", os.path.abspath(_project_skills))
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.exceptions import RequestValidationError
@@ -81,6 +84,11 @@ async def lifespan(app: FastAPI):
 
     await apply_sqlite_runtime_pragmas()
     logger.info("Database ready.")
+    from backend.db import async_session_maker
+    from backend.services.skill_lifecycle import sync_workspace_skills
+
+    async with async_session_maker() as db:
+        await sync_workspace_skills(db)
     from backend.services.kb_embedding import (
         embed_warmup_blocking_enabled,
         warmup_embed_model,

@@ -27,5 +27,8 @@
       "label": "技术IP传播策划方案",
       "path": "templates/ip_comm_plan.md"
     }
-  ]
+  ],
+  "execution": {
+    "type": "llm_template"
+  }
 }

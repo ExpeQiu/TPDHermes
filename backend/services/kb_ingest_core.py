@@ -48,7 +48,9 @@ def _deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any
 
 
 def _read_text_file(path: Path) -> str:
-    return path.read_text(encoding="utf-8", errors="replace")
+    from backend.services.document_extract import extract_to_markdown
+
+    return extract_to_markdown(path)
 
 
 def sha256_file(path: Path) -> str:

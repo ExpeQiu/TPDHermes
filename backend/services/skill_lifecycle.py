@@ -43,6 +43,34 @@ def assert_valid_skill_directory_name(name: str) -> None:
         raise ValueError("技能目录名须以字母开头，且仅含字母、数字、下划线")
 
 
+_WORKSPACE_SKIP_PREFIXES = (
+    "smoke_",
+    "cfgskill_",
+    "market_install_",
+    "market_user_",
+    "ws_upload_",
+    "mdskill_",
+)
+
+
+def is_ephemeral_skill_dir(name: str) -> bool:
+    """测试残留目录不进入工作区登记。"""
+    if not name or name.startswith("."):
+        return True
+    return name.startswith(_WORKSPACE_SKIP_PREFIXES)
+
+
+def is_workspace_content_skill(name: str, skill_dir: Path) -> bool:
+    """可登记的工作区内容包：有 skill.json，且能被加载器发现。"""
+    if is_ephemeral_skill_dir(name):
+        return False
+    if not re.match(r"^[a-zA-Z][a-zA-Z0-9_]*$", name):
+        return False
+    if not (skill_dir / "skill.json").is_file():
+        return False
+    return (skill_dir / "__init__.py").is_file() or (skill_dir / "SKILL.md").is_file()
+
+
 def upload_replace_allowed(existing: Optional[Dict[str, Any]], owner_id: str) -> bool:
     """上传 ZIP 是否允许覆盖已有技能（公共/市场技能不可覆盖）。"""
     if existing is None:
@@ -94,6 +122,107 @@ def safe_extract_zip(zf: zipfile.ZipFile, dest: Path) -> None:
         if base not in target.parents and target != base:
             raise ValueError(f"压缩包路径越界: {name}")
     zf.extractall(base)
+
+
+def _workspace_skill_payload(skill_dir: Path) -> tuple[str, str, Dict[str, Any]]:
+    """从技能包读取描述、版本和入库 config。已有行不会走这里。"""
+    meta_path = skill_dir / "skill.json"
+    try:
+        raw = json.loads(meta_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ValueError(f"skill.json 无法读取: {skill_dir.name}") from exc
+    if not isinstance(raw, dict):
+        raise ValueError(f"skill.json 不是对象: {skill_dir.name}")
+    config, _meta = derive_upload_config_with_meta(skill_dir)
+    for key in ("when", "triggers", "input_schema", "market_category"):
+        if key in raw and key not in config:
+            config[key] = raw[key]
+    if raw.get("name") and "display_name" not in config:
+        config["display_name"] = raw["name"]
+    description = str(raw.get("description") or config.get("description") or "").strip()
+    version = str(raw.get("version") or "1.0.0").strip() or "1.0.0"
+    return description, version, config
+
+
+async def sync_workspace_skills(
+    db: AsyncSession,
+    loader: Optional[SkillLoader] = None,
+) -> Dict[str, int]:
+    """
+    把工作区 skills/ 里尚未入库的内容包登记进 skills 表。
+
+    已有行不改启用状态、不覆盖配置、不删除用户上传包。
+    """
+    loader = loader or SkillLoader()
+    root = loader.skills_root
+    inserted = 0
+    skipped_existing = 0
+    skipped_test = 0
+    if not root.is_dir():
+        logger.info(
+            "skill_registry_sync inserted=0 skipped_existing=0 skipped_test=0 reason=missing_root"
+        )
+        return {"inserted": 0, "skipped_existing": 0, "skipped_test": 0}
+
+    result = await db.execute(select(Skill.name))
+    existing = {str(name) for name in result.scalars().all() if name}
+
+    for entry in sorted(root.iterdir(), key=lambda p: p.name):
+        if not entry.is_dir():
+            continue
+        name = entry.name
+        if is_ephemeral_skill_dir(name):
+            skipped_test += 1
+            continue
+        if not is_workspace_content_skill(name, entry):
+            continue
+        if name in existing:
+            skipped_existing += 1
+            continue
+        try:
+            description, version, config = _workspace_skill_payload(entry)
+        except ValueError as exc:
+            logger.warning("skill_registry_sync skip name=%s err=%s", name, exc)
+            continue
+        now = datetime.now().isoformat()
+        db.add(
+            Skill(
+                id=str(uuid.uuid4()),
+                name=name,
+                description=description,
+                config=json.dumps(config, ensure_ascii=False),
+                version=version,
+                enabled=1,
+                source="workspace",
+                owner_id="",
+                installed_at=now,
+                updated_at=now,
+                version_history=json.dumps(
+                    [{
+                        "version": version,
+                        "changelog": "workspace registry",
+                        "installed_at": now,
+                    }],
+                    ensure_ascii=False,
+                ),
+            )
+        )
+        inserted += 1
+        logger.info("skill_registry_sync insert name=%s version=%s source=workspace", name, version)
+
+    if inserted:
+        await db.commit()
+    logger.info(
+        "skill_registry_sync inserted=%s skipped_existing=%s skipped_test=%s",
+        inserted,
+        skipped_existing,
+        skipped_test,
+    )
+    return {
+        "inserted": inserted,
+        "skipped_existing": skipped_existing,
+        "skipped_test": skipped_test,
+    }
 
 
 class SkillLifecycleService:
@@ -454,6 +583,38 @@ class SkillLifecycleService:
         await self.db.refresh(skill)
         self.loader._cache.pop(name, None)
         logger.info("skill cache dropped after version update name=%s version=%s", name, version)
+        return self._skill_to_dict(skill)
+
+    async def restore_version(self, name: str, version: str) -> Dict[str, Any]:
+        """把工作区技能目录恢复到已有快照，并把数据库版本指针拨回去。"""
+        skill = await self._get_db_skill(name)
+        if not skill:
+            raise SkillNotFoundError(f"Skill '{name}' not found")
+        old_version = skill.version or "1.0.0"
+        current_snapshot = self.version_service._version_dir(name, old_version)
+        if old_version != version and not current_snapshot.exists():
+            skill_dir = self.loader.skills_root / name
+            if skill_dir.is_dir():
+                self.version_service.snapshot(name, old_version, "restore 前快照")
+                logger.info(
+                    "skill_restore presnapshot name=%s version=%s",
+                    name,
+                    old_version,
+                )
+        self.version_service.restore_files(name, version)
+        history = json.loads(skill.version_history or "[]")
+        history.append({
+            "version": version,
+            "changelog": f"restore from {old_version}",
+            "installed_at": datetime.now().isoformat(),
+        })
+        skill.version = version
+        skill.version_history = json.dumps(history, ensure_ascii=False)
+        skill.updated_at = datetime.now().isoformat()
+        await self.db.commit()
+        await self.db.refresh(skill)
+        self.loader._cache.pop(name, None)
+        logger.info("skill_restore name=%s from=%s to=%s", name, old_version, version)
         return self._skill_to_dict(skill)
 
     async def set_enabled(self, name: str, enabled: bool) -> Dict[str, Any]:

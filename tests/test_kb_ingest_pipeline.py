@@ -211,6 +211,44 @@ async def test_kb_upload_persists_doc_id_hint(tmp_path, monkeypatch):
     assert row is not None
     assert row.doc_id_hint == "stable_doc_1"
     assert Path(row.stored_path).is_file()
+    assert row.stored_path.endswith(".md")
+
+
+@pytest.mark.asyncio
+async def test_kb_upload_html_materializes_markdown(tmp_path, monkeypatch):
+    monkeypatch.setenv("KB_UPLOAD_DIR", str(tmp_path / "up"))
+    content = "<html><body><p>导入正文</p><script>nope()</script></body></html>".encode()
+    with TestClient(app) as client:
+        r = client.post(
+            "/api/v1/kb/upload",
+            files={"file": ("note.html", content, "text/html")},
+            headers=HDR_KNOWLEDGE_ADMIN,
+        )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["extracted"] is True
+    assert body["source_format"] == "html"
+    assert body["char_count"] > 0
+    async with async_session_maker() as db:
+        row = await db.get(KbSourceFile, body["upload_id"])
+    assert row is not None
+    stored = Path(row.stored_path)
+    assert stored.name.endswith(".html.extracted.md")
+    text = stored.read_text(encoding="utf-8")
+    assert "导入正文" in text
+    assert "nope" not in text
+
+
+def test_kb_upload_rejects_unknown_binary(tmp_path, monkeypatch):
+    monkeypatch.setenv("KB_UPLOAD_DIR", str(tmp_path / "up"))
+    with TestClient(app) as client:
+        r = client.post(
+            "/api/v1/kb/upload",
+            files={"file": ("blob.bin", b"\x00\x01\x02", "application/octet-stream")},
+            headers=HDR_KNOWLEDGE_ADMIN,
+        )
+    assert r.status_code == 422
+    assert "暂不支持" in r.json()["detail"]
 
 
 @patch("backend.routes.kb_ingest.queue_ingest_job")

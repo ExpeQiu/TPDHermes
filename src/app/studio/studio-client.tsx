@@ -2,7 +2,10 @@
 
 import { useEffect, useMemo, useState } from "react";
 
+import { ProjectFilesRail } from "@/components/project-files-rail";
 import { apiGet, apiPost } from "@/lib/api";
+import { decodeProjectFileSelectValue, type ProjectRecord } from "@/lib/chat-context";
+import { fetchProjectFileDetail, fetchProjectFilesUnified, type ProjectFileDetail, type ProjectFileItem } from "@/lib/co-create-api";
 import {
   STUDIO_SCENES,
   STUDIO_SKILLS,
@@ -28,7 +31,7 @@ type StudioTurnResponse = {
   reply: string;
   driver: "hermes" | "mock";
   fallback_reason: string | null;
-  log: StudioLog & { driver?: string };
+  log: StudioLog & { driver?: string; project_id?: string | null; file_id?: string | null; file_kind?: string | null };
 };
 
 type ChatMessage = { id: string; role: "user" | "assistant"; content: string };
@@ -97,11 +100,80 @@ export default function StudioClient() {
   ]);
   const [draft, setDraft] = useState("");
   const [skillId, setSkillId] = useState("V04");
+  const [projects, setProjects] = useState<ProjectRecord[]>([]);
+  const [projectId, setProjectId] = useState("");
+  const [includeProject, setIncludeProject] = useState(false);
+  const [fileKey, setFileKey] = useState<string | null>(null);
+  const [projectFiles, setProjectFiles] = useState<ProjectFileItem[]>([]);
+  const [projectFilesLoading, setProjectFilesLoading] = useState(false);
+  const [projectFilesRefreshKey, setProjectFilesRefreshKey] = useState(0);
+  const [linkedFile, setLinkedFile] = useState<ProjectFileDetail | null>(null);
   const activeSkill = studioSkillById(skillId);
+  const boundProjectId = includeProject ? projectId : "";
+  const boundProject = projects.find((project) => project.id === boundProjectId) ?? null;
   const skillReady = activeSkill.status === "ready";
 
   const selected = studio.cards.find((card) => card.id === studio.selectedCardId) ?? null;
   const activeQuote = selected && studio.selectedField ? quoteFor(selected, studio.selectedField) : "";
+
+  useEffect(() => {
+    let cancelled = false;
+    apiGet<ProjectRecord[]>("/projects/")
+      .then((rows) => {
+        if (!cancelled) setProjects(Array.isArray(rows) ? rows : []);
+      })
+      .catch((error) => {
+        console.warn("[studio] 项目列表加载失败", error);
+        if (!cancelled) setProjects([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!boundProjectId) {
+      setProjectFiles([]);
+      setProjectFilesLoading(false);
+      return;
+    }
+    let cancelled = false;
+    setProjectFilesLoading(true);
+    fetchProjectFilesUnified(boundProjectId)
+      .then((files) => {
+        if (!cancelled) setProjectFiles(files);
+      })
+      .catch((error) => {
+        console.warn("[studio] 项目文件加载失败", { project_id: boundProjectId, error });
+        if (!cancelled) setProjectFiles([]);
+      })
+      .finally(() => {
+        if (!cancelled) setProjectFilesLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [boundProjectId, projectFilesRefreshKey]);
+
+  useEffect(() => {
+    const decoded = fileKey ? decodeProjectFileSelectValue(fileKey) : null;
+    if (!boundProjectId || !decoded) {
+      setLinkedFile(null);
+      return;
+    }
+    let cancelled = false;
+    fetchProjectFileDetail(boundProjectId, decoded.id, decoded.kind)
+      .then((detail) => {
+        if (!cancelled) setLinkedFile(detail);
+      })
+      .catch((error) => {
+        console.warn("[studio] 关联文件读取失败", { project_id: boundProjectId, file: fileKey, error });
+        if (!cancelled) setLinkedFile(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [boundProjectId, fileKey]);
 
   useEffect(() => {
     let cancelled = false;
@@ -148,7 +220,14 @@ export default function StudioClient() {
     setPending(true);
     setDraft("");
     try {
-      const result = await apiPost<StudioTurnResponse>("/studio/turn", { message: content, state: base });
+      const linked = fileKey ? decodeProjectFileSelectValue(fileKey) : null;
+      const result = await apiPost<StudioTurnResponse>("/studio/turn", {
+        message: content,
+        state: base,
+        project_id: boundProjectId || null,
+        file_id: linked?.id ?? null,
+        file_kind: linked?.kind ?? null,
+      });
       console.info("[studio]", result.log);
       setStudio(result.state);
       setKernelLabel(driverLabel(result.driver, result.fallback_reason));
@@ -176,6 +255,26 @@ export default function StudioClient() {
     const selected = selectCardField(studio, cardId, "definition");
     commit("锁定当前卡", selected);
   }
+
+  const renderProjectFilesRail = (autoHide = false) => (
+    <ProjectFilesRail
+      scope="studio"
+      autoHide={autoHide}
+      projects={projects}
+      projectId={boundProjectId}
+      fileKey={fileKey}
+      files={projectFiles}
+      loading={projectFilesLoading}
+      onProjectChange={(next) => {
+        setProjectId(next);
+        setIncludeProject(Boolean(next));
+        setFileKey(null);
+        setLinkedFile(null);
+      }}
+      onFileChange={setFileKey}
+      onRefresh={() => setProjectFilesRefreshKey((value) => value + 1)}
+    />
+  );
 
   return (
     <div className="flex h-full min-h-0 flex-col lg:flex-row">
@@ -215,6 +314,14 @@ export default function StudioClient() {
           ))}
         </div>
       </aside>
+      <details className="group shrink-0 border-b border-slate-200 bg-slate-50 dark:border-slate-800 dark:bg-slate-900/40 lg:hidden">
+        <summary className="flex cursor-pointer list-none items-center justify-between px-4 py-2.5 text-sm font-medium [&::-webkit-details-marker]:hidden">
+          <span>项目文件</span>
+          <span className="text-xs text-slate-500 group-open:hidden">展开</span>
+          <span className="hidden text-xs text-slate-500 group-open:inline">收起</span>
+        </summary>
+        <div className="h-[42vh] min-h-0 border-t border-slate-200 dark:border-slate-800">{renderProjectFilesRail()}</div>
+      </details>
       <section className="flex h-[42%] min-h-0 w-full flex-col border-b border-slate-200 dark:border-slate-800 lg:h-full lg:w-[22rem] lg:shrink-0 lg:border-b-0 lg:border-r">
         <header className="border-b border-slate-200 px-4 py-3 dark:border-slate-800">
           <p className="text-xs text-slate-500">
@@ -279,7 +386,12 @@ export default function StudioClient() {
             </p>
             <h2 className="text-base font-semibold">{skillReady ? "可视化工作区" : "工作区尚未接入"}</h2>
           </div>
-          <p className="text-xs text-slate-500">{summary}</p>
+          <p className="text-xs text-slate-500">
+            {boundProject ? `项目 ${boundProject.name}` : "未绑定项目"}
+            {linkedFile ? ` · ${linkedFile.title}` : ""}
+            {" · "}
+            {summary}
+          </p>
         </header>
         {studio.blockedReason ? (
           <p className="border-b border-amber-300 bg-amber-50 px-4 py-2 text-sm text-amber-900 dark:border-amber-700 dark:bg-amber-950 dark:text-amber-100">
@@ -297,8 +409,14 @@ export default function StudioClient() {
         {skillReady ? (
         <div className="grid min-h-0 flex-1 grid-rows-2 lg:grid-cols-[minmax(0,1fr)_22rem] lg:grid-rows-1">
           <div className="min-h-0 overflow-y-auto border-b border-slate-200 p-4 dark:border-slate-800 lg:border-b-0 lg:border-r">
-            <p className="mb-2 text-xs text-slate-500">原文</p>
-            <SourcePane quote={activeQuote} />
+            <p className="mb-2 text-xs text-slate-500">{linkedFile ? `关联文件 · ${linkedFile.title}` : "原文"}</p>
+            {linkedFile ? (
+              <p className="whitespace-pre-wrap text-sm leading-7 text-slate-700 dark:text-slate-200">
+                {linkedFile.content?.trim() || "这份文件没有正文。"}
+              </p>
+            ) : (
+              <SourcePane quote={activeQuote} />
+            )}
           </div>
           <div className="min-h-0 overflow-y-auto p-4">
             <p className="mb-2 text-xs text-slate-500">技术卡</p>
@@ -352,6 +470,7 @@ export default function StudioClient() {
         </div>
         ) : null}
       </section>
+      <div className="hidden h-full min-h-0 lg:flex">{renderProjectFilesRail(true)}</div>
     </div>
   );
 }

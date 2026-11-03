@@ -11,8 +11,17 @@
     "KOL",
     "物料齐套"
   ],
-  "tags": ["传播", "素材清单", "媒介投放", "KOL"],
-  "market_tags": ["传播素材", "投放计划", "KOL"],
+  "tags": [
+    "传播",
+    "素材清单",
+    "媒介投放",
+    "KOL"
+  ],
+  "market_tags": [
+    "传播素材",
+    "投放计划",
+    "KOL"
+  ],
   "market_category": "传播物料",
   "version": "1.0.1",
   "author": "TPD Team",
@@ -24,5 +33,8 @@
     "budget": "string (预算总额)",
     "launch_date": "string (上市日期)",
     "top_selling_points": "array of string (核心卖点，用于物料内容方向)"
+  },
+  "execution": {
+    "type": "llm_template"
   }
 }

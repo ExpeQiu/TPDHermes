@@ -26,5 +26,8 @@
       "label": "IP技术展具概念策划书",
       "path": "templates/display_concept.md"
     }
-  ]
+  ],
+  "execution": {
+    "type": "llm_template"
+  }
 }

@@ -125,7 +125,7 @@ async def build_skill_metrics(
     runs = (
         await db.execute(
             select(OrchestrationRun).where(
-                OrchestrationRun.entrypoint == "workshop",
+                OrchestrationRun.entrypoint.in_(("workshop", "chat")),
                 OrchestrationRun.created_at >= since,
             )
         )
@@ -192,5 +192,97 @@ async def build_skill_metrics(
         "skills_total_calls": total_calls,
         "skills_feedback_count": overall_feedback,
         "skills_overall_adoption_rate": _calc_adoption_rate(dict(overall_levels)),
+        "skill_usage": rows,
+    }
+
+
+def _policy_allowed(raw: str | None) -> list[str]:
+    data = _loads(raw)
+    values = data.get("allowed")
+    if not isinstance(values, list):
+        return []
+    names: list[str] = []
+    for item in values:
+        name = str(item or "").strip()
+        if name and name not in names:
+            names.append(name)
+    return names
+
+
+async def build_skill_usage_view(
+    db: AsyncSession,
+    *,
+    since: str,
+    viewer_user_id: str | None = None,
+) -> dict[str, Any]:
+    """工坊页用量：调用、采纳、退回，以及场景白名单绑定。"""
+    from backend.models.scenario_profile import ScenarioProfile
+
+    metrics = await build_skill_metrics(db, since=since, top=500)
+    usage = {
+        str(row.get("skill_name") or ""): dict(row)
+        for row in metrics.get("skill_usage") or []
+        if str(row.get("skill_name") or "")
+    }
+
+    scenarios = (await db.execute(select(ScenarioProfile))).scalars().all()
+    bound: dict[str, list[str]] = defaultdict(list)
+    for row in scenarios:
+        for name in _policy_allowed(row.skills_policy_json):
+            label = str(row.name or row.code or "").strip() or name
+            if label not in bound[name]:
+                bound[name].append(label)
+
+    viewer = (viewer_user_id or "").strip()
+    viewer_adopted: dict[str, int] = defaultdict(int)
+    if viewer:
+        feedback_rows = (
+            await db.execute(
+                select(FeedbackEvent).where(
+                    FeedbackEvent.created_at >= since,
+                    FeedbackEvent.user_id == viewer,
+                    FeedbackEvent.adoption_level.in_(("full", "partial")),
+                )
+            )
+        ).scalars().all()
+        cache: dict[str, str | None] = {}
+        for fb in feedback_rows:
+            skill = await _resolve_skill_for_feedback(
+                db,
+                run_id=fb.run_id,
+                output_id=fb.output_id,
+                run_skill_cache=cache,
+            )
+            if skill:
+                viewer_adopted[skill] += 1
+
+    names = set(usage) | set(bound) | set(viewer_adopted)
+    rows: list[dict[str, Any]] = []
+    for name in sorted(names):
+        base = usage.get(name) or {
+            "skill_name": name,
+            "call_count": 0,
+            "user_count": 0,
+            "feedback_count": 0,
+            "adoption_rate": None,
+            "full_count": 0,
+            "partial_count": 0,
+            "reject_count": 0,
+        }
+        base = dict(base)
+        base["bound_scenarios"] = bound.get(name, [])
+        base["viewer_adopted"] = int(viewer_adopted.get(name, 0))
+        rows.append(base)
+
+    logger.info(
+        "skill_usage_view since=%s skills=%s viewer=%s",
+        since,
+        len(rows),
+        (viewer or "-")[:24],
+    )
+    return {
+        "skills_total_calls": int(metrics.get("skills_total_calls") or 0),
+        "skills_feedback_count": int(metrics.get("skills_feedback_count") or 0),
+        "skills_overall_adoption_rate": metrics.get("skills_overall_adoption_rate"),
         "skill_usage": rows,
     }

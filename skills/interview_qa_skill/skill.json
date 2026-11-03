@@ -27,5 +27,8 @@
       "label": "领导采访QA",
       "path": "templates/interview_qa.md"
     }
-  ]
+  ],
+  "execution": {
+    "type": "llm_template"
+  }
 }

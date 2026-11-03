@@ -17,15 +17,12 @@ import { apiV1 } from "@/lib/api";
 import {
   ChatInit,
   ChatMode,
-  ChatTransportConfig,
   decodeProjectFileSelectValue,
   fetchChatBootstrap,
   fetchOrchestrationPreview,
   fetchProjectContext,
-  fetchProjectFiles,
   getDocOptimizeBindingStatus,
   isAllProjectFilesSelection,
-  ProjectFileListItem,
   ProjectRecord,
   type OrchestrationPreviewResponse,
   type ProjectContextResponse,
@@ -37,10 +34,8 @@ import { CONTENT_MAX_CLASS } from "@/lib/content-shell";
 import { useEffectiveUserScopeId } from "@/lib/use-effective-user-scope-id";
 import type { ChatSession } from "@/app/chat/chat-types";
 import { ChatMessageStream } from "@/app/chat/components/chat-message-stream";
-import {
-  ChatTaskBoundaryModel,
-  ChatTaskBoundaryPanel,
-} from "@/app/chat/components/chat-task-boundary-panel";
+import { ProjectFilesRail } from "@/components/project-files-rail";
+import { fetchProjectFilesUnified, type ProjectFileItem } from "@/lib/co-create-api";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { useChatExecution } from "@/app/chat/hooks/use-chat-execution";
 import {
@@ -135,7 +130,6 @@ function ChatPageInner() {
   const [preparingContext, setPreparingContext] = useState(false);
   const [error, setError] = useState("");
   const [sidebarOpen, setSidebarOpen] = useState(true);
-  const [boundaryPanelOpen, setBoundaryPanelOpen] = useState(true);
   const [pendingDeleteSession, setPendingDeleteSession] = useState<{
     id: string;
     title: string;
@@ -143,7 +137,6 @@ function ChatPageInner() {
   const [projects, setProjects] = useState<ProjectRecord[]>([]);
   const [collections, setCollections] = useState<string[]>([]);
   const [skills, setSkills] = useState<string[]>([]);
-  const [transport, setTransport] = useState<ChatTransportConfig | null>(null);
   const [bootstrapWarnings, setBootstrapWarnings] = useState<string[]>([]);
   const [selectedProjectId, setSelectedProjectId] = useState("");
   const [selectedCollection, setSelectedCollection] = useState("");
@@ -154,8 +147,9 @@ function ChatPageInner() {
   const [chatMode, setChatMode] = useState<ChatMode>("co_create");
   const [includeFileContext, setIncludeFileContext] = useState(false);
   const [selectedFileId, setSelectedFileId] = useState("");
-  const [projectFiles, setProjectFiles] = useState<ProjectFileListItem[]>([]);
+  const [projectFiles, setProjectFiles] = useState<ProjectFileItem[]>([]);
   const [projectFilesLoading, setProjectFilesLoading] = useState(false);
+  const [projectFilesRefreshKey, setProjectFilesRefreshKey] = useState(0);
   const [rewriteTargetSection, setRewriteTargetSection] = useState("");
   const [rewriteSourceExcerpt, setRewriteSourceExcerpt] = useState("");
   const [rewriteGoal, setRewriteGoal] = useState("");
@@ -334,14 +328,17 @@ function ChatPageInner() {
     }
   }, [chatMode, selectedFileId]);
 
+  const boundProjectId = includeProjectContext ? selectedProjectId : "";
+
   useEffect(() => {
-    if (!selectedProjectId) {
+    if (!boundProjectId) {
       setProjectFiles([]);
+      setProjectFilesLoading(false);
       return;
     }
     let cancelled = false;
     setProjectFilesLoading(true);
-    fetchProjectFiles(selectedProjectId)
+    fetchProjectFilesUnified(boundProjectId)
       .then((files) => {
         if (!cancelled) setProjectFiles(files);
       })
@@ -357,7 +354,7 @@ function ChatPageInner() {
     return () => {
       cancelled = true;
     };
-  }, [selectedProjectId]);
+  }, [boundProjectId, projectFilesRefreshKey]);
 
   useEffect(() => {
     if (sessionsLoading || !activeId) return;
@@ -421,7 +418,6 @@ function ChatPageInner() {
         setProjects(data.projects);
         setCollections(data.collections);
         setSkills(data.skills);
-        setTransport(data.transport);
         setBootstrapWarnings(data.warnings);
       })
       .catch((loadError) => {
@@ -438,19 +434,6 @@ function ChatPageInner() {
       setIncludeSkillsContext(true);
     }
   }, [collectionFromUrl, skillsFromUrl]);
-
-  const handleChatModeChange = useCallback(
-    (nextMode: ChatMode) => {
-      if (nextMode === chatMode) return;
-      const defaults: Partial<ChatSession> = { chatMode: nextMode };
-      if (nextMode === "doc_optimize") {
-        defaults.includeProjectContext = true;
-        defaults.includeFileContext = true;
-      }
-      createSession(defaults);
-    },
-    [chatMode, createSession],
-  );
 
   useEffect(() => {
     if (!projectFromUrl || sessionsLoading || !scopeUserId) return;
@@ -645,80 +628,6 @@ function ChatPageInner() {
     updateSession,
   ]);
 
-  const contextSummary = useMemo(() => {
-    const parts: string[] = [];
-    const outputFiles = projectFiles.filter((file) => file.kind === "output");
-    const attachmentFiles = projectFiles.filter((file) => file.kind === "attachment");
-    parts.push(`场景: ${chatMode === "doc_optimize" ? "文稿优化" : "对话共创"}`);
-    if (chatMode === "doc_optimize") {
-      if (selectedProjectId) {
-        const project = projects.find((item) => item.id === selectedProjectId);
-        parts.push(`项目: ${project?.name ?? "已选"}`);
-      } else {
-        parts.push("项目: 未选择");
-      }
-      if (selectedFileId) {
-        const decoded = decodeProjectFileSelectValue(selectedFileId);
-        const file = decoded
-          ? projectFiles.find((item) => item.id === decoded.id && item.kind === decoded.kind)
-          : null;
-        parts.push(`优化文稿: ${file?.title ?? "已选"}`);
-      } else {
-        parts.push("优化文稿: 未选择");
-      }
-      const binding = getDocOptimizeBindingStatus({
-        selectedProjectId,
-        selectedFileValue: selectedFileId,
-        projectFiles,
-      });
-      if (!binding.ready) parts.push(`待完成: ${binding.issues.join("；")}`);
-    } else if (includeProjectContext && selectedProjectId) {
-      const project = projects.find((item) => item.id === selectedProjectId);
-      parts.push(`项目: ${project?.name ?? "已选"}`);
-    }
-    if (chatMode !== "doc_optimize") {
-      if (isAllProjectFilesSelection(selectedFileId)) {
-        parts.push(`文件: 全部（${outputFiles.length} 输出 + ${attachmentFiles.length} 附件）`);
-      } else if (includeFileContext && selectedFileId) {
-        const decoded = decodeProjectFileSelectValue(selectedFileId);
-        const file = decoded
-          ? projectFiles.find((item) => item.id === decoded.id && item.kind === decoded.kind)
-          : null;
-        parts.push(`文件: ${file?.title ?? "已选"}`);
-      } else if (includeProjectContext && selectedProjectId) {
-        parts.push("文件: 项目背景");
-      }
-    }
-    if (includeKnowledgeContext && selectedCollection) {
-      const knowledgeCollections = activeSession?.quickCreateOverrides?.knowledgeCollections;
-      parts.push(
-        knowledgeCollections && knowledgeCollections.length > 1
-          ? `知识库: ${knowledgeCollections.length} 个（${knowledgeCollections.join("、")}）`
-          : `知识库: ${selectedCollection}`,
-      );
-    }
-    if (includeSkillsContext) {
-      const skillNames = activeSession?.quickCreateOverrides?.skillNames;
-      const skillCount = skillNames?.length ? skillNames.length : skills.length;
-      parts.push(`技能: ${skillCount} 项`);
-    }
-    return parts;
-  }, [
-    activeSession?.quickCreateOverrides?.knowledgeCollections,
-    activeSession?.quickCreateOverrides?.skillNames,
-    chatMode,
-    includeFileContext,
-    includeKnowledgeContext,
-    includeProjectContext,
-    includeSkillsContext,
-    projectFiles,
-    projects,
-    selectedCollection,
-    selectedFileId,
-    selectedProjectId,
-    skills.length,
-  ]);
-
   const { sendMessage, regenerateAssistantReply } = useChatExecution({
     input,
     streaming,
@@ -810,35 +719,32 @@ function ChatPageInner() {
     selectedProjectId,
   ]);
 
-  const boundaryModel: ChatTaskBoundaryModel = {
-    activeSession: workspaceSession,
-    useOrchestration,
-    transport,
-    tasksExecuteUrl,
-    chatApiBase,
-    chatMode,
-    onChatModeChange: handleChatModeChange,
-    includeProjectContext,
-    setIncludeProjectContext,
-    selectedProjectId,
-    setSelectedProjectId,
-    projects,
-    includeFileContext,
-    setIncludeFileContext,
-    selectedFileId,
-    setSelectedFileId,
-    projectFiles,
-    projectFilesLoading,
-    rewriteTargetSection,
-    setRewriteTargetSection,
-    rewriteSourceExcerpt,
-    setRewriteSourceExcerpt,
-    rewriteGoal,
-    setRewriteGoal,
-    contextSummary,
-    bootstrapWarnings,
-    projectContextLocked: isChatConversationStarted(workspaceSession),
-  };
+  const projectBindingLocked = isChatConversationStarted(workspaceSession);
+  const chatFileKey = includeFileContext && selectedFileId ? selectedFileId : null;
+
+  const renderProjectFilesRail = (autoHide = false) => (
+    <ProjectFilesRail
+      scope="chat"
+      autoHide={autoHide}
+      projects={projects}
+      projectId={boundProjectId}
+      fileKey={chatFileKey}
+      files={projectFiles}
+      loading={projectFilesLoading}
+      locked={projectBindingLocked}
+      onProjectChange={(next) => {
+        setSelectedProjectId(next);
+        setIncludeProjectContext(Boolean(next));
+        setIncludeFileContext(false);
+        setSelectedFileId("");
+      }}
+      onFileChange={(next) => {
+        setIncludeFileContext(Boolean(next));
+        setSelectedFileId(next ?? "");
+      }}
+      onRefresh={() => setProjectFilesRefreshKey((value) => value + 1)}
+    />
+  );
 
   return (
     <>
@@ -929,15 +835,6 @@ function ChatPageInner() {
             <h1 className="flex-1 truncate text-sm font-semibold text-slate-900 dark:text-white">
               {titleFromSession(workspaceSession)}
             </h1>
-            {!boundaryPanelOpen ? (
-              <button
-                type="button"
-                onClick={() => setBoundaryPanelOpen(true)}
-                className="hidden text-xs text-slate-400 transition hover:text-slate-900 lg:inline-flex dark:hover:text-white"
-              >
-                创作边界 ▶
-              </button>
-            ) : null}
             {(preparingContext || streaming) && (
               <span className="flex items-center gap-1.5 text-xs text-blue-400">
                 <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-blue-400" />
@@ -946,14 +843,14 @@ function ChatPageInner() {
             )}
           </header>
 
-          <details className="group shrink-0 border-b border-slate-300 bg-slate-200/40 dark:border-slate-700 dark:bg-slate-800/40 lg:hidden">
+          <details className="group shrink-0 border-b border-slate-300 bg-slate-100 dark:border-slate-700 dark:bg-slate-900/40 lg:hidden">
             <summary className="flex cursor-pointer list-none items-center justify-between px-4 py-2.5 text-sm font-medium text-slate-800 dark:text-slate-200 [&::-webkit-details-marker]:hidden">
-              <span>创作边界</span>
+              <span>项目文件</span>
               <span className="text-xs text-slate-500 group-open:hidden">展开</span>
               <span className="hidden text-xs text-slate-500 group-open:inline">收起</span>
             </summary>
-            <div className="max-h-[42vh] overflow-y-auto border-t border-slate-300 px-3 pb-3 pt-2 dark:border-slate-700/50">
-              <ChatTaskBoundaryPanel model={boundaryModel} />
+            <div className="h-[42vh] min-h-0 border-t border-slate-300 dark:border-slate-700">
+              {renderProjectFilesRail()}
             </div>
           </details>
 
@@ -990,6 +887,11 @@ function ChatPageInner() {
                 中继续，可获得文件 diff 与版本沉淀。
               </p>
             ) : null}
+            {bootstrapWarnings.length > 0 ? (
+              <p className="mb-2 text-center text-xs text-amber-700 dark:text-amber-300">
+                {bootstrapWarnings.join("；")}
+              </p>
+            ) : null}
             {docOptimizeBindingHint ? (
               <p className="mb-2 text-center text-xs text-amber-700 dark:text-amber-300">
                 {docOptimizeBindingHint}
@@ -1003,7 +905,7 @@ function ChatPageInner() {
                 onKeyDown={handleKeyDown}
                 placeholder={
                   docOptimizeBindingHint
-                    ? "请先在右侧「文稿初稿」中选择项目与待优化输出物…"
+                    ? "请先在右侧选择项目和要优化的文稿…"
                     : chatMode === "doc_optimize"
                       ? "说明改写要求，回车发送…"
                       : "输入问题，回车发送，Shift+回车换行…"
@@ -1045,27 +947,7 @@ function ChatPageInner() {
           </div>
         </div>
 
-        <aside
-          className={`${
-            boundaryPanelOpen ? "w-[min(22rem,32vw)] max-w-sm border-l" : "w-0 border-l-0"
-          } hidden h-full min-h-0 shrink-0 flex-col overflow-hidden border-slate-300 bg-slate-200/40 transition-all dark:border-slate-700 dark:bg-slate-800/40 lg:flex`}
-        >
-          <div className="flex shrink-0 items-center justify-between border-b border-slate-300 px-3 py-2 dark:border-slate-700/80">
-            <span className="text-xs font-medium uppercase tracking-[0.16em] text-slate-500">
-              创作边界
-            </span>
-            <button
-              type="button"
-              onClick={() => setBoundaryPanelOpen(false)}
-              className="text-xs text-slate-500 transition hover:text-slate-800 dark:hover:text-slate-200"
-            >
-              隐藏
-            </button>
-          </div>
-          <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-3">
-            <ChatTaskBoundaryPanel model={boundaryModel} />
-          </div>
-        </aside>
+        <div className="hidden h-full min-h-0 lg:flex">{renderProjectFilesRail(true)}</div>
       </div>
     </div>
     <ConfirmDialog

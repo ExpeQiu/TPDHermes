@@ -206,6 +206,7 @@ def _find_skill(name: str) -> Optional[Dict[str, Any]]:
     categorized relative path (``mlops/axolotl``) — the two forms skill_view resolves. The
     categorized form matches RELATIVE to the local root only (relative_to raises for external dirs)."""
     from agent.skill_utils import get_all_skills_dirs
+    from tools.skill_manager_guards import project_skill_roots
     local_root = None
     if "/" in name or "\\" in name:
         try:
@@ -215,7 +216,11 @@ def _find_skill(name: str) -> Optional[Dict[str, Any]]:
                 "skills dir resolve failed; categorized lookups fall back to the unresolved path",
                 exc_info=True)
             local_root = _skills_dir()
-    for skills_dir in get_all_skills_dirs():
+    search_dirs = list(get_all_skills_dirs())
+    for extra in project_skill_roots():
+        if extra.is_dir() and extra not in search_dirs:
+            search_dirs.append(extra)
+    for skills_dir in search_dirs:
         if not skills_dir.exists():
             continue
         for skill_dir in _iter_skill_dirs(skills_dir):

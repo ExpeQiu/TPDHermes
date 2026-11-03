@@ -61,6 +61,40 @@ export function isKbCollectionHidden(name: string): boolean {
   return KB_HIDDEN_COLLECTIONS.has(name.trim());
 }
 
+export const KB_COLLECTION_SCOPE_ORDER = ["internal", "public", "project"] as const;
+
+export type KbCollectionScope = (typeof KB_COLLECTION_SCOPE_ORDER)[number];
+
+const KB_COLLECTION_SCOPE_LABEL: Record<KbCollectionScope, string> = {
+  internal: "内部知识库",
+  public: "公共知识库",
+  project: "项目知识库",
+};
+
+export function kbCollectionScopeLabel(scope: KbCollectionScope): string {
+  return KB_COLLECTION_SCOPE_LABEL[scope];
+}
+
+/** 集合一级：内部 / 公共 / 项目。无法识别的测试集合归为 other。 */
+export function kbCollectionScope(name: string): KbCollectionScope | "other" {
+  const key = name.trim();
+  if (/^project\.[^.]+\.kb$/.test(key) || key.startsWith("project.")) return "project";
+  if (key.startsWith("internal.")) return "internal";
+  if (key.startsWith("public.")) return "public";
+  return "other";
+}
+
+/** 集合二级：业务域，或项目知识库的项目 id。 */
+export function kbCollectionSecondaryId(name: string): string {
+  const key = name.trim();
+  const project = /^project\.([^.]+)\.kb$/.exec(key);
+  if (project) return project[1];
+  const parts = key.split(".").filter(Boolean);
+  const scope = kbCollectionScope(key);
+  if (scope !== "other" && parts.length >= 2) return parts[1];
+  return "_uncategorized";
+}
+
 /** 是否在「内部知识库」按钮区展示 */
 export function isInternalSectionCollection(name: string): boolean {
   const key = name.trim();

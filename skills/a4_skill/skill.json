@@ -30,5 +30,8 @@
     "tech_highlights": "array of {highlight, params, user_benefit} (技术亮点)",
     "test_data": "array of {data, source, condition} (实测数据)",
     "vehicle_models": "array of {model, plan, rights} (车型与权益)"
+  },
+  "execution": {
+    "type": "llm_template"
   }
 }

@@ -27,5 +27,8 @@
       "label": "技术推广视频导演脚本",
       "path": "templates/video_script.md"
     }
-  ]
+  ],
+  "execution": {
+    "type": "llm_template"
+  }
 }

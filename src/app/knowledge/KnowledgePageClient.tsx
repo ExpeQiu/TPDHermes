@@ -10,29 +10,30 @@ import {
 } from "react";
 import KBDegradedBanner from "@/components/kb/KBDegradedBanner";
 import Link from "next/link";
-import { useSearchParams } from "next/navigation";
-import { apiDelete, apiGet, apiPatch, apiPost, getPublicApiBase } from "@/lib/api";
+import { useRouter, useSearchParams } from "next/navigation";
+import { apiDelete, apiGet, apiPatch, apiPost, apiPut, getPublicApiBase } from "@/lib/api";
 import { CONTENT_MAX_CLASS } from "@/lib/content-shell";
 import { KbMarkdown } from "@/components/kb-markdown";
 import type { KbMarkdownAssetContext } from "@/lib/kb-markdown-assets";
 import {
   KnowledgeBrowseDomain,
-  KnowledgeIngestDomain,
   KnowledgeKgDomain,
-  KnowledgePolicyDomainPanel,
   KnowledgeTreeDomain,
 } from "@/app/knowledge/components/KnowledgeDomainPanels";
 import KnowledgeIngestWorkspace, {
   type KnowledgeIngestPrefill,
 } from "@/app/knowledge/components/KnowledgeIngestWorkspace";
+import KnowledgeAutoGovern from "@/app/knowledge/components/KnowledgeAutoGovern";
 import KnowledgePolicyDomain from "@/app/knowledge/components/KnowledgePolicyDomain";
 import { getKnowledgeQueryCache } from "@/app/knowledge/knowledge-query-cache";
 import {
   fieldLabel,
-  isInternalSectionCollection,
   isKbCollectionHidden,
   isPublicKbCollection,
-  sortInternalSectionCollections,
+  kbCollectionScope,
+  kbCollectionScopeLabel,
+  kbCollectionSecondaryId,
+  KB_COLLECTION_SCOPE_ORDER,
   isTpdExperienceCollection,
   isTpdExperienceEntry,
   isAuthoritativeKbCollection,
@@ -191,6 +192,21 @@ const KG_KINDS = [
   "CoreTech",
   "PlannedVehicle",
 ] as const;
+
+function kgNodeSummary(row: Record<string, unknown>): { id: string; title: string; meta: string } {
+  const id = String(
+    row.brand_id || row.vehicle_id || row.insight_id || row.tech_id || row.planned_id || "",
+  );
+  const title = String(
+    row.name_cn || row.name || row.vehicle_name || row.tech_category || row.narrative_theme || id || "未命名",
+  );
+  const meta = [row.domain, row.vehicle_type, row.tech_category, row.brand_id, row.insight_id]
+    .map((item) => (item == null ? "" : String(item).trim()))
+    .filter((item) => item && item !== id && item !== title)
+    .slice(0, 2)
+    .join(" · ");
+  return { id, title, meta };
+}
 
 type SourceTypeFilter =
   | "all"
@@ -517,7 +533,129 @@ function treeSelectionKey(node: TreeNode, depth: number, index: number): string 
 }
 
 function treeNodeFolderPath(node: TreeNode): string {
-  return (node.path || "").trim();
+  const raw = (node.path || "").trim();
+  if (!raw.startsWith("scope:")) return raw;
+  return raw.split("/").slice(2).join("/");
+}
+
+function collectAllTreeDocs(nodes: TreeNode[]): BrowseDoc[] {
+  const out: BrowseDoc[] = [];
+  const walk = (list: TreeNode[]) => {
+    for (const node of list) {
+      out.push(...(node.documents || []));
+      if (node.children?.length) walk(node.children);
+    }
+  };
+  walk(nodes);
+  return out;
+}
+
+function recountTreeNode(node: TreeNode): number {
+  const nested = (node.children || []).reduce((sum, child) => sum + recountTreeNode(child), 0);
+  const total = (node.documents?.length || 0) + nested;
+  node.document_count = total;
+  node.total_documents = total;
+  return total;
+}
+
+function insertDocByFolder(root: TreeNode, doc: BrowseDoc) {
+  const parts = (doc.folder_path || "").split("/").filter(Boolean);
+  let cursor = root;
+  let prefix = root.path;
+  for (const part of parts) {
+    const path = `${prefix}/${part}`;
+    let child = cursor.children.find((item) => item.path === path);
+    if (!child) {
+      child = {
+        segment: part,
+        path,
+        domain: root.domain,
+        documents: [],
+        children: [],
+        document_count: 0,
+      };
+      cursor.children.push(child);
+    }
+    cursor = child;
+    prefix = path;
+  }
+  cursor.documents.push(doc);
+}
+
+function secondaryNodeLabel(
+  scope: "internal" | "public" | "project",
+  id: string,
+  projectNames: Record<string, string>,
+): string {
+  if (id === "_uncategorized") return "未归类";
+  if (scope === "project") return projectNames[id]?.trim() || "未命名项目";
+  return kbDomainLabel(id);
+}
+
+/** 目录树按集合的三大类，再按业务域或项目展开目录。 */
+function buildScopedBrowseTree(
+  nodes: TreeNode[],
+  projectNames: Record<string, string>,
+): TreeNode[] {
+  const docs = collectAllTreeDocs(nodes);
+  const domainOrder = Object.keys(KB_DOMAIN_LABELS);
+  const roots: TreeNode[] = [];
+  for (const scope of KB_COLLECTION_SCOPE_ORDER) {
+    const scoped = docs.filter((doc) => kbCollectionScope(doc.collection) === scope);
+    if (!scoped.length) continue;
+    const groups = new Map<string, BrowseDoc[]>();
+    for (const doc of scoped) {
+      const id = kbCollectionSecondaryId(doc.collection);
+      const list = groups.get(id) ?? [];
+      list.push(doc);
+      groups.set(id, list);
+    }
+    const children = [...groups.entries()]
+      .sort((a, b) => {
+        const ai = domainOrder.indexOf(a[0]);
+        const bi = domainOrder.indexOf(b[0]);
+        if (ai !== -1 || bi !== -1) return (ai === -1 ? 99 : ai) - (bi === -1 ? 99 : bi);
+        return secondaryNodeLabel(scope, a[0], projectNames).localeCompare(
+          secondaryNodeLabel(scope, b[0], projectNames),
+          "zh",
+        );
+      })
+      .map(([id, items]) => {
+        const node: TreeNode = {
+          segment: secondaryNodeLabel(scope, id, projectNames),
+          path: `scope:${scope}/sec:${id}`,
+          domain: scope === "project" ? undefined : id,
+          documents: [],
+          children: [],
+          document_count: 0,
+        };
+        for (const doc of items) insertDocByFolder(node, doc);
+        node.children.sort((a, b) => a.segment.localeCompare(b.segment, "zh"));
+        recountTreeNode(node);
+        return node;
+      });
+    const scopeNode: TreeNode = {
+      segment: kbCollectionScopeLabel(scope),
+      path: `scope:${scope}`,
+      documents: [],
+      children,
+      document_count: 0,
+    };
+    recountTreeNode(scopeNode);
+    roots.push(scopeNode);
+  }
+  const leftover = docs.filter((doc) => kbCollectionScope(doc.collection) === "other");
+  if (leftover.length) {
+    roots.push({
+      segment: "未归类",
+      path: "scope:other",
+      documents: leftover,
+      children: [],
+      document_count: leftover.length,
+      total_documents: leftover.length,
+    });
+  }
+  return roots;
 }
 
 function defaultImportFolderForNode(node: TreeNode): string {
@@ -689,29 +827,22 @@ function KbEntryMetadataFields({
   );
 }
 
-function KbClassifyRulesHint({ compact }: { compact?: boolean }) {
+function KbClassifyRulesHint({ focus }: { focus: "tree" | "collections" }) {
+  if (focus === "collections") {
+    return (
+      <p className="max-w-3xl text-sm leading-6 text-slate-600 dark:text-slate-400">
+        <span className="font-medium text-slate-800 dark:text-slate-200">按集合查看：</span>
+        文档按知识集合归组。内部名如{" "}
+        <code className="text-emerald-700 dark:text-emerald-300">internal.geelywiki.pages</code>
+        ，页面上显示为「内部知识库·GeelyWiki」。目录位置在「目录浏览」里按业务域和路径查看。
+      </p>
+    );
+  }
   return (
-    <div
-      className={`rounded-lg border border-slate-300 dark:border-slate-700/80 bg-white/90 dark:bg-slate-900/60 text-slate-400 ${
-        compact ? "px-3 py-2 text-xs" : "px-4 py-3 text-sm"
-      }`}
-    >
-      <p className="text-slate-700 dark:text-slate-300 font-medium mb-1">分类规则</p>
-      <ul className={`space-y-0.5 ${compact ? "text-[11px]" : "text-xs"} list-disc pl-4`}>
-        <li>
-          <strong className="text-slate-700 dark:text-slate-300">目录浏览</strong>：按 metadata{" "}
-          <code className="text-emerald-700 dark:text-emerald-300/90">domain</code>（业务域）+{" "}
-          <code className="text-emerald-700 dark:text-emerald-300/90">folder_path</code>（Obsidian 目录，用 / 分隔）生成树
-        </li>
-        <li>
-          <strong className="text-slate-700 dark:text-slate-300">按集合</strong>：按 Chroma{" "}
-          <code className="text-emerald-700 dark:text-emerald-300/90">collection</code> 分组，规范名如{" "}
-          <code className="text-emerald-700 dark:text-emerald-300/90">internal.geelywiki.pages</code>
-          （展示名「内部知识库·GeelyWiki」）
-        </li>
-        <li>导入时在「上传导入」填写 domain / folder_path，或在 metadata 中补全后刷新</li>
-      </ul>
-    </div>
+    <p className="max-w-3xl text-sm leading-6 text-slate-600 dark:text-slate-400">
+      <span className="font-medium text-slate-800 dark:text-slate-200">目录怎么排：</span>
+      左侧树按业务域和目录路径展开，路径用 / 分隔。上传导入时填上这两项，或稍后补全后再刷新，文档就会出现在对应节点。
+    </p>
   );
 }
 
@@ -829,7 +960,201 @@ function KbEntryListDetailSplit({
 }
 
 // ============== 页面 ==============
-export default function KnowledgePageClient() {
+function CollectionGovernPanel({
+  collections,
+  projectNames,
+  selected,
+  onSelect,
+  busy,
+  message,
+  onClear,
+}: {
+  collections: Collection[];
+  projectNames: Record<string, string>;
+  selected: string;
+  onSelect: (name: string) => void;
+  busy: boolean;
+  message: string | null;
+  onClear: (name: string, label: string, count: number) => void;
+}) {
+  const [policyId, setPolicyId] = useState<string | null>(null);
+  const [allowed, setAllowed] = useState<string[] | null>(null);
+  const [permMessage, setPermMessage] = useState<string | null>(null);
+  const [permBusy, setPermBusy] = useState(false);
+  const visible = collections.filter((col) => !isKbCollectionHidden(col.name));
+  const current = visible.find((col) => col.name === selected) ?? null;
+
+  useEffect(() => {
+    let cancelled = false;
+    void apiGet<{ items: Array<{ id: string; status: string; config?: { write_control?: { allowed_collections?: string[] } } }> }>(
+      "/kb/policies/?status=published",
+    )
+      .then((data) => {
+        if (cancelled) return;
+        const policy = data.items?.[0];
+        setPolicyId(policy?.id ?? null);
+        const list = policy?.config?.write_control?.allowed_collections;
+        setAllowed(Array.isArray(list) ? list : null);
+      })
+      .catch(() => {
+        if (!cancelled) setPolicyId(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const writable = !selected || allowed == null || allowed.includes(selected);
+
+  const toggleWrite = async () => {
+    if (!selected || !policyId || allowed == null) return;
+    const next = writable ? allowed.filter((name) => name !== selected) : [...allowed, selected];
+    setPermBusy(true);
+    setPermMessage(null);
+    try {
+      const detail = await apiGet<{
+        name: string;
+        description?: string | null;
+        config: Record<string, unknown>;
+      }>(`/kb/policies/${encodeURIComponent(policyId)}`);
+      const config = { ...(detail.config || {}) };
+      const writeControl =
+        config.write_control && typeof config.write_control === "object"
+          ? { ...(config.write_control as Record<string, unknown>) }
+          : {};
+      writeControl.allowed_collections = next;
+      config.write_control = writeControl;
+      await apiPut(`/kb/policies/${encodeURIComponent(policyId)}`, {
+        name: detail.name,
+        description: detail.description,
+        config,
+        change_note: "更新合集写入权限",
+      });
+      setAllowed(next);
+      setPermMessage(writable ? "已改为仅检索" : "已允许写入");
+    } catch (e) {
+      setPermMessage(e instanceof Error ? e.message : "权限更新失败");
+    } finally {
+      setPermBusy(false);
+    }
+  };
+
+  return (
+    <div className="space-y-4">
+      <div className="rounded-2xl border border-slate-200 bg-white p-4 dark:border-slate-700 dark:bg-slate-900/50">
+        <p className="text-sm font-medium text-slate-900 dark:text-white">合集清理与写入权限</p>
+        <p className="mt-1 text-sm leading-6 text-slate-500">
+          针对单个合集清空内容，或按已发布策略切换它能不能被写入。
+        </p>
+        <label className="mt-3 block text-xs">
+          <span className="text-slate-500">合集</span>
+          <select
+            value={selected}
+            onChange={(e) => onSelect(e.target.value)}
+            className="mt-1 w-full max-w-xl rounded-lg border border-slate-300 bg-slate-50 px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-950"
+          >
+            <option value="">选择合集…</option>
+            {KB_COLLECTION_SCOPE_ORDER.map((scope) => {
+              const items = visible.filter((col) => kbCollectionScope(col.name) === scope);
+              if (!items.length) return null;
+              return (
+                <optgroup key={scope} label={kbCollectionScopeLabel(scope)}>
+                  {items.map((col) => (
+                    <option key={col.name} value={col.name}>
+                      {kbCollectionLabel(col.name, { projectNames })}（{col.entry_count} 条）
+                    </option>
+                  ))}
+                </optgroup>
+              );
+            })}
+          </select>
+        </label>
+        <div className="mt-3 flex flex-wrap gap-2">
+          <button
+            type="button"
+            disabled={!current || busy}
+            onClick={() =>
+              current &&
+              onClear(
+                current.name,
+                kbCollectionLabel(current.name, { projectNames }),
+                current.entry_count,
+              )
+            }
+            className="rounded-lg border border-rose-400/70 px-3 py-1.5 text-sm text-rose-700 hover:bg-rose-50 disabled:opacity-40 dark:text-rose-300"
+          >
+            清空该合集
+          </button>
+          <button
+            type="button"
+            disabled={!current || permBusy || !policyId || allowed == null}
+            onClick={() => void toggleWrite()}
+            className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm text-slate-800 hover:bg-slate-100 disabled:opacity-40 dark:border-slate-600 dark:text-slate-200"
+          >
+            {writable ? "改为仅检索" : "允许写入"}
+          </button>
+        </div>
+        {!policyId ? (
+          <p className="mt-3 text-xs text-amber-800 dark:text-amber-200">
+            还没有已发布策略，写入权限先不能改。清空合集仍然可用。
+          </p>
+        ) : allowed == null ? (
+          <p className="mt-3 text-xs text-slate-500">当前策略没有写入白名单，合集默认可写。</p>
+        ) : current ? (
+          <p className="mt-3 text-xs text-slate-500">
+            {current.name}：{writable ? "允许写入" : "仅检索"}
+          </p>
+        ) : null}
+        {permMessage ? <p className="mt-2 text-xs text-slate-600 dark:text-slate-300">{permMessage}</p> : null}
+        {message ? <p className="mt-2 text-xs text-amber-800 dark:text-amber-200">{message}</p> : null}
+      </div>
+    </div>
+  );
+}
+
+function KnowledgePageLinks({ current }: { current?: "ingest" | "govern" }) {
+  const linkClass = (active: boolean, tone: string) =>
+    `rounded-xl px-4 py-2.5 text-sm font-medium shadow-sm transition ${tone} ${
+      active ? "ring-2 ring-offset-2 ring-offset-slate-50 dark:ring-offset-slate-950" : ""
+    }`;
+  return (
+    <div className="flex flex-wrap gap-2">
+      <Link
+        href="/knowledge/ingest"
+        aria-current={current === "ingest" ? "page" : undefined}
+        className={linkClass(
+          current === "ingest",
+          "bg-blue-600 text-white hover:bg-blue-500 ring-blue-300 dark:ring-blue-400/80",
+        )}
+      >
+        上传导入
+      </Link>
+      <Link
+        href="/knowledge/govern"
+        aria-current={current === "govern" ? "page" : undefined}
+        className={linkClass(
+          current === "govern",
+          "bg-slate-900 text-white hover:bg-slate-800 dark:bg-slate-100 dark:text-slate-900 dark:hover:bg-white ring-slate-300 dark:ring-slate-400/80",
+        )}
+      >
+        知识库治理
+      </Link>
+      <Link
+        href="/learning"
+        className="rounded-xl border border-violet-400/70 bg-violet-50 px-4 py-2.5 text-sm font-medium text-violet-950 transition hover:bg-violet-100 dark:border-violet-500/40 dark:bg-violet-500/10 dark:text-violet-100 dark:hover:bg-violet-500/20"
+      >
+        学习中心
+      </Link>
+    </div>
+  );
+}
+
+export default function KnowledgePageClient({
+  surface = "hub",
+}: {
+  surface?: "hub" | "ingest" | "govern";
+}) {
+  const router = useRouter();
   const searchParams = useSearchParams();
   const [workspaceMode, setWorkspaceMode] = useState<
     | "tree"
@@ -840,13 +1165,15 @@ export default function KnowledgePageClient() {
     | "harvest"
     | "experience"
     | "policy"
-  >("tree");
+  >(surface === "govern" ? "policy" : "tree");
+  const [governPane, setGovernPane] = useState<"node" | "auto" | "collection" | "policy">("node");
 
   const [searchScopeCollection, setSearchScopeCollection] = useState<string>("");
 
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState<KBEntry[]>([]);
   const [isSearching, setIsSearching] = useState(false);
+  const [searchSubmitted, setSearchSubmitted] = useState(false);
   const [selectedEntry, setSelectedEntry] = useState<KBEntry | null>(null);
   const [page, setPage] = useState(0);
   const PAGE_SIZE = 10;
@@ -882,11 +1209,21 @@ export default function KnowledgePageClient() {
   const [treeDocScope, setTreeDocScope] = useState<
     "subtree" | "direct" | "draft" | "unclassified"
   >("subtree");
+  const [treeTargetScope, setTreeTargetScope] = useState<"internal" | "public" | "project">("public");
+  const [treeTargetProjectId, setTreeTargetProjectId] = useState("");
   const [treeTargetDomain, setTreeTargetDomain] = useState("structured_tech");
   const [treeTargetFolderPath, setTreeTargetFolderPath] = useState("");
   const [treeNodeDocFilter, setTreeNodeDocFilter] = useState<Set<string> | null>(null);
   const [nodeManageMessage, setNodeManageMessage] = useState<string | null>(null);
   const [showAddCategoryPanel, setShowAddCategoryPanel] = useState(false);
+  const [showCollectionCategoryPanel, setShowCollectionCategoryPanel] = useState(false);
+  const [collectionScope, setCollectionScope] = useState<"internal" | "public" | "project">("public");
+  const [collectionDomain, setCollectionDomain] = useState("structured_tech");
+  const [collectionProjectId, setCollectionProjectId] = useState("");
+  const [collectionTopic, setCollectionTopic] = useState("");
+  const [collectionCategoryMessage, setCollectionCategoryMessage] = useState<string | null>(null);
+  const [collectionCategoryBusy, setCollectionCategoryBusy] = useState(false);
+  const [governCollection, setGovernCollection] = useState("");
   const [addCategoryDomain, setAddCategoryDomain] = useState("structured_tech");
   const [addCategoryParentPath, setAddCategoryParentPath] = useState("02-知识库");
   const [addCategorySegment, setAddCategorySegment] = useState("");
@@ -919,13 +1256,13 @@ export default function KnowledgePageClient() {
   const [kgLinkKind, setKgLinkKind] = useState<string>("CoreTech");
   const [kgLinkNodeId, setKgLinkNodeId] = useState("");
   const [previewMode, setPreviewMode] = useState<"summary" | "markdown">("summary");
-  const [ingestPrefill, setIngestPrefill] = useState<KnowledgeIngestPrefill>({
+  const [ingestPrefill] = useState<KnowledgeIngestPrefill>({
     collection: "",
     domain: "structured_tech",
     folder_path: "02-知识库/导入",
     project_id: "__all__",
   });
-  const [ingestPrefillNonce, setIngestPrefillNonce] = useState(0);
+  const [ingestPrefillNonce] = useState(0);
 
   const [kgStats, setKgStats] = useState<Record<string, unknown> | null>(null);
   const [kgValidate, setKgValidate] = useState<{
@@ -1112,7 +1449,7 @@ export default function KnowledgePageClient() {
   }, [workspaceMode, reloadBrowseEntries]);
 
   useEffect(() => {
-    if (workspaceMode === "tree") {
+    if (workspaceMode === "tree" || workspaceMode === "policy") {
       void reloadBrowseTree({ force: false });
     }
   }, [workspaceMode, reloadBrowseTree]);
@@ -1164,7 +1501,21 @@ export default function KnowledgePageClient() {
     setTreeDocs(collectDocsFromTree(node));
     setTreeDocQuery("");
     setTreeDocScope("subtree");
-    setTreeTargetDomain(defaultImportDomainForNode(node));
+    const nodePath = node.path || "";
+    const scope = nodePath.startsWith("scope:public")
+      ? "public"
+      : nodePath.startsWith("scope:project")
+        ? "project"
+        : "internal";
+    const secondary = /sec:([^/]+)/.exec(nodePath)?.[1] || "";
+    setTreeTargetScope(scope);
+    if (scope === "project") {
+      setTreeTargetProjectId(secondary && secondary !== "_uncategorized" ? secondary : "");
+    } else if (secondary && secondary !== "_uncategorized") {
+      setTreeTargetDomain(secondary);
+    } else {
+      setTreeTargetDomain(defaultImportDomainForNode(node));
+    }
     setTreeTargetFolderPath(defaultImportFolderForNode(node));
     setNodeManageMessage(null);
     setSelectedEntry(null);
@@ -1177,6 +1528,11 @@ export default function KnowledgePageClient() {
     }
     return m;
   }, [projects]);
+
+  const scopedBrowseTree = useMemo(
+    () => buildScopedBrowseTree(browseTree, projectNameMap),
+    [browseTree, projectNameMap],
+  );
 
   const unclassifiedCount = useMemo(() => {
     if (browseEntries.length > 0) {
@@ -1231,13 +1587,13 @@ export default function KnowledgePageClient() {
   }, [selectedTreeNode, treeDocs, entryById]);
 
   useEffect(() => {
-    if (browseTree.length > 0 && !selectedTreeKey) {
-      const first = browseTree[0];
+    if (scopedBrowseTree.length > 0 && !selectedTreeKey) {
+      const first = scopedBrowseTree[0];
       if (first) {
         onTreeSelect(treeSelectionKey(first, 0, 0), first);
       }
     }
-  }, [browseTree, selectedTreeKey, onTreeSelect]);
+  }, [scopedBrowseTree, selectedTreeKey, onTreeSelect]);
 
   const loadKgLinks = useCallback(async (entryId: string, projectId: string | null) => {
     if (!entryId || USE_MOCK_KB) {
@@ -1272,15 +1628,46 @@ export default function KnowledgePageClient() {
   >("all");
 
   useEffect(() => {
-    if (searchParams.get("mode") !== "experience") return;
-    setFilterCollection(TPD_EXPERIENCE_COLLECTION);
-    setFilterSourceType("all");
-    setWorkspaceMode("experience");
+    if (surface === "govern") {
+      const pane = searchParams.get("pane");
+      if (pane === "policy" || pane === "node" || pane === "auto" || pane === "collection") {
+        setGovernPane(pane);
+      }
+      return;
+    }
+    if (surface !== "hub") return;
+    const mode = searchParams.get("mode");
+    if (!mode) return;
+    if (mode === "experience") {
+      setFilterCollection(TPD_EXPERIENCE_COLLECTION);
+      setFilterSourceType("all");
+      setWorkspaceMode("experience");
+    } else if (mode === "harvest") {
+      setFilterSourceType("conversation_harvest");
+      setFilterCollection(null);
+      setShowUnclassifiedOnly(false);
+      setHarvestPublishFilter("draft");
+      setWorkspaceMode("harvest");
+    } else if (mode === "collections" || mode === "graph" || mode === "tree") {
+      setWorkspaceMode(mode);
+    }
     setSelectedEntry(null);
     setPage(0);
-  }, [searchParams]);
+  }, [searchParams, surface]);
 
   const handleWorkspaceMode = (m: typeof workspaceMode) => {
+    if (m === "ingest") {
+      router.push("/knowledge/ingest");
+      return;
+    }
+    if (m === "policy") {
+      router.push("/knowledge/govern");
+      return;
+    }
+    if (surface !== "hub") {
+      router.push(m === "tree" ? "/knowledge" : `/knowledge?mode=${m}`);
+      return;
+    }
     if (m === "harvest") {
       setFilterSourceType("conversation_harvest");
       setFilterCollection(null);
@@ -1303,11 +1690,12 @@ export default function KnowledgePageClient() {
     setWorkspaceMode(m);
     setSelectedEntry(null);
     setPage(0);
-    if (m === "search") {
-      setSearchResults([]);
-      setSearchQuery("");
-      setSearchScopeCollection("");
-    }
+  };
+
+  const openKnowledgeGovern = (pane: "node" | "policy" = "node") => {
+    setGovernPane(pane);
+    if (surface === "govern") return;
+    router.push(pane === "policy" ? "/knowledge/govern?pane=policy" : "/knowledge/govern");
   };
 
   const openIngestWorkspace = useCallback(
@@ -1318,17 +1706,34 @@ export default function KnowledgePageClient() {
         folder_path: opts?.folder_path?.trim() || treeTargetFolderPath.trim() || "02-知识库/导入",
         project_id: opts?.project_id?.trim() || ingestPrefill.project_id || "__all__",
       };
-      setIngestPrefill(next);
-      setIngestPrefillNonce((n) => n + 1);
-      handleWorkspaceMode("ingest");
+      const query = new URLSearchParams();
+      if (next.collection) query.set("collection", next.collection);
+      if (next.domain) query.set("domain", next.domain);
+      if (next.folder_path) query.set("folder_path", next.folder_path);
+      if (next.project_id) query.set("project_id", next.project_id);
+      const qs = query.toString();
+      router.push(qs ? `/knowledge/ingest?${qs}` : "/knowledge/ingest");
     },
-    [handleWorkspaceMode, ingestPrefill.project_id, treeTargetDomain, treeTargetFolderPath],
+    [ingestPrefill.project_id, router, treeTargetDomain, treeTargetFolderPath],
   );
+
+  const importCollection = useMemo(() => {
+    if (treeTargetScope === "project") {
+      return treeTargetProjectId ? `project.${treeTargetProjectId}.kb` : "";
+    }
+    const prefix = `${treeTargetScope}.${treeTargetDomain}.`;
+    const existing = collections.find(
+      (col) => col.name.startsWith(prefix) && !isKbCollectionHidden(col.name),
+    );
+    return existing?.name || `${prefix}general`;
+  }, [collections, treeTargetDomain, treeTargetProjectId, treeTargetScope]);
 
   const jumpToIngestFromTree = () => {
     openIngestWorkspace({
+      collection: importCollection,
       domain: treeTargetDomain.trim() || "structured_tech",
       folder_path: treeTargetFolderPath.trim() || "02-知识库/导入",
+      project_id: treeTargetScope === "project" ? treeTargetProjectId || "__all__" : "__all__",
     });
   };
 
@@ -1381,7 +1786,7 @@ export default function KnowledgePageClient() {
   const jumpToCreateFromTree = (opts?: { domain?: string; folder_path?: string }) => {
     const domain = opts?.domain?.trim() || treeTargetDomain.trim() || "structured_tech";
     const folder_path = opts?.folder_path?.trim() || treeTargetFolderPath.trim() || "02-知识库/手动录入";
-    const col = pickDefaultCollection(domain);
+    const col = importCollection || pickDefaultCollection(domain);
     setCreateEntryForm((f) => ({
       ...f,
       collection: col,
@@ -1398,6 +1803,52 @@ export default function KnowledgePageClient() {
       opts?.domain ?? treeTargetDomain,
     );
     openIngestWorkspace({ domain, folder_path });
+  };
+
+  const createCollectionCategory = async () => {
+    if (USE_MOCK_KB || collectionCategoryBusy) return;
+    const topic = collectionTopic.trim().replace(/\s+/g, "_").replace(/[^a-zA-Z0-9_\u4e00-\u9fff-]/g, "");
+    let name = "";
+    let domain = collectionDomain;
+    let folder = "02-知识库/导入";
+    if (collectionScope === "project") {
+      if (!collectionProjectId) {
+        setCollectionCategoryMessage("请选择项目。");
+        return;
+      }
+      name = `project.${collectionProjectId}.kb`;
+      domain = "structured_tech";
+      folder = "项目知识库";
+    } else {
+      if (!topic) {
+        setCollectionCategoryMessage("请填写合集标识。");
+        return;
+      }
+      name = `${collectionScope}.${collectionDomain}.${topic}`;
+      folder = collectionScope === "internal" ? "06-内部方法论" : "02-知识库";
+    }
+    setCollectionCategoryBusy(true);
+    setCollectionCategoryMessage(null);
+    try {
+      await apiPost("/kb/entries/manual", {
+        collection: name,
+        project_id: collectionScope === "project" ? collectionProjectId : "__all__",
+        title: `合集分类索引 · ${name}`,
+        content: `该条目用于占位，使合集 ${name} 出现在对应分类下。`,
+        domain,
+        folder_path: folder,
+        published: true,
+        doc_id: `colcat_${topic || collectionProjectId}`,
+        sync_cache: true,
+      });
+      setCollectionCategoryMessage(`已创建合集分类：${name}`);
+      await reloadKbBrowse({ force: true });
+      await reloadBrowseTree({ force: true });
+    } catch (e) {
+      setCollectionCategoryMessage(e instanceof Error ? e.message : "创建合集分类失败");
+    } finally {
+      setCollectionCategoryBusy(false);
+    }
   };
 
   const createCategoryIndexEntry = async () => {
@@ -1478,6 +1929,7 @@ export default function KnowledgePageClient() {
 
   const handleSearch = useCallback(async () => {
     if (!searchQuery.trim()) return;
+    setSearchSubmitted(true);
     setIsSearching(true);
     setPage(0);
     const q = searchQuery.trim();
@@ -1856,11 +2308,12 @@ export default function KnowledgePageClient() {
         project_id: projectId,
         sync_cache: true,
       });
+      const concreteProject = projectId && !["__all__", "*", "all"].includes(projectId);
       setPublishMessage(
         published
-          ? metadataDirty
-            ? "已保存分类并发布，缓存已同步。"
-            : "已发布并完成缓存同步。"
+          ? concreteProject
+            ? "已通过审批，并沉淀到该项目的知识库。"
+            : "已发布。这条没有关联项目，所以没有归入项目知识库。"
           : "已保持草稿（未对外发布）。",
       );
       await reloadKbBrowse({ force: true });
@@ -2060,6 +2513,8 @@ export default function KnowledgePageClient() {
   useEffect(() => {
     if (workspaceMode === "graph" && !USE_MOCK_KB) {
       void loadKgPanel({ force: false });
+      void loadKgNodes({ force: false });
+      void loadKgRels({ force: false });
     }
   }, [workspaceMode]);
 
@@ -2252,7 +2707,19 @@ export default function KnowledgePageClient() {
           >
             <div className="font-medium text-slate-900 dark:text-white truncate">{d.title}</div>
             <div className="text-xs text-slate-500 mt-1 truncate">
-              {kbFolderPathLabel(d.folder_path) || "—"} · {kbCollectionLabel(d.collection, { projectNames: projectNameMap })}
+              {(() => {
+                const scope = kbCollectionScope(d.collection);
+                const scopeLabel = scope === "other" ? "未归类" : kbCollectionScopeLabel(scope);
+                const secondaryId = kbCollectionSecondaryId(d.collection);
+                const secondary =
+                  scope === "other"
+                    ? kbCollectionLabel(d.collection, { projectNames: projectNameMap })
+                    : scope === "project"
+                      ? projectNameMap[secondaryId]?.trim() || "未命名项目"
+                      : kbDomainLabel(secondaryId);
+                const folder = kbFolderPathLabel(d.folder_path);
+                return [scopeLabel, secondary, folder].filter(Boolean).join(" · ");
+              })()}
             </div>
           </button>
           <div className="flex flex-col items-end gap-1 shrink-0">
@@ -2406,156 +2873,37 @@ export default function KnowledgePageClient() {
 
     return (
     <div className="space-y-4">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <KbClassifyRulesHint compact />
-        <div className="flex flex-wrap gap-2">
-          <button
-            type="button"
-            onClick={toggleAddCategoryPanel}
-            className={`rounded-lg border px-3 py-1.5 text-xs font-medium transition ${
-              showAddCategoryPanel
-                ? "border-emerald-500/60 bg-emerald-50 text-emerald-900 dark:border-emerald-500/40 dark:bg-emerald-500/15 dark:text-emerald-200"
-                : "border-emerald-400/70 text-emerald-800 hover:bg-emerald-50 dark:text-emerald-300 dark:hover:bg-emerald-500/10"
-            }`}
-          >
-            新增分类及功能
-          </button>
-          <button
-            type="button"
-            onClick={() => {
-              void reloadKbBrowse({ force: true });
-              void reloadBrowseTree({ force: true });
-            }}
-            className="rounded-lg border border-slate-300 dark:border-slate-600 px-3 py-1.5 text-xs text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:bg-slate-800"
-          >
-            刷新数据
-          </button>
-          {unclassifiedCount > 0 ? (
-            <button
-              type="button"
-              onClick={() => {
-                setShowUnclassifiedOnly(true);
-                handleWorkspaceMode("collections");
-              }}
-              className={`rounded-lg px-3 py-1.5 text-xs font-medium ${KB_BTN_AMBER}`}
-            >
-              {unclassifiedCount} 条未完整分类
-            </button>
-          ) : null}
-        </div>
+    {selectedTreeNode ? (
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-900/40">
+        <span className="text-slate-500">当前节点</span>
+        <span className="font-medium text-slate-900 dark:text-white">
+          {selectedTreeNode.domain
+            ? kbDomainLabel(selectedTreeNode.domain)
+            : selectedTreeNode.segment || "当前节点"}
+        </span>
+        <span className="font-mono text-xs text-slate-600 dark:text-slate-300">
+          {kbFolderPathLabel(selectedTreeFolderPath) || "域根"}
+        </span>
+        <span className="text-xs text-slate-500">{treeNodeStats.subtreeCount} 篇</span>
+        {treeNodeStats.unclassifiedCount > 0 ? (
+          <span className={`text-xs font-medium ${KB_TEXT_AMBER}`}>
+            未分类 {treeNodeStats.unclassifiedCount}
+          </span>
+        ) : null}
+        <button
+          type="button"
+          onClick={() => openKnowledgeGovern("node")}
+          className="ml-auto rounded-lg bg-slate-900 px-3 py-1.5 text-xs font-medium text-white hover:bg-slate-800 dark:bg-slate-100 dark:text-slate-900 dark:hover:bg-white"
+        >
+          在知识库治理中处理
+        </button>
       </div>
-      {showAddCategoryPanel ? (
-        <div className="rounded-xl border border-emerald-400/50 bg-emerald-50/80 dark:border-emerald-500/30 dark:bg-emerald-950/20 p-4 space-y-3">
-          <div className="flex items-start justify-between gap-2">
-            <div>
-              <p className="text-sm font-medium text-emerald-900 dark:text-emerald-100">新增分类及功能</p>
-              <p className="text-xs text-slate-600 dark:text-slate-400 mt-0.5">
-                目录树由条目的 domain + folder_path 聚合；创建分类索引可在左侧树中占位展示。
-              </p>
-            </div>
-            <button
-              type="button"
-              onClick={() => setShowAddCategoryPanel(false)}
-              className="text-slate-400 hover:text-slate-700 dark:hover:text-white text-lg leading-none shrink-0"
-              aria-label="关闭"
-            >
-              ×
-            </button>
-          </div>
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-            <label className="block text-xs">
-              <span className="text-slate-500">业务域</span>
-              <select
-                value={addCategoryDomain}
-                onChange={(e) => setAddCategoryDomain(e.target.value)}
-                className="mt-1 w-full rounded border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-2 py-1.5 text-sm"
-              >
-                {Object.entries(KB_DOMAIN_LABELS)
-                  .filter(([k]) => k !== "_uncategorized")
-                  .map(([k, label]) => (
-                    <option key={k} value={k}>
-                      {label}
-                    </option>
-                  ))}
-              </select>
-            </label>
-            <label className="block text-xs sm:col-span-2">
-              <span className="text-slate-500">父级路径</span>
-              <input
-                value={addCategoryParentPath}
-                onChange={(e) => setAddCategoryParentPath(e.target.value)}
-                placeholder="如 02-知识库/智能驾驶"
-                className="mt-1 w-full rounded border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-2 py-1.5 text-sm font-mono"
-              />
-            </label>
-            <label className="block text-xs">
-              <span className="text-slate-500">新分类名称</span>
-              <input
-                value={addCategorySegment}
-                onChange={(e) => setAddCategorySegment(e.target.value)}
-                placeholder="如 NOA/城市NOA"
-                className="mt-1 w-full rounded border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-2 py-1.5 text-sm"
-              />
-            </label>
-          </div>
-          <p className="text-xs text-slate-600 dark:text-slate-400 font-mono">
-            完整路径：
-            <span className="text-emerald-800 dark:text-emerald-200 ml-1">
-              {addCategoryFullPath || "—"}
-            </span>
-          </p>
-          <div className="flex flex-wrap gap-2">
-            {!USE_MOCK_KB ? (
-              <button
-                type="button"
-                disabled={addCategoryBusy || !addCategorySegment.trim()}
-                onClick={() => void createCategoryIndexEntry()}
-                className="rounded-lg bg-emerald-600/90 px-3 py-1.5 text-xs font-medium text-white hover:bg-emerald-500 disabled:opacity-40"
-              >
-                {addCategoryBusy ? "创建中…" : "创建分类索引"}
-              </button>
-            ) : null}
-            {!USE_MOCK_KB ? (
-              <button
-                type="button"
-                disabled={!addCategorySegment.trim()}
-                onClick={() => {
-                  const path = addCategoryFullPath.trim();
-                  applyCategoryTarget(path, addCategoryDomain);
-                  jumpToCreateFromTree({
-                    domain: addCategoryDomain.trim(),
-                    folder_path: path,
-                  });
-                  setShowAddCategoryPanel(false);
-                }}
-                className="rounded-lg bg-blue-600/90 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-500 disabled:opacity-40"
-              >
-                新建条目
-              </button>
-            ) : null}
-            <button
-              type="button"
-              disabled={!addCategorySegment.trim()}
-              onClick={() => {
-                jumpToIngestFromTreeWithTarget({
-                  domain: addCategoryDomain,
-                  folder_path: addCategoryFullPath,
-                });
-                setShowAddCategoryPanel(false);
-              }}
-              className="rounded-lg border border-slate-300 dark:border-slate-600 px-3 py-1.5 text-xs text-slate-800 dark:text-slate-200 hover:bg-slate-200 dark:bg-slate-800 disabled:opacity-40"
-            >
-              导入到此分类
-            </button>
-          </div>
-          {addCategoryMessage ? (
-            <p className={`text-xs whitespace-pre-wrap ${KB_TEXT_EMERALD}`}>{addCategoryMessage}</p>
-          ) : null}
-        </div>
-      ) : null}
+    ) : (
+      <p className="text-sm text-slate-500">选择左侧目录后，可在知识库治理里调整落点和导入目标。</p>
+    )}
     <div className="grid gap-4 lg:grid-cols-12 min-h-[480px]">
-      <div className="lg:col-span-3 rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-200/40 dark:bg-slate-800/40 p-3 overflow-auto max-h-[70vh]">
-        <p className="text-xs text-slate-400 mb-2 font-medium">业务域 / 目录路径</p>
+      <div className="lg:col-span-4 rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-200/40 dark:bg-slate-800/40 p-3 overflow-auto max-h-[70vh]">
+        <p className="text-xs text-slate-400 mb-2 font-medium">知识库 / 业务域 / 目录</p>
         {treeLoading ? (
           <p className="text-slate-400 text-sm">加载目录树…</p>
         ) : treeError ? (
@@ -2575,7 +2923,7 @@ export default function KnowledgePageClient() {
           </div>
         ) : (
           <TreeNav
-            nodes={browseTree}
+            nodes={scopedBrowseTree}
             depth={0}
             selectedPath={selectedTreeKey}
             onSelect={onTreeSelect}
@@ -2588,204 +2936,14 @@ export default function KnowledgePageClient() {
         ) : null}
       </div>
       {selectedEntry ? (
-        <div className="lg:col-span-9 grid gap-4 grid-cols-[minmax(0,1fr)_minmax(0,2fr)] items-start min-w-0">
+        <div className="lg:col-span-8 grid gap-4 grid-cols-[minmax(0,1fr)_minmax(0,2fr)] items-start min-w-0">
           <div className="min-w-0">{treeDocListPanel}</div>
           <div className="min-w-0 max-h-[min(85vh,calc(100vh-8rem))] overflow-y-auto lg:sticky lg:top-4">
             {renderDetailPanel(selectedEntry)}
           </div>
         </div>
       ) : (
-        <>
-      <div className="lg:col-span-5">{treeDocListPanel}</div>
-      <div className="lg:col-span-4 rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-200/40 dark:bg-slate-800/40 p-3 overflow-auto max-h-[70vh]">
-        <p className="text-xs text-slate-400 mb-3 font-medium">节点管理</p>
-        {selectedTreeNode ? (
-          <div className="text-sm text-slate-700 dark:text-slate-300 space-y-3">
-            <div className="rounded-lg bg-white/90 dark:bg-slate-900/60 p-3 space-y-2">
-              <p>
-                <span className="text-slate-500">业务域：</span>
-                <span className="text-slate-900 dark:text-white">{kbDomainLabel(selectedTreeNode.domain)}</span>
-                {selectedTreeNode.domain ? (
-                  <span className="ml-1 text-xs text-slate-600 font-mono">
-                    ({selectedTreeNode.domain})
-                  </span>
-                ) : null}
-              </p>
-              <p>
-                <span className="text-slate-500">目录路径：</span>
-                <span className="break-all text-slate-900 dark:text-white">
-                  {kbFolderPathLabel(selectedTreeFolderPath) ||
-                    "（域根 · 条目可能无 folder_path）"}
-                </span>
-              </p>
-              <div className="grid grid-cols-2 gap-x-2 gap-y-1 text-xs pt-1 border-t border-slate-300/50 dark:border-slate-700/50">
-                <span className="text-slate-500">本级文档</span>
-                <span className="text-right text-slate-900 dark:text-white">{directCount}</span>
-                <span className="text-slate-500">含子目录</span>
-                <span className="text-right text-slate-900 dark:text-white">{subtreeCount}</span>
-                <span className="text-slate-500">子文件夹</span>
-                <span className="text-right text-slate-900 dark:text-white">{treeNodeStats.childFolderCount}</span>
-                <span className="text-slate-500">草稿</span>
-                <span className={`text-right font-medium ${KB_TEXT_AMBER}`}>
-                  {treeNodeStats.draftCount}
-                </span>
-                <span className="text-slate-500">未完整分类</span>
-                <span className={`text-right font-medium ${KB_TEXT_AMBER}`}>
-                  {treeNodeStats.unclassifiedCount}
-                </span>
-                {treeNodeStats.harvestCount > 0 ? (
-                  <>
-                    <span className="text-slate-500">对话收割</span>
-                    <span className={`text-right font-medium ${KB_TEXT_EMERALD}`}>
-                      {treeNodeStats.harvestCount}
-                    </span>
-                  </>
-                ) : null}
-              </div>
-              {treeNodeStats.collectionCounts.length > 0 ? (
-                <div className="pt-2 border-t border-slate-300/50 dark:border-slate-700/50">
-                  <p className="text-[11px] text-slate-500 mb-1">涉及集合</p>
-                  <div className="flex flex-wrap gap-1">
-                    {treeNodeStats.collectionCounts.slice(0, 4).map((c) => (
-                      <button
-                        key={c.name}
-                        type="button"
-                        title={c.name}
-                        onClick={() => jumpToCollectionFromDoc(c.name)}
-                        className="rounded px-1.5 py-0.5 text-[10px] bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-300 dark:hover:bg-slate-700"
-                      >
-                        {kbCollectionLabel(c.name, { projectNames: projectNameMap })} ({c.count})
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              ) : null}
-            </div>
-
-            <div className="rounded-lg border border-slate-300 dark:border-slate-700 bg-white/80 dark:bg-slate-900/50 p-3 space-y-2">
-              <p className="text-[11px] uppercase tracking-wide text-slate-500">导入 / 新建目标</p>
-              <label className="block text-xs">
-                <span className="text-slate-500">业务域</span>
-                <select
-                  value={treeTargetDomain}
-                  onChange={(e) => setTreeTargetDomain(e.target.value)}
-                  className="mt-1 w-full rounded border border-slate-300 dark:border-slate-700 bg-slate-100 dark:bg-slate-950 px-2 py-1.5 text-sm"
-                >
-                  {Object.entries(KB_DOMAIN_LABELS)
-                    .filter(([k]) => k !== "_uncategorized")
-                    .map(([k, label]) => (
-                      <option key={k} value={k}>
-                        {label}
-                      </option>
-                    ))}
-                </select>
-              </label>
-              <label className="block text-xs">
-                <span className="text-slate-500">目录路径</span>
-                <input
-                  value={treeTargetFolderPath}
-                  onChange={(e) => setTreeTargetFolderPath(e.target.value)}
-                  placeholder="如 02-知识库/子目录"
-                  className="mt-1 w-full rounded border border-slate-300 dark:border-slate-700 bg-slate-100 dark:bg-slate-950 px-2 py-1.5 text-sm font-mono"
-                />
-              </label>
-            </div>
-
-            {(selectedTreeNode.children?.length ?? 0) > 0 ? (
-              <div>
-                <p className="text-[11px] text-slate-500 mb-1">子目录</p>
-                <div className="flex flex-wrap gap-1 max-h-24 overflow-auto">
-                  {selectedTreeNode.children!.map((ch, i) => {
-                    const key = treeSelectionKey(ch, 1, i);
-                    return (
-                      <button
-                        key={key}
-                        type="button"
-                        onClick={() => onTreeSelect(key, ch)}
-                        className="rounded px-2 py-0.5 text-[11px] border border-slate-300 dark:border-slate-600 text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-800"
-                      >
-                        {ch.segment || "子目录"} ({ch.document_count ?? 0})
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-            ) : null}
-
-            <div className="flex flex-wrap gap-2">
-              <button
-                type="button"
-                onClick={jumpToIngestFromTree}
-                className="rounded-lg bg-emerald-600/90 px-3 py-1.5 text-xs font-medium text-white hover:bg-emerald-500"
-              >
-                导入到此目录
-              </button>
-              {!USE_MOCK_KB ? (
-                <button
-                  type="button"
-                  onClick={() => jumpToCreateFromTree()}
-                  className="rounded-lg bg-blue-600/90 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-500"
-                >
-                  新建条目
-                </button>
-              ) : null}
-              <button
-                type="button"
-                onClick={jumpToCollectionsForNode}
-                className="rounded-lg border border-slate-300 dark:border-slate-600 px-3 py-1.5 text-xs text-slate-800 dark:text-slate-200 hover:bg-slate-200 dark:bg-slate-800"
-              >
-                在集合中管理
-              </button>
-              <button
-                type="button"
-                onClick={() => void copyTreeFolderPath()}
-                className="rounded-lg border border-slate-300 dark:border-slate-600 px-3 py-1.5 text-xs text-slate-800 dark:text-slate-200 hover:bg-slate-200 dark:bg-slate-800"
-              >
-                复制路径
-              </button>
-              {treeNodeStats.draftCount > 0 ? (
-                <button
-                  type="button"
-                  onClick={() => {
-                    setTreeDocScope("draft");
-                    setTreeDocQuery("");
-                  }}
-                  className={`rounded-lg px-3 py-1.5 text-xs font-medium ${KB_BTN_AMBER}`}
-                >
-                  查看草稿 ({treeNodeStats.draftCount})
-                </button>
-              ) : null}
-              {treeNodeStats.unclassifiedCount > 0 ? (
-                <button
-                  type="button"
-                  onClick={() => {
-                    setTreeDocScope("unclassified");
-                    setTreeDocQuery("");
-                  }}
-                  className={`rounded-lg px-3 py-1.5 text-xs font-medium ${KB_BTN_AMBER}`}
-                >
-                  未分类 ({treeNodeStats.unclassifiedCount})
-                </button>
-              ) : null}
-              {treeNodeStats.harvestCount > 0 ? (
-                <button
-                  type="button"
-                  onClick={() => handleWorkspaceMode("harvest")}
-                  className={`rounded-lg px-3 py-1.5 text-xs font-medium ${KB_BTN_EMERALD}`}
-                >
-                  对话收割 ({treeNodeStats.harvestCount})
-                </button>
-              ) : null}
-            </div>
-            {nodeManageMessage ? (
-              <p className="text-[11px] text-slate-500">{nodeManageMessage}</p>
-            ) : null}
-          </div>
-        ) : (
-          <p className="text-slate-500 text-sm">选择左侧节点</p>
-        )}
-      </div>
-        </>
+        <div className="lg:col-span-8">{treeDocListPanel}</div>
       )}
     </div>
     </div>
@@ -3105,16 +3263,41 @@ export default function KnowledgePageClient() {
     const cols = (collections.length > 0 ? collections : MOCK_COLLECTIONS).filter(
       (c) => !isKbCollectionHidden(c.name),
     );
-    const internalSectionCols = sortInternalSectionCollections(
-      cols.filter((c) => isInternalSectionCollection(c.name)),
-    );
-    const publicCols = cols.filter(
-      (c) => isPublicKbCollection(c.name) && !isInternalSectionCollection(c.name),
-    );
-    const otherCols = cols.filter(
-      (c) =>
-        !isPublicKbCollection(c.name) && !isInternalSectionCollection(c.name),
-    );
+    const domainOrder = Object.keys(KB_DOMAIN_LABELS);
+    const groupedCols = KB_COLLECTION_SCOPE_ORDER.map((scope) => {
+      const inScope = cols.filter((c) => kbCollectionScope(c.name) === scope);
+      const bySecondary = new Map<string, Collection[]>();
+      for (const col of inScope) {
+        const secondary = kbCollectionSecondaryId(col.name);
+        const list = bySecondary.get(secondary) ?? [];
+        list.push(col);
+        bySecondary.set(secondary, list);
+      }
+      const sections = [...bySecondary.entries()]
+        .map(([id, items]) => ({
+          id,
+          label:
+            id === "_uncategorized"
+              ? "未归类"
+              : scope === "project"
+                ? projectNameMap[id]?.trim() || "未命名项目"
+                : kbDomainLabel(id),
+          cols: items.sort((a, b) =>
+            kbCollectionLabel(a.name, { projectNames: projectNameMap }).localeCompare(
+              kbCollectionLabel(b.name, { projectNames: projectNameMap }),
+              "zh",
+            ),
+          ),
+        }))
+        .sort((a, b) => {
+          const ai = domainOrder.indexOf(a.id);
+          const bi = domainOrder.indexOf(b.id);
+          if (ai !== -1 || bi !== -1) return (ai === -1 ? 99 : ai) - (bi === -1 ? 99 : bi);
+          return a.label.localeCompare(b.label, "zh");
+        });
+      return { scope, label: kbCollectionScopeLabel(scope), sections };
+    });
+    const otherCols = cols.filter((c) => kbCollectionScope(c.name) === "other");
     const rawRows =
       visibleBrowseEntries.length > 0
         ? visibleBrowseEntries
@@ -3143,7 +3326,7 @@ export default function KnowledgePageClient() {
           }`}
           title={desc ? `${col.name}\n${desc}` : col.name}
         >
-          <span className="block font-medium text-slate-900 dark:text-white">
+          <span className={`block font-medium ${active ? "text-white" : "text-slate-900 dark:text-white"}`}>
             {label}
             {isAuthoritativeKbCollection(col.name) ? (
               <span className="ml-1.5 inline-block rounded bg-emerald-500/15 px-1.5 py-0.5 text-[10px] font-normal text-emerald-700 dark:text-emerald-300">
@@ -3156,24 +3339,11 @@ export default function KnowledgePageClient() {
               </span>
             ) : null}
           </span>
-          <span className="text-slate-400 text-xs font-mono">{col.name}</span>
-          <span className="ml-0 mt-0.5 block text-slate-400 text-xs">({col.entry_count} 条)</span>
+          <span className={`text-xs font-mono ${active ? "text-blue-100" : "text-slate-400"}`}>{col.name}</span>
+          <span className={`mt-0.5 block text-xs ${active ? "text-blue-100" : "text-slate-400"}`}>({col.entry_count} 条)</span>
         </button>
       );
     };
-
-    const renderColOption = (col: Collection) => {
-      const label = kbCollectionLabel(col.name, { projectNames: projectNameMap });
-      return (
-        <option key={col.name} value={col.name} title={col.name}>
-          {label} ({col.entry_count} 条)
-        </option>
-      );
-    };
-
-    const otherColNames = new Set(otherCols.map((c) => c.name));
-    const selectedOtherCollection =
-      filterCollection && otherColNames.has(filterCollection) ? filterCollection : "";
 
     return (
       <div>
@@ -3206,7 +3376,7 @@ export default function KnowledgePageClient() {
           </div>
         ) : null}
         <div className="mb-4">
-          <KbClassifyRulesHint compact />
+          <KbClassifyRulesHint focus="collections" />
         </div>
         <div className="flex flex-wrap gap-2 mb-4 items-center">
           <button
@@ -3248,69 +3418,35 @@ export default function KnowledgePageClient() {
             </button>
           ) : null}
         </div>
-        {publicCols.length > 0 ? (
-          <div className="mb-4">
-            <p className="text-xs text-slate-500 mb-2 uppercase tracking-wide">公共知识库</p>
-            <div className="flex gap-2 flex-wrap">{publicCols.map(renderColButton)}</div>
-          </div>
-        ) : null}
-        {internalSectionCols.length > 0 ? (
-          <div className="mb-4">
-            <p className="text-xs text-slate-500 mb-2 uppercase tracking-wide">内部知识库</p>
-            <div className="flex gap-2 flex-wrap">
-              {internalSectionCols.map(renderColButton)}
-            </div>
-          </div>
-        ) : null}
-        {otherCols.length > 0 ? (
-          <div className="mb-6">
-            <label
-              htmlFor="kb-collection-select"
-              className="mb-1.5 block text-xs text-slate-500 uppercase tracking-wide"
+        <div className="mb-6 space-y-4">
+          {groupedCols.map((group) => (
+            <section
+              key={group.scope}
+              className="rounded-2xl border border-slate-200 bg-slate-50/80 p-4 dark:border-slate-700 dark:bg-slate-900/40"
             >
-              其他集合
-            </label>
-            <select
-              id="kb-collection-select"
-              value={showUnclassifiedOnly ? "" : selectedOtherCollection}
-              disabled={showUnclassifiedOnly}
-              onChange={(e) => {
-                const v = e.target.value;
-                setFilterCollection(v || null);
-                setShowUnclassifiedOnly(false);
-                setPage(0);
-              }}
-              className="w-full max-w-md rounded-lg border border-slate-300 dark:border-slate-700 bg-slate-100 dark:bg-slate-900 px-3 py-2 text-sm text-slate-900 dark:text-white disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              <option value="">请选择集合…</option>
-              {otherCols.map(renderColOption)}
-            </select>
-          </div>
-        ) : publicCols.length === 0 ? (
-          <div className="mb-6">
-            <label
-              htmlFor="kb-collection-select"
-              className="mb-1.5 block text-xs text-slate-500 uppercase tracking-wide"
-            >
-              知识集合
-            </label>
-            <select
-              id="kb-collection-select"
-              value={showUnclassifiedOnly ? "" : filterCollection ?? ""}
-              disabled={showUnclassifiedOnly}
-              onChange={(e) => {
-                const v = e.target.value;
-                setFilterCollection(v || null);
-                setShowUnclassifiedOnly(false);
-                setPage(0);
-              }}
-              className="w-full max-w-md rounded-lg border border-slate-300 dark:border-slate-700 bg-slate-100 dark:bg-slate-900 px-3 py-2 text-sm text-slate-900 dark:text-white disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              <option value="">请选择集合…</option>
-              {cols.map(renderColOption)}
-            </select>
-          </div>
-        ) : null}
+              <h3 className="text-sm font-semibold text-slate-900 dark:text-white">{group.label}</h3>
+              {group.sections.length === 0 ? (
+                <p className="mt-2 text-xs text-slate-500">暂无集合</p>
+              ) : (
+                <div className="mt-3 space-y-3">
+                  {group.sections.map((section) => (
+                    <div key={section.id}>
+                      <p className="mb-2 text-xs text-slate-500">{section.label}</p>
+                      <div className="flex flex-wrap gap-2">{section.cols.map(renderColButton)}</div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </section>
+          ))}
+          {otherCols.length > 0 ? (
+            <section className="rounded-2xl border border-dashed border-slate-300 p-4 dark:border-slate-600">
+              <h3 className="text-sm font-semibold text-slate-900 dark:text-white">未归类</h3>
+              <p className="mt-1 text-xs text-slate-500">名称不以 internal / public / project 开头，暂不归入三大类。</p>
+              <div className="mt-3 flex flex-wrap gap-2">{otherCols.map(renderColButton)}</div>
+            </section>
+          ) : null}
+        </div>
         {workspaceMode === "collections" ? (
           <div className="flex flex-wrap items-center gap-2 mb-4">
             <span className="text-xs text-slate-400">知识点来源：</span>
@@ -3328,32 +3464,13 @@ export default function KnowledgePageClient() {
               <option value="upload">上传导入</option>
             </select>
             {filterCollection ? (
-              <>
-                <button
-                  type="button"
-                  onClick={() => handleWorkspaceMode("tree")}
-                  className="text-xs text-blue-400 hover:text-blue-300"
-                >
-                  在目录树中浏览 →
-                </button>
-                {!USE_MOCK_KB ? (
-                  <button
-                    type="button"
-                    disabled={entryManageBusy}
-                    onClick={() => {
-                      const col = cols.find((c) => c.name === filterCollection);
-                      void deleteCollectionAll(
-                        filterCollection,
-                        kbCollectionLabel(filterCollection, { projectNames: projectNameMap }),
-                        col?.entry_count ?? rows.length,
-                      );
-                    }}
-                    className="rounded-lg border border-rose-400/60 px-3 py-1.5 text-xs text-rose-700 hover:bg-rose-50 dark:border-rose-500/50 dark:text-rose-400 dark:hover:bg-rose-500/10 disabled:opacity-40"
-                  >
-                    删除此合集全部
-                  </button>
-                ) : null}
-              </>
+              <button
+                type="button"
+                onClick={() => handleWorkspaceMode("tree")}
+                className="text-xs text-blue-400 hover:text-blue-300"
+              >
+                在目录树中浏览 →
+              </button>
             ) : null}
           </div>
         ) : null}
@@ -3368,7 +3485,7 @@ export default function KnowledgePageClient() {
                   <p className="text-slate-500 text-center py-8 text-sm">
                     {showUnclassifiedOnly
                       ? "所有条目均已填写 domain 与 folder_path。"
-                      : "暂无条目。可在外部 KB 同步后刷新，或切换到「检索验证」。"}
+                      : "暂无条目。可在外部 KB 同步后刷新，或使用上方搜索。"}
                   </p>
                 )}
                 {rows.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE).map((entry) =>
@@ -3410,40 +3527,6 @@ export default function KnowledgePageClient() {
 
   const renderSearchView = () => (
     <div>
-      <p className="text-xs text-slate-500 mb-2">
-        默认跨全部知识集合检索（/kb/query-all）；可选限定其一。
-      </p>
-      <div className="flex flex-wrap gap-3 mb-4">
-        <select
-          value={searchScopeCollection}
-          onChange={(e) => setSearchScopeCollection(e.target.value)}
-          className="rounded-lg border border-slate-300 dark:border-slate-700 bg-slate-100 dark:bg-slate-900 px-3 py-2 text-sm text-slate-900 dark:text-white min-w-[200px]"
-        >
-          <option value="">全部知识集合</option>
-          {(collections.length ? collections : MOCK_COLLECTIONS).map((c) => (
-            <option key={c.name} value={c.name}>
-              {kbCollectionLabel(c.name, { projectNames: projectNameMap })}
-            </option>
-          ))}
-        </select>
-      </div>
-      <div className="flex gap-3 mb-6">
-        <input
-          type="text"
-          value={searchQuery}
-          onChange={(e) => setSearchQuery(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && handleSearch()}
-          placeholder="输入关键词搜索知识库..."
-          className="flex-1 px-4 py-3 bg-slate-200 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:border-blue-500"
-        />
-        <button
-          onClick={handleSearch}
-          disabled={isSearching || !searchQuery.trim()}
-          className="px-6 py-3 bg-blue-600 rounded-lg hover:bg-blue-500 disabled:opacity-50 text-white font-medium"
-        >
-          {isSearching ? "搜索中..." : "搜索"}
-        </button>
-      </div>
       {isSearching ? (
         <p className="text-slate-400 text-center py-12">搜索中...</p>
       ) : searchResults.length === 0 && searchQuery !== "" ? (
@@ -3557,16 +3640,31 @@ export default function KnowledgePageClient() {
           </button>
         </div>
         {nodesBlock ? (
-          <div className="grid gap-3 sm:grid-cols-5">
-            {Object.entries(nodesBlock).map(([k, v]) => (
-              <div key={k} className="rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-200 dark:bg-slate-800/50 p-3">
-                <p className="text-xs text-slate-500">{k}</p>
-                <p className="text-xl font-semibold text-slate-900 dark:text-white">{v}</p>
+          <>
+            <div className="grid gap-3 sm:grid-cols-3 lg:grid-cols-6">
+              {Object.entries(nodesBlock).map(([k, v]) => (
+                <div key={k} className="rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-200 dark:bg-slate-800/50 p-3">
+                  <p className="text-xs text-slate-500">{kgKindLabel(k)}</p>
+                  <p className="text-xl font-semibold text-slate-900 dark:text-white">{v}</p>
+                </div>
+              ))}
+              <div className="rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-200 dark:bg-slate-800/50 p-3">
+                <p className="text-xs text-slate-500">关系</p>
+                <p className="text-xl font-semibold text-slate-900 dark:text-white">
+                  {Number(kgStats?.relations_explicit ?? 0)}
+                </p>
               </div>
-            ))}
-          </div>
+            </div>
+            {Object.values(nodesBlock).every((v) => Number(v) === 0) &&
+            Number(kgStats?.relations_explicit ?? 0) === 0 ? (
+              <div className="rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm leading-6 text-amber-950 dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-amber-100">
+                图谱库是空的，所以这里看不到结构和数据。品牌、车型、技术洞察、核心技术、规划车型都还没有入库。
+                「校验：通过」只表示没有悬空关系。目录浏览里的文档在另一套知识库里，不会自动出现在这张图上。
+              </div>
+            ) : null}
+          </>
         ) : (
-          <p className="text-slate-500 text-sm">暂无统计，可先导入 bundle。</p>
+          <p className="text-slate-500 text-sm">统计还没读到。刷新后如果仍是空的，说明图谱库没有实体。</p>
         )}
         {kgValidate ? (
           <div
@@ -3620,18 +3718,27 @@ export default function KnowledgePageClient() {
                 ))}
               </select>
             </div>
-            <div className="max-h-64 overflow-auto rounded-lg border border-slate-300 dark:border-slate-700">
-              <table className="w-full text-left text-xs text-slate-700 dark:text-slate-300">
-                <tbody>
-                  {kgNodes.map((row, i) => (
-                    <tr key={i} className="border-b border-slate-200 dark:border-slate-800">
-                      <td className="p-2 font-mono break-all">
-                        {JSON.stringify(row).slice(0, 200)}…
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+            <div className="max-h-72 overflow-auto rounded-lg border border-slate-300 dark:border-slate-700">
+              {kgNodes.length === 0 ? (
+                <p className="p-3 text-sm text-slate-500">
+                  {kgKindLabel(kgKindPick)}还没有数据。换一个类型，或先在上方导入。
+                </p>
+              ) : (
+                <ul className="divide-y divide-slate-200 dark:divide-slate-800">
+                  {kgNodes.map((row, i) => {
+                    const item = kgNodeSummary(row);
+                    return (
+                      <li key={item.id || i} className="px-3 py-2">
+                        <p className="text-sm font-medium text-slate-900 dark:text-white">{item.title}</p>
+                        <p className="mt-0.5 font-mono text-[11px] text-slate-500">
+                          {item.id}
+                          {item.meta ? ` · ${item.meta}` : ""}
+                        </p>
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
             </div>
           </div>
           <div>
@@ -3837,7 +3944,10 @@ export default function KnowledgePageClient() {
     const canDeleteEntry = !!cacheEntryId;
 
     const renderHarvestAuditActions = () =>
-      fromEntry.source_type === "conversation_harvest" && chromaDocId ? (
+      (fromEntry.source_type === "conversation_harvest" ||
+        fromEntry.source_type === "tpd_experience" ||
+        isTpdExperienceEntry(fromEntry)) &&
+      chromaDocId ? (
         <div className="flex flex-wrap gap-2">
           <button
             type="button"
@@ -4452,6 +4562,249 @@ export default function KnowledgePageClient() {
     );
   };
 
+  const renderNodeGovernPanel = () => {
+    if (treeLoading && !selectedTreeNode) {
+      return <p className="text-sm text-slate-500">正在读取目录…</p>;
+    }
+    if (!selectedTreeNode) {
+      return (
+        <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-6 py-10 text-center dark:border-slate-700 dark:bg-slate-900/40">
+          <p className="text-sm font-medium text-slate-900 dark:text-white">还没有选中目录节点</p>
+          <p className="mx-auto mt-2 max-w-md text-sm leading-6 text-slate-500">
+            先在目录浏览里点一个业务域或文件夹，再回到这里设置导入目标、补分类或复制路径。
+          </p>
+          <button
+            type="button"
+            onClick={() => handleWorkspaceMode("tree")}
+            className="mt-4 rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800 dark:bg-slate-100 dark:text-slate-900"
+          >
+            去目录浏览
+          </button>
+        </div>
+      );
+    }
+
+    const stats = [
+      ["本级文档", treeNodeStats.directCount, "text-slate-900 dark:text-white"],
+      ["含子目录", treeNodeStats.subtreeCount, "text-slate-900 dark:text-white"],
+      ["子文件夹", treeNodeStats.childFolderCount, "text-slate-900 dark:text-white"],
+      ["草稿", treeNodeStats.draftCount, KB_TEXT_AMBER],
+      ["未完整分类", treeNodeStats.unclassifiedCount, KB_TEXT_AMBER],
+    ] as const;
+
+    return (
+      <div className="space-y-4">
+        <div className="rounded-2xl border border-slate-200 bg-white p-4 dark:border-slate-700 dark:bg-slate-900/50">
+          <p className="text-xs text-slate-500">当前节点</p>
+          <div className="mt-1 flex flex-wrap items-baseline gap-x-3 gap-y-1">
+            <h3 className="text-lg font-semibold text-slate-900 dark:text-white">
+              {kbDomainLabel(selectedTreeNode.domain)}
+            </h3>
+            {selectedTreeNode.domain ? (
+              <span className="font-mono text-xs text-slate-500">{selectedTreeNode.domain}</span>
+            ) : null}
+          </div>
+          <p className="mt-1 break-all font-mono text-sm text-slate-700 dark:text-slate-200">
+            {kbFolderPathLabel(selectedTreeFolderPath) || "域根 · 条目可能还没有目录路径"}
+          </p>
+          <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5">
+            {stats.map(([label, value, tone]) => (
+              <div
+                key={label}
+                className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 dark:border-slate-700 dark:bg-slate-950/40"
+              >
+                <p className="text-[11px] text-slate-500">{label}</p>
+                <p className={`mt-1 text-xl font-semibold ${tone}`}>{value}</p>
+              </div>
+            ))}
+          </div>
+          {treeNodeStats.collectionCounts.length > 0 ? (
+            <div className="mt-4">
+              <p className="text-xs text-slate-500">涉及集合</p>
+              <div className="mt-2 flex flex-wrap gap-1.5">
+                {treeNodeStats.collectionCounts.slice(0, 8).map((c) => (
+                  <button
+                    key={c.name}
+                    type="button"
+                    title={c.name}
+                    onClick={() => jumpToCollectionFromDoc(c.name)}
+                    className="rounded-md bg-slate-100 px-2 py-1 text-xs text-slate-700 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
+                  >
+                    {kbCollectionLabel(c.name, { projectNames: projectNameMap })} ({c.count})
+                  </button>
+                ))}
+              </div>
+            </div>
+          ) : null}
+        </div>
+
+        <div className="grid gap-4 lg:grid-cols-2">
+          <div className="rounded-2xl border border-slate-200 bg-white p-4 dark:border-slate-700 dark:bg-slate-900/50">
+            <p className="text-sm font-medium text-slate-900 dark:text-white">导入 / 新建目标</p>
+            <p className="mt-1 text-xs leading-5 text-slate-500">
+              知识库决定创作时搜哪一类合集，业务域决定策略能不能用到这篇，目录决定人在树里的位置。
+            </p>
+            <label className="mt-3 block text-xs">
+              <span className="text-slate-500">知识库</span>
+              <select
+                value={treeTargetScope}
+                onChange={(e) =>
+                  setTreeTargetScope(e.target.value as "internal" | "public" | "project")
+                }
+                className="mt-1 w-full rounded-lg border border-slate-300 bg-slate-50 px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-950"
+              >
+                <option value="internal">内部知识库</option>
+                <option value="public">公共知识库</option>
+                <option value="project">项目知识库</option>
+              </select>
+            </label>
+            {treeTargetScope === "project" ? (
+              <label className="mt-3 block text-xs">
+                <span className="text-slate-500">项目</span>
+                <select
+                  value={treeTargetProjectId}
+                  onChange={(e) => setTreeTargetProjectId(e.target.value)}
+                  className="mt-1 w-full rounded-lg border border-slate-300 bg-slate-50 px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-950"
+                >
+                  <option value="">选择项目…</option>
+                  {projects.map((project) => (
+                    <option key={project.id} value={project.id}>
+                      {project.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            ) : null}
+            <label className="mt-3 block text-xs">
+              <span className="text-slate-500">业务域</span>
+              <select
+                value={treeTargetDomain}
+                onChange={(e) => setTreeTargetDomain(e.target.value)}
+                className="mt-1 w-full rounded-lg border border-slate-300 bg-slate-50 px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-950"
+              >
+                {Object.entries(KB_DOMAIN_LABELS)
+                  .filter(([k]) => k !== "_uncategorized")
+                  .map(([k, label]) => (
+                    <option key={k} value={k}>
+                      {label}
+                    </option>
+                  ))}
+              </select>
+            </label>
+            <label className="mt-3 block text-xs">
+              <span className="text-slate-500">目录路径</span>
+              <input
+                value={treeTargetFolderPath}
+                onChange={(e) => setTreeTargetFolderPath(e.target.value)}
+                placeholder="如 02-知识库/子目录"
+                className="mt-1 w-full rounded-lg border border-slate-300 bg-slate-50 px-3 py-2 font-mono text-sm dark:border-slate-700 dark:bg-slate-950"
+              />
+            </label>
+            <p className="mt-3 break-all font-mono text-[11px] text-slate-500">
+              {importCollection
+                ? `写入合集 ${importCollection}`
+                : "选择项目后才会写入项目知识库"}
+            </p>
+          </div>
+
+          <div className="rounded-2xl border border-slate-200 bg-white p-4 dark:border-slate-700 dark:bg-slate-900/50">
+            <p className="text-sm font-medium text-slate-900 dark:text-white">可执行操作</p>
+            {(selectedTreeNode.children?.length ?? 0) > 0 ? (
+              <div className="mt-3">
+                <p className="text-xs text-slate-500">子目录</p>
+                <div className="mt-2 flex max-h-24 flex-wrap gap-1 overflow-auto">
+                  {selectedTreeNode.children!.map((ch, i) => {
+                    const key = treeSelectionKey(ch, 1, i);
+                    return (
+                      <button
+                        key={key}
+                        type="button"
+                        onClick={() => onTreeSelect(key, ch)}
+                        className="rounded-md border border-slate-300 px-2 py-1 text-xs text-slate-700 hover:bg-slate-100 dark:border-slate-600 dark:text-slate-200 dark:hover:bg-slate-800"
+                      >
+                        {ch.segment || "子目录"} ({ch.document_count ?? 0})
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            ) : null}
+            <div className="mt-3 flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={jumpToIngestFromTree}
+                className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-emerald-500"
+              >
+                导入到此目录
+              </button>
+              {!USE_MOCK_KB ? (
+                <button
+                  type="button"
+                  onClick={() => jumpToCreateFromTree()}
+                  className="rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-500"
+                >
+                  新建条目
+                </button>
+              ) : null}
+              <button
+                type="button"
+                onClick={jumpToCollectionsForNode}
+                className="rounded-lg border border-slate-300 px-3 py-1.5 text-xs text-slate-800 hover:bg-slate-100 dark:border-slate-600 dark:text-slate-200 dark:hover:bg-slate-800"
+              >
+                在集合中管理
+              </button>
+              <button
+                type="button"
+                onClick={() => void copyTreeFolderPath()}
+                className="rounded-lg border border-slate-300 px-3 py-1.5 text-xs text-slate-800 hover:bg-slate-100 dark:border-slate-600 dark:text-slate-200 dark:hover:bg-slate-800"
+              >
+                复制路径
+              </button>
+              {treeNodeStats.draftCount > 0 ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setTreeDocScope("draft");
+                    setTreeDocQuery("");
+                    handleWorkspaceMode("tree");
+                  }}
+                  className={`rounded-lg px-3 py-1.5 text-xs font-medium ${KB_BTN_AMBER}`}
+                >
+                  查看草稿 ({treeNodeStats.draftCount})
+                </button>
+              ) : null}
+              {treeNodeStats.unclassifiedCount > 0 ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setTreeDocScope("unclassified");
+                    setTreeDocQuery("");
+                    handleWorkspaceMode("tree");
+                  }}
+                  className={`rounded-lg px-3 py-1.5 text-xs font-medium ${KB_BTN_AMBER}`}
+                >
+                  未分类 ({treeNodeStats.unclassifiedCount})
+                </button>
+              ) : null}
+              {treeNodeStats.harvestCount > 0 ? (
+                <button
+                  type="button"
+                  onClick={() => handleWorkspaceMode("harvest")}
+                  className={`rounded-lg px-3 py-1.5 text-xs font-medium ${KB_BTN_EMERALD}`}
+                >
+                  对话收割 ({treeNodeStats.harvestCount})
+                </button>
+              ) : null}
+            </div>
+            {nodeManageMessage ? (
+              <p className="mt-3 text-xs text-slate-500">{nodeManageMessage}</p>
+            ) : null}
+          </div>
+        </div>
+      </div>
+    );
+  };
+
   const kbWorkspaceBody = (
     <>
       {workspaceMode === "tree" && (
@@ -4459,8 +4812,7 @@ export default function KnowledgePageClient() {
       )}
       {(workspaceMode === "collections" ||
         workspaceMode === "harvest" ||
-        workspaceMode === "experience" ||
-        workspaceMode === "search") && (
+        workspaceMode === "experience") && (
         <KnowledgeBrowseDomain
           workspaceMode={workspaceMode}
           entryManageMessage={
@@ -4474,32 +4826,145 @@ export default function KnowledgePageClient() {
           renderCollectionWorkspace={renderCollectionWorkspace}
           renderHarvestWorkspace={renderHarvestWorkspace}
           renderExperienceWorkspace={renderExperienceWorkspace}
-          renderSearchView={renderSearchView}
+          renderSearchView={() => null}
         />
       )}
       {workspaceMode === "graph" && <KnowledgeKgDomain>{renderGraphWorkspace()}</KnowledgeKgDomain>}
-      {workspaceMode === "ingest" && (
-        <KnowledgeIngestDomain>
-          <KnowledgeIngestWorkspace
-            useMock={USE_MOCK_KB}
-            prefill={ingestPrefill}
-            prefillNonce={ingestPrefillNonce}
-            onCompleted={() => {
-              knowledgeQueryCacheRef.current.invalidatePrefix("browse:");
-              knowledgeQueryCacheRef.current.invalidatePrefix("tree:");
-              void reloadKbBrowse({ force: true });
-              void reloadBrowseTree({ force: true });
-            }}
-          />
-        </KnowledgeIngestDomain>
-      )}
-      {workspaceMode === "policy" && (
-        <KnowledgePolicyDomainPanel>
-          <KnowledgePolicyDomain active={workspaceMode === "policy"} />
-        </KnowledgePolicyDomainPanel>
-      )}
     </>
   );
+
+  const ingestQueryPrefill = useMemo<KnowledgeIngestPrefill>(
+    () => ({
+      collection: searchParams.get("collection") || "",
+      domain: searchParams.get("domain") || "structured_tech",
+      folder_path: searchParams.get("folder_path") || "02-知识库/导入",
+      project_id: searchParams.get("project_id") || "__all__",
+    }),
+    [searchParams],
+  );
+
+  const governBody = (
+    <div className="space-y-4">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+        <div>
+          <h2 className="text-lg font-semibold text-slate-900 dark:text-white">目录与策略</h2>
+          <p className="mt-1 max-w-2xl text-sm leading-6 text-slate-500">
+            目录节点决定文档落在哪个业务域和路径；策略决定检索范围和写入白名单。
+          </p>
+        </div>
+        <div className="flex gap-1 rounded-lg border border-slate-300 bg-slate-100 p-1 dark:border-slate-700 dark:bg-slate-800/60">
+          {(
+            [
+              ["node", "目录节点"],
+              ["auto", "自动治理"],
+              ["collection", "合集管理"],
+              ["policy", "策略"],
+            ] as const
+          ).map(([key, label]) => (
+            <button
+              key={key}
+              type="button"
+              onClick={() => setGovernPane(key)}
+              className={`rounded-md px-4 py-2 text-sm font-medium transition ${
+                governPane === key
+                  ? "bg-slate-900 text-white dark:bg-white dark:text-slate-900"
+                  : "text-slate-600 hover:bg-white dark:text-slate-300 dark:hover:bg-slate-900"
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      </div>
+      {renderCreateEntryPanel()}
+      {governPane === "node" ? (
+        renderNodeGovernPanel()
+      ) : governPane === "auto" ? (
+        <KnowledgeAutoGovern
+          onCompleted={() => {
+            knowledgeQueryCacheRef.current.invalidatePrefix("browse:");
+            knowledgeQueryCacheRef.current.invalidatePrefix("tree:");
+            void reloadBrowseTree({ force: true });
+            void reloadKbBrowse({ force: true });
+          }}
+        />
+      ) : governPane === "collection" ? (
+        <CollectionGovernPanel
+          collections={collections}
+          projectNames={projectNameMap}
+          selected={governCollection}
+          onSelect={setGovernCollection}
+          busy={entryManageBusy}
+          message={entryManageMessage}
+          onClear={(name, label, count) => void deleteCollectionAll(name, label, count)}
+        />
+      ) : (
+        <KnowledgePolicyDomain active={surface === "govern" && governPane === "policy"} embedded />
+      )}
+    </div>
+  );
+
+  if (surface === "ingest") {
+    return (
+      <main className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-slate-100 p-4 text-slate-900 sm:p-6 md:p-8 dark:from-slate-950 dark:via-slate-900 dark:to-slate-950 dark:text-white">
+        <div className={CONTENT_MAX_CLASS}>
+          <header className="mb-8">
+            <Link href="/knowledge" className="text-sm text-slate-500 hover:text-slate-800 dark:hover:text-slate-200">
+              返回知识库
+            </Link>
+            <div className="mt-4 flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+              <div>
+                <h1 className="text-3xl font-bold sm:text-4xl">上传导入</h1>
+                <p className="mt-2 max-w-2xl text-sm text-slate-500 sm:text-base">
+                  上传或批量导入文档，自动抽取正文后写入知识库并回填缓存。
+                </p>
+              </div>
+              <KnowledgePageLinks current="ingest" />
+            </div>
+          </header>
+          <KBDegradedBanner />
+          <section className="rounded-3xl border border-slate-200 bg-white/80 p-6 dark:border-slate-800 dark:bg-slate-900/50">
+            <KnowledgeIngestWorkspace
+              useMock={USE_MOCK_KB}
+              prefill={ingestQueryPrefill}
+              prefillNonce={ingestPrefillNonce}
+              onCompleted={() => {
+                knowledgeQueryCacheRef.current.invalidatePrefix("browse:");
+                knowledgeQueryCacheRef.current.invalidatePrefix("tree:");
+              }}
+            />
+          </section>
+        </div>
+      </main>
+    );
+  }
+
+  if (surface === "govern") {
+    return (
+      <main className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-slate-100 p-4 text-slate-900 sm:p-6 md:p-8 dark:from-slate-950 dark:via-slate-900 dark:to-slate-950 dark:text-white">
+        <div className={CONTENT_MAX_CLASS}>
+          <header className="mb-8">
+            <Link href="/knowledge" className="text-sm text-slate-500 hover:text-slate-800 dark:hover:text-slate-200">
+              返回知识库
+            </Link>
+            <div className="mt-4 flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+              <div>
+                <h1 className="text-3xl font-bold sm:text-4xl">知识库治理</h1>
+                <p className="mt-2 max-w-2xl text-sm text-slate-500 sm:text-base">
+                  管理目录落点和检索策略，与知识浏览分开。
+                </p>
+              </div>
+              <KnowledgePageLinks current="govern" />
+            </div>
+          </header>
+          <KBDegradedBanner />
+          <section className="rounded-3xl border border-slate-200 bg-white/80 p-6 dark:border-slate-800 dark:bg-slate-900/50">
+            {governBody}
+          </section>
+        </div>
+      </main>
+    );
+  }
 
   return (
     <main className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-slate-100 p-4 text-slate-900 sm:p-6 md:p-8 dark:from-slate-950 dark:via-slate-900 dark:to-slate-950 dark:text-white">
@@ -4515,26 +4980,13 @@ export default function KnowledgePageClient() {
             <div>
               <h1 className="text-3xl font-bold sm:text-4xl">知识范围与检索</h1>
               <p className="mt-2 max-w-2xl text-sm text-slate-400 sm:text-base">
-                公共知识库：<strong className="text-slate-800 dark:text-slate-200">目录树</strong>治理与{" "}
-                <strong className="text-slate-800 dark:text-slate-200">知识图谱</strong>
-                信息点；治理侧新增 <strong className="text-slate-800 dark:text-slate-200">Policy 管理台</strong>
-                ，执行侧消费项目 / 场景绑定后的知识策略配置。
+                公共知识库按<strong className="text-slate-800 dark:text-slate-200">目录树</strong>
+                浏览，<strong className="text-slate-800 dark:text-slate-200">知识图谱</strong>
+                看信息点。目录落点和检索策略在
+                <strong className="text-slate-800 dark:text-slate-200">知识库治理</strong>。
               </p>
             </div>
-            <div className="flex flex-wrap gap-2">
-              <Link
-                href="/projects"
-                className="rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-100 dark:bg-slate-900/70 px-4 py-2.5 text-sm font-medium text-slate-800 dark:text-slate-200 transition hover:border-slate-300 dark:border-slate-600"
-              >
-                查看项目中心
-              </Link>
-              <Link
-                href="/learning"
-                className="rounded-xl border border-violet-400/70 bg-violet-50 px-4 py-2.5 text-sm font-medium text-violet-950 transition hover:bg-violet-100 dark:border-violet-500/40 dark:bg-violet-500/10 dark:text-violet-100 dark:hover:bg-violet-500/20"
-              >
-                学习中心
-              </Link>
-            </div>
+            <KnowledgePageLinks />
           </div>
         </header>
 
@@ -4559,11 +5011,57 @@ export default function KnowledgePageClient() {
 
         <KBDegradedBanner />
 
+        <div className="mb-4 rounded-2xl border border-slate-200 bg-white/80 px-4 py-3 dark:border-slate-800 dark:bg-slate-900/50">
+          <p className="mb-2 text-xs text-slate-500">
+            默认跨全部知识集合检索（/kb/query-all）；可选限定其一。
+          </p>
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+            <select
+              value={searchScopeCollection}
+              onChange={(e) => setSearchScopeCollection(e.target.value)}
+              aria-label="检索知识集合"
+              className="w-full shrink-0 rounded-lg border border-slate-300 bg-slate-100 px-3 py-2 text-sm text-slate-900 sm:max-w-md dark:border-slate-700 dark:bg-slate-900 dark:text-white"
+            >
+              <option value="">全部知识集合</option>
+              {(collections.length ? collections : MOCK_COLLECTIONS).map((c) => (
+                <option key={c.name} value={c.name}>
+                  {kbCollectionLabel(c.name, { projectNames: projectNameMap })}
+                </option>
+              ))}
+            </select>
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => {
+                const next = e.target.value;
+                setSearchQuery(next);
+                if (!next.trim()) {
+                  setSearchSubmitted(false);
+                  setSearchResults([]);
+                }
+              }}
+              onKeyDown={(e) => e.key === "Enter" && void handleSearch()}
+              placeholder="输入关键词搜索知识库..."
+              aria-label="搜索知识库"
+              className="min-w-0 flex-1 rounded-lg border border-slate-300 bg-slate-200 px-4 py-2 text-sm text-slate-900 placeholder-slate-400 focus:border-blue-500 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-white dark:placeholder-slate-500"
+            />
+            <button
+              type="button"
+              onClick={() => void handleSearch()}
+              disabled={isSearching || !searchQuery.trim()}
+              className="shrink-0 rounded-lg bg-blue-600 px-5 py-2 text-sm font-medium text-white hover:bg-blue-500 disabled:opacity-50"
+            >
+              {isSearching ? "搜索中..." : "搜索"}
+            </button>
+          </div>
+          {searchSubmitted ? <div className="mt-4">{renderSearchView()}</div> : null}
+        </div>
+
         <section id="kb-workspace" className="rounded-3xl border border-slate-200 dark:border-slate-800 bg-white/80 dark:bg-slate-900/50 p-6">
           <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
             <div>
               <p className="text-xs uppercase tracking-[0.2em] text-slate-500">知识工作台</p>
-              <h2 className="mt-2 text-xl font-semibold text-slate-900 dark:text-white">目录 · 集合 · 检索 · 图谱 · 导入 · Policy</h2>
+              <h2 className="mt-2 text-xl font-semibold text-slate-900 dark:text-white">目录 · 集合 · 检索 · 图谱</h2>
             </div>
             <div className="flex flex-wrap gap-1 rounded-lg border border-slate-300 dark:border-slate-700 bg-slate-200/60 dark:bg-slate-800/60 p-1">
               {(
@@ -4572,10 +5070,7 @@ export default function KnowledgePageClient() {
                   ["collections", "按集合"],
                   ["harvest", "对话收割"],
                   ["experience", "经验库"],
-                  ["search", "检索验证"],
                   ["graph", "知识图谱"],
-                  ["ingest", "上传导入"],
-                  ["policy", "策略治理"],
                 ] as const
               ).map(([k, label]) => (
                 <button
@@ -4591,27 +5086,6 @@ export default function KnowledgePageClient() {
                   {label}
                 </button>
               ))}
-              {!USE_MOCK_KB ? (
-                <button
-                  type="button"
-                  onClick={() => {
-                    setShowCreateEntry((v) => !v);
-                    setEntryManageMessage(null);
-                    const firstCol =
-                      (collections.length ? collections : MOCK_COLLECTIONS)[0]?.name ?? "";
-                    if (firstCol && !createEntryForm.collection) {
-                      setCreateEntryForm((f) => ({ ...f, collection: firstCol }));
-                    }
-                  }}
-                  className={`rounded-md px-4 py-2 text-sm font-medium transition ${
-                    showCreateEntry
-                      ? "bg-emerald-600 text-white"
-                      : "text-emerald-800 hover:bg-emerald-50 dark:text-emerald-300 dark:hover:text-white dark:hover:bg-transparent"
-                  }`}
-                >
-                  新建条目
-                </button>
-              ) : null}
             </div>
           </div>
 

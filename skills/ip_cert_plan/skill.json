@@ -27,5 +27,8 @@
       "label": "IP技术认证策划方案",
       "path": "templates/ip_cert_plan.md"
     }
-  ]
+  ],
+  "execution": {
+    "type": "llm_template"
+  }
 }

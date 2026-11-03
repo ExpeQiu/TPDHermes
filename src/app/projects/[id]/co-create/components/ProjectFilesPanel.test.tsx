@@ -8,7 +8,7 @@ import {
   renderComponent,
   setInputValue,
 } from "@/test-utils/component-test-utils";
-import { ProjectFilesPanel } from "./ProjectFilesPanel";
+import { buildBoundProjectOptions, ProjectFilesPanel } from "./ProjectFilesPanel";
 
 vi.mock("@/lib/co-create-api", async () => {
   const actual = (await vi.importActual("@/lib/co-create-api")) as typeof import("@/lib/co-create-api");
@@ -23,6 +23,24 @@ import { exportProjectFileToLocal, uploadProjectAttachment } from "@/lib/co-crea
 
 const uploadProjectAttachmentMock = vi.mocked(uploadProjectAttachment);
 const exportProjectFileToLocalMock = vi.mocked(exportProjectFileToLocal);
+
+describe("buildBoundProjectOptions", () => {
+  it("listAll 时保留非进行中项目", () => {
+    const options = buildBoundProjectOptions("", [
+      { id: "done", name: "已完成", status: "completed" },
+    ], true);
+    expect(options.map((item) => item.id)).toEqual(["done"]);
+  });
+
+  it("默认保留当前项目，其余只列出进行中", () => {
+    const options = buildBoundProjectOptions("current", [
+      { id: "current", name: "当前共创", status: "paused" },
+      { id: "live", name: "进行中的项目", status: "active" },
+      { id: "done", name: "已完成", status: "completed" },
+    ]);
+    expect(options.map((item) => item.id)).toEqual(["current", "live"]);
+  });
+});
 
 describe("ProjectFilesPanel", () => {
   afterEach(() => {
@@ -239,5 +257,38 @@ describe("ProjectFilesPanel", () => {
     clickElement(findByText(container, "全部")!);
     clickElement(findByText(container, "brief.txt")!);
     expect(onSelectPreview).toHaveBeenCalledWith("attachment:att-1");
+  });
+
+  it("切换绑定项目时回调新的项目", () => {
+    const onBoundProjectChange = vi.fn();
+    const { container } = renderComponent(
+      React.createElement(ProjectFilesPanel, {
+        projectId: "current",
+        boundProjectId: "current",
+        routeProjectId: "current",
+        projects: [
+          { id: "current", name: "当前共创", status: "active" },
+          { id: "live", name: "另一个进行中", status: "active" },
+          { id: "done", name: "已完成", status: "completed" },
+        ],
+        onBoundProjectChange,
+        files: [],
+        loading: false,
+        openTabKeys: [],
+        activeFileKey: null,
+        pinnedFileIds: [],
+        roundFileIds: [],
+        onSelectPreview: () => {},
+        onRefresh: () => {},
+      }),
+    );
+    const select = container.querySelector("select") as HTMLSelectElement;
+    expect(select.value).toBe("current");
+    expect(select.textContent).toContain("当前共创（当前）");
+    expect(select.textContent).toContain("另一个进行中");
+    expect(select.textContent).not.toContain("已完成");
+    select.value = "live";
+    select.dispatchEvent(new Event("change", { bubbles: true }));
+    expect(onBoundProjectChange).toHaveBeenCalledWith("live");
   });
 });

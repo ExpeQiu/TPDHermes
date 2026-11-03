@@ -20,6 +20,11 @@ from backend.db import async_session_maker, get_db
 from backend.models.kb_source_file import KbSourceFile
 from backend.services.chroma_client import ChromaHttpClient, flatten_chroma_get_ids
 from backend.services.kb_cache import kb_cache_service
+from backend.services.document_extract import (
+    DocumentExtractError,
+    kb_upload_error_message,
+    prepare_kb_ingest_file,
+)
 from backend.services.kb_ingest_core import sha256_file
 from backend.services.kb_ingest_job_service import (
     create_ingest_job,
@@ -202,11 +207,18 @@ async def kb_upload(
     mime = file.content_type
     created = datetime.now().isoformat()
 
+    try:
+        ingest_path, extracted = prepare_kb_ingest_file(dest, content_type=mime)
+    except DocumentExtractError as exc:
+        log.warning("kb_upload extract failed id=%s name=%s err=%s", upload_id, fname, exc)
+        dest.unlink(missing_ok=True)
+        raise HTTPException(status_code=422, detail=kb_upload_error_message(exc)) from exc
+
     async with async_session_maker() as db:
         row = KbSourceFile(
             id=upload_id,
             file_name=fname,
-            stored_path=str(dest),
+            stored_path=str(ingest_path),
             checksum=checksum,
             mime_type=mime,
             size=size,
@@ -216,8 +228,26 @@ async def kb_upload(
         db.add(row)
         await db.commit()
 
-    log.info("kb_upload ok id=%s path=%s size=%s", upload_id, dest, size)
-    return {"upload_id": upload_id, "file_name": fname, "size": size, "checksum": checksum, "doc_id_hint": hint}
+    log.info(
+        "kb_upload ok id=%s name=%s format=%s chars=%s extracted=%s path=%s size=%s",
+        upload_id,
+        fname,
+        extracted.get("source_format"),
+        extracted.get("char_count"),
+        extracted.get("extracted"),
+        ingest_path,
+        size,
+    )
+    return {
+        "upload_id": upload_id,
+        "file_name": fname,
+        "size": size,
+        "checksum": checksum,
+        "doc_id_hint": hint,
+        "source_format": extracted.get("source_format"),
+        "char_count": extracted.get("char_count"),
+        "extracted": extracted.get("extracted"),
+    }
 
 
 @router.post("/ingest")
@@ -358,6 +388,14 @@ async def kb_publish(body: KbPublishRequest):
             collections=[body.collection],
         )
     detail["cache_synced"] = bool(body.sync_cache)
+    if body.published:
+        from backend.services.project_kb import settle_docs_into_project_kb
+
+        settled = await settle_docs_into_project_kb(
+            doc_ids=list(body.doc_ids),
+            project_id=body.project_id,
+        )
+        detail["project_kb"] = settled
     return detail
 
 

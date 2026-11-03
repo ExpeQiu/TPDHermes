@@ -27,5 +27,8 @@
       "label": "技术品牌调研计划",
       "path": "templates/research_plan.md"
     }
-  ]
+  ],
+  "execution": {
+    "type": "llm_template"
+  }
 }

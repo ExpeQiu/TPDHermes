@@ -10,12 +10,20 @@ SkillVersionService - Skill 版本管理服务
 from __future__ import annotations
 
 import json
+import logging
 import shutil
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 from datetime import datetime
 
 from backend.services.skill_loader import SkillLoader, Skill, SkillNotFoundError
+
+logger = logging.getLogger("tpdx.hermes.skill_version")
+
+
+def _ignore_snapshot_junk(_src: str, names: list[str]) -> set[str]:
+    skip = {"__pycache__", ".version_meta.json", ".DS_Store"}
+    return {name for name in names if name in skip}
 
 
 # ─── 版本号工具 ───────────────────────────────────────────────────────────────
@@ -125,6 +133,44 @@ class SkillVersionService:
             "snapshotted_at": datetime.now().isoformat(),
         }, ensure_ascii=False, indent=2))
 
+        return dest
+
+    def restore_files(self, skill_name: str, version: str) -> Path:
+        """用快照覆盖工作区技能目录。快照本身保留，失败时把原目录搬回。"""
+        src = self._version_dir(skill_name, version)
+        if not src.is_dir():
+            raise SkillNotFoundError(
+                f"Version '{version}' of skill '{skill_name}' not found. "
+                f"Snapshot at {src} does not exist."
+            )
+        dest = self.loader.skills_root / skill_name
+        staging_parent = self.VERSION_ROOT / ".staging"
+        backup_parent = self.VERSION_ROOT / ".backup"
+        staging_parent.mkdir(parents=True, exist_ok=True)
+        backup_parent.mkdir(parents=True, exist_ok=True)
+        staged = staging_parent / skill_name
+        backup = backup_parent / skill_name
+        if staged.exists():
+            shutil.rmtree(staged)
+        if backup.exists():
+            shutil.rmtree(backup)
+        shutil.copytree(src, staged, ignore=_ignore_snapshot_junk)
+        moved_live = False
+        try:
+            if dest.exists():
+                dest.rename(backup)
+                moved_live = True
+            staged.rename(dest)
+        except Exception:
+            logger.exception("skill_restore files failed skill=%s version=%s", skill_name, version)
+            if moved_live and backup.exists() and not dest.exists():
+                backup.rename(dest)
+            raise
+        if backup.exists():
+            shutil.rmtree(backup, ignore_errors=True)
+        if staged.exists():
+            shutil.rmtree(staged, ignore_errors=True)
+        logger.info("skill_restore files skill=%s version=%s dest=%s", skill_name, version, dest)
         return dest
 
     def get_versions(self, skill_name: str) -> List[Dict[str, Any]]:

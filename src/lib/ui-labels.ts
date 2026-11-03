@@ -13,7 +13,11 @@ export {
   isInternalKbCollection,
   isInternalSectionCollection,
   isKbCollectionHidden,
+  KB_COLLECTION_SCOPE_ORDER,
   kbCollectionDescription,
+  kbCollectionScope,
+  kbCollectionScopeLabel,
+  kbCollectionSecondaryId,
   sortInternalSectionCollections,
 } from "@/lib/kb-collection-catalog";
 

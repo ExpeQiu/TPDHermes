@@ -12,8 +12,17 @@
     "季度报告",
     "年度洞察"
   ],
-  "tags": ["技术趋势", "洞察报告", "竞品", "营销策略"],
-  "market_tags": ["技术趋势", "洞察报告", "竞品分析"],
+  "tags": [
+    "技术趋势",
+    "洞察报告",
+    "竞品",
+    "营销策略"
+  ],
+  "market_tags": [
+    "技术趋势",
+    "洞察报告",
+    "竞品分析"
+  ],
   "market_category": "调研洞察",
   "version": "1.0.2",
   "author": "TPD Team",
@@ -24,5 +33,8 @@
       "label": "技术发展趋势洞察报告",
       "path": "templates/technology_trend_insight_report.md"
     }
-  ]
+  ],
+  "execution": {
+    "type": "llm_template"
+  }
 }

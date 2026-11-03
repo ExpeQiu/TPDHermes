@@ -61,6 +61,24 @@ class GrowthScheduler:
             await enqueue_feedback_prompts(db, hours=24)
             await analyze_feedbacks(db, days=14)
             await export_learning_hints(db)
+            try:
+                from backend.services.skill_evolution import evolve_recent
+                from backend.services.system_quiet import system_is_quiet
+
+                quiet, reason = await system_is_quiet(db)
+                if not quiet:
+                    logger.info("growth_scheduler evolve deferred reason=%s", reason)
+                else:
+                    evolved = await evolve_recent(db, days=14)
+                    logger.info(
+                        "growth_scheduler evolve enabled=%s patched=%s created=%s skipped=%s",
+                        evolved.get("enabled"),
+                        len(evolved.get("patched") or []),
+                        len(evolved.get("created") or []),
+                        len(evolved.get("skipped") or []),
+                    )
+            except Exception:
+                logger.exception("growth_scheduler evolve failed")
 
             now = datetime.now()
             week_key = now.strftime("%Y-W%W")

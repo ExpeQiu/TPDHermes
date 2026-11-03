@@ -11,8 +11,17 @@
     "单独命名",
     "敏感问题"
   ],
-  "tags": ["技术品牌", "车型策略", "IP赋能", "风险回应"],
-  "market_tags": ["技术品牌", "车型策略", "IP赋能"],
+  "tags": [
+    "技术品牌",
+    "车型策略",
+    "IP赋能",
+    "风险回应"
+  ],
+  "market_tags": [
+    "技术品牌",
+    "车型策略",
+    "IP赋能"
+  ],
   "market_category": "技术IP",
   "version": "1.0.1",
   "author": "TPD Team",
@@ -23,5 +32,8 @@
       "label": "技术品牌赋能车型策略方案",
       "path": "templates/model_brand_strategy.md"
     }
-  ]
+  ],
+  "execution": {
+    "type": "llm_template"
+  }
 }

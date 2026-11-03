@@ -30,8 +30,8 @@ def test_should_skip_kb_prefetch_for_co_create_draft():
     assert not should_skip_kb_prefetch_for_co_create_draft("你好")
 
 
-def test_chat_force_skill_mode_disabled_for_co_create():
-    from backend.routes.tasks import _chat_force_skill_mode
+def test_chat_force_skill_mode_covers_co_create_fallback():
+    from backend.routes.tasks import _chat_direct_before_agent, _chat_force_skill_mode
     from backend.schemas.orchestration import (
         OrchestrationExecution,
         OrchestrationOutput,
@@ -57,7 +57,9 @@ def test_chat_force_skill_mode_disabled_for_co_create():
         user_input=OrchestrationUserInput(message="输出技术方案"),
     )
     assert _chat_force_skill_mode(payload) is True
-    assert _chat_force_skill_mode(payload, chat_mode="co_create") is False
+    assert _chat_force_skill_mode(payload, chat_mode="co_create") is True
+    assert _chat_direct_before_agent(payload) is True
+    assert _chat_direct_before_agent(payload, chat_mode="co_create") is False
 
 
 def test_format_kb_prefetch_prompt_block():

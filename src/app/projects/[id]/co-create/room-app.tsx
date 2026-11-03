@@ -6,13 +6,18 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import {
   coCreateAgentModeMeta,
+  isPlanConfirmPrompt,
   type CoCreateAgentMode,
 } from "@/app/projects/[id]/co-create/co-create-agent-utils";
 import { FilePreviewPanel } from "@/app/projects/[id]/co-create/components/FilePreviewPanel";
 import { ProjectFilesPanel } from "@/app/projects/[id]/co-create/components/ProjectFilesPanel";
 import { useFileWorkspace } from "@/app/projects/[id]/co-create/hooks/use-file-workspace";
 import { apiGet, apiPatch, apiPost } from "@/lib/api";
-import { encodeProjectFileSelectValue, decodeProjectFileSelectValue } from "@/lib/chat-context";
+import {
+  encodeProjectFileSelectValue,
+  decodeProjectFileSelectValue,
+  type ProjectRecord,
+} from "@/lib/chat-context";
 import {
   applyFileAction,
   fetchProjectFileDetail,
@@ -21,7 +26,6 @@ import {
 } from "@/lib/co-create-api";
 
 type RoleMeta = { id: string; name: string; description?: string };
-type MemberRow = { user_id: string; role: string };
 type RoomSummary = {
   id: string;
   title: string;
@@ -45,6 +49,50 @@ type RoomMessage = {
 
 const POLL_MS = 2000;
 const ROOM_AGENT_MODES: CoCreateAgentMode[] = ["ask", "agent", "plan"];
+
+function hashRoleId(value: string): number {
+  let hash = 2166136261;
+  for (let i = 0; i < value.length; i += 1) {
+    hash ^= value.charCodeAt(i);
+    hash = Math.imul(hash, 16777619);
+  }
+  return hash >>> 0;
+}
+
+function layoutRoleCloud(ids: string[]): Map<string, { x: number; y: number; duration: number; delay: number; dx: number; dy: number }> {
+  const points = ids.map((id) => {
+    const hash = hashRoleId(id);
+    return {
+      id,
+      x: 14 + (hash % 62),
+      y: 8 + ((hash >>> 8) % 76),
+      duration: 6 + (hash % 5),
+      delay: ((hash >>> 4) % 12) * 0.35,
+      dx: (hash % 2 === 0 ? 1 : -1) * (3 + (hash % 4)),
+      dy: ((hash >>> 2) % 2 === 0 ? 1 : -1) * (4 + ((hash >>> 6) % 5)),
+    };
+  });
+  for (let pass = 0; pass < 10; pass += 1) {
+    for (let i = 0; i < points.length; i += 1) {
+      for (let j = i + 1; j < points.length; j += 1) {
+        const a = points[i];
+        const b = points[j];
+        const dx = a.x - b.x;
+        const dy = a.y - b.y;
+        const dist = Math.hypot(dx, dy) || 0.01;
+        if (dist >= 22) continue;
+        const push = (22 - dist) / 2;
+        const ux = dx / dist;
+        const uy = dy / dist;
+        a.x = Math.min(78, Math.max(12, a.x + ux * push));
+        a.y = Math.min(90, Math.max(8, a.y + uy * push));
+        b.x = Math.min(78, Math.max(12, b.x - ux * push));
+        b.y = Math.min(90, Math.max(8, b.y - uy * push));
+      }
+    }
+  }
+  return new Map(points.map((point) => [point.id, point]));
+}
 
 export type RoomMentionKind = "role" | "file";
 
@@ -77,14 +125,15 @@ function mergeMessages(current: RoomMessage[], incoming: RoomMessage[]): RoomMes
 export default function CoCreateRoomApp() {
   const params = useParams();
   const projectId = String(params?.id || "");
+  const [fileProjectId, setFileProjectId] = useState(projectId);
+  const [bindableProjects, setBindableProjects] = useState<ProjectRecord[]>([]);
   const [roles, setRoles] = useState<RoleMeta[]>([]);
-  const [members, setMembers] = useState<MemberRow[]>([]);
   const [fileSaving, setFileSaving] = useState(false);
   const [filesPinned, setFilesPinned] = useState(false);
   const [filesRevealed, setFilesRevealed] = useState(false);
   const filesHideTimer = useRef<number | null>(null);
   const filesOpen = filesPinned || filesRevealed;
-  const fileWorkspace = useFileWorkspace(projectId);
+  const fileWorkspace = useFileWorkspace(fileProjectId);
   const [rooms, setRooms] = useState<RoomSummary[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [messages, setMessages] = useState<RoomMessage[]>([]);
@@ -137,6 +186,31 @@ export default function CoCreateRoomApp() {
   }, [projectId]);
 
   useEffect(() => {
+    setFileProjectId(projectId);
+  }, [projectId]);
+
+  useEffect(() => {
+    if (!projectId) return;
+    let cancelled = false;
+    apiGet<ProjectRecord[]>("/projects/")
+      .then((rows) => {
+        if (cancelled) return;
+        const list = Array.isArray(rows) ? rows : [];
+        setBindableProjects(list);
+        console.info("[co-create-room] 可绑定项目", {
+          projectId,
+          active: list.filter((item) => item.status === "active").length,
+        });
+      })
+      .catch((err) => {
+        console.warn("[co-create-room] 项目列表加载失败", err);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [projectId]);
+
+  useEffect(() => {
     if (!projectId) return;
     let cancelled = false;
     const load = async <T,>(path: string, apply: (data: T) => void) => {
@@ -148,7 +222,6 @@ export default function CoCreateRoomApp() {
       }
     };
     void load<{ items: RoleMeta[] }>("/brainstorm/roles", (data) => setRoles(data.items ?? []));
-    void load<MemberRow[]>(`/projects/${projectId}/members`, (data) => setMembers(data ?? []));
     loadRooms().catch((err: Error) => {
       if (!cancelled) setError(err.message);
     });
@@ -223,7 +296,7 @@ export default function CoCreateRoomApp() {
 
   const openedDocRef = useRef("");
   useEffect(() => {
-    if (!outputId || docVersion <= 0) return;
+    if (!outputId || docVersion <= 0 || fileProjectId !== projectId) return;
     const fileKey = encodeProjectFileSelectValue("output", outputId);
     const token = `${activeId}:${fileKey}:${docVersion}`;
     if (openedDocRef.current === token) return;
@@ -237,6 +310,7 @@ export default function CoCreateRoomApp() {
     docVersion,
     fileWorkspace.openFileTab,
     fileWorkspace.refreshFiles,
+    fileProjectId,
     fileWorkspace.reloadFileTab,
     outputId,
     projectId,
@@ -248,7 +322,7 @@ export default function CoCreateRoomApp() {
       if (!decoded || decoded.kind !== "output") throw new Error("仅支持编辑输出类文件");
       setFileSaving(true);
       try {
-        await applyFileAction(projectId, {
+        await applyFileAction(fileProjectId, {
           session_id: activeId ?? undefined,
           proposal_id: crypto.randomUUID(),
           action: {
@@ -263,23 +337,23 @@ export default function CoCreateRoomApp() {
         fileWorkspace.patchTabContent(fileKey, content);
         await fileWorkspace.refreshFiles();
         await fileWorkspace.reloadFileTab(fileKey);
-        console.info("[co-create-room] 手动编辑已保存", { projectId, fileKey });
+        console.info("[co-create-room] 手动编辑已保存", { projectId: fileProjectId, fileKey });
       } finally {
         setFileSaving(false);
       }
     },
-    [activeId, fileWorkspace, projectId],
+    [activeId, fileProjectId, fileWorkspace],
   );
 
   const handleRenameFile = useCallback(
     async (fileKey: string, title: string) => {
       const decoded = decodeProjectFileSelectValue(fileKey);
       if (!decoded) throw new Error("无法识别文件");
-      const result = await renameProjectFile(projectId, decoded.id, decoded.kind, title);
+      const result = await renameProjectFile(fileProjectId, decoded.id, decoded.kind, title);
       fileWorkspace.patchTabTitle(fileKey, result.title);
       await fileWorkspace.refreshFiles();
     },
-    [fileWorkspace, projectId],
+    [fileProjectId, fileWorkspace],
   );
 
   const handleRestoreVersion = useCallback(
@@ -288,10 +362,10 @@ export default function CoCreateRoomApp() {
       if (!fileKey) throw new Error("请先打开要恢复的文件");
       const decoded = decodeProjectFileSelectValue(fileKey);
       if (!decoded || decoded.kind !== "output") throw new Error("仅支持恢复输出类文件");
-      const detail = await fetchProjectFileDetail(projectId, version.id, "output");
+      const detail = await fetchProjectFileDetail(fileProjectId, version.id, "output");
       setFileSaving(true);
       try {
-        await applyFileAction(projectId, {
+        await applyFileAction(fileProjectId, {
           session_id: activeId ?? undefined,
           proposal_id: crypto.randomUUID(),
           action: {
@@ -309,7 +383,7 @@ export default function CoCreateRoomApp() {
         setFileSaving(false);
       }
     },
-    [activeId, fileWorkspace, projectId],
+    [activeId, fileProjectId, fileWorkspace],
   );
 
   const mentionItems = useMemo(() => {
@@ -332,6 +406,8 @@ export default function CoCreateRoomApp() {
       .slice(0, 8)
       .map((file) => ({ kind: "file" as const, id: file.id, label: file.title }));
   }, [activeRoom?.role_ids, fileWorkspace.files, mention, roles]);
+
+  const roleCloud = useMemo(() => layoutRoleCloud(roles.map((role) => role.id)), [roles]);
 
   useEffect(() => {
     setMentionIndex(0);
@@ -372,19 +448,25 @@ export default function CoCreateRoomApp() {
       const mentionFileIds = fileWorkspace.files
         .filter((file) => mentionTokenPresent(text, "#", file.title))
         .map((file) => file.id);
+      const modeToSend: CoCreateAgentMode =
+        agentMode === "plan" && isPlanConfirmPrompt(text) ? "agent" : agentMode;
+      if (modeToSend !== agentMode) {
+        setAgentMode("agent");
+        console.info("[co-create-room] 计划已确认，切换 Agent 执行", { projectId, roomId });
+      }
       const message = await apiPost<RoomMessage>(
         `/projects/${projectId}/rooms/${roomId}/messages`,
         {
           content: text,
           mention_role_ids: mentionRoleIds,
           mention_file_ids: mentionFileIds,
-          agent_mode: agentMode,
+          agent_mode: modeToSend,
         },
       );
       setMessages((prev) => mergeMessages(prev, [message]));
       setDraft("");
       setMention(null);
-      console.info("[co-create-room] 发送", { projectId, roomId, seq: message.seq, agentMode });
+      console.info("[co-create-room] 发送", { projectId, roomId, seq: message.seq, agentMode: modeToSend });
     } catch (err) {
       setError(err instanceof Error ? err.message : "发送失败");
     } finally {
@@ -617,17 +699,19 @@ export default function CoCreateRoomApp() {
               里添加，再点选入座。
             </p>
           ) : null}
-              <button
-                type="button"
-                disabled={creating}
-                onClick={() => void createRoom("bot")}
-                className="w-full rounded-full border border-blue-500/40 bg-blue-500/15 px-2 py-1 text-xs text-blue-700 transition hover:bg-blue-500/25 disabled:opacity-40 dark:text-blue-200"
-              >
-                新建Bot
-              </button>
-              <div className="flex min-h-0 flex-1 flex-wrap content-start gap-1 overflow-y-auto" role="group" aria-label="入座角色">
+              <div className="relative min-h-0 flex-1 overflow-hidden" role="group" aria-label="入座角色">
+                <style>{`
+                  @keyframes co-create-role-drift {
+                    0%, 100% { transform: translate(-50%, -50%) translate(0, 0); }
+                    50% { transform: translate(-50%, -50%) translate(var(--drift-x), var(--drift-y)); }
+                  }
+                  @media (prefers-reduced-motion: reduce) {
+                    .co-create-role-point { animation: none !important; }
+                  }
+                `}</style>
                 {roles.map((role) => {
                   const selected = selectedRoles.includes(role.id);
+                  const point = roleCloud.get(role.id);
                   return (
                     <button
                       key={role.id}
@@ -643,17 +727,32 @@ export default function CoCreateRoomApp() {
                           return next;
                         });
                       }}
-                      className={`inline-flex shrink-0 items-center justify-center whitespace-nowrap rounded-full border px-2 py-0.5 text-center text-[10px] leading-4 transition ${
+                      className={`co-create-role-point absolute inline-flex items-center justify-center whitespace-nowrap rounded-full border px-2 py-0.5 text-center text-[10px] leading-4 hover:z-10 hover:[animation-play-state:paused] ${
                         selected
-                          ? "border-blue-500/40 bg-blue-500/15 text-blue-700 dark:text-blue-200"
-                          : "border-slate-200 bg-slate-100 text-slate-600 hover:border-slate-300 hover:bg-slate-200 hover:text-slate-900 dark:border-slate-700 dark:bg-slate-900/60 dark:text-slate-400 dark:hover:border-slate-600 dark:hover:text-slate-200"
+                          ? "z-[2] border-blue-500/40 bg-blue-500/15 text-blue-700 shadow-[0_0_12px_rgba(59,130,246,0.35)] dark:text-blue-200"
+                          : "border-slate-200/80 bg-white/80 text-slate-600 hover:border-slate-300 hover:bg-white dark:border-slate-700 dark:bg-slate-900/70 dark:text-slate-300"
                       }`}
+                      style={{
+                        left: `${point?.x ?? 50}%`,
+                        top: `${point?.y ?? 50}%`,
+                        animation: `co-create-role-drift ${point?.duration ?? 7}s ease-in-out ${point?.delay ?? 0}s infinite`,
+                        ["--drift-x" as string]: `${point?.dx ?? 4}px`,
+                        ["--drift-y" as string]: `${point?.dy ?? 6}px`,
+                      }}
                     >
                       {role.name}
                     </button>
                   );
                 })}
               </div>
+              <button
+                type="button"
+                disabled={creating}
+                onClick={() => void createRoom("bot")}
+                className="w-full shrink-0 rounded-full border border-blue-500/40 bg-blue-500/15 px-2 py-1 text-xs text-blue-700 transition hover:bg-blue-500/25 disabled:opacity-40 dark:text-blue-200"
+              >
+                新建Bot
+              </button>
               {selectedRoles.length > 0 ? (
                 <div className="flex flex-wrap gap-1" role="group" aria-label="主笔">
                   {roles
@@ -828,11 +927,6 @@ export default function CoCreateRoomApp() {
               发送
             </button>
           </div>
-          {members.length > 0 ? (
-            <p className="mt-1 truncate text-[11px] text-slate-400">
-              成员 {members.map((member) => member.user_id).join("、")}
-            </p>
-          ) : null}
         </div>
       </section>
   );
@@ -844,7 +938,7 @@ export default function CoCreateRoomApp() {
       <div className="flex min-h-0 w-[46%] min-w-[22rem] shrink-0">
         <div className="min-h-0 min-w-0 flex-1 overflow-hidden border-l border-slate-300 dark:border-slate-700">
           <FilePreviewPanel
-            projectId={projectId}
+            projectId={fileProjectId}
             openTabKeys={fileWorkspace.openTabKeys}
             activeFileKey={fileWorkspace.activeFileKey}
             tabLabels={fileWorkspace.tabLabels}
@@ -878,25 +972,19 @@ export default function CoCreateRoomApp() {
           onMouseLeave={concealFiles}
         >
           {filesOpen ? (
-            <div className="flex h-full w-60 flex-col">
-              <div className="flex shrink-0 justify-end border-b border-slate-300 bg-slate-100 px-2 py-0.5 dark:border-slate-700 dark:bg-slate-900/40">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setFilesPinned((pinned) => {
-                      const next = !pinned;
-                      console.info("[co-create-room] 文件栏", { projectId, pinned: next });
-                      return next;
+            <div className="h-full w-60">
+                <ProjectFilesPanel
+                  projectId={fileProjectId}
+                  boundProjectId={fileProjectId}
+                  routeProjectId={projectId}
+                  projects={bindableProjects}
+                  onBoundProjectChange={(next) => {
+                    setFileProjectId(next);
+                    console.info("[co-create-room] 文件栏绑定项目", {
+                      roomProjectId: projectId,
+                      fileProjectId: next,
                     });
                   }}
-                  className="text-[10px] text-slate-500 hover:text-slate-800 dark:hover:text-slate-200"
-                >
-                  {filesPinned ? "自动隐藏" : "固定"}
-                </button>
-              </div>
-              <div className="min-h-0 flex-1">
-                <ProjectFilesPanel
-                  projectId={projectId}
                   files={fileWorkspace.files}
                   loading={fileWorkspace.loading}
                   openTabKeys={fileWorkspace.openTabKeys}
@@ -907,8 +995,15 @@ export default function CoCreateRoomApp() {
                     if (key) fileWorkspace.openFileTab(key);
                   }}
                   onRefresh={() => void fileWorkspace.refreshFiles()}
+                  pinLabel={filesPinned ? "自动隐藏" : "固定"}
+                  onTogglePin={() => {
+                    setFilesPinned((pinned) => {
+                      const next = !pinned;
+                      console.info("[co-create-room] 文件栏", { projectId, pinned: next });
+                      return next;
+                    });
+                  }}
                 />
-              </div>
             </div>
           ) : (
             <button

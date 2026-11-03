@@ -169,6 +169,7 @@ def _build_llm_prompt(skill: Skill, context: dict[str, Any]) -> tuple[str, str, 
         "请根据提供的知识库资料与任务信息，输出可直接发布/宣讲的 Markdown 成稿。"
         "禁止输出模版说明、结构框架示例、占位符、写作注意事项或 meta 注释。"
         "正文须完整、连贯，可独立阅读。"
+        "缺少证据的数字、场景和承诺写成「待补充」，不要编造量化指标。"
     )
     user_parts = [
         f"技能：{skill.name}（{_skill_description(skill)}）",
@@ -279,8 +280,9 @@ def _compose_fallback_deliverable(skill: Skill, context: dict[str, Any]) -> str:
     scene = str(context.get("scene_pain") or context.get("hook") or "").strip()
     solution = str(context.get("tech_solution") or context.get("tech_display") or "").strip()
     value = str(context.get("user_value") or "").strip()
-    cta = str(context.get("cta") or "欢迎进一步了解与交流。").strip()
+    cta = str(context.get("cta") or "").strip() or "（待补充：cta）"
     slogan = str(context.get("slogan") or "").strip()
+    collection_hint = suggested_collection_hint(context)
 
     parts = [f"# {title}"]
     if slogan:
@@ -302,10 +304,11 @@ def _compose_fallback_deliverable(skill: Skill, context: dict[str, Any]) -> str:
         parts.append(kb_block[:800])
 
     parts.append("\n\n## 用户价值\n")
-    parts.append(value or "帮助团队减少重复摸索，更快形成可复用的技术推广内容。")
+    parts.append(value or "（待补充：user_value。请从知识库补证据，不要写成确定承诺）")
 
     parts.append("\n\n## 收尾\n")
     parts.append(cta)
+    parts.append(f"\n\n建议补充知识库集合：{collection_hint}")
     return "\n".join(parts).strip()
 
 
@@ -427,6 +430,31 @@ async def generate_workshop_deliverable(skill: Skill, context: dict[str, Any]) -
     }
 
 
+def _input_schema(skill: Skill) -> dict[str, Any]:
+    meta = getattr(skill, "skill_meta", None)
+    if not isinstance(meta, dict):
+        return {}
+    schema = meta.get("input_schema")
+    return schema if isinstance(schema, dict) else {}
+
+
+def missing_input_fields(skill: Skill, context: dict[str, Any]) -> list[str]:
+    """input_schema 中为空的字段。校验失败时回给调用方，而不是填假数据。"""
+    missing: list[str] = []
+    for key in _input_schema(skill):
+        value = context.get(key)
+        if value is None or value == "" or value == [] or value == {}:
+            missing.append(str(key))
+    return missing
+
+
+def suggested_collection_hint(context: dict[str, Any]) -> str:
+    name = str(context.get("collection_name") or "").strip()
+    if name:
+        return name
+    return "请绑定知识库集合后补充证据"
+
+
 def _reject_invalid_input(skill: Skill, context: dict[str, Any]) -> dict[str, Any] | None:
     try:
         accepted = bool(skill.validate_input(context))
@@ -441,13 +469,25 @@ def _reject_invalid_input(skill: Skill, context: dict[str, Any]) -> dict[str, An
         }
     if accepted:
         return None
-    logger.info("workshop input rejected skill=%s", skill.name)
+    missing = missing_input_fields(skill, context)
+    hint = suggested_collection_hint(context)
+    logger.info(
+        "workshop input rejected skill=%s missing=%s collection=%s",
+        skill.name,
+        ",".join(missing) or "-",
+        hint,
+    )
+    detail = f"Invalid input for skill '{skill.name}'"
+    if missing:
+        detail = f"{detail}；缺少字段：{', '.join(missing)}；建议补充知识库集合：{hint}"
     return {
         "success": False,
         "status": "failed",
         "skill": skill.name,
         "content": None,
-        "error": f"Invalid input for skill '{skill.name}'",
+        "error": detail,
+        "missing_fields": missing,
+        "suggested_collection": hint,
     }
 
 

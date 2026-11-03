@@ -11,8 +11,17 @@
     "领导讲话",
     "开场致辞"
   ],
-  "tags": ["发言稿", "发布会", "口播", "CTA"],
-  "market_tags": ["发言稿", "发布会", "演讲稿"],
+  "tags": [
+    "发言稿",
+    "发布会",
+    "口播",
+    "CTA"
+  ],
+  "market_tags": [
+    "发言稿",
+    "发布会",
+    "演讲稿"
+  ],
   "market_category": "内容生产",
   "version": "1.0.1",
   "author": "TPD Team",
@@ -24,5 +33,8 @@
     "highlights": "array of {name, scene_data} (技术亮点：场景+数据)",
     "user_value": "string (用户价值：量化指标)",
     "cta": "string (收尾行动号召)"
+  },
+  "execution": {
+    "type": "llm_template"
   }
 }

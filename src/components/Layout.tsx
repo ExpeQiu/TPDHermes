@@ -43,7 +43,10 @@ export function Layout({ children }: { children: React.ReactNode }) {
         {/* Nav */}
         <nav className="flex-1 overflow-y-auto py-3 px-3 space-y-0.5">
           {visibleNavLinks.map((link) => {
-            const active = pathname === link.href
+            const active =
+              link.href === "/knowledge"
+                ? pathname === "/knowledge" || pathname.startsWith("/knowledge/")
+                : pathname === link.href
             return (
               <Link
                 key={link.href}
@@ -103,7 +106,10 @@ export function Layout({ children }: { children: React.ReactNode }) {
         </div>
         <nav className="flex-1 py-3 px-3 space-y-0.5">
           {visibleNavLinks.map((link) => {
-            const active = pathname === link.href
+            const active =
+              link.href === "/knowledge"
+                ? pathname === "/knowledge" || pathname.startsWith("/knowledge/")
+                : pathname === link.href
             return (
               <Link
                 key={link.href}

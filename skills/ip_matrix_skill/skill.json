@@ -10,8 +10,17 @@
     "技术品牌定位",
     "车型互锁"
   ],
-  "tags": ["IP矩阵", "技术品牌", "七步法", "车型节奏"],
-  "market_tags": ["IP矩阵", "技术品牌", "七步法"],
+  "tags": [
+    "IP矩阵",
+    "技术品牌",
+    "七步法",
+    "车型节奏"
+  ],
+  "market_tags": [
+    "IP矩阵",
+    "技术品牌",
+    "七步法"
+  ],
   "market_category": "技术IP",
   "version": "1.0.1",
   "author": "TPD Team",
@@ -25,5 +34,8 @@
     "highlights": "array of {dimension, point, params_scene_benefit} (技术亮点)",
     "tech_stack": "object of {computing, algorithm, data, ecosystem} (技术底座)",
     "vehicle_timeline": "array of {model, plan_level, launch_time} (车型×上市时间)"
+  },
+  "execution": {
+    "type": "llm_template"
   }
 }

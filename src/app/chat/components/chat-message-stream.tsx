@@ -63,9 +63,10 @@ export function ChatMessageStream({
   messagesEndRef,
 }: ChatMessageStreamProps) {
   return (
-    <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain space-y-4 px-4 py-4 sm:px-6 md:px-8">
+    <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
+      <div className="flex min-h-full flex-col space-y-4 px-4 py-4 sm:px-6 md:px-8">
       {(!activeSession || activeSession.messages.length === 0) && (
-        <div className="flex min-h-full flex-col items-center justify-center text-slate-500">
+        <div className="flex flex-1 flex-col items-center justify-center text-slate-500">
           <p className="text-4xl mb-4">💬</p>
           <p className="text-sm">开始一段新对话吧</p>
           <p className="text-xs mt-1 text-slate-600">回车发送 · Shift+回车换行</p>
@@ -208,6 +209,7 @@ export function ChatMessageStream({
       )}
 
       <div ref={messagesEndRef} />
+      </div>
     </div>
   );
 }

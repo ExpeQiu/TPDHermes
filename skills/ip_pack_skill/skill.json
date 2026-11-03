@@ -27,5 +27,8 @@
       "label": "技术IP包装全案策划",
       "path": "templates/ip_pack_plan.md"
     }
-  ]
+  ],
+  "execution": {
+    "type": "llm_template"
+  }
 }

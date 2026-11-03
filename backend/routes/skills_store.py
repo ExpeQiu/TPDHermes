@@ -11,12 +11,16 @@ Skills Store API - 技能商店
   DELETE /skills/:name      - 卸载 Skill
   GET  /skills/:name/versions - 获取版本历史
   POST /skills/:name/versions/:version/load - 加载指定版本（预览）
+  POST /skills/:name/versions/:version/restore - 用快照覆盖工作区并回拨版本指针
 """
 
 from __future__ import annotations
 
+import json
 import logging
 import shutil
+import uuid
+from datetime import datetime, timedelta
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Depends, Query, File, UploadFile, Form
@@ -26,7 +30,10 @@ from typing import Any, Dict, List, Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.db import get_db
+from backend.services.run_log_service import create_run, finalize_run
 from backend.services.skill_lifecycle import SkillLifecycleService
+from backend.services.skill_metrics_service import build_skill_usage_view
+from backend.services.workshop_llm_generator import execute_workshop_skill_generate
 from backend.services.skill_version import SkillVersionService
 from backend.services.skill_loader import SkillNotFoundError, get_loader
 from backend.services.skill_package import (
@@ -73,6 +80,11 @@ class SkillPublishGlobalRequest(BaseModel):
     publish: bool = True
 
 
+class SkillTrialRequest(BaseModel):
+    fields: Dict[str, Any] = {}
+    collection_name: str = ""
+
+
 class SkillPackageFileWriteRequest(BaseModel):
     path: str
     content: str
@@ -106,60 +118,6 @@ class SkillResponse(BaseModel):
     updated_at: str
     config_source: Optional[str] = None
     config_keys_count: Optional[int] = None
-
-
-# ─── Marketplace catalog（静态原型数据）────────────────────────────────────────
-
-MARKETPLACE_CATALOG = [
-    {
-        "name": "hello_skill",
-        "display_name": "Hello 示例",
-        "description": "最小示例技能，用于联调与验证加载链路",
-        "icon": "👋",
-        "category": "文档类",
-        "latest_version": "1.0.0",
-        "author": "TPD Team",
-        "tags": ["示例", "联调"],
-        "installs": 12,
-        "rating": 5.0,
-    },
-    {
-        "name": "speech_skill",
-        "display_name": "发言稿",
-        "description": "生成领导讲话、产品发布、技术分享等场景的正式发言稿",
-        "icon": "🎤",
-        "category": "文档类",
-        "latest_version": "1.2.0",
-        "author": "TPD Team",
-        "tags": ["讲话", "演讲", "PPT"],
-        "installs": 342,
-        "rating": 4.8,
-    },
-    {
-        "name": "video_skill",
-        "display_name": "视频脚本",
-        "description": "生成短视频/宣传片的分镜脚本，包含旁白和画面描述",
-        "icon": "🎬",
-        "category": "文档类",
-        "latest_version": "1.1.0",
-        "author": "TPD Team",
-        "tags": ["视频", "脚本", "宣传片"],
-        "installs": 218,
-        "rating": 4.6,
-    },
-    {
-        "name": "a4_skill",
-        "display_name": "A4一页纸",
-        "description": "单页精华文档，提炼核心信息，适合快速阅读和传播",
-        "icon": "📄",
-        "category": "文档类",
-        "latest_version": "1.0.0",
-        "author": "TPD Team",
-        "tags": ["一页纸", "摘要", "精华"],
-        "installs": 156,
-        "rating": 4.5,
-    },
-]
 
 
 # ─── Helpers ───────────────────────────────────────────────────────────────────
@@ -225,17 +183,18 @@ def _skill_to_market_row(skill: Dict[str, Any]) -> Dict[str, Any]:
     config = skill.get("config") if isinstance(skill.get("config"), dict) else {}
     source = str(skill.get("source") or "local").strip().lower()
     owner_id = str(skill.get("owner_id") or "").strip()
+    display_name = str(config.get("display_name") or "").strip() or str(skill.get("name") or "")
     return {
         "name": skill.get("name", ""),
-        "display_name": skill.get("name", ""),
+        "display_name": display_name,
         "description": skill.get("description", ""),
         "icon": _normalize_market_icon(config),
         "category": _normalize_market_category(config, source),
         "latest_version": skill.get("version", "1.0.0"),
         "author": _safe_owner_alias(owner_id),
         "tags": _normalize_market_tags(config),
-        "installs": max(len(skill.get("version_history") or []), 1),
-        "rating": float(config.get("market_rating") or 4.6),
+        "installs": 0,
+        "rating": None,
         "updated_at": _date_only(str(skill.get("updated_at") or "")),
         "publisher_id": owner_id,
         "source": source,
@@ -291,11 +250,7 @@ async def get_marketplace(
     """浏览 Skill 市场目录（汇总全体用户创建并已安装的技能）。"""
     svc = SkillLifecycleService(db, get_loader())
     all_skills = await svc.list_skills(enabled_only=False, viewer_user_id=None)
-    if all_skills:
-        results = [_skill_to_market_row(skill) for skill in all_skills]
-    else:
-        # 兼容空库启动：保留原型数据
-        results = MARKETPLACE_CATALOG
+    results = [_skill_to_market_row(skill) for skill in all_skills]
     if q:
         q_lower = q.lower()
         results = [
@@ -323,7 +278,7 @@ async def get_categories(db: AsyncSession = Depends(get_db)):
     """获取市场分类列表（动态）。"""
     svc = SkillLifecycleService(db, get_loader())
     all_skills = await svc.list_skills(enabled_only=False, viewer_user_id=None)
-    rows = [_skill_to_market_row(skill) for skill in all_skills] if all_skills else MARKETPLACE_CATALOG
+    rows = [_skill_to_market_row(skill) for skill in all_skills]
     cats = sorted(set(s["category"] for s in rows))
     return cats
 
@@ -431,6 +386,117 @@ async def upload_skill_package(
     except ValueError as e:
         logger.warning("skill_upload rejected: %s", e)
         raise HTTPException(status_code=400, detail=str(e)) from e
+
+
+@router.get("/usage")
+async def skill_usage(
+    days: int = Query(7, ge=1, le=90),
+    db: AsyncSession = Depends(get_db),
+    effective_uid: str = Depends(get_effective_user_id),
+):
+    """近 N 日技能调用、采纳与场景白名单。工坊页使用，不拉整份用量总览。"""
+    since = (datetime.now() - timedelta(days=days)).isoformat()
+    view = await build_skill_usage_view(db, since=since, viewer_user_id=effective_uid)
+    view["days"] = days
+    return view
+
+
+@router.post("/{name}/trial")
+async def trial_skill(
+    name: str,
+    data: SkillTrialRequest,
+    db: AsyncSession = Depends(get_db),
+    effective_uid: str = Depends(get_effective_user_id),
+):
+    """按输入字段试跑。先记一条 workshop run，再走统一执行入口。"""
+    svc = SkillLifecycleService(db, get_loader())
+    skill_row = await svc.get_skill(name)
+    if not skill_row or not skill_installation_visible(skill_row.get("owner_id"), effective_uid):
+        raise HTTPException(status_code=404, detail=f"Skill '{name}' not found")
+    if not skill_row.get("enabled"):
+        raise HTTPException(status_code=400, detail=f"技能未启用：{name}")
+
+    run_id = str(uuid.uuid4())
+    fields = data.fields if isinstance(data.fields, dict) else {}
+    context = dict(fields)
+    collection = (data.collection_name or "").strip()
+    if collection:
+        context["collection_name"] = collection
+    context["tphermes_run_id"] = run_id
+    policy = {
+        "mode": "allowed_list",
+        "allowed": [name],
+        "preferred": [name],
+        "forbidden": [],
+        "allow_agent_free_choice": False,
+    }
+    logger.info("skill_trial start skill=%s user=%s run_id=%s", name, effective_uid[:24], run_id)
+    await create_run(
+        db,
+        run_id=run_id,
+        project_id=None,
+        entrypoint="workshop",
+        user_id=effective_uid,
+        request_json=json.dumps({"skill": name, "context_keys": sorted(context.keys())}, ensure_ascii=False),
+        snapshot_json="{}",
+        skills_policy_json=json.dumps(policy, ensure_ascii=False),
+    )
+    try:
+        skill = get_loader().load(name)
+        result = await execute_workshop_skill_generate(skill, context)
+    except Exception as exc:
+        logger.warning("skill_trial failed skill=%s run_id=%s err=%s", name, run_id, exc)
+        await finalize_run(
+            db,
+            run_id=run_id,
+            assistant_content="",
+            status="failed",
+            response_metadata={"skill": name, "error": str(exc)},
+            validation=None,
+            error_message=str(exc),
+            duration_ms=None,
+            project_id=None,
+            template_id=None,
+            save_output=False,
+        )
+        raise HTTPException(status_code=500, detail=f"试跑失败：{exc}") from exc
+
+    if not isinstance(result, dict):
+        result = {"content": str(result), "status": "succeeded"}
+    status = str(result.get("status") or ("failed" if result.get("success") is False else "succeeded"))
+    content = result.get("content")
+    text = content if isinstance(content, str) else ("" if content is None else json.dumps(content, ensure_ascii=False))
+    await finalize_run(
+        db,
+        run_id=run_id,
+        assistant_content=text,
+        status="failed" if status == "failed" else "completed",
+        response_metadata={
+            "skill": name,
+            "execution_type": result.get("execution_type"),
+            "fallback_reason": result.get("fallback_reason"),
+            "missing_fields": result.get("missing_fields") or [],
+        },
+        validation=None,
+        error_message=str(result.get("error") or "") or None,
+        duration_ms=None,
+        project_id=None,
+        template_id=None,
+        save_output=bool(text.strip()) and status != "failed",
+        output_title=str(skill_row.get("config", {}).get("display_name") or name) if isinstance(skill_row.get("config"), dict) else name,
+    )
+    logger.info("skill_trial done skill=%s run_id=%s status=%s", name, run_id, status)
+    return {
+        "run_id": run_id,
+        "skill": name,
+        "status": status,
+        "content": text or None,
+        "error": result.get("error"),
+        "missing_fields": result.get("missing_fields") or [],
+        "suggested_collection": result.get("suggested_collection"),
+        "execution_type": result.get("execution_type"),
+        "fallback_reason": result.get("fallback_reason"),
+    }
 
 
 @router.get("/{name}", response_model=SkillResponse)
@@ -643,3 +709,19 @@ async def load_version(name: str, version: str):
         }
     except SkillNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e))
+
+
+@router.post("/{name}/versions/{version}/restore")
+async def restore_skill_version(
+    name: str,
+    version: str,
+    db: AsyncSession = Depends(get_db),
+):
+    """用指定快照覆盖当前技能目录，并把版本指针拨回该快照。"""
+    lifecycle = SkillLifecycleService(db, get_loader())
+    try:
+        restored = await lifecycle.restore_version(name, version)
+    except SkillNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
+    logger.info("skill_restore via api name=%s version=%s", name, version)
+    return restored

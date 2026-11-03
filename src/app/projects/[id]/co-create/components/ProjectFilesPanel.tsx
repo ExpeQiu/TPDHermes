@@ -12,8 +12,45 @@ import type { FileRefState } from "@/app/projects/[id]/co-create/co-create-types
 
 type FilterKind = "all" | "output" | "attachment";
 
+export type BoundProjectOption = {
+  id: string;
+  name: string;
+  status?: string;
+};
+
+/** 当前项目始终在列表里；其余只保留进行中的项目。 */
+export function buildBoundProjectOptions(
+  routeProjectId: string,
+  projects: BoundProjectOption[],
+  listAll = false,
+): BoundProjectOption[] {
+  const byId = new Map<string, BoundProjectOption>();
+  for (const project of projects) {
+    if (!project.id) continue;
+    if (listAll || project.id === routeProjectId || project.status === "active") {
+      byId.set(project.id, project);
+    }
+  }
+  if (routeProjectId && !byId.has(routeProjectId)) {
+    byId.set(routeProjectId, { id: routeProjectId, name: "当前项目", status: "active" });
+  }
+  return Array.from(byId.values()).sort((a, b) => {
+    if (a.id === routeProjectId) return -1;
+    if (b.id === routeProjectId) return 1;
+    return a.name.localeCompare(b.name, "zh");
+  });
+}
+
 type Props = {
   projectId: string;
+  boundProjectId?: string;
+  routeProjectId?: string;
+  projects?: BoundProjectOption[];
+  /** 对话页可清空绑定；项目共创房间始终绑定当前项目 */
+  allowUnbound?: boolean;
+  /** 列出传入的全部项目，而不是只保留进行中 */
+  listAllProjects?: boolean;
+  onBoundProjectChange?: (projectId: string) => void;
   files: ProjectFileItem[];
   loading: boolean;
   openTabKeys: string[];
@@ -22,6 +59,8 @@ type Props = {
   roundFileIds: string[];
   onSelectPreview: (fileKey: string | null) => void;
   onRefresh: () => void;
+  pinLabel?: string;
+  onTogglePin?: () => void;
 };
 
 function refStateFor(fileKey: string, pinned: string[], round: string[]): FileRefState {
@@ -39,6 +78,12 @@ const refBadge: Record<FileRefState, string> = {
 
 export function ProjectFilesPanel({
   projectId,
+  boundProjectId,
+  routeProjectId,
+  projects = [],
+  allowUnbound = false,
+  listAllProjects = false,
+  onBoundProjectChange,
   files,
   loading,
   openTabKeys,
@@ -47,6 +92,8 @@ export function ProjectFilesPanel({
   roundFileIds,
   onSelectPreview,
   onRefresh,
+  pinLabel,
+  onTogglePin,
 }: Props) {
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState<FilterKind>("all");
@@ -55,6 +102,16 @@ export function ProjectFilesPanel({
   const [exportingKey, setExportingKey] = useState<string | null>(null);
   const [exportError, setExportError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const explicitRouteId = routeProjectId?.trim() ?? "";
+  const routeId = explicitRouteId || projectId;
+  const boundId = boundProjectId || projectId;
+  const projectOptions = useMemo(() => {
+    const options = buildBoundProjectOptions(routeId, projects, listAllProjects);
+    if (boundId && !options.some((item) => item.id === boundId)) {
+      options.push({ id: boundId, name: "已选项目", status: "active" });
+    }
+    return options;
+  }, [boundId, listAllProjects, projects, routeId]);
 
   const handlePickAttachment = () => {
     setUploadError(null);
@@ -114,9 +171,44 @@ export function ProjectFilesPanel({
   }, [files, filter, search]);
 
   return (
-    <aside className="flex h-full min-h-0 flex-col overflow-hidden border-l border-slate-300 bg-slate-100 dark:border-slate-700 dark:bg-slate-900/40">
+    <aside className="flex h-full min-h-0 w-full min-w-0 flex-1 flex-col overflow-hidden border-l border-slate-300 bg-slate-100 dark:border-slate-700 dark:bg-slate-900/40">
       <div className="shrink-0 space-y-2 border-b border-slate-300 p-3 dark:border-slate-700">
-        <p className="text-xs font-semibold text-slate-700 dark:text-slate-200">项目文件</p>
+        <div className="flex items-center justify-between gap-2">
+          <p className="text-xs font-semibold text-slate-700 dark:text-slate-200">项目文件</p>
+          {onTogglePin ? (
+            <button
+              type="button"
+              onClick={onTogglePin}
+              className="shrink-0 text-[10px] text-slate-500 hover:text-slate-800 dark:hover:text-slate-200"
+            >
+              {pinLabel}
+            </button>
+          ) : null}
+        </div>
+        <label className="block space-y-1">
+          <span className="text-[10px] text-slate-500">绑定项目</span>
+          <select
+            aria-label="绑定项目"
+            value={boundId}
+            disabled={!onBoundProjectChange || (projectOptions.length === 0 && !allowUnbound)}
+            onChange={(e) => {
+              const next = e.target.value;
+              if (next === boundId) return;
+              if (!next && !allowUnbound) return;
+              console.info("[co-create] 文件栏切换绑定项目", { from: boundId, to: next || null });
+              onBoundProjectChange?.(next);
+            }}
+            className="w-full truncate rounded-lg border border-slate-300 bg-white px-2 py-1 text-xs text-slate-800 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100"
+          >
+            {allowUnbound ? <option value="">不绑定项目</option> : null}
+            {projectOptions.map((project) => (
+              <option key={project.id} value={project.id}>
+                {project.name || project.id}
+                {explicitRouteId && project.id === explicitRouteId ? "（当前）" : ""}
+              </option>
+            ))}
+          </select>
+        </label>
         <input
           value={search}
           onChange={(e) => setSearch(e.target.value)}
@@ -154,6 +246,8 @@ export function ProjectFilesPanel({
       <div className="min-h-0 flex-1 space-y-0.5 overflow-y-auto overscroll-contain p-1">
         {loading ? (
           <p className="p-4 text-xs text-slate-500">加载文件…</p>
+        ) : !projectId ? (
+          <p className="p-4 text-xs leading-relaxed text-slate-500">先绑定项目，再选择要关联的文件。</p>
         ) : filtered.length === 0 ? (
           <p className="p-4 text-xs leading-relaxed text-slate-500">
             暂无项目文件。可上传参考资料，或让 Agent 生成初始文件。

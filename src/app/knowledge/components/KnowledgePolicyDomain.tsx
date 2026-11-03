@@ -115,7 +115,13 @@ async function copyText(text: string): Promise<void> {
   await navigator.clipboard.writeText(text);
 }
 
-export default function KnowledgePolicyDomain({ active }: { active: boolean }) {
+export default function KnowledgePolicyDomain({
+  active,
+  embedded = false,
+}: {
+  active: boolean;
+  embedded?: boolean;
+}) {
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
@@ -363,12 +369,18 @@ export default function KnowledgePolicyDomain({ active }: { active: boolean }) {
     <div className="space-y-5">
       <div className="rounded-2xl border border-violet-300/70 dark:border-violet-500/30 bg-violet-50/80 dark:bg-violet-950/20 p-4">
         <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-          <div>
-            <h3 className="text-lg font-semibold text-slate-900 dark:text-white">Policy 管理台</h3>
-            <p className="mt-1 text-sm text-slate-600 dark:text-slate-400">
-              统一管理知识策略实体、版本快照和审批发布状态；项目与场景可绑定 `knowledge_policy_id`。
+          {embedded ? (
+            <p className="text-sm text-slate-600 dark:text-slate-400">
+              管理策略版本、审批发布，以及项目和场景的绑定。
             </p>
-          </div>
+          ) : (
+            <div>
+              <h3 className="text-lg font-semibold text-slate-900 dark:text-white">Policy 管理台</h3>
+              <p className="mt-1 text-sm text-slate-600 dark:text-slate-400">
+                统一管理知识策略实体、版本快照和审批发布状态；项目与场景可绑定 `knowledge_policy_id`。
+              </p>
+            </div>
+          )}
           <div className="flex flex-wrap gap-2">
             <button
               type="button"

@@ -27,5 +27,8 @@
       "label": "IP技术/事件传播稿",
       "path": "templates/tech_pr.md"
     }
-  ]
+  ],
+  "execution": {
+    "type": "llm_template"
+  }
 }

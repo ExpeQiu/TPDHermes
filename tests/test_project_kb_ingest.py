@@ -68,6 +68,37 @@ def test_extract_unsupported(tmp_path: Path):
         extract_to_markdown(p)
 
 
+def test_extract_html_strips_tags(tmp_path: Path):
+    p = tmp_path / "page.html"
+    p.write_text("<html><body><h1>标题</h1><script>secret()</script><p>正文</p></body></html>", encoding="utf-8")
+    text = extract_to_markdown(p)
+    assert "标题" in text
+    assert "正文" in text
+    assert "secret" not in text
+    assert "<p>" not in text
+
+
+def test_extract_doc_via_textutil(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    p = tmp_path / "legacy.doc"
+    p.write_bytes(b"\xd0\xcf\x11\xe0")
+
+    monkeypatch.setattr(
+        "backend.services.document_extract.shutil.which",
+        lambda name: "/usr/bin/textutil" if name == "textutil" else None,
+    )
+
+    def fake_run(cmd, **kwargs):
+        class _Proc:
+            returncode = 0
+            stdout = "旧版文档正文"
+            stderr = ""
+
+        return _Proc()
+
+    monkeypatch.setattr("backend.services.document_extract.subprocess.run", fake_run)
+    assert "旧版文档正文" in extract_to_markdown(p)
+
+
 def test_project_context_includes_kb_stats():
     with TestClient(app) as client:
         pr = client.post("/api/v1/projects/", json={"name": "KB上下文项目"}).json()

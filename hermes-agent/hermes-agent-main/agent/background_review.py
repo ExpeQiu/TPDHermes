@@ -1244,6 +1244,26 @@ _PROMPT_NAME_BY_SCOPE = {
 }
 
 
+def _project_skill_prompt_addendum() -> str:
+    """Tell the review fork which project skill roots it may patch. Empty when the gate is shut."""
+    try:
+        from tools.skill_manager_guards import project_skill_roots
+        roots = [str(path) for path in project_skill_roots()]
+    except Exception:
+        logger.debug("project skill root lookup failed", exc_info=True)
+        return ""
+    if not roots:
+        return ""
+    listed = "\n".join(f"- {path}" for path in roots)
+    return (
+        "\n\nProject skill roots are unlocked for this process. You may patch or extend "
+        "skills under these directories even when they are not curator-managed. Do not "
+        "delete them. Pinned, bundled, hub-installed, and protected built-in skills stay "
+        "off-limits. A version snapshot is written before each write.\n"
+        f"{listed}\n"
+    )
+
+
 def spawn_background_review_thread(
     agent: Any, messages_snapshot: List[Dict], review_memory: bool = False,
     review_skills: bool = False, focus: Optional[str] = None,
@@ -1266,6 +1286,7 @@ def spawn_background_review_thread(
             f"{prompt}\n\nThe user explicitly requested this review with the following "
             f"focus — prioritize it over the general instructions above:\n{focus}"
         )
+    prompt = f"{prompt}{_project_skill_prompt_addendum()}"
 
     def _target() -> None:  # resolves _run_review_in_thread at call time (tests patch it)
         _run_review_in_thread(

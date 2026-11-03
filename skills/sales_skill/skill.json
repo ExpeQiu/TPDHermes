@@ -11,8 +11,17 @@
     "逼单",
     "4S店培训"
   ],
-  "tags": ["销售话术", "4S店", "异议处理", "试驾"],
-  "market_tags": ["销售话术", "门店", "异议处理"],
+  "tags": [
+    "销售话术",
+    "4S店",
+    "异议处理",
+    "试驾"
+  ],
+  "market_tags": [
+    "销售话术",
+    "门店",
+    "异议处理"
+  ],
   "market_category": "终端转化",
   "version": "1.0.1",
   "author": "TPD Team",
@@ -23,5 +32,8 @@
     "top_selling_points": "array of string (主打卖点，3个)",
     "target_competitors": "array of string (对标竞品)",
     "target_users": "array of {type, pain_point, pitch} (目标用户类型)"
+  },
+  "execution": {
+    "type": "llm_template"
   }
 }

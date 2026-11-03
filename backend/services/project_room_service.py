@@ -43,14 +43,35 @@ def normalize_room_agent_mode(value: str | None) -> str:
     return mode if mode in _AGENT_MODES else "agent"
 
 
-def room_turn_writes_document(mode: str, text: str) -> bool:
-    """Ask 只读；Plan 先规划，确认后才写回；Agent 可写回。都不会新建文档。"""
+def is_plan_confirm(text: str) -> bool:
+    return bool(_PLAN_CONFIRM_RE.match((text or "").strip()))
+
+
+_DOC_NEED_RE = re.compile(r"写|生成|产出|成稿|文档|修订|改写|起草|输出|整理成|行动计划")
+
+
+def agent_turn_needs_document(text: str) -> bool:
+    """Agent 按需写文档：确认执行，或明确要求产出/修订。"""
+    raw = (text or "").strip()
+    if is_plan_confirm(raw):
+        return True
+    return bool(_DOC_NEED_RE.search(raw))
+
+
+def effective_room_mode(mode: str, text: str) -> str:
+    """Plan 确认后按 Agent 执行。"""
     resolved = normalize_room_agent_mode(mode)
-    if resolved == "ask":
+    if resolved == "plan" and is_plan_confirm(text):
+        return "agent"
+    return resolved
+
+
+def room_turn_writes_document(mode: str, text: str) -> bool:
+    """Ask 与规划中的 Plan 不写文档；Agent 按需创建或修订。"""
+    resolved = effective_room_mode(mode, text)
+    if resolved != "agent":
         return False
-    if resolved == "plan":
-        return bool(_PLAN_CONFIRM_RE.match((text or "").strip()))
-    return True
+    return agent_turn_needs_document(text)
 
 
 def set_room_completer_for_tests(fn: RoomCompleter | None) -> None:
@@ -235,18 +256,34 @@ def compose_room_document(
 
 async def mock_room_reply(role: dict[str, Any], ctx: dict[str, Any]) -> str:
     name = str(role.get("name") or role.get("id") or "角色")
-    human = str(ctx.get("human_text") or "")
+    human = str(ctx.get("human_text") or "").strip()
     prior = str(ctx.get("prior_agent_text") or "")
+    mode = effective_room_mode(str(ctx.get("agent_mode") or "agent"), human)
+    transcript = ctx.get("transcript") or []
+    seen = f"\n已看到：{transcript[-1]}" if transcript else ""
+    if mode == "ask":
+        brief = human[:80]
+        line = f"简答：{brief}"
+        if prior:
+            line += f"\n承接：{prior[:80]}"
+        return line + seen
+    if mode == "plan":
+        return (
+            f"需求：{human}\n"
+            "拆解：\n1. 澄清目标与约束\n2. 拆成可执行步骤\n3. 排定先后\n"
+            "行动计划：\n- [ ] 确认范围\n- [ ] 产出结果\n"
+            "请确认后开始执行。"
+            + seen
+        )
     if ctx.get("is_writer"):
         line = f"主笔收束：{human}"
     else:
         line = f"{name}回应：{human}"
     if prior:
         line += f"\n承接：{prior}"
-    transcript = ctx.get("transcript") or []
-    if transcript:
-        line += f"\n已看到：{transcript[-1]}"
-    return line
+    if agent_turn_needs_document(human):
+        line += "\n已按需写入右侧文档。"
+    return line + seen
 
 
 async def complete_room_turn(role: dict[str, Any], ctx: dict[str, Any]) -> str:
@@ -673,7 +710,10 @@ async def _execute_turn(db: AsyncSession, room_id: str, turn_id: str) -> None:
             "document": await _output_content(db, room.output_id),
             "file_names": file_names,
             "is_writer": rid == room.writer_role_id,
-            "agent_mode": normalize_room_agent_mode(getattr(human, "agent_mode", None)),
+            "agent_mode": effective_room_mode(
+                getattr(human, "agent_mode", None),
+                human.content or "",
+            ),
             "system": role.get("system") or "",
         }
         reply = (await complete_room_turn(role, ctx)).strip() or f"{role.get('name') or rid} 暂无补充。"
@@ -708,7 +748,7 @@ async def _execute_turn(db: AsyncSession, room_id: str, turn_id: str) -> None:
             turn_id,
         )
 
-    mode = normalize_room_agent_mode(getattr(human, "agent_mode", None))
+    mode = effective_room_mode(getattr(human, "agent_mode", None), human.content or "")
     if not can_write or not room_turn_writes_document(mode, human.content or ""):
         logger.info(
             "[co-create-room] skip doc write room_id=%s project_id=%s user_id=%s turn_id=%s agent_mode=%s can_write=%s",
@@ -724,15 +764,6 @@ async def _execute_turn(db: AsyncSession, room_id: str, turn_id: str) -> None:
     room = await db.get(ProjectRoom, room_id)
     if not room:
         return
-    if not room.output_id:
-        logger.info(
-            "[co-create-room] skip new doc room_id=%s project_id=%s user_id=%s turn_id=%s",
-            room_id,
-            room.project_id,
-            human.author_id,
-            turn_id,
-        )
-        return
     previous = await _output_content(db, room.output_id)
     document = compose_room_document(
         title=room.title,
@@ -741,15 +772,24 @@ async def _execute_turn(db: AsyncSession, room_id: str, turn_id: str) -> None:
         discussion=discussion,
     )
     proposal_id = f"room-{turn_id}"
-    action = {
-        "type": "patch",
-        "file_id": room.output_id,
-        "file_kind": "output",
-        "file_name": f"{room.title}.md",
-        "edit_mode": "full",
-        "content": document,
-        "summary": "共创修订",
-    }
+    if room.output_id:
+        action = {
+            "type": "patch",
+            "file_id": room.output_id,
+            "file_kind": "output",
+            "file_name": f"{room.title}.md",
+            "edit_mode": "full",
+            "content": document,
+            "summary": "共创修订",
+        }
+    else:
+        action = {
+            "type": "create",
+            "file_name": f"{room.title}.md",
+            "path": f"/输出/{room.title}.md",
+            "content": document,
+            "summary": "共创创建",
+        }
     result = await apply_file_action(
         db,
         room.project_id,

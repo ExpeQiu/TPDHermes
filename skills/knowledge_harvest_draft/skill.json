@@ -25,5 +25,8 @@
     "project_id": "string，可选",
     "collection_hint": "string，建议 collection 名，可选",
     "domain_hint": "string，可选，如 structured_tech"
+  },
+  "execution": {
+    "type": "python"
   }
 }

@@ -41,6 +41,8 @@ type SkillsScopePanelProps = {
   onToggleSelect?: (name: string) => void;
   showManageLink?: boolean;
   displayNameByName?: Map<string, string>;
+  /** browse 模式下卡片副文案：适用说法、必填输入、近况 */
+  detailByName?: Map<string, string>;
   className?: string;
   emptyHint?: string;
 };
@@ -60,6 +62,7 @@ function SkillScopeCard({
   onSkillClick,
   onToggleSelect,
   displayNameByName,
+  detailByName,
 }: {
   skill: SkillScopeItem;
   mode: "browse" | "select";
@@ -69,11 +72,13 @@ function SkillScopeCard({
   onSkillClick?: (skill: SkillScopeItem) => void;
   onToggleSelect?: (name: string) => void;
   displayNameByName?: Map<string, string>;
+  detailByName?: Map<string, string>;
 }) {
   const highlighted = mode === "browse" ? active : selected;
   const scopeLabel = skill.owner_id && String(skill.owner_id).trim() ? "个人" : "公共";
   const selectable = mode === "select" && skill.enabled;
   const displayName = skillLabel(skill.name, displayNameByName?.get(skill.name));
+  const detail = mode === "browse" ? detailByName?.get(skill.name) : "";
 
   return (
     <button
@@ -100,8 +105,9 @@ function SkillScopeCard({
           {skill.enabled ? "启用" : "禁用"}
         </span>
       </div>
+      {detail ? <p className="mt-1 line-clamp-2 text-xs text-slate-400">{detail}</p> : null}
       <p className="mt-1 text-xs text-slate-500">
-        v{skill.version} · {scopeLabel}
+        {scopeLabel}
         {showManageLink ? (
           <>
             {" · "}
@@ -130,6 +136,7 @@ function SkillScopeSection({
   onSkillClick,
   onToggleSelect,
   displayNameByName,
+  detailByName,
   emptyText,
 }: {
   title: string;
@@ -142,6 +149,7 @@ function SkillScopeSection({
   onSkillClick?: (skill: SkillScopeItem) => void;
   onToggleSelect?: (name: string) => void;
   displayNameByName?: Map<string, string>;
+  detailByName?: Map<string, string>;
   emptyText: string;
 }) {
   return (
@@ -163,6 +171,7 @@ function SkillScopeSection({
               onSkillClick={onSkillClick}
               onToggleSelect={onToggleSelect}
               displayNameByName={displayNameByName}
+              detailByName={detailByName}
             />
           ))}
         </div>
@@ -181,6 +190,7 @@ export function SkillsScopePanel({
   onToggleSelect,
   showManageLink = true,
   displayNameByName,
+  detailByName,
   className = "",
   emptyHint,
 }: SkillsScopePanelProps) {
@@ -223,6 +233,7 @@ export function SkillsScopePanel({
         onSkillClick={onSkillClick}
         onToggleSelect={onToggleSelect}
         displayNameByName={displayNameByName}
+        detailByName={detailByName}
         emptyText="暂无公共技能条目"
       />
       <section className="border-t border-slate-300 dark:border-slate-700 pt-4">
@@ -237,6 +248,7 @@ export function SkillsScopePanel({
           onSkillClick={onSkillClick}
           onToggleSelect={onToggleSelect}
           displayNameByName={displayNameByName}
+          detailByName={detailByName}
           emptyText="暂无上传技能，可使用技能页「上传技能」"
         />
       </section>

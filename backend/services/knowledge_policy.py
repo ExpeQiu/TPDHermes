@@ -156,6 +156,50 @@ async def get_allowed_write_collections(
     return None
 
 
+def _result_domain(row: dict) -> str:
+    meta = row.get("metadata") if isinstance(row.get("metadata"), dict) else {}
+    return str(meta.get("domain") or "").strip()
+
+
+async def filter_results_by_eligible_domains(result: dict, project_id: str | None) -> dict:
+    """创作检索只保留策略允许的业务域。未标业务域的条目仍保留。"""
+    pid = str(project_id or "").strip()
+    if not pid or pid in {"__all__", "*", "all"}:
+        return result
+    config = await resolve_effective_knowledge_policy(project_id=pid)
+    raw = config.get("eligible_domains") if isinstance(config, dict) else None
+    if not isinstance(raw, list) or not raw:
+        return result
+    allowed = {str(item).strip() for item in raw if str(item).strip() and str(item).strip() != "_uncategorized"}
+    if not allowed:
+        return result
+    rows = list(result.get("results") or [])
+    kept = []
+    dropped = 0
+    for row in rows:
+        domain = _result_domain(row)
+        if domain and domain not in allowed:
+            dropped += 1
+            continue
+        kept.append(row)
+    if not dropped:
+        return result
+    logger.info(
+        "kb_query domain_filter project_id=%s allowed=%s kept=%s dropped=%s",
+        pid,
+        ",".join(sorted(allowed)),
+        len(kept),
+        dropped,
+    )
+    out = dict(result)
+    out["results"] = kept
+    out["count"] = len(kept)
+    warning = str(out.get("warning") or "").strip()
+    note = "domain_filtered_by_policy"
+    out["warning"] = f"{warning}; {note}" if warning else note
+    return out
+
+
 async def validate_harvest_collection(
     collection_name: str,
     *,

@@ -26,5 +26,8 @@
     "my_tech": "string (本品技术方案)",
     "competitors": "array of {name, tech, advantage, weakness} (竞品信息)",
     "compare_dimensions": "array of string (对比维度，如续航/智驾/座舱/价格等)"
+  },
+  "execution": {
+    "type": "llm_template"
   }
 }

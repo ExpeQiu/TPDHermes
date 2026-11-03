@@ -27,5 +27,8 @@
       "label": "技术规划与技术品牌互锁地图",
       "path": "templates/tech_lockmap.md"
     }
-  ]
+  ],
+  "execution": {
+    "type": "llm_template"
+  }
 }

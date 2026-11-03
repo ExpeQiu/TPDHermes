@@ -504,50 +504,6 @@ export function FilePreviewPanel({
             </div>
           ) : null}
         </div>
-        {activeFileKey ? (
-          <div className="space-y-1">
-            <div className="flex items-center gap-2">
-              <input
-                type="text"
-                value={titleDraft}
-                onChange={(e) => {
-                  setTitleDraft(e.target.value);
-                  setRenameError(null);
-                }}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") {
-                    e.preventDefault();
-                    void handleRename();
-                  }
-                  if (e.key === "Escape") {
-                    setTitleDraft(displayTitle);
-                    setRenameError(null);
-                  }
-                }}
-                onBlur={() => {
-                  if (titleDirty) void handleRename();
-                }}
-                disabled={renaming || !onRenameFile || previewLoading}
-                placeholder="文件名"
-                aria-label="文件名"
-                className="min-w-0 flex-1 rounded-md border border-slate-300 bg-white px-2 py-1 text-xs font-medium text-slate-900 outline-none ring-blue-500 focus:ring-2 disabled:opacity-60 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100"
-              />
-              {titleDirty ? (
-                <button
-                  type="button"
-                  disabled={renaming || !onRenameFile}
-                  onClick={() => void handleRename()}
-                  className="shrink-0 rounded-md bg-blue-600 px-2 py-1 text-[10px] text-white transition hover:bg-blue-500 disabled:opacity-50"
-                >
-                  {renaming ? "保存中…" : "改名"}
-                </button>
-              ) : null}
-            </div>
-            {renameError ? (
-              <p className="text-[10px] text-red-500">{renameError}</p>
-            ) : null}
-          </div>
-        ) : null}
         {openTabKeys.length > 0 ? (
           <div className="flex flex-wrap gap-1">
             {openTabKeys.map((fileKey) => {
@@ -601,7 +557,45 @@ export function FilePreviewPanel({
       {activeFileKey ? (
         <>
           <div className="flex shrink-0 flex-wrap items-center gap-1 border-b border-slate-300 p-2 dark:border-slate-700">
-            <p className="min-w-0 text-[10px] text-slate-400">可直接修改文件名，回车或失焦保存</p>
+            <input
+              type="text"
+              value={titleDraft}
+              onChange={(e) => {
+                setTitleDraft(e.target.value);
+                setRenameError(null);
+              }}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  void handleRename();
+                }
+                if (e.key === "Escape") {
+                  setTitleDraft(displayTitle);
+                  setRenameError(null);
+                }
+              }}
+              onBlur={() => {
+                if (titleDirty) void handleRename();
+              }}
+              disabled={renaming || !onRenameFile || previewLoading}
+              placeholder="文件名"
+              aria-label="文件名"
+              title="可直接修改文件名，回车或失焦保存"
+              className="min-w-0 w-40 max-w-[12rem] flex-1 rounded-md border border-slate-300 bg-white px-2 py-0.5 text-[11px] font-medium text-slate-900 outline-none ring-blue-500 focus:ring-2 disabled:opacity-60 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100"
+            />
+            {titleDirty ? (
+              <button
+                type="button"
+                disabled={renaming || !onRenameFile}
+                onClick={() => void handleRename()}
+                className="shrink-0 rounded-md bg-blue-600 px-2 py-0.5 text-[10px] text-white transition hover:bg-blue-500 disabled:opacity-50"
+              >
+                {renaming ? "保存中…" : "改名"}
+              </button>
+            ) : null}
+            {renameError ? (
+              <p className="min-w-0 truncate text-[10px] text-red-500">{renameError}</p>
+            ) : null}
             {/* 加入本轮 / 固定引用 / AI 解读 / AI 修改 暂隐藏，后续按需恢复 */}
             <div className="ml-auto flex items-center gap-1">
               {onTogglePreviewMaximize ? (

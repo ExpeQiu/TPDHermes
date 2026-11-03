@@ -27,5 +27,8 @@
       "label": "IP技术展具使用说明书",
       "path": "templates/display_guide.md"
     }
-  ]
+  ],
+  "execution": {
+    "type": "llm_template"
+  }
 }

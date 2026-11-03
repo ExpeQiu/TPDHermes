@@ -198,6 +198,26 @@ async def run_learning_analysis(
     return {"signals": [signal_to_dict(s) for s in signals], "count": len(signals)}
 
 
+@learning_router.post("/evolve")
+async def run_skill_evolution(
+    days: int = Query(default=14, ge=1, le=60),
+    db: AsyncSession = Depends(get_db),
+):
+    """按近期对话与反馈改写或新建技能，并留下版本快照。"""
+    from backend.services.skill_evolution import evolve_recent
+
+    await analyze_feedbacks(db, days=days)
+    result = await evolve_recent(db, days=days)
+    logger.info(
+        "learning evolve days=%s patched=%s created=%s skipped=%s",
+        result.get("days"),
+        len(result.get("patched") or []),
+        len(result.get("created") or []),
+        len(result.get("skipped") or []),
+    )
+    return result
+
+
 @learning_router.get("/signals")
 async def get_learning_signals(
     limit: int = Query(default=50, ge=1, le=100),

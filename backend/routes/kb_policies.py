@@ -42,6 +42,10 @@ class KnowledgePolicyUpdate(BaseModel):
     change_note: str | None = None
 
 
+class AutoGovernBody(BaseModel):
+    dry_run: bool = True
+
+
 @router.get("/")
 async def kb_policy_list(
     status: str | None = Query(None),
@@ -188,6 +192,18 @@ async def kb_policy_approve(
         effective_uid=effective_uid,
         change_note="approved",
     )
+
+
+@router.post("/{policy_id}/auto-govern")
+async def kb_policy_auto_govern(policy_id: str, body: AutoGovernBody):
+    from backend.services.kb_auto_govern import run_auto_govern
+
+    result = await run_auto_govern(policy_id, dry_run=body.dry_run)
+    if not result.get("ok"):
+        message = str(result.get("message") or "auto_govern_failed")
+        status = 404 if message == "policy_not_found" else 400
+        raise HTTPException(status_code=status, detail=message)
+    return result
 
 
 @router.post("/{policy_id}/publish")

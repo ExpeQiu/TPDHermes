@@ -27,5 +27,8 @@
       "label": "技术推广活动策划方案",
       "path": "templates/event_plan.md"
     }
-  ]
+  ],
+  "execution": {
+    "type": "llm_template"
+  }
 }

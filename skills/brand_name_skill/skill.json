@@ -27,5 +27,8 @@
       "label": "技术品牌命名策略报告",
       "path": "templates/brand_name_report.md"
     }
-  ]
+  ],
+  "execution": {
+    "type": "llm_template"
+  }
 }

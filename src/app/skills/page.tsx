@@ -31,6 +31,36 @@ interface Skill {
 type SkillMetaRow = {
   name: string;
   display_name?: string;
+  when?: string;
+  triggers?: string[];
+  input_schema?: Record<string, string>;
+  market_category?: string;
+};
+
+type SkillUsageRow = {
+  skill_name: string;
+  call_count: number;
+  adoption_rate: number | null;
+  full_count: number;
+  partial_count: number;
+  reject_count: number;
+  bound_scenarios?: string[];
+  viewer_adopted?: number;
+};
+
+type SkillUsageView = {
+  skills_total_calls: number;
+  skills_overall_adoption_rate: number | null;
+  skill_usage: SkillUsageRow[];
+};
+
+type SkillTrialResult = {
+  status: string;
+  content?: string | null;
+  error?: string | null;
+  missing_fields?: string[];
+  suggested_collection?: string | null;
+  fallback_reason?: string | null;
 };
 
 const SKILLS_BASE = "/skills/";
@@ -65,17 +95,23 @@ export default function SkillsPage() {
   const [uploading, setUploading] = useState(false);
   const [uploadNameHint, setUploadNameHint] = useState("");
   const [skillMeta, setSkillMeta] = useState<SkillMetaRow[]>([]);
+  const [usage, setUsage] = useState<SkillUsageView | null>(null);
+  const [trialFields, setTrialFields] = useState<Record<string, string>>({});
+  const [trialCollection, setTrialCollection] = useState("");
+  const [trialBusy, setTrialBusy] = useState(false);
+  const [trialResult, setTrialResult] = useState<SkillTrialResult | null>(null);
   const uploadInputRef = useRef<HTMLInputElement>(null);
 
   const fetchSkills = useCallback(async () => {
     setLoading(true);
     setError("");
     try {
-      const [skillsRes, metaRes] = await Promise.allSettled([
+      const [skillsRes, metaRes, usageRes] = await Promise.allSettled([
         apiFetch(SKILLS_BASE).then((res) => readJson<Skill[]>(res)),
         apiFetch("/ws/skills/metadata").then((res) =>
           readJson<{ skills: SkillMetaRow[] }>(res),
         ),
+        apiFetch("/skills/usage?days=7").then((res) => readJson<SkillUsageView>(res)),
       ]);
       if (skillsRes.status === "fulfilled") {
         setSkills(skillsRes.value);
@@ -84,6 +120,9 @@ export default function SkillsPage() {
       }
       if (metaRes.status === "fulfilled") {
         setSkillMeta(metaRes.value.skills ?? []);
+      }
+      if (usageRes.status === "fulfilled") {
+        setUsage(usageRes.value);
       }
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : "加载失败";
@@ -105,6 +144,15 @@ export default function SkillsPage() {
     });
   }, []);
 
+  const metaByName = useMemo(
+    () => new Map(skillMeta.map((row) => [row.name, row])),
+    [skillMeta],
+  );
+  const usageByName = useMemo(
+    () => new Map((usage?.skill_usage ?? []).map((row) => [row.skill_name, row])),
+    [usage],
+  );
+
   const skillDisplayByName = useMemo(
     () =>
       new Map(
@@ -114,6 +162,63 @@ export default function SkillsPage() {
       ),
     [skillMeta],
   );
+
+  const detailByName = useMemo(() => {
+    const lines = new Map<string, string>();
+    for (const skill of skills) {
+      const meta = metaByName.get(skill.name);
+      const used = usageByName.get(skill.name);
+      const when = meta?.when?.trim() || (meta?.triggers ?? []).slice(0, 3).join(" / ");
+      const required = Object.keys(meta?.input_schema ?? {}).slice(0, 4).join("、");
+      const recent = used && used.call_count > 0 ? `近 7 日 ${used.call_count} 次` : "近 7 日未运行";
+      lines.set(
+        skill.name,
+        [when, required ? `必填 ${required}` : "", recent].filter(Boolean).join(" · "),
+      );
+    }
+    return lines;
+  }, [skills, metaByName, usageByName]);
+
+  const selectedMeta = selectedSkill ? metaByName.get(selectedSkill.name) : undefined;
+  const selectedUsage = selectedSkill ? usageByName.get(selectedSkill.name) : undefined;
+  const selectedSchema = selectedMeta?.input_schema ?? {};
+
+  useEffect(() => {
+    setTrialFields({});
+    setTrialCollection("");
+    setTrialResult(null);
+  }, [selectedSkill?.name]);
+
+  const handleTrial = async () => {
+    if (!selectedSkill) return;
+    setTrialBusy(true);
+    setTrialResult(null);
+    try {
+      const res = await apiFetch(`${SKILLS_BASE}${encodeURIComponent(selectedSkill.name)}/trial`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          fields: trialFields,
+          collection_name: trialCollection.trim(),
+        }),
+      });
+      const data = await readJson<SkillTrialResult>(res);
+      setTrialResult(data);
+      console.info("[skills]", {
+        event: "skill.trial",
+        skill_name: selectedSkill.name,
+        status: data.status,
+        missing: data.missing_fields ?? [],
+      });
+    } catch (e: unknown) {
+      setTrialResult({
+        status: "failed",
+        error: e instanceof Error ? e.message : "试跑失败",
+      });
+    } finally {
+      setTrialBusy(false);
+    }
+  };
 
   const selectedSkillTitle = selectedSkill
     ? skillLabel(selectedSkill.name, skillDisplayByName.get(selectedSkill.name))
@@ -244,8 +349,10 @@ export default function SkillsPage() {
     }
   };
 
-  const installedCount = skills.filter((s) => s.enabled).length;
-  const disabledCount = skills.length - installedCount;
+  const callCount = usage?.skills_total_calls ?? 0;
+  const adoptionRate = usage?.skills_overall_adoption_rate;
+  const adoptionLabel =
+    adoptionRate == null ? "—" : `${Math.round(adoptionRate * 100)}%`;
   const isDefaultAdmin = scopeUserId === "default";
 
   return (
@@ -258,15 +365,14 @@ export default function SkillsPage() {
             </Link>
             <div className="inline-flex items-center gap-2 rounded-full border border-amber-500/30 bg-amber-500/10 px-3 py-1 text-xs font-medium text-amber-200">
               <span className="h-2 w-2 rounded-full bg-amber-400" aria-hidden />
-              技能策略入口
+              交付目录
             </div>
           </div>
           <div className="mt-4 flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
             <div>
-              <h1 className="text-3xl font-bold sm:text-4xl">技能策略</h1>
+              <h1 className="text-3xl font-bold sm:text-4xl">技能工坊</h1>
               <p className="mt-2 max-w-2xl text-sm text-slate-400 sm:text-base">
-                <span className="text-slate-800 dark:text-slate-200">公共技能</span>（工作区与市场安装）与
-                <span className="text-slate-800 dark:text-slate-200">我的技能</span>（本地上传 ZIP）分区管理；启用状态参与编排白名单。
+                工作区内容包登记后即可试跑。场景白名单里的技能会在对话里出稿；采纳与退回记在近 7 日用量上。
               </p>
             </div>
             <div className="flex flex-col items-stretch gap-2 sm:items-end">
@@ -305,11 +411,10 @@ export default function SkillsPage() {
           </div>
         </div>
 
-        <div className="mb-6 grid grid-cols-1 gap-3 md:grid-cols-4">
-          <MetricCard label="已安装" value={String(skills.length)} hint="当前本地能力池" />
-          <MetricCard label="启用中" value={String(installedCount)} hint="可参与任务执行" />
-          <MetricCard label="已禁用" value={String(disabledCount)} hint="保留但不主动使用" />
-          <MetricCard label="策略目标" value="核心 / 偏好 / 自学习" />
+        <div className="mb-6 grid grid-cols-1 gap-3 md:grid-cols-3">
+          <MetricCard label="已登记" value={String(skills.length)} hint="工作区与已上传技能" />
+          <MetricCard label="近 7 日成稿" value={String(callCount)} hint="对话与工坊中命中技能的次数" />
+          <MetricCard label="有反馈的采纳率" value={adoptionLabel} hint="无反馈时显示 —" />
         </div>
 
         {actionMsg && (
@@ -333,6 +438,7 @@ export default function SkillsPage() {
               mode="browse"
               selectedSkillId={selectedSkill?.id ?? null}
               displayNameByName={skillDisplayByName}
+              detailByName={detailByName}
               onSkillClick={(skill) => {
                 trackUsage({
                   eventName: "skills_panel_select",
@@ -391,6 +497,90 @@ export default function SkillsPage() {
                     <p className="text-xs text-slate-400">更新时间</p>
                     <p className="font-medium mt-0.5">{new Date(selectedSkill.updated_at).toLocaleString("zh-CN")}</p>
                   </div>
+                </div>
+
+                <div className="grid grid-cols-1 gap-3 text-sm sm:grid-cols-2">
+                  <div className="rounded-lg bg-slate-300/40 p-3 dark:bg-slate-700/40">
+                    <p className="text-xs text-slate-400">适用说法</p>
+                    <p className="mt-0.5">{selectedMeta?.when || "未声明"}</p>
+                  </div>
+                  <div className="rounded-lg bg-slate-300/40 p-3 dark:bg-slate-700/40">
+                    <p className="text-xs text-slate-400">适用场景</p>
+                    <p className="mt-0.5">{selectedMeta?.market_category || "未标注"}</p>
+                  </div>
+                  <div className="rounded-lg bg-slate-300/40 p-3 dark:bg-slate-700/40">
+                    <p className="text-xs text-slate-400">场景白名单</p>
+                    <p className="mt-0.5">
+                      {(selectedUsage?.bound_scenarios ?? []).length
+                        ? selectedUsage?.bound_scenarios?.join("、")
+                        : "尚未绑定"}
+                    </p>
+                  </div>
+                  <div className="rounded-lg bg-slate-300/40 p-3 dark:bg-slate-700/40">
+                    <p className="text-xs text-slate-400">采纳 / 退回</p>
+                    <p className="mt-0.5">
+                      采纳 {selectedUsage?.viewer_adopted ?? 0} 次 · 退回 {selectedUsage?.reject_count ?? 0} 次
+                    </p>
+                  </div>
+                </div>
+
+                <div>
+                  <h3 className="mb-2 text-sm font-semibold text-slate-700 dark:text-slate-300">试跑</h3>
+                  <p className="mb-3 text-xs text-slate-500">
+                    必填输入：{Object.keys(selectedSchema).join("、") || "该技能未声明 input_schema"}
+                  </p>
+                  <div className="space-y-2">
+                    {Object.keys(selectedSchema).map((key) => (
+                      <label key={key} className="block text-xs text-slate-400">
+                        {key}
+                        <span className="ml-2 text-slate-500">{selectedSchema[key]}</span>
+                        <textarea
+                          value={trialFields[key] ?? ""}
+                          onChange={(ev) =>
+                            setTrialFields((prev) => ({ ...prev, [key]: ev.target.value }))
+                          }
+                          rows={2}
+                          className="mt-1 w-full rounded-lg border border-slate-300 bg-white/80 px-3 py-2 text-sm text-slate-900 dark:border-slate-600 dark:bg-slate-900/80 dark:text-slate-100"
+                        />
+                      </label>
+                    ))}
+                    <label className="block text-xs text-slate-400">
+                      知识库集合
+                      <input
+                        value={trialCollection}
+                        onChange={(ev) => setTrialCollection(ev.target.value)}
+                        placeholder="缺证据时建议填写集合名"
+                        className="mt-1 w-full rounded-lg border border-slate-300 bg-white/80 px-3 py-2 text-sm text-slate-900 dark:border-slate-600 dark:bg-slate-900/80 dark:text-slate-100"
+                      />
+                    </label>
+                    <button
+                      type="button"
+                      disabled={trialBusy || !selectedSkill.enabled}
+                      onClick={() => void handleTrial()}
+                      className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
+                    >
+                      {trialBusy ? "生成中…" : "试跑"}
+                    </button>
+                  </div>
+                  {trialResult ? (
+                    <div className="mt-3 rounded-lg border border-slate-300 p-3 text-sm dark:border-slate-600">
+                      <p className="text-xs text-slate-500">状态 {trialResult.status}</p>
+                      {trialResult.missing_fields && trialResult.missing_fields.length > 0 ? (
+                        <p className="mt-2 text-amber-700 dark:text-amber-300">
+                          缺少字段：{trialResult.missing_fields.join("、")}
+                          {trialResult.suggested_collection
+                            ? `。建议补充：${trialResult.suggested_collection}`
+                            : ""}
+                        </p>
+                      ) : null}
+                      {trialResult.error ? <p className="mt-2 text-red-400">{trialResult.error}</p> : null}
+                      {trialResult.content ? (
+                        <pre className="mt-2 max-h-64 overflow-auto whitespace-pre-wrap text-xs text-slate-700 dark:text-slate-200">
+                          {trialResult.content}
+                        </pre>
+                      ) : null}
+                    </div>
+                  ) : null}
                 </div>
 
                 <div>

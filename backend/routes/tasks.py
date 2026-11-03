@@ -498,17 +498,8 @@ async def _resolve_workshop_agent_output(
     raise HTTPException(status_code=424, detail=detail)
 
 
-def _chat_force_skill_mode(
-    payload: OrchestrationPayload,
-    *,
-    chat_mode: str | None = None,
-) -> bool:
-    """
-    chat 入口仅在“显式单技能白名单”时强制要求命中 tool 调用。
-    共创 co_create（含快捷创作）须基于项目+场景走 Hermes 编排，禁止直连技能模板。
-    """
-    if chat_mode == "co_create":
-        return False
+def _single_skill_whitelist(payload: OrchestrationPayload) -> bool:
+    """场景已保存为恰好一个技能、且不允许自由选择。"""
     if payload.entrypoint != "chat":
         return False
     if payload.skills.allow_agent_free_choice:
@@ -517,6 +508,30 @@ def _chat_force_skill_mode(
         return False
     allowed = [s for s in payload.skills.allowed if s]
     return len(allowed) == 1
+
+
+def _chat_force_skill_mode(
+    payload: OrchestrationPayload,
+    *,
+    chat_mode: str | None = None,
+) -> bool:
+    """
+    单技能白名单时，工具未命中则直连该技能。
+    chat 与共创 co_create 使用同一兜底，并标记 degraded。
+    """
+    del chat_mode
+    return _single_skill_whitelist(payload)
+
+
+def _chat_direct_before_agent(
+    payload: OrchestrationPayload,
+    *,
+    chat_mode: str | None = None,
+) -> bool:
+    """普通 chat 可在进编排前直接出稿。共创仍先走编排，未命中再兜底。"""
+    if chat_mode == "co_create":
+        return False
+    return _single_skill_whitelist(payload)
 
 
 async def _resolve_chat_skill_output(
@@ -552,8 +567,9 @@ async def _resolve_chat_skill_output(
     if _chat_force_skill_mode(payload, chat_mode=chat_mode):
         skill_name = allowed[0]
         logger.warning(
-            "chat forced skill capture miss run_id=%s fallback=direct skill=%s",
+            "skill capture miss run_id=%s chat_mode=%s fallback=direct skill=%s",
             run_id,
+            chat_mode or "chat",
             skill_name,
         )
         try:
@@ -926,9 +942,9 @@ async def execute_task(req: Request, task_req: TaskExecuteRequest, db: AsyncSess
             },
         )
 
-    # chat 入口：显式单技能白名单时直接执行技能，避免 agent 未调 tool 或超时。
-    # 共创 co_create 走 Hermes 基于项目+场景编排，不在此短路。
-    if payload.entrypoint == "chat" and _chat_force_skill_mode(
+    # 普通 chat 的单技能白名单可在进编排前直接出稿。
+    # 共创先走 Hermes，未命中工具时由 _chat_force_skill_mode 直连兜底。
+    if payload.entrypoint == "chat" and _chat_direct_before_agent(
         payload, chat_mode=eff_request.chat_mode
     ):
         forced_skill = payload.skills.allowed[0]

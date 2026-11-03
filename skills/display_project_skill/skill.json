@@ -26,5 +26,8 @@
       "label": "IP技术展具制作立项书",
       "path": "templates/display_project.md"
     }
-  ]
+  ],
+  "execution": {
+    "type": "llm_template"
+  }
 }

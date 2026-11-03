@@ -40,149 +40,6 @@ const CATEGORIES: Category[] = [
 ];
 
 // Mock marketplace data
-const MOCK_MARKET: MarketSkill[] = [
-  {
-    id: "speech-writer",
-    name: "发言稿生成器",
-    description: "生成领导讲话、产品发布、技术分享等场景的正式发言稿，支持多种风格定制",
-    version: "2.1.0",
-    author: "TPDTeam",
-    category: "文档",
-    icon: "🎤",
-    tags: ["发言稿", "领导讲话", "产品发布"],
-    install_count: 1284,
-    rating: 4.8,
-    review_count: 236,
-    updated_at: "2026-04-28",
-  },
-  {
-    id: "video-script",
-    name: "视频脚本生成器",
-    description: "生成短视频/宣传片的分镜脚本，包含旁白、画面描述和时长提示",
-    version: "1.5.2",
-    author: "TPDTeam",
-    category: "文档",
-    icon: "🎬",
-    tags: ["视频脚本", "宣传片", "短视频"],
-    install_count: 876,
-    rating: 4.6,
-    review_count: 142,
-    updated_at: "2026-04-20",
-  },
-  {
-    id: "a4-onepager",
-    name: "A4一页纸生成器",
-    description: "单页精华文档生成器，提炼核心信息，适合快速阅读和传播分享",
-    version: "3.0.1",
-    author: "TPDTeam",
-    category: "文档",
-    icon: "📄",
-    tags: ["一页纸", "精华", "摘要"],
-    install_count: 2103,
-    rating: 4.9,
-    review_count: 389,
-    updated_at: "2026-05-01",
-  },
-  {
-    id: "tech-article",
-    name: "技术文章生成器",
-    description: "生成深度技术文章，适合公众号、技术博客发布，包含代码示例",
-    version: "2.3.0",
-    author: "TPDTeam",
-    category: "文档",
-    icon: "✍️",
-    tags: ["技术文章", "博客", "公众号"],
-    install_count: 654,
-    rating: 4.5,
-    review_count: 98,
-    updated_at: "2026-04-15",
-  },
-  {
-    id: "social-copy",
-    name: "社交媒体文案助手",
-    description: "生成微博、小红书、朋友圈等社交平台的短文案，支持多平台适配",
-    version: "1.8.0",
-    author: "TPDTeam",
-    category: "文案",
-    icon: "📱",
-    tags: ["社交媒体", "小红书", "微博"],
-    install_count: 1567,
-    rating: 4.7,
-    review_count: 271,
-    updated_at: "2026-04-30",
-  },
-  {
-    id: "business-email",
-    name: "商务邮件生成器",
-    description: "专业商务邮件生成，支持多种场景和语气，自动添加专业格式",
-    version: "1.2.3",
-    author: "TPDTeam",
-    category: "文档",
-    icon: "📧",
-    tags: ["商务邮件", "邮件", "沟通"],
-    install_count: 932,
-    rating: 4.4,
-    review_count: 167,
-    updated_at: "2026-03-28",
-  },
-  {
-    id: "data-analysis",
-    name: "数据分析报告器",
-    description: "自动分析数据并生成结构化分析报告，支持图表解读和趋势分析",
-    version: "1.0.0",
-    author: "TPDTeam",
-    category: "分析",
-    icon: "📊",
-    tags: ["数据分析", "报告", "图表"],
-    install_count: 423,
-    rating: 4.3,
-    review_count: 67,
-    updated_at: "2026-04-10",
-  },
-  {
-    id: "image-desc",
-    name: "图片描述生成器",
-    description: "为产品图片、技术架构图等生成精准的文字描述和 alt 文本",
-    version: "0.9.1",
-    author: "TPDTeam",
-    category: "图片",
-    icon: "🖼️",
-    tags: ["图片描述", "alt", "产品图"],
-    install_count: 312,
-    rating: 4.2,
-    review_count: 45,
-    updated_at: "2026-04-05",
-  },
-  {
-    id: "meeting-minutes",
-    name: "会议纪要生成器",
-    description: "从会议内容自动生成结构化会议纪要，提取决议事项和待办任务",
-    version: "2.0.0",
-    author: "TPDTeam",
-    category: "效率",
-    icon: "⚡",
-    tags: ["会议纪要", "效率", "协作"],
-    install_count: 789,
-    rating: 4.6,
-    review_count: 134,
-    updated_at: "2026-05-02",
-  },
-  {
-    id: "knowledge-graph",
-    name: "知识图谱构建器",
-    description: "从文档中自动提取实体和关系，构建可视化知识图谱",
-    version: "1.1.0",
-    author: "TPDTeam",
-    category: "知识",
-    icon: "🧠",
-    tags: ["知识图谱", "知识管理", "NLP"],
-    install_count: 541,
-    rating: 4.5,
-    review_count: 89,
-    updated_at: "2026-04-18",
-  },
-];
-
 function catalogItemToMarket(row: Record<string, unknown>): MarketSkill {
   const pkg = String(row.name ?? "");
   const updatedAtRaw = String(row.updated_at ?? "2026-01-01");
@@ -208,30 +65,8 @@ function catalogItemToMarket(row: Record<string, unknown>): MarketSkill {
   };
 }
 
-function StarRating({ rating }: { rating: number }) {
-  return (
-    <div className="flex items-center gap-0.5">
-      {[1, 2, 3, 4, 5].map((star) => (
-        <span
-          key={star}
-          className={`text-sm ${
-            star <= Math.round(rating) ? "text-yellow-400" : "text-slate-600"
-          }`}
-        >
-          ★
-        </span>
-      ))}
-    </div>
-  );
-}
-
-function formatCount(n: number): string {
-  if (n >= 1000) return `${(n / 1000).toFixed(1)}k`;
-  return String(n);
-}
-
-function sourceTypeLabel(skill: MarketSkill): "官方" | "用户" {
-  return skill.publisher_id ? "用户" : "官方";
+function sourceTypeLabel(skill: MarketSkill): "工作区" | "用户" {
+  return skill.source === "workspace" || !skill.publisher_id ? "工作区" : "用户";
 }
 
 function publisherLabel(skill: MarketSkill): string {
@@ -257,7 +92,7 @@ export default function SkillMarketPage() {
   const [error, setError] = useState("");
   const [search, setSearch] = useState("");
   const [activeCategory, setActiveCategory] = useState("all");
-  const [sortBy, setSortBy] = useState<"installs" | "rating" | "updated">("installs");
+  const [sortBy, setSortBy] = useState<"name" | "updated">("updated");
   const [installing, setInstalling] = useState<string | null>(null);
   const [installedSet, setInstalledSet] = useState<Set<string>>(new Set());
   const [installedSourceSet, setInstalledSourceSet] = useState<Set<string>>(new Set());
@@ -269,9 +104,9 @@ export default function SkillMarketPage() {
     try {
       const raw = await apiGet<Record<string, unknown>[]>("/skills/marketplace");
       setSkills(raw.map(catalogItemToMarket));
-    } catch {
-      setSkills(MOCK_MARKET);
-      setError("无法连接技能市场 API，已显示演示数据");
+    } catch (e: unknown) {
+      setSkills([]);
+      setError(e instanceof Error ? e.message : "无法连接技能市场");
     } finally {
       setLoading(false);
     }
@@ -346,13 +181,11 @@ export default function SkillMarketPage() {
       return matchSearch && matchCat;
     })
     .sort((a, b) => {
-      if (sortBy === "rating") return b.rating - a.rating;
-      if (sortBy === "updated") return b.updated_at.localeCompare(a.updated_at);
-      return b.install_count - a.install_count;
+      if (sortBy === "name") return a.name.localeCompare(b.name, "zh-CN");
+      return b.updated_at.localeCompare(a.updated_at);
     });
 
-  const totalInstalls = skills.reduce((sum, s) => sum + s.install_count, 0);
-  const topRated = skills.length > 0 ? Math.max(...skills.map((s) => s.rating)) : 0;
+  const workspaceCount = skills.filter((skill) => skill.source === "workspace" || !skill.publisher_id).length;
 
   return (
     <main className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-slate-100 p-4 text-slate-900 sm:p-6 md:p-8 dark:from-slate-950 dark:via-slate-900 dark:to-slate-950 dark:text-white">
@@ -371,7 +204,7 @@ export default function SkillMarketPage() {
             <div>
               <h1 className="text-3xl font-bold sm:text-4xl">技能市场</h1>
               <p className="mt-2 max-w-2xl text-sm text-slate-400 sm:text-base">
-                汇总全体用户发布技能，支持安装到自己的技能仓库，安装后可在技能策略页启用。
+                浏览已登记的公共技能。工作区技能无需再次安装。
               </p>
             </div>
             <div className="flex flex-wrap gap-2">
@@ -390,11 +223,10 @@ export default function SkillMarketPage() {
             </div>
           </div>
 
-          <div className="mt-6 grid grid-cols-2 gap-3 md:grid-cols-4">
+          <div className="mt-6 grid grid-cols-1 gap-3 sm:grid-cols-3">
             <MetricCard label="在架能力" value={String(skills.length)} hint="当前可发现技能" />
-            <MetricCard label="总安装量" value={formatCount(totalInstalls)} hint="市场热度参考" />
+            <MetricCard label="已在工作区" value={String(workspaceCount)} hint="随仓库登记，不必再装" />
             <MetricCard label="我的安装" value={String(installedSet.size)} hint="已纳入本地能力池" />
-            <MetricCard label="最高评分" value={topRated > 0 ? topRated.toFixed(1) : "-"} hint="质量参考" />
           </div>
         </div>
 
@@ -434,9 +266,8 @@ export default function SkillMarketPage() {
               onChange={(e) => setSortBy(e.target.value as typeof sortBy)}
               className="min-w-36 cursor-pointer appearance-none rounded-lg border border-slate-300 dark:border-slate-700 bg-slate-200/80 dark:bg-slate-800/80 px-3 py-2.5 text-sm text-slate-900 dark:text-white transition focus:border-blue-500 focus:outline-none"
             >
-              <option value="installs">🔥 最多安装</option>
-              <option value="rating">⭐ 最高评分</option>
-              <option value="updated">🕐 最近更新</option>
+              <option value="updated">最近更新</option>
+              <option value="name">名称</option>
             </select>
           </div>
 
@@ -481,6 +312,7 @@ export default function SkillMarketPage() {
               <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
                 {filtered.map((skill) => {
                   const isInstalled = installedSet.has(skill.id) || installedSourceSet.has(skill.id);
+                  const inWorkspace = skill.source === "workspace" || isInstalled;
                   const isInstalling = installing === skill.id;
 
                   return (
@@ -529,37 +361,26 @@ export default function SkillMarketPage() {
                         ))}
                       </div>
 
-                      <div className="mb-3 flex items-center justify-between border-b border-slate-300 dark:border-slate-700/60 pb-3">
-                        <div className="flex items-center gap-3">
-                          <StarRating rating={skill.rating} />
-                          <span className="text-xs text-slate-400">{skill.rating.toFixed(1)}</span>
-                        </div>
-                        <div className="flex items-center gap-1 text-xs text-slate-500">
-                          <span>↓</span>
-                          <span>{formatCount(skill.install_count)}</span>
-                        </div>
-                      </div>
-
-                      <div className="flex items-center justify-between gap-3">
+                      <div className="flex items-center justify-between gap-3 border-t border-slate-300 pt-3 dark:border-slate-700/60">
                         <span className="text-xs text-slate-500">更新于 {skill.updated_at}</span>
                         <button
-                          onClick={() => !isInstalled && !isInstalling && handleInstall(skill)}
-                          disabled={isInstalled || isInstalling}
+                          onClick={() => !inWorkspace && !isInstalling && handleInstall(skill)}
+                          disabled={inWorkspace || isInstalling}
                           className={`rounded-lg px-3 py-1.5 text-xs font-medium transition ${
-                            isInstalled
+                            inWorkspace
                               ? "cursor-default bg-green-600/20 text-green-400"
                               : isInstalling
                                 ? "cursor-not-allowed bg-slate-300 dark:bg-slate-700 text-slate-400"
                                 : "bg-blue-600 text-white hover:bg-blue-500"
                           }`}
                         >
-                          {isInstalled ? "✓ 已安装" : isInstalling ? "安装中…" : "安装"}
+                          {inWorkspace ? "已在工作区" : isInstalling ? "安装中…" : "安装"}
                         </button>
                       </div>
 
                       {isInstalled && (
                         <div className="mt-3 rounded-lg border border-green-600/30 bg-green-600/10 px-3 py-2 text-xs text-green-300">
-                          已安装，可在技能策略页启用与配置。
+                          已在工作区，可直接在技能工坊试跑或绑定到场景。
                         </div>
                       )}
                     </div>

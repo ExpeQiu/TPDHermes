@@ -42,14 +42,14 @@ export function coCreateAgentModeMeta(mode: CoCreateAgentMode): {
     case "ask":
       return {
         label: "Ask",
-        description: "只读问答与检索，不改项目文件",
+        description: "只做简练问答，不生成文档",
         badgeClassName:
           "border-sky-200 bg-sky-50 text-sky-700 dark:border-sky-800/70 dark:bg-sky-950/40 dark:text-sky-200",
       };
     case "plan":
       return {
         label: "Plan",
-        description: "对话式先规划后执行，每步绑定 Skill 并产出文件",
+        description: "引导澄清需求、拆解任务并给出行动计划；确认后自动切到 Agent 执行",
         badgeClassName:
           "border-violet-200 bg-violet-50 text-violet-700 dark:border-violet-800/70 dark:bg-violet-950/40 dark:text-violet-200",
       };
@@ -57,7 +57,7 @@ export function coCreateAgentModeMeta(mode: CoCreateAgentMode): {
     default:
       return {
         label: "Agent",
-        description: "全工具共创；短问句快速应答，改写/研究类任务自动加深",
+        description: "按需生产或修订文档",
         badgeClassName:
           "border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-800/70 dark:bg-emerald-950/40 dark:text-emerald-200",
       };

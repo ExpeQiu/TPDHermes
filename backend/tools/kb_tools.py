@@ -14,6 +14,7 @@ from backend.services.kb_proxy import kb_proxy_service
 from backend.services.kb_cache import kb_cache_service
 from backend.services.kb_write import add_kb_harvest_entry
 from backend.services.kb_collection_resolve import merge_kb_warnings, resolve_collection_name
+from backend.services.knowledge_policy import filter_results_by_eligible_domains
 from backend.services.project_kb import is_project_kb_collection
 
 logger = logging.getLogger(__name__)
@@ -353,7 +354,7 @@ async def kb_query(
                 filtered.get("warning"),
                 "semantic_miss_switched_to_cross_collection_lexical",
             )
-            return await _apply_kb_source_capture(
+            narrowed = await filter_results_by_eligible_domains(
                 {
                     "results": lexical_rows[:limit],
                     "source": cross.get("source", filtered.get("source", "chroma")),
@@ -362,6 +363,10 @@ async def kb_query(
                     "collection_resolved": resolved_name,
                     "fallback_scope": "__all__",
                 },
+                project_id,
+            )
+            return await _apply_kb_source_capture(
+                narrowed,
                 tphermes_run_id=tphermes_run_id,
                 project_id=project_id,
                 collection_name=resolved_name,
@@ -376,6 +381,7 @@ async def kb_query(
         collection=resolved_name,
         project_id=project_id,
     )
+    filtered = await filter_results_by_eligible_domains(filtered, project_id)
     return await _apply_kb_source_capture(
         filtered,
         tphermes_run_id=tphermes_run_id,

@@ -258,8 +258,14 @@ def test_ask_skips_write_and_plan_writes_after_confirm(room_roles):
 
     with TestClient(app) as client:
         done = _messages(client, owner, project_id, room_id)
-        assert done["doc_version"] == 0
-        assert not done["output_id"]
+        assert done["doc_version"] == 1
+        assert done["output_id"]
+        plan_reply = next(
+            item["content"]
+            for item in done["messages"]
+            if item["author_type"] == "agent" and "行动计划" in item["content"]
+        )
+        assert "请确认后开始执行" in plan_reply
 
 
 def test_viewer_does_not_write_and_outsider_cannot_read(room_roles):

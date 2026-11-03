@@ -27,5 +27,8 @@
       "label": "技术IP包装货架文档",
       "path": "templates/ip_shelf_doc.md"
     }
-  ]
+  ],
+  "execution": {
+    "type": "llm_template"
+  }
 }

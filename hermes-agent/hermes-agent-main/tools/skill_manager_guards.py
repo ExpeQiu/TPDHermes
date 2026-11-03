@@ -5,10 +5,13 @@ so test patches keep working."""
 
 import contextvars as _ctxvars
 import logging
+import os
+import shutil
 import threading
 from contextlib import suppress
+from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger("tools.skill_manager_tool")
 
@@ -161,6 +164,58 @@ def _pinned_guard(name: str) -> Optional[str]:
     return None
 
 
+_UNLOCKED_ACTIONS = frozenset({"edit", "patch", "write_file"})
+
+
+def project_skill_roots() -> List[Path]:
+    """Directories whose skills the background review may patch. ``os.pathsep``-separated."""
+    raw = os.environ.get("HERMES_PROJECT_SKILL_ROOTS", "")
+    roots: List[Path] = []
+    for part in raw.split(os.pathsep):
+        text = part.strip()
+        if text:
+            roots.append(Path(text).expanduser())
+    return roots
+
+
+def project_skill_autowrite_allowed(skill_dir: Path, action: str) -> bool:
+    """True only for patch-like writes inside a configured project skill root."""
+    if action not in _UNLOCKED_ACTIONS:
+        return False
+    try:
+        resolved = skill_dir.resolve()
+    except OSError:
+        return False
+    for root in project_skill_roots():
+        try:
+            root_resolved = root.resolve()
+        except OSError:
+            continue
+        if resolved == root_resolved or resolved.is_relative_to(root_resolved):
+            return True
+    return False
+
+
+def snapshot_project_skill(skill_dir: Path) -> Path:
+    """Copy a project skill into ``<root>/.versions/<name>/<timestamp>`` before an autonomous write."""
+    resolved = skill_dir.resolve()
+    root = next(
+        item.resolve()
+        for item in project_skill_roots()
+        if resolved == item.resolve() or resolved.is_relative_to(item.resolve())
+    )
+    dest = root / ".versions" / skill_dir.name / datetime.now().strftime("%Y%m%dT%H%M%S%f")
+    if dest.exists():
+        shutil.rmtree(dest)
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copytree(
+        skill_dir,
+        dest,
+        ignore=lambda _src, names: {n for n in names if n in {"__pycache__", ".DS_Store"}},
+    )
+    return dest
+
+
 def _background_review_write_guard(
     name: str, skill_dir: Path, action: str) -> Optional[Dict[str, Any]]:
     """Refuse autonomous curator writes to anything but curator-owned sediment. The review fork
@@ -174,6 +229,31 @@ def _background_review_write_guard(
             f"are off-limits to autonomous maintenance. Ask the user to run `hermes curator "
             f"unpin {name}` if they want it changed.")
     try:
+        from tools import skill_usage
+        for predicate, label in (
+            (skill_usage.is_protected_builtin, "protected built-in"),
+            (skill_usage.is_hub_installed, "hub-installed"),
+            (skill_usage.is_bundled, "bundled")):
+            if predicate(name):
+                return _refusal(f"{refuse} {label} skill '{name}'.")
+    except Exception:
+        logger.warning("builtin skill guard lookup failed for %s", name, exc_info=True)
+        return _refusal(
+            f"{refuse} skill '{name}': built-in ownership could not be verified.")
+    if project_skill_autowrite_allowed(skill_dir, action):
+        try:
+            dest = snapshot_project_skill(skill_dir)
+        except Exception:
+            logger.exception("project_skill_snapshot failed skill=%s action=%s", name, action)
+            return _refusal(
+                f"{refuse} skill '{name}': project skill write is unlocked, but the version "
+                f"snapshot failed.")
+        logger.info(
+            "project_skill_write unlocked skill=%s action=%s snapshot=%s",
+            name, action, dest,
+        )
+        return None
+    try:
         from agent.skill_utils import is_external_skill_path
         if is_external_skill_path(skill_dir):
             return _refusal(
@@ -183,12 +263,6 @@ def _background_review_write_guard(
         logger.debug("external skill guard lookup failed for %s", name, exc_info=True)
     try:
         from tools import skill_usage
-        for predicate, label in (
-            (skill_usage.is_protected_builtin, "protected built-in"),
-            (skill_usage.is_hub_installed, "hub-installed"),
-            (skill_usage.is_bundled, "bundled")):
-            if predicate(name):
-                return _refusal(f"{refuse} {label} skill '{name}'.")
         # Not curator-managed (no `created_by: "agent"`) => user-owned. A MISSING
         # record and an explicit `created_by: null` must resolve IDENTICALLY (keying
         # on presence made the policy depend on the guard's own side effect: the

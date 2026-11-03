@@ -173,3 +173,66 @@ async def ensure_project_kb_collection_in_config(db: AsyncSession, project_id: s
         db.add(ProjectConfig(project_id=pid, defaults_json=payload, updated_at=now))
     await db.commit()
     logger.info("project_kb config ensured project=%s collection=%s", pid[:24], col)
+
+
+def _is_concrete_project(project_id: str | None) -> bool:
+    pid = str(project_id or "").strip()
+    return bool(pid) and pid not in {"__all__", "*", "all"}
+
+
+async def settle_docs_into_project_kb(*, doc_ids: list[str], project_id: str) -> dict:
+    """审批通过后，把对话收割 / 经验文档归入该项目的知识库集合。"""
+    import json
+    from datetime import datetime
+
+    from sqlalchemy import select
+
+    from backend.db import async_session_maker
+    from backend.models.kb_cache import KBCache
+    from backend.services.kb_ids import kb_doc_id_from_ref
+
+    pid = str(project_id or "").strip()
+    if not _is_concrete_project(pid):
+        return {"ok": False, "message": "no_project", "updated": 0}
+    wanted = {str(item).strip() for item in doc_ids if str(item).strip()}
+    if not wanted:
+        return {"ok": False, "message": "no_docs", "updated": 0}
+    target = project_kb_collection(pid)
+    updated = 0
+    now = datetime.now().isoformat()
+    async with async_session_maker() as db:
+        rows = (await db.execute(select(KBCache).limit(8000))).scalars().all()
+        for row in rows:
+            raw = row.metadata_ or "{}"
+            try:
+                meta = json.loads(raw)
+            except json.JSONDecodeError:
+                meta = {}
+            if not isinstance(meta, dict):
+                meta = {}
+            doc_id = str(meta.get("doc_id") or "").strip() or kb_doc_id_from_ref(str(row.id))
+            if doc_id not in wanted and str(row.id) not in wanted:
+                continue
+            source_type = str(meta.get("source_type") or "")
+            if source_type == "tpd_experience":
+                meta["folder_path"] = "经验库"
+            elif source_type == "conversation_harvest" or not str(meta.get("folder_path") or "").strip():
+                meta["folder_path"] = "对话收割"
+            meta["published"] = True
+            meta["settled_project_id"] = pid
+            row.collection = target
+            row.project_id = pid
+            row.metadata_ = json.dumps(meta, ensure_ascii=False)
+            row.updated_at = now
+            row.version = int(row.version or 1) + 1
+            updated += 1
+        if updated:
+            await db.commit()
+    logger.info(
+        "kb settle_project project_id=%s target=%s docs=%s updated_rows=%s",
+        pid,
+        target,
+        len(wanted),
+        updated,
+    )
+    return {"ok": True, "collection": target, "updated": updated}

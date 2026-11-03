@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import { apiFetch, apiGet, apiPost } from "@/lib/api";
 import { runStatusLabel } from "@/lib/ui-labels";
@@ -10,6 +10,34 @@ export interface KnowledgeIngestPrefill {
   domain?: string;
   folder_path?: string;
   project_id?: string;
+}
+
+const ACCEPT =
+  ".md,.markdown,.txt,.text,.csv,.json,.log,.html,.htm,.pdf,.doc,.docx,.rtf,text/plain,text/markdown,text/html,application/pdf,application/msword,application/rtf,application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+
+type QueueStatus = "uploading" | "ready" | "importing" | "done" | "error";
+
+interface QueueItem {
+  localId: string;
+  name: string;
+  status: QueueStatus;
+  uploadId?: string;
+  sourceFormat?: string;
+  charCount?: number;
+  error?: string;
+}
+
+const STATUS_LABEL: Record<QueueStatus, string> = {
+  uploading: "处理中",
+  ready: "待导入",
+  importing: "导入中",
+  done: "已导入",
+  error: "失败",
+};
+
+function uploadErrorMessage(data: { detail?: unknown }, status: number): string {
+  if (typeof data.detail === "string" && data.detail.trim()) return data.detail;
+  return `上传失败 HTTP ${status}`;
 }
 
 export default function KnowledgeIngestWorkspace({
@@ -28,6 +56,7 @@ export default function KnowledgeIngestWorkspace({
   const [folderPath, setFolderPath] = useState(prefill.folder_path || "02-知识库/导入");
   const [projectId, setProjectId] = useState(prefill.project_id || "__all__");
   const [uploadIds, setUploadIds] = useState<string[]>([]);
+  const [queue, setQueue] = useState<QueueItem[]>([]);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [jobId, setJobId] = useState<string | null>(null);
@@ -35,6 +64,10 @@ export default function KnowledgeIngestWorkspace({
   const [docIdOnUpload, setDocIdOnUpload] = useState("");
   const [uploadDocIdsJson, setUploadDocIdsJson] = useState("");
   const [docIdStrategy, setDocIdStrategy] = useState<"filename" | "checksum">("filename");
+  const [dragOver, setDragOver] = useState(false);
+  const uploadInputRef = useRef<HTMLInputElement>(null);
+  const batchInputRef = useRef<HTMLInputElement>(null);
+  const notifiedJobRef = useRef<string | null>(null);
 
   useEffect(() => {
     setCollection(prefill.collection || "");
@@ -43,50 +76,99 @@ export default function KnowledgeIngestWorkspace({
     setProjectId(prefill.project_id || "__all__");
   }, [prefill, prefillNonce]);
 
-  const uploadSummary = useMemo(() => {
-    if (!uploadIds.length) return "";
-    return uploadIds.join(", ");
-  }, [uploadIds]);
+  const readyIds = useMemo(
+    () => queue.filter((item) => item.status === "ready" && item.uploadId).map((item) => item.uploadId as string),
+    [queue],
+  );
 
-  const onPickFiles = async (files: FileList | null) => {
-    if (!files?.length) return;
+  const patchQueue = (localId: string, patch: Partial<QueueItem>) => {
+    setQueue((prev) => prev.map((item) => (item.localId === localId ? { ...item, ...patch } : item)));
+  };
+
+  const markIds = (ids: string[], status: QueueStatus, error?: string) => {
+    const idSet = new Set(ids);
+    setQueue((prev) =>
+      prev.map((item) =>
+        item.uploadId && idSet.has(item.uploadId) ? { ...item, status, error } : item,
+      ),
+    );
+  };
+
+  const uploadFiles = async (files: File[], autoImport: boolean) => {
+    if (!files.length) return;
     setMessage(null);
     setBusy(true);
+    const created: QueueItem[] = files.map((file, index) => ({
+      localId: `${Date.now()}-${index}-${file.name}`,
+      name: file.name,
+      status: "uploading",
+    }));
+    setQueue((prev) => [...created, ...prev]);
     const ids: string[] = [];
+    let failed = 0;
+    const hint = docIdOnUpload.trim();
     try {
       for (let i = 0; i < files.length; i += 1) {
-        const f = files[i];
+        const file = files[i];
+        const localId = created[i].localId;
         const fd = new FormData();
-        fd.append("file", f);
-        const hint = docIdOnUpload.trim();
-        if (hint) fd.append("doc_id", hint);
-        const res = await apiFetch("/kb/upload", { method: "POST", body: fd });
-        const data = (await res.json()) as { upload_id?: string; detail?: string };
-        if (!res.ok) {
-          throw new Error(typeof data.detail === "string" ? data.detail : `上传失败 HTTP ${res.status}`);
+        fd.append("file", file);
+        if (hint && files.length === 1) fd.append("doc_id", hint);
+        try {
+          const res = await apiFetch("/kb/upload", { method: "POST", body: fd });
+          const data = (await res.json()) as {
+            upload_id?: string;
+            detail?: unknown;
+            source_format?: string;
+            char_count?: number;
+          };
+          if (!res.ok || !data.upload_id) {
+            failed += 1;
+            patchQueue(localId, { status: "error", error: uploadErrorMessage(data, res.status) });
+            continue;
+          }
+          ids.push(data.upload_id);
+          patchQueue(localId, {
+            status: "ready",
+            uploadId: data.upload_id,
+            sourceFormat: data.source_format,
+            charCount: data.char_count,
+          });
+        } catch (e) {
+          failed += 1;
+          patchQueue(localId, { status: "error", error: e instanceof Error ? e.message : "上传失败" });
         }
-        if (data.upload_id) ids.push(data.upload_id);
       }
-      setUploadIds((prev) => [...prev, ...ids]);
-      setMessage(`已上传 ${ids.length} 个文件`);
-    } catch (e) {
-      setMessage(e instanceof Error ? e.message : "上传失败");
+      if (ids.length) setUploadIds((prev) => [...prev, ...ids]);
+      const summary = `已处理 ${ids.length} 个文件${failed ? `，失败 ${failed} 个` : ""}`;
+      if (hint && files.length > 1) {
+        setMessage(`${summary}。多个文件时忽略统一文档 ID，按所选策略生成。`);
+      } else {
+        setMessage(summary);
+      }
+      if (autoImport && ids.length) {
+        await runIngest(ids);
+      } else if (autoImport && !ids.length) {
+        setMessage("没有可导入的文件");
+      }
     } finally {
       setBusy(false);
     }
   };
 
-  const runIngest = async () => {
+  const runIngest = async (explicitIds?: string[]) => {
+    const target = explicitIds?.length ? explicitIds : readyIds;
     if (!collection.trim()) {
-      setMessage("请填写 collection");
+      setMessage("请填写知识集合");
       return;
     }
-    if (!uploadIds.length) {
+    if (!target.length) {
       setMessage("请先上传文件");
       return;
     }
     setBusy(true);
     setMessage(null);
+    markIds(target, "importing");
     try {
       let upload_doc_ids: Record<string, string> | undefined;
       const mapRaw = uploadDocIdsJson.trim();
@@ -97,6 +179,7 @@ export default function KnowledgeIngestWorkspace({
             throw new Error("需为对象");
           }
         } catch {
+          markIds(target, "ready");
           setMessage("上传 ID 映射须为「上传 ID → 文档 ID」的 JSON 对象");
           setBusy(false);
           return;
@@ -108,7 +191,7 @@ export default function KnowledgeIngestWorkspace({
         collection: collection.trim(),
         project_id: projectId.trim() || "__all__",
         sync_cache: true,
-        upload_ids: uploadIds,
+        upload_ids: target,
         defaults: {
           domain: domain.trim(),
           folder_path: folderPath.trim(),
@@ -128,9 +211,28 @@ export default function KnowledgeIngestWorkspace({
         typeof report.status === "string" ? `任务状态：${runStatusLabel(report.status)}` : "导入任务已创建",
       );
     } catch (e) {
+      markIds(target, "ready");
       setMessage(e instanceof Error ? e.message : "导入失败");
     } finally {
       setBusy(false);
+    }
+  };
+
+  const applyJob = (row: { status: string; result: Record<string, unknown> | null }) => {
+    setJobView(row.result ?? { status: row.status });
+    setMessage(`任务 ${jobId}：${runStatusLabel(row.status)}`);
+    if (row.status === "completed") {
+      setQueue((prev) => prev.map((item) => (item.status === "importing" ? { ...item, status: "done" } : item)));
+      if (jobId && notifiedJobRef.current !== jobId) {
+        notifiedJobRef.current = jobId;
+        onCompleted?.();
+      }
+    } else if (row.status === "failed") {
+      setQueue((prev) =>
+        prev.map((item) =>
+          item.status === "importing" ? { ...item, status: "error", error: "导入失败" } : item,
+        ),
+      );
     }
   };
 
@@ -141,22 +243,54 @@ export default function KnowledgeIngestWorkspace({
         status: string;
         result: Record<string, unknown> | null;
       }>(`/kb/ingest-jobs/${encodeURIComponent(jobId)}`);
-      setJobView(row.result ?? { status: row.status });
-      setMessage(`任务 ${jobId}：${runStatusLabel(row.status)}`);
-      if (row.status === "completed") {
-        onCompleted?.();
-      }
+      applyJob(row);
     } catch (e) {
       setMessage(e instanceof Error ? e.message : "查询任务失败");
     }
   };
 
+  useEffect(() => {
+    if (!jobId) return;
+    let cancelled = false;
+    const tick = async () => {
+      try {
+        const row = await apiGet<{
+          status: string;
+          result: Record<string, unknown> | null;
+        }>(`/kb/ingest-jobs/${encodeURIComponent(jobId)}`);
+        if (cancelled) return;
+        applyJob(row);
+        if (row.status === "completed" || row.status === "failed") {
+          window.clearInterval(timer);
+        }
+      } catch (e) {
+        if (!cancelled) setMessage(e instanceof Error ? e.message : "查询任务失败");
+      }
+    };
+    const timer = window.setInterval(() => void tick(), 2000);
+    void tick();
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+    // 任务创建后轮询到终态；applyJob 读取当前 jobId。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [jobId]);
+
   const clearQueue = () => {
     setUploadIds([]);
+    setQueue([]);
     setJobId(null);
     setJobView(null);
     setMessage(null);
     setUploadDocIdsJson("");
+  };
+
+  const onPick = (fileList: FileList | null, autoImport: boolean) => {
+    const files = fileList ? Array.from(fileList) : [];
+    if (uploadInputRef.current) uploadInputRef.current.value = "";
+    if (batchInputRef.current) batchInputRef.current.value = "";
+    void uploadFiles(files, autoImport);
   };
 
   if (useMock) {
@@ -168,117 +302,200 @@ export default function KnowledgeIngestWorkspace({
   }
 
   return (
-    <div className="space-y-6 max-w-3xl">
-      <p className="text-sm text-slate-400">
-        上传 Markdown / 纯文本，异步写入外部 Chroma 并增量回填 `kb_cache`。目录树和条目详情可把域、目录、集合预填到此工作台。
-      </p>
-      <div className="grid gap-4 sm:grid-cols-2">
-        <label className="block text-sm">
-          <span className="text-slate-400">知识集合</span>
-          <input
-            value={collection}
-            onChange={(e) => setCollection(e.target.value)}
-            placeholder="如：public.structured_tech.topic"
-            className="mt-1 w-full rounded-lg border border-slate-300 dark:border-slate-700 bg-slate-100 dark:bg-slate-900 px-3 py-2 text-sm"
-          />
-        </label>
-        <label className="block text-sm">
-          <span className="text-slate-400">业务域</span>
-          <input
-            value={domain}
-            onChange={(e) => setDomain(e.target.value)}
-            className="mt-1 w-full rounded-lg border border-slate-300 dark:border-slate-700 bg-slate-100 dark:bg-slate-900 px-3 py-2 text-sm"
-          />
-        </label>
-        <label className="block text-sm sm:col-span-2">
-          <span className="text-slate-400">目录路径</span>
-          <input
-            value={folderPath}
-            onChange={(e) => setFolderPath(e.target.value)}
-            className="mt-1 w-full rounded-lg border border-slate-300 dark:border-slate-700 bg-slate-100 dark:bg-slate-900 px-3 py-2 text-sm"
-          />
-        </label>
-        <label className="block text-sm sm:col-span-2">
-          <span className="text-slate-400">缓存同步项目 ID</span>
-          <input
-            value={projectId}
-            onChange={(e) => setProjectId(e.target.value)}
-            className="mt-1 w-full rounded-lg border border-slate-300 dark:border-slate-700 bg-slate-100 dark:bg-slate-900 px-3 py-2 text-sm"
-          />
-        </label>
-        <label className="block text-sm">
-          <span className="text-slate-400">上传时文档 ID（可选）</span>
-          <input
-            value={docIdOnUpload}
-            onChange={(e) => setDocIdOnUpload(e.target.value)}
-            placeholder="稳定文档 ID，幂等更新 / publish"
-            className="mt-1 w-full rounded-lg border border-slate-300 dark:border-slate-700 bg-slate-100 dark:bg-slate-900 px-3 py-2 text-sm"
-          />
-        </label>
-        <label className="block text-sm">
-          <span className="text-slate-400">默认 doc_id 策略</span>
-          <select
-            value={docIdStrategy}
-            onChange={(e) => setDocIdStrategy(e.target.value === "checksum" ? "checksum" : "filename")}
-            className="mt-1 w-full rounded-lg border border-slate-300 dark:border-slate-700 bg-slate-100 dark:bg-slate-900 px-3 py-2 text-sm"
+    <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_22rem]">
+      <div className="space-y-6">
+        <p className="text-sm text-slate-400">
+          文档会先抽成文本，再异步写入外部 Chroma 并增量回填 kb_cache。目录树和条目详情可把域、目录、集合预填到此工作台。
+        </p>
+        <div className="grid gap-4 sm:grid-cols-2">
+          <label className="block text-sm">
+            <span className="text-slate-400">知识集合</span>
+            <input
+              value={collection}
+              onChange={(e) => setCollection(e.target.value)}
+              placeholder="如：public.structured_tech.topic"
+              className="mt-1 w-full rounded-lg border border-slate-300 dark:border-slate-700 bg-slate-100 dark:bg-slate-900 px-3 py-2 text-sm"
+            />
+          </label>
+          <label className="block text-sm">
+            <span className="text-slate-400">业务域</span>
+            <input
+              value={domain}
+              onChange={(e) => setDomain(e.target.value)}
+              className="mt-1 w-full rounded-lg border border-slate-300 dark:border-slate-700 bg-slate-100 dark:bg-slate-900 px-3 py-2 text-sm"
+            />
+          </label>
+          <label className="block text-sm sm:col-span-2">
+            <span className="text-slate-400">目录路径</span>
+            <input
+              value={folderPath}
+              onChange={(e) => setFolderPath(e.target.value)}
+              className="mt-1 w-full rounded-lg border border-slate-300 dark:border-slate-700 bg-slate-100 dark:bg-slate-900 px-3 py-2 text-sm"
+            />
+          </label>
+          <label className="block text-sm sm:col-span-2">
+            <span className="text-slate-400">缓存同步项目 ID</span>
+            <input
+              value={projectId}
+              onChange={(e) => setProjectId(e.target.value)}
+              className="mt-1 w-full rounded-lg border border-slate-300 dark:border-slate-700 bg-slate-100 dark:bg-slate-900 px-3 py-2 text-sm"
+            />
+          </label>
+          <label className="block text-sm">
+            <span className="text-slate-400">上传时文档 ID（可选）</span>
+            <input
+              value={docIdOnUpload}
+              onChange={(e) => setDocIdOnUpload(e.target.value)}
+              placeholder="仅单个文件时生效"
+              className="mt-1 w-full rounded-lg border border-slate-300 dark:border-slate-700 bg-slate-100 dark:bg-slate-900 px-3 py-2 text-sm"
+            />
+          </label>
+          <label className="block text-sm">
+            <span className="text-slate-400">默认 doc_id 策略</span>
+            <select
+              value={docIdStrategy}
+              onChange={(e) => setDocIdStrategy(e.target.value === "checksum" ? "checksum" : "filename")}
+              className="mt-1 w-full rounded-lg border border-slate-300 dark:border-slate-700 bg-slate-100 dark:bg-slate-900 px-3 py-2 text-sm"
+            >
+              <option value="filename">原文件名 stem</option>
+              <option value="checksum">sha256 前缀</option>
+            </select>
+          </label>
+          <label className="block text-sm sm:col-span-2">
+            <span className="text-slate-400">上传 ID → 文档 ID 映射（JSON，可选）</span>
+            <input
+              value={uploadDocIdsJson}
+              onChange={(e) => setUploadDocIdsJson(e.target.value)}
+              placeholder='{"uuid-1":"my_doc_a"}'
+              className="mt-1 w-full rounded-lg border border-slate-300 dark:border-slate-700 bg-slate-100 dark:bg-slate-900 px-3 py-2 text-sm font-mono"
+            />
+          </label>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            disabled={busy || !readyIds.length}
+            onClick={() => void runIngest()}
+            className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white disabled:opacity-40"
           >
-            <option value="filename">原文件名 stem</option>
-            <option value="checksum">sha256 前缀</option>
-          </select>
-        </label>
-        <label className="block text-sm sm:col-span-2">
-          <span className="text-slate-400">上传 ID → 文档 ID 映射（JSON，可选）</span>
-          <input
-            value={uploadDocIdsJson}
-            onChange={(e) => setUploadDocIdsJson(e.target.value)}
-            placeholder='{"uuid-1":"my_doc_a"}'
-            className="mt-1 w-full rounded-lg border border-slate-300 dark:border-slate-700 bg-slate-100 dark:bg-slate-900 px-3 py-2 text-sm font-mono"
-          />
-        </label>
+            开始导入
+          </button>
+          <button
+            type="button"
+            disabled={!jobId}
+            onClick={() => void pollJob()}
+            className="rounded-lg border border-slate-300 dark:border-slate-600 px-4 py-2 text-sm text-slate-800 dark:text-slate-200 disabled:opacity-40"
+          >
+            刷新任务状态
+          </button>
+          <button
+            type="button"
+            disabled={busy}
+            onClick={clearQueue}
+            className="rounded-lg border border-slate-300 dark:border-slate-600 px-4 py-2 text-sm text-slate-800 dark:text-slate-200"
+          >
+            清空队列
+          </button>
+        </div>
+        {uploadIds.length ? (
+          <p className="text-xs text-slate-500">队列中上传 ID：{uploadIds.join(", ")}</p>
+        ) : null}
+        {message ? <p className="text-sm whitespace-pre-wrap text-amber-500">{message}</p> : null}
+        {jobView ? (
+          <pre className="text-xs bg-slate-100 dark:bg-slate-950/80 border border-slate-200 dark:border-slate-800 rounded-lg p-3 overflow-auto max-h-64 text-slate-700 dark:text-slate-300">
+            {JSON.stringify(jobView, null, 2)}
+          </pre>
+        ) : null}
       </div>
-      <div>
+
+      <aside className="rounded-2xl border border-slate-200 bg-slate-50/80 p-4 dark:border-slate-700 dark:bg-slate-950/40">
+        <div className="flex items-center justify-between gap-2">
+          <h2 className="text-sm font-semibold text-slate-800 dark:text-slate-100">文件导入</h2>
+          <span className="text-xs text-slate-500">{queue.length ? `${queue.length} 个` : "空队列"}</span>
+        </div>
+        <p className="mt-1 text-xs leading-5 text-slate-500">
+          支持 md、txt、doc、docx、pdf、html、rtf。上传后自动抽取正文；批量导入会接着写入当前知识集合。
+        </p>
+        <div className="mt-3 flex flex-wrap gap-2">
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() => uploadInputRef.current?.click()}
+            className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm text-slate-800 disabled:opacity-40 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100"
+          >
+            上传文件
+          </button>
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() => batchInputRef.current?.click()}
+            className="rounded-lg bg-slate-900 px-3 py-1.5 text-sm text-white disabled:opacity-40 dark:bg-slate-100 dark:text-slate-900"
+          >
+            批量导入
+          </button>
+        </div>
         <input
+          ref={uploadInputRef}
           type="file"
           multiple
-          accept=".md,.markdown,.txt,text/markdown,text/plain"
-          disabled={busy}
-          onChange={(e) => void onPickFiles(e.target.files)}
-          className="block w-full text-sm text-slate-700 dark:text-slate-300"
+          accept={ACCEPT}
+          className="hidden"
+          onChange={(e) => onPick(e.target.files, false)}
         />
-        {uploadSummary ? <p className="text-xs text-slate-500 mt-2">已选上传 ID：{uploadSummary}</p> : null}
-      </div>
-      <div className="flex flex-wrap gap-2">
-        <button
-          type="button"
-          disabled={busy}
-          onClick={() => void runIngest()}
-          className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white disabled:opacity-40"
+        <input
+          ref={batchInputRef}
+          type="file"
+          multiple
+          accept={ACCEPT}
+          className="hidden"
+          onChange={(e) => onPick(e.target.files, true)}
+        />
+        <div
+          onDragOver={(e) => {
+            e.preventDefault();
+            setDragOver(true);
+          }}
+          onDragLeave={() => setDragOver(false)}
+          onDrop={(e) => {
+            e.preventDefault();
+            setDragOver(false);
+            onPick(e.dataTransfer.files, false);
+          }}
+          className={`mt-3 rounded-xl border border-dashed px-3 py-6 text-center text-xs ${
+            dragOver
+              ? "border-emerald-500 bg-emerald-50 text-emerald-700 dark:bg-emerald-950/30 dark:text-emerald-300"
+              : "border-slate-300 text-slate-500 dark:border-slate-600"
+          }`}
         >
-          开始导入
-        </button>
-        <button
-          type="button"
-          disabled={!jobId}
-          onClick={() => void pollJob()}
-          className="rounded-lg border border-slate-300 dark:border-slate-600 px-4 py-2 text-sm text-slate-800 dark:text-slate-200 disabled:opacity-40"
-        >
-          刷新任务状态
-        </button>
-        <button
-          type="button"
-          disabled={busy}
-          onClick={clearQueue}
-          className="rounded-lg border border-slate-300 dark:border-slate-600 px-4 py-2 text-sm text-slate-800 dark:text-slate-200"
-        >
-          清空队列
-        </button>
-      </div>
-      {message ? <p className="text-sm whitespace-pre-wrap text-amber-500">{message}</p> : null}
-      {jobView ? (
-        <pre className="text-xs bg-slate-100 dark:bg-slate-950/80 border border-slate-200 dark:border-slate-800 rounded-lg p-3 overflow-auto max-h-64 text-slate-700 dark:text-slate-300">
-          {JSON.stringify(jobView, null, 2)}
-        </pre>
-      ) : null}
+          拖入文件到此窗口，先抽取再等待导入
+        </div>
+        <ul className="mt-3 max-h-[28rem] space-y-2 overflow-auto">
+          {queue.length === 0 ? (
+            <li className="rounded-lg border border-slate-200 px-3 py-4 text-center text-xs text-slate-400 dark:border-slate-800">
+              还没有文件
+            </li>
+          ) : (
+            queue.map((item) => (
+              <li
+                key={item.localId}
+                className="rounded-lg border border-slate-200 bg-white px-3 py-2 dark:border-slate-800 dark:bg-slate-900"
+              >
+                <div className="flex items-start justify-between gap-2">
+                  <p className="min-w-0 truncate text-sm text-slate-800 dark:text-slate-100" title={item.name}>
+                    {item.name}
+                  </p>
+                  <span className="shrink-0 text-xs text-slate-500">{STATUS_LABEL[item.status]}</span>
+                </div>
+                <p className="mt-1 text-xs text-slate-500">
+                  {item.sourceFormat ? item.sourceFormat.toUpperCase() : "—"}
+                  {typeof item.charCount === "number" ? ` · ${item.charCount} 字` : ""}
+                </p>
+                {item.error ? <p className="mt-1 text-xs text-amber-600">{item.error}</p> : null}
+              </li>
+            ))
+          )}
+        </ul>
+      </aside>
     </div>
   );
 }

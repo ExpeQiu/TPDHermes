@@ -27,5 +27,8 @@
       "label": "领导讲稿",
       "path": "templates/speech_draft.md"
     }
-  ]
+  ],
+  "execution": {
+    "type": "llm_template"
+  }
 }
