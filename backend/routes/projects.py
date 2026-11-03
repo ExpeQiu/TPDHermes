@@ -1040,6 +1040,7 @@ class ProjectFileListResponse(BaseModel):
 
 class FileActionApplyBody(BaseModel):
     session_id: str | None = None
+    room_id: str | None = None
     message_id: str | None = None
     proposal_id: str
     action: dict
@@ -1120,21 +1121,33 @@ async def apply_project_file_action(
         FileNameConflict,
         apply_file_action,
     )
+    from backend.services.project_room_service import assert_room_manual_write
 
-    await assert_co_create_file_write_allowed(
-        db,
-        session_id=body.session_id,
-        user_id=effective_uid,
-        project_id=project_id,
-    )
+    if (body.room_id or "").strip():
+        await assert_room_manual_write(
+            db,
+            project_id=project_id,
+            room_id=body.room_id.strip(),
+            user_id=effective_uid,
+        )
+    else:
+        await assert_co_create_file_write_allowed(
+            db,
+            session_id=body.session_id,
+            user_id=effective_uid,
+            project_id=project_id,
+        )
 
+    if (body.room_id or "").strip() and str(body.action.get("type") or "") == "patch":
+        if not str(body.action.get("base_version") or body.action.get("expected_version") or "").strip():
+            raise HTTPException(status_code=400, detail="手工保存需要基准版本")
     try:
         result = await apply_file_action(
             db,
             project_id,
             effective_uid=effective_uid,
             action=body.action,
-            session_id=body.session_id,
+            session_id=None if (body.room_id or "").strip() else body.session_id,
             message_id=body.message_id,
             proposal_id=body.proposal_id,
         )

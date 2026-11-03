@@ -177,4 +177,15 @@ async def test_create_folder_stores_catalog_without_duplicate_index(monkeypatch)
         listed = await list_catalog()
         assert any(item["path"] == "02-知识库/目录探针" for item in listed["folders"])
     finally:
-        await _cleanup(["folder:02-知识库/目录探针"])
+        from backend.services.kb_ids import folder_catalog_item_id
+
+        await _cleanup(
+            [
+                folder_catalog_item_id(
+                    scope="public",
+                    project_id="",
+                    collection="public.structured_tech.general",
+                    folder="02-知识库/目录探针",
+                )
+            ]
+        )

@@ -7,7 +7,8 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-from datetime import datetime
+import os
+from datetime import datetime, timedelta
 from typing import Any
 
 from fastapi import HTTPException
@@ -22,7 +23,10 @@ from backend.services.kb_ingest_core import (
     new_ingest_job_id,
     run_kb_ingestion,
 )
+from backend.services.kb_access import assert_ingest_file, reject_client_chroma_url
 from backend.services.kb_proxy import CHROMA_HOST
+
+LEASE_SECONDS = int(os.getenv("KB_INGEST_LEASE_SECONDS", "900"))
 
 log = logging.getLogger("tpdx.hermes.kb_ingest_jobs")
 
@@ -35,7 +39,7 @@ async def normalize_ingest_request(payload: dict[str, Any]) -> dict[str, Any]:
     source_type = str(payload.get("source_type") or "").strip()
     collection = str(payload.get("collection") or "").strip()
     project_id = str(payload.get("project_id") or "__all__").strip() or "__all__"
-    chroma_url = str(payload.get("chroma_url") or CHROMA_HOST).strip()
+    chroma_url = reject_client_chroma_url(payload.get("chroma_url"))
     strict_domain = bool(payload.get("strict_domain", False))
     sync_cache = bool(payload.get("sync_cache", True))
     batch_chunk_size = int(payload.get("batch_chunk_size") or 64)
@@ -70,6 +74,11 @@ async def normalize_ingest_request(payload: dict[str, Any]) -> dict[str, Any]:
         missing = [uid for uid in upload_ids if uid not in by_id]
         if missing:
             raise HTTPException(status_code=400, detail=f"upload_ids 不存在: {missing}")
+        actor = str(payload.get("created_by") or "").strip()
+        for row in rows:
+            owner = str(getattr(row, "created_by", "") or "").strip()
+            if actor and owner and owner != actor:
+                raise HTTPException(status_code=404, detail="upload 不存在")
 
         raw_override = payload.get("upload_doc_ids")
         upload_doc_ids = raw_override if isinstance(raw_override, dict) else {}
@@ -98,6 +107,18 @@ async def normalize_ingest_request(payload: dict[str, Any]) -> dict[str, Any]:
     doc_ids = [str(doc.get("doc_id") or "").strip() for doc in documents if isinstance(doc, dict)]
     if not all(doc_ids):
         raise HTTPException(status_code=400, detail="documents 中存在空 doc_id")
+    for doc in documents:
+        if not isinstance(doc, dict):
+            continue
+        file_path = doc.get("file_path") or doc.get("stored_path")
+        if not file_path:
+            continue
+        try:
+            assert_ingest_file(str(file_path))
+        except PermissionError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except FileNotFoundError as exc:
+            raise HTTPException(status_code=400, detail=f"file_not_found:{exc}") from exc
 
     return {
         "payload": normalized_payload,
@@ -138,6 +159,8 @@ async def create_ingest_job(
         created_at=now,
         updated_at=now,
         created_by=created_by,
+        project_id=str(normalized.get("project_id") or ""),
+        operation_id=job_id,
     )
     async with async_session_maker() as db:
         db.add(row)
@@ -168,6 +191,10 @@ async def get_ingest_job(job_id: str) -> dict[str, Any] | None:
         "created_at": row.created_at,
         "updated_at": row.updated_at,
         "created_by": row.created_by,
+        "project_id": row.project_id,
+        "worker_id": row.worker_id,
+        "lease_until": row.lease_until,
+        "error_message": row.error_message,
     }
 
 
@@ -178,34 +205,46 @@ async def queue_ingest_job(job_id: str) -> None:
     log.info("kb_ingest queued job=%s", job_id)
 
 
-async def _mark_job_running(job_id: str) -> KbIngestJob | None:
+async def claim_ingest_job(job_id: str, worker_id: str) -> KbIngestJob | None:
+    """条件领取。第二个 worker 对同一 queued 任务更新行数为 0。"""
+    now = datetime.now()
+    lease = (now + timedelta(seconds=LEASE_SECONDS)).isoformat()
+    now_s = now.isoformat()
     async with async_session_maker() as db:
-        row = (
-            await db.execute(
-                select(KbIngestJob).where(KbIngestJob.id == job_id, KbIngestJob.status == "queued")
+        res = await db.execute(
+            update(KbIngestJob)
+            .where(KbIngestJob.id == job_id, KbIngestJob.status == "queued")
+            .values(
+                status="running",
+                worker_id=worker_id,
+                lease_until=lease,
+                updated_at=now_s,
+                error_message=None,
             )
-        ).scalar_one_or_none()
-        if not row:
-            return None
-        row.status = "running"
-        row.updated_at = _now_iso()
+        )
         await db.commit()
-        await db.refresh(row)
-        return row
+        if int(res.rowcount or 0) != 1:
+            log.info("kb_ingest claim missed job=%s worker=%s", job_id, worker_id[:24])
+            return None
+        return await db.get(KbIngestJob, job_id)
 
 
-async def process_ingest_job(job_id: str) -> dict[str, Any] | None:
-    row = await _mark_job_running(job_id)
+async def process_ingest_job(job_id: str, worker_id: str = "worker") -> dict[str, Any] | None:
+    row = await claim_ingest_job(job_id, worker_id)
     if row is None:
         return None
 
     payload = json.loads(row.payload_json or "{}")
-    normalized = await normalize_ingest_request(payload)
-    manifest = normalized["manifest"]
-    collection = str(manifest.get("collection") or normalized["collection"])
-    doc_ids = list(normalized["doc_ids"])
-
+    if row.created_by and not payload.get("created_by"):
+        payload["created_by"] = row.created_by
+    collection = str(payload.get("collection") or "")
+    doc_ids: list[str] = []
+    error_message = None
     try:
+        normalized = await normalize_ingest_request(payload)
+        manifest = normalized["manifest"]
+        collection = str(manifest.get("collection") or normalized["collection"])
+        doc_ids = list(normalized["doc_ids"])
         report = await asyncio.to_thread(
             run_kb_ingestion,
             manifest=manifest,
@@ -237,16 +276,21 @@ async def process_ingest_job(job_id: str) -> dict[str, Any] | None:
                 kg_report = await graph_after_public_ingest(collection, manifest)
                 if not kg_report.get("skipped"):
                     report["kg"] = kg_report
-            except Exception:
+            except Exception as kg_exc:
                 log.exception("kb_ingest graph hook failed job=%s collection=%s", job_id, collection)
+                report["kg"] = {"ok": False, "error": str(kg_exc)}
+                if final_status == "completed":
+                    final_status = "partial"
+                    report["status"] = "partial"
     except Exception as e:
         log.exception("kb_ingest failed job=%s", job_id)
+        error_message = str(getattr(e, "detail", None) or e)
         report = {
             "job_id": job_id,
             "collection": collection,
             "status": "failed",
             "doc_ids": doc_ids,
-            "errors": [{"doc": "", "error": str(e)}],
+            "errors": [{"doc": "", "error": error_message}],
             "cache_sync_triggered": False,
         }
         final_status = "failed"
@@ -258,6 +302,9 @@ async def process_ingest_job(job_id: str) -> dict[str, Any] | None:
             .values(
                 status=final_status,
                 result_json=json.dumps(report, ensure_ascii=False),
+                error_message=error_message,
+                worker_id=None,
+                lease_until=None,
                 updated_at=_now_iso(),
             )
         )
@@ -266,15 +313,25 @@ async def process_ingest_job(job_id: str) -> dict[str, Any] | None:
 
 
 async def requeue_running_ingest_jobs() -> int:
+    """只重排租约已过期的 running。有效租约留给原 worker。"""
+    now = _now_iso()
     async with async_session_maker() as db:
         rows = (
             await db.execute(select(KbIngestJob).where(KbIngestJob.status == "running"))
         ).scalars().all()
-        if not rows:
+        expired = [
+            row
+            for row in rows
+            if not row.lease_until or str(row.lease_until) <= now
+        ]
+        if not expired:
             return 0
-        now = _now_iso()
-        for row in rows:
+        for row in expired:
             row.status = "queued"
+            row.worker_id = None
+            row.lease_until = None
             row.updated_at = now
+            row.error_message = row.error_message or "lease_expired"
         await db.commit()
-        return len(rows)
+        log.info("kb_ingest requeued expired jobs=%s", len(expired))
+        return len(expired)

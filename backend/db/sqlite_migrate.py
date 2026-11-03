@@ -39,15 +39,96 @@ def _add_columns(conn: Connection, table: str, specs: Iterable[tuple[str, str]])
         logger.info("sqlite_migrate: %s", sql)
 
 
+def ensure_kb_runtime_columns(connection: Connection) -> None:
+    """给已有库补上知识库合同列。测试和运行中的 ensure_table 都会走到这里。"""
+    tables = {
+        str(row[0])
+        for row in connection.execute(
+            text("SELECT name FROM sqlite_master WHERE type='table'")
+        ).fetchall()
+    }
+    if "kb_cache" in tables:
+        _add_columns(connection, "kb_cache", [("source_chunk_id", "TEXT")])
+    if "kb_ingest_jobs" in tables:
+        _add_columns(
+            connection,
+            "kb_ingest_jobs",
+            [
+                ("project_id", "TEXT"),
+                ("operation_id", "TEXT"),
+                ("worker_id", "TEXT"),
+                ("lease_until", "TEXT"),
+                ("error_message", "TEXT"),
+            ],
+        )
+    if "kb_source_files" in tables:
+        _add_columns(
+            connection,
+            "kb_source_files",
+            [("created_by", "TEXT"), ("project_id", "TEXT")],
+        )
+    if "kb_catalog_items" in tables:
+        _add_columns(
+            connection,
+            "kb_catalog_items",
+            [("project_id", "TEXT"), ("collection", "TEXT")],
+        )
+
+
 def run_sqlite_migrations(connection: Connection) -> None:
     """同步函数，供 async_engine.begin() 内 run_sync 调用。"""
+    ensure_kb_runtime_columns(connection)
     tables = connection.execute(
         text("SELECT name FROM sqlite_master WHERE type='table'")
     ).fetchall()
     names = {str(r[0]) for r in tables}
 
     if "project_rooms" in names:
-        _add_columns(connection, "project_rooms", [("archived_at", "TEXT")])
+        _add_columns(
+            connection,
+            "project_rooms",
+            [
+                ("archived_at", "TEXT"),
+                ("seq_counter", "INTEGER NOT NULL DEFAULT 0"),
+                ("event_counter", "INTEGER NOT NULL DEFAULT 0"),
+                ("plan_id", "TEXT"),
+                ("plan_version", "INTEGER NOT NULL DEFAULT 0"),
+                ("plan_summary", "TEXT NOT NULL DEFAULT ''"),
+                ("plan_confirmed_version", "INTEGER"),
+                ("plan_confirmed_by", "TEXT"),
+                ("lease_until", "TEXT"),
+                ("turn_retry", "INTEGER NOT NULL DEFAULT 0"),
+            ],
+        )
+    if "project_room_messages" in names:
+        _add_columns(
+            connection,
+            "project_room_messages",
+            [
+                ("client_message_id", "TEXT"),
+                ("event_seq", "INTEGER NOT NULL DEFAULT 0"),
+                ("error_summary", "TEXT NOT NULL DEFAULT ''"),
+                ("error_code", "INTEGER"),
+                ("materials_json", "TEXT NOT NULL DEFAULT '[]'"),
+                ("warnings_json", "TEXT NOT NULL DEFAULT '[]'"),
+                ("run_id", "TEXT"),
+                ("plan_id", "TEXT"),
+                ("plan_version", "INTEGER"),
+            ],
+        )
+        connection.execute(
+            text(
+                "CREATE UNIQUE INDEX IF NOT EXISTS uq_room_client_message "
+                "ON project_room_messages(room_id, author_id, client_message_id) "
+                "WHERE client_message_id IS NOT NULL AND client_message_id != ''"
+            )
+        )
+        connection.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS idx_project_room_messages_room_event "
+                "ON project_room_messages(room_id, event_seq)"
+            )
+        )
 
     if "projects" in names:
         _add_columns(
@@ -666,6 +747,68 @@ def _ensure_performance_indexes(connection: Connection) -> None:
                     "ON outputs (project_id, status)",
                 ),
             ]
+        )
+    if "kb_cache" in names:
+        _add_columns(
+            connection,
+            "kb_cache",
+            [("source_chunk_id", "TEXT")],
+        )
+        connection.execute(
+            text(
+                "UPDATE kb_cache SET source_chunk_id = id "
+                "WHERE source_chunk_id IS NULL OR source_chunk_id = ''"
+            )
+        )
+        dup = connection.execute(
+            text(
+                "SELECT COUNT(*) FROM ("
+                "SELECT project_id, collection, source_chunk_id FROM kb_cache "
+                "WHERE source_chunk_id IS NOT NULL "
+                "GROUP BY project_id, collection, source_chunk_id HAVING COUNT(*) > 1)"
+            )
+        ).scalar()
+        if not dup:
+            connection.execute(
+                text(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS uq_kb_cache_scope_source "
+                    "ON kb_cache (project_id, collection, source_chunk_id)"
+                )
+            )
+        else:
+            logger.warning(
+                "sqlite_migrate: kb_cache identity conflicts=%s, unique index skipped",
+                dup,
+            )
+    if "kb_ingest_jobs" in names:
+        _add_columns(
+            connection,
+            "kb_ingest_jobs",
+            [
+                ("project_id", "TEXT"),
+                ("operation_id", "TEXT"),
+                ("worker_id", "TEXT"),
+                ("lease_until", "TEXT"),
+                ("error_message", "TEXT"),
+            ],
+        )
+    if "kb_source_files" in names:
+        _add_columns(
+            connection,
+            "kb_source_files",
+            [
+                ("created_by", "TEXT"),
+                ("project_id", "TEXT"),
+            ],
+        )
+    if "kb_catalog_items" in names:
+        _add_columns(
+            connection,
+            "kb_catalog_items",
+            [
+                ("project_id", "TEXT"),
+                ("collection", "TEXT"),
+            ],
         )
     if "kb_ingest_jobs" in names:
         stmts.append(

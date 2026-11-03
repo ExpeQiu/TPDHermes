@@ -135,7 +135,7 @@ const MOCK_ENTRIES: KBEntry[] = [
     source: "演示",
     summary: "为启用左侧目录，请在 Chroma metadata 中填写 domain 与 folder_path。",
     body:
-      "为启用左侧目录，请在 Chroma metadata 中填写 domain 与 folder_path。\n\n详见 guide/产品1.2升级方案.md 中的 metadata 约定。",
+      "为启用左侧目录，请在 Chroma metadata 中填写 domain 与 folder_path。\n\n详见 docs/archive/产品1.2升级方案.md 中的 metadata 约定。",
     collection: "tech_docs",
     domain: "structured_tech",
     folder_path: "02-知识库/示例分类",
@@ -420,9 +420,16 @@ function resolveChromaDocId(entry: Pick<KBEntry, "id" | "doc_id">): string | nul
   return null;
 }
 
-/** 合并/去重：Chroma doc_id，否则回落到缓存主键 id */
-function resolveDocId(entry: Pick<KBEntry, "id" | "doc_id">): string | null {
-  return resolveChromaDocId(entry) ?? (entry.id?.trim() || null);
+/** 合并/去重：集合 + 逻辑 doc_id。同名文档在不同集合里各自保留。 */
+function resolveDocId(entry: {
+  id?: string;
+  doc_id?: string;
+  collection?: string;
+}): string | null {
+  const doc = resolveChromaDocId(entry) ?? (entry.id?.trim() || null);
+  if (!doc) return null;
+  const collection = entry.collection?.trim();
+  return collection ? `${collection}::${doc}` : doc;
 }
 
 /** 仅 kb_cache 行（无 Chroma doc），如测试数据 qa-* / unit-* */
@@ -496,7 +503,7 @@ function dedupeKbEntriesByDocId(entries: KBEntry[]): KBEntry[] {
 function dedupeBrowseDocsByDocId(docs: BrowseDoc[]): BrowseDoc[] {
   const seen = new Map<string, BrowseDoc>();
   for (const d of docs) {
-    const did = resolveDocId({ id: d.id }) ?? d.id;
+    const did = resolveDocId({ id: d.id, doc_id: d.doc_id, collection: d.collection }) ?? d.id;
     if (!seen.has(did)) seen.set(did, d);
   }
   return [...seen.values()];

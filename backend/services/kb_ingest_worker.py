@@ -7,6 +7,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import uuid
 
 from sqlalchemy import select
 
@@ -27,6 +28,7 @@ class KBIngestWorker:
     def __init__(self) -> None:
         self._task: asyncio.Task | None = None
         self._wakeup = asyncio.Event()
+        self.worker_id = f"kb-worker-{uuid.uuid4().hex[:8]}"
 
     async def start(self) -> None:
         if not _ENABLED:
@@ -89,9 +91,9 @@ class KBIngestWorker:
         job_id = await self._next_queued_job_id()
         if not job_id:
             return False
-        logger.info("kb_ingest_worker processing job=%s", job_id)
-        await process_ingest_job(job_id)
-        return True
+        logger.info("kb_ingest_worker processing job=%s worker=%s", job_id, self.worker_id)
+        claimed = await process_ingest_job(job_id, self.worker_id)
+        return claimed is not None
 
 
 kb_ingest_worker = KBIngestWorker()

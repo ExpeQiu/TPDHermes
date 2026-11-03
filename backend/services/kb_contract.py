@@ -124,3 +124,8 @@ def is_public_intel_collection(name: str) -> bool:
 
 def is_geelywiki_collection(name: str) -> bool:
     return str(name or "").strip() == GEELYWIKI_PAGES_COLLECTION
+
+
+# 经验/收割文档进入项目库：复制还是移动尚未拍板。
+# 在规则写明前，不得只改 kb_cache 的 collection 并报成功（同步会盖回，且分不清原集合是否保留）。
+PROJECT_KB_SETTLE_CONTRACT = "deferred"

@@ -10,6 +10,7 @@ from typing import Any
 
 from fastapi import HTTPException
 from sqlalchemy import delete, func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.models.chat_session import ChatMessageRecord, ChatSessionRecord
@@ -594,6 +595,26 @@ async def migrate_local_sessions(
     return {"imported": imported, "skipped": skipped}
 
 
+def _apply_message_item(existing: ChatMessageRecord, item: dict[str, Any], session_id: str) -> bool:
+    changed = False
+    if existing.session_id != session_id:
+        existing.session_id = session_id
+        changed = True
+    if existing.role != item["role"]:
+        existing.role = item["role"]
+        changed = True
+    if (existing.content or "") != item["content"]:
+        existing.content = item["content"]
+        changed = True
+    if (existing.metadata_json or "") != item["metadata_json"]:
+        existing.metadata_json = item["metadata_json"]
+        changed = True
+    if int(existing.sort_index or 0) != int(item["sort_index"]):
+        existing.sort_index = item["sort_index"]
+        changed = True
+    return changed
+
+
 async def _sync_messages(
     db: AsyncSession,
     session_id: str,
@@ -640,35 +661,35 @@ async def _sync_messages(
     for item in normalized:
         existing = existing_by_id.get(item["id"])
         if existing is None:
-            db.add(
-                ChatMessageRecord(
-                    id=item["id"],
-                    session_id=session_id,
-                    role=item["role"],
-                    content=item["content"],
-                    metadata_json=item["metadata_json"],
-                    sort_index=item["sort_index"],
+            try:
+                async with db.begin_nested():
+                    db.add(
+                        ChatMessageRecord(
+                            id=item["id"],
+                            session_id=session_id,
+                            role=item["role"],
+                            content=item["content"],
+                            metadata_json=item["metadata_json"],
+                            sort_index=item["sort_index"],
+                        )
+                    )
+                    await db.flush()
+                created += 1
+            except IntegrityError:
+                # 并发 sync 都先查到「不存在」时，后写入的一方改为更新已有行。
+                logger.warning(
+                    "chat_message sync conflict session_id=%s message_id=%s, rewrite existing",
+                    session_id,
+                    item["id"],
                 )
-            )
-            created += 1
+                raced = await db.get(ChatMessageRecord, item["id"])
+                if raced is None:
+                    raise
+                existing_by_id[item["id"]] = raced
+                if _apply_message_item(raced, item, session_id):
+                    rewritten += 1
             continue
-        changed = False
-        if existing.session_id != session_id:
-            existing.session_id = session_id
-            changed = True
-        if existing.role != item["role"]:
-            existing.role = item["role"]
-            changed = True
-        if (existing.content or "") != item["content"]:
-            existing.content = item["content"]
-            changed = True
-        if (existing.metadata_json or "") != item["metadata_json"]:
-            existing.metadata_json = item["metadata_json"]
-            changed = True
-        if int(existing.sort_index or 0) != int(item["sort_index"]):
-            existing.sort_index = item["sort_index"]
-            changed = True
-        if changed:
+        if _apply_message_item(existing, item, session_id):
             rewritten += 1
 
     deleted_ids: set[str] = {str(mid).strip() for mid in (removed_message_ids or []) if str(mid).strip()}

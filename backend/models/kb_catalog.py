@@ -16,6 +16,8 @@ class KbCatalogItem(Base):
     label = Column(String, nullable=False)
     parent_key = Column(String)
     scope = Column(String)
+    project_id = Column(String, nullable=True)
+    collection = Column(String, nullable=True)
     builtin = Column(String, nullable=False, default="0")
     created_at = Column(String, default=lambda: datetime.now().isoformat())
     updated_at = Column(String, default=lambda: datetime.now().isoformat())

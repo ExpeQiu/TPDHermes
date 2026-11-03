@@ -35,6 +35,9 @@ def room_roles(monkeypatch):
         "backend.routes.project_rooms.schedule_room_drain",
         lambda background_tasks, room_id: None,
     )
+    rooms.set_room_completer_for_tests(rooms.mock_room_reply)
+    yield
+    rooms.set_room_completer_for_tests(None)
 
 
 def _headers(user_id: str) -> dict[str, str]:
@@ -282,8 +285,8 @@ def test_viewer_does_not_write_and_outsider_cannot_read(room_roles):
 
     with TestClient(app) as client:
         before = _messages(client, viewer, project_id, room_id)
-        assert before["doc_version"] == 0
-        assert not before["output_id"]
+        assert before["doc_version"] == 1
+        assert before["output_id"]
         spoken = _post(client, viewer, project_id, room_id, "只读成员插一句")
         assert spoken["author_id"] == viewer
         denied = client.post(
@@ -302,7 +305,7 @@ def test_viewer_does_not_write_and_outsider_cannot_read(room_roles):
 
     with TestClient(app) as client:
         after = _messages(client, owner, project_id, room_id)
-        assert after["doc_version"] == 0
+        assert after["doc_version"] == 1
         assert after["output_id"] == before["output_id"]
         assert "只读成员插一句" not in after["content"]
         assert any(item["content"] == "只读成员插一句" for item in after["messages"])

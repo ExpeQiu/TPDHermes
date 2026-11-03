@@ -26,7 +26,7 @@ isProject: false
 
 当前 [`backend/routes/tasks.py`](backend/routes/tasks.py) 在 `entrypoint == "workshop"` 时走独立分支，调用 [`backend/services/workshop_task_runner.py`](backend/services/workshop_task_runner.py) 本地执行 `skill.generate()`，**不经过** Hermes-agent。对话/chat 则经 [`backend/services/agent_gateway.py`](backend/services/agent_gateway.py) 转发至 `HERMES_CHAT_API_URL`（默认 `:8642/v1/chat/completions`）。
 
-这与 [`guide/编排改造方案.md`](guide/编排改造方案.md)、[`guide/功能调整.md`](guide/功能调整.md) 的目标不一致。你已确认：
+这与 [`guide/编排改造方案.md`](guide/编排改造方案.md)、[`docs/archive/功能调整.md`](docs/archive/功能调整.md) 的目标不一致。你已确认：
 
 - **默认**：Hermes-agent；`WORKSHOP_EXECUTION_MODE=direct` 作 fallback
 - **落库正文**：优先取自 `workshop_generate` / `workshop_generate_from_kb` 的 **tool 结果**，而非 assistant 闲聊文本

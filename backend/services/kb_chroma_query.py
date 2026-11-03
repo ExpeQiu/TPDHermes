@@ -30,17 +30,21 @@ def parse_chroma_query_response(
         dists = dists_outer if isinstance(dists_outer, list) else []
 
     results: list[dict[str, Any]] = []
-    for doc, meta, dist in zip(docs, metas, dists):
+    for index, doc in enumerate(docs):
+        meta = metas[index] if index < len(metas) else {}
+        dist = dists[index] if index < len(dists) else None
         m = dict(meta or {})
         if "collection" not in m:
             m["collection"] = collection_name
+        distance = 1.0 if dist is None else float(dist)
         results.append(
             {
                 "content": doc,
                 "metadata": m,
-                "distance": dist,
+                "distance": distance,
             }
         )
+    results.sort(key=lambda item: (item["distance"] is None, float(item["distance"])))
     return results
 
 

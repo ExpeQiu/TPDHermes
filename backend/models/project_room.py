@@ -5,7 +5,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Column, Index, Integer, String, Text, UniqueConstraint
+from sqlalchemy import Column, Index, Integer, String, Text, UniqueConstraint, text
 
 from backend.db import Base
 
@@ -23,6 +23,15 @@ class ProjectRoom(Base):
     doc_version = Column(Integer, nullable=False, default=0)
     active_turn_id = Column(String)
     archived_at = Column(String)
+    seq_counter = Column(Integer, nullable=False, default=0)
+    event_counter = Column(Integer, nullable=False, default=0)
+    plan_id = Column(String)
+    plan_version = Column(Integer, nullable=False, default=0)
+    plan_summary = Column(Text, nullable=False, default="")
+    plan_confirmed_version = Column(Integer)
+    plan_confirmed_by = Column(String)
+    lease_until = Column(String)
+    turn_retry = Column(Integer, nullable=False, default=0)
     created_at = Column(String, default=lambda: datetime.now().isoformat())
     updated_at = Column(String, default=lambda: datetime.now().isoformat())
 
@@ -32,6 +41,15 @@ class ProjectRoomMessage(Base):
     __table_args__ = (
         UniqueConstraint("room_id", "seq", name="uq_project_room_messages_room_seq"),
         Index("idx_project_room_messages_room_seq", "room_id", "seq"),
+        Index("idx_project_room_messages_room_event", "room_id", "event_seq"),
+        Index(
+            "uq_room_client_message",
+            "room_id",
+            "author_id",
+            "client_message_id",
+            unique=True,
+            sqlite_where=text("client_message_id IS NOT NULL AND client_message_id != ''"),
+        ),
     )
 
     id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
@@ -47,5 +65,14 @@ class ProjectRoomMessage(Base):
     mention_file_ids_json = Column(Text, nullable=False, default="[]")
     file_actions_json = Column(Text, nullable=False, default="[]")
     agent_mode = Column(String, nullable=False, default="agent")  # ask | agent | plan
-    turn_state = Column(String, nullable=False, default="done")  # queued | running | done
+    turn_state = Column(String, nullable=False, default="done")  # queued | running | succeeded | failed | cancelled；done 仅旧数据
+    client_message_id = Column(String)
+    event_seq = Column(Integer, nullable=False, default=0)
+    error_summary = Column(Text, nullable=False, default="")
+    error_code = Column(Integer)
+    materials_json = Column(Text, nullable=False, default="[]")
+    warnings_json = Column(Text, nullable=False, default="[]")
+    run_id = Column(String)
+    plan_id = Column(String)
+    plan_version = Column(Integer)
     created_at = Column(String, default=lambda: datetime.now().isoformat())

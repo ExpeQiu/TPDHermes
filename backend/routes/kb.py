@@ -7,8 +7,12 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
+from sqlalchemy.ext.asyncio import AsyncSession
 
+from backend.db import get_db
+from backend.services.kb_access import authorize_kb_operation, reject_client_chroma_url
 from backend.services.kb_proxy import kb_proxy_service
+from backend.services.user_identity import get_effective_user_id
 from backend.tools.kb_tools import kb_query as kb_query_tool
 from backend.services.kb_browse import DEFAULT_TREE_ENTRY_LIMIT, build_browse_tree
 from backend.services.kb_cache import kb_cache_service
@@ -172,14 +176,19 @@ async def kb_query_all(
     project_id: Optional[str] = Query(None),
     collection: Optional[str] = Query(
         None,
-        description="可选：限定单个 collection；省略则为全库",
+        description="可选：限定单个 collection；省略则为当前主体可见范围",
     ),
+    db: AsyncSession = Depends(get_db),
+    user_id: str = Depends(get_effective_user_id),
 ):
-    """跨 collection 合并检索（验证用）；上行可用时逐集合调 Chroma。"""
+    """跨 collection 合并检索；只含当前主体可读的项目。"""
+    scope = await authorize_kb_operation(
+        db, user_id, project_id=project_id, operation="read", collection=collection
+    )
     result = await kb_proxy_service.query_all_collections(
         query_text=q,
         n_results=n,
-        project_id=project_id,
+        project_id=scope["project_id"],
         collection=collection,
     )
     return KBQueriesResponse(
@@ -207,12 +216,23 @@ async def kb_health():
 
 
 @router.post("/query", response_model=KBQueriesResponse)
-async def kb_query(data: KBQueriesRequest):
+async def kb_query(
+    data: KBQueriesRequest,
+    db: AsyncSession = Depends(get_db),
+    user_id: str = Depends(get_effective_user_id),
+):
     """
     按 collection 名称查询知识库
 
-    优先透传到外部 ChromaDB；外部服务不可用时自动降级到本地缓存。
+    优先透传到外部 ChromaDB；外部服务不可用时按词法降级到本地缓存。
     """
+    await authorize_kb_operation(
+        db,
+        user_id,
+        project_id=data.project_id,
+        operation="read",
+        collection=data.collection_name,
+    )
     result = await kb_query_tool(
         query=data.query_text,
         collection_name=data.collection_name,
@@ -233,12 +253,17 @@ async def kb_query_by_collection(
     q: str = Query(..., description="查询文本"),
     n: int = Query(10, ge=1, le=100, description="返回条数"),
     project_id: Optional[str] = Query(None, description="项目 ID"),
+    db: AsyncSession = Depends(get_db),
+    user_id: str = Depends(get_effective_user_id),
 ):
     """
     GET 风格的 collection 查询接口
 
     支持路径参数指定 collection 名。
     """
+    await authorize_kb_operation(
+        db, user_id, project_id=project_id, operation="read", collection=name
+    )
     result = await kb_query_tool(
         query=q,
         collection_name=name,
@@ -274,29 +299,56 @@ async def list_collections(
 
 
 @router.get("/cache/stats/{project_id}", response_model=CacheStatsResponse)
-async def cache_stats(project_id: str):
+async def cache_stats(
+    project_id: str,
+    db: AsyncSession = Depends(get_db),
+    user_id: str = Depends(get_effective_user_id),
+):
     """
     获取指定项目的本地缓存统计
     """
+    await authorize_kb_operation(db, user_id, project_id=project_id, operation="read")
     stats = await kb_cache_service.get_cache_stats(project_id=project_id)
     return CacheStatsResponse(**stats)
 
 
 @router.get("/cache/entry/{entry_id}")
-async def get_cached_entry_by_id(entry_id: str):
+async def get_cached_entry_by_id(
+    entry_id: str,
+    db: AsyncSession = Depends(get_db),
+    user_id: str = Depends(get_effective_user_id),
+):
     """按主键拉取单条缓存（目录树条目可能未出现在前几页 browse 列表中）。"""
     row = await kb_cache_service.get_cached_entry_by_id(entry_id)
     if not row:
         raise HTTPException(status_code=404, detail="缓存条目不存在")
+    await authorize_kb_operation(
+        db,
+        user_id,
+        project_id=str(row.get("project_id") or ""),
+        operation="read",
+        collection=str(row.get("collection") or ""),
+    )
     return row
 
 
 @router.delete("/cache/entry/{entry_id}")
 async def delete_cached_entry_by_id_route(
     entry_id: str,
-    collection: Optional[str] = Query(None, description="可选，缩小 doc_id 回退删除范围"),
+    collection: Optional[str] = Query(None, description="doc_id 回退时必须带上集合"),
+    db: AsyncSession = Depends(get_db),
+    user_id: str = Depends(get_effective_user_id),
 ):
-    """按 kb_cache 主键删除；chunk id 可回退为按 doc_id 批量清理。"""
+    """按 kb_cache 主键删除；不会扩大到其他集合。"""
+    existing = await kb_cache_service.get_cached_entry_by_id(entry_id)
+    if existing:
+        await authorize_kb_operation(
+            db,
+            user_id,
+            project_id=str(existing.get("project_id") or ""),
+            operation="manage",
+            collection=str(existing.get("collection") or collection or ""),
+        )
     from backend.services.kb_entry_manage import delete_cached_entry_by_id
 
     ok = await delete_cached_entry_by_id(entry_id, collection=collection)
@@ -309,13 +361,23 @@ async def delete_cached_entry_by_id_route(
 async def delete_cached_entries_by_doc_id_route(
     doc_id: str,
     collection: Optional[str] = Query(None),
+    project_id: str = Query("__all__"),
+    db: AsyncSession = Depends(get_db),
+    user_id: str = Depends(get_effective_user_id),
 ):
+    await authorize_kb_operation(
+        db,
+        user_id,
+        project_id=project_id,
+        operation="manage",
+        collection=collection,
+    )
     """按逻辑 doc_id 清理 kb_cache（含 *_chunk_* 行）。"""
     from backend.services.kb_entry_manage import delete_cached_entries_by_doc_id
 
+    if not collection:
+        raise HTTPException(status_code=400, detail="collection required")
     removed = await delete_cached_entries_by_doc_id(doc_id.strip(), collection=collection)
-    if removed <= 0 and collection:
-        removed = await delete_cached_entries_by_doc_id(doc_id.strip(), collection=None)
     if removed <= 0:
         raise HTTPException(status_code=404, detail="cache_entry_not_found")
     return {"ok": True, "doc_id": doc_id.strip(), "removed": removed}
@@ -331,29 +393,43 @@ async def get_cached_entries(
         True,
         description="为 false 时不返回正文 content（列表浏览加速，详情请用 /cache/entry/{id}）",
     ),
+    db: AsyncSession = Depends(get_db),
+    user_id: str = Depends(get_effective_user_id),
 ):
     """
     读取本地 kb_cache 缓存条目（不依赖外部 ChromaDB）。
 
     `project_id` 为 `__all__`、`all` 或 `*` 时表示跨项目汇总（不按 project_id 过滤）。
     """
+    scope = await authorize_kb_operation(
+        db, user_id, project_id=project_id, operation="read", collection=collection
+    )
     entries = await kb_cache_service.get_cached_entries(
         project_id=project_id,
         collection=collection,
         limit=limit,
         offset=offset,
         include_content=include_content,
+        project_ids=scope["allowed_project_ids"] if project_id in {"__all__", "all", "*"} else None,
     )
     return {"entries": entries, "count": len(entries)}
 
 
 @router.post("/cache/sync", response_model=SyncResponse)
-async def sync_from_external(data: SyncRequest):
+async def sync_from_external(
+    data: SyncRequest,
+    db: AsyncSession = Depends(get_db),
+    user_id: str = Depends(get_effective_user_id),
+):
     """
     手动触发从外部 ChromaDB 同步元数据到本地 kb_cache 表
     """
+    await authorize_kb_operation(
+        db, user_id, project_id=data.project_id, operation="manage"
+    )
+    chroma = reject_client_chroma_url(data.external_kb_url)
     result = await kb_cache_service.sync_from_external(
-        external_kb_url=data.external_kb_url,
+        external_kb_url=chroma,
         project_id=data.project_id,
         collections=data.collections,
     )

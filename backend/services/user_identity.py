@@ -15,6 +15,8 @@ logger = logging.getLogger("tpdx.hermes.user_identity")
 GLOBAL_ADMIN_ENV = "TPDHERMES_GLOBAL_ADMIN_USER_IDS"
 # 显式打开后才允许 Query/Body 覆盖身份（仅调试）
 ALLOW_USER_ID_OVERRIDE_ENV = "TPDHERMES_ALLOW_USER_ID_OVERRIDE"
+# 仅受控代理/本地显式开启时采信客户端 X-User-ID。不能用来冒充已登录的飞书主体。
+TRUST_USER_ID_HEADER_ENV = "TPDHERMES_TRUST_USER_ID_HEADER"
 # 显式打开后 user_id=default 才自动成为 platform_admin
 DEFAULT_IS_PLATFORM_ADMIN_ENV = "TPDHERMES_DEFAULT_IS_PLATFORM_ADMIN"
 
@@ -24,6 +26,15 @@ def normalize_user_id(value: str | None) -> str:
         return "default"
     s = str(value).strip()
     return s if s else "default"
+
+
+def trust_user_id_header() -> bool:
+    return os.getenv(TRUST_USER_ID_HEADER_ENV, "0").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+        "on",
+    )
 
 
 def allow_user_id_override() -> bool:
@@ -92,13 +103,26 @@ def feishu_effective_user_id(request: Request | None) -> str | None:
     return f"feishu:{user.open_id.strip()}"
 
 
+def _header_user_id(request: Request) -> str:
+    return (request.headers.get("X-User-ID") or request.headers.get("x-user-id") or "").strip()
+
+
 def _resolve_from_trusted_sources(request: Request) -> str:
-    header_uid = (request.headers.get("X-User-ID") or request.headers.get("x-user-id") or "").strip()
-    if header_uid:
-        return normalize_user_id(header_uid)
+    """飞书会话优先。客户端 X-User-ID 不能绕过已登录主体，且默认不信任。"""
     fs = feishu_effective_user_id(request)
+    header_uid = _header_user_id(request)
     if fs:
+        if header_uid and normalize_user_id(header_uid) != fs:
+            logger.warning(
+                "ignored X-User-ID bypass of feishu session claimed=%s session=%s",
+                header_uid[:24],
+                fs[:24],
+            )
         return fs
+    if header_uid and trust_user_id_header():
+        return normalize_user_id(header_uid)
+    if header_uid:
+        logger.warning("ignored untrusted X-User-ID claimed=%s", header_uid[:24])
     return derive_user_id(request, None)
 
 
@@ -109,8 +133,9 @@ def effective_user_id_for_api(
     body_user_id: str | None = None,
 ) -> str:
     """
-    默认优先级：X-User-ID > 飞书会话 > IP+UA。
+    默认优先级：飞书会话 >（受控）X-User-ID > IP+UA。
     body/query 覆盖仅当 TPDHERMES_ALLOW_USER_ID_OVERRIDE=1。
+    X-User-ID 仅当 TPDHERMES_TRUST_USER_ID_HEADER=1 且没有飞书会话。
     """
     trusted = _resolve_from_trusted_sources(request)
 

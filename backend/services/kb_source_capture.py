@@ -461,46 +461,11 @@ async def prefetch_kb_sources_for_run(
     async with async_session_maker() as db:
         existing = await load_kb_sources(db, run_id)
     if not (existing and (existing.get("sources") or [])):
-        try:
-            from backend.services.kb_proxy import kb_proxy_service
-            await _progress("kb_prefetch_cross_collection", {"query": q})
-            cross = await asyncio.wait_for(
-                kb_proxy_service.query_all_collections(
-                    query_text=q,
-                    n_results=5,
-                    project_id=project_id,
-                    collection=None,
-                ),
-                timeout=_KB_PREFETCH_FALLBACK_TIMEOUT_SEC,
-            )
-            if int(cross.get("count") or 0) > 0:
-                async with async_session_maker() as db:
-                    await append_kb_sources(
-                        db,
-                        run_id=run_id,
-                        tool_name="kb_query",
-                        payload=cross,
-                        collection_name="__all__",
-                    )
-                logger.info(
-                    "kb prefetch cross-collection run_id=%s count=%s",
-                    run_id,
-                    cross.get("count", 0),
-                )
-            await _progress(
-                "kb_prefetch_cross_collection_complete",
-                {"count": int(cross.get("count") or 0)},
-            )
-        except TimeoutError:
-            logger.warning(
-                "kb prefetch cross-collection timeout run_id=%s timeout=%s",
-                run_id,
-                _KB_PREFETCH_FALLBACK_TIMEOUT_SEC,
-            )
-            await _progress("kb_prefetch_cross_collection_timeout", {})
-        except Exception as exc:
-            logger.warning("kb prefetch cross-collection failed run_id=%s err=%s", run_id, exc)
-            await _progress("kb_prefetch_cross_collection_failed", {"error": str(exc)})
+        logger.info(
+            "kb prefetch stayed in requested collections run_id=%s query_len=%s",
+            run_id,
+            len(q or ""),
+        )
 
     async with async_session_maker() as db:
         final = await load_kb_sources(db, run_id)

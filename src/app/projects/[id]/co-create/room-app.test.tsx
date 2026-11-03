@@ -190,6 +190,10 @@ describe("CoCreateRoomApp", () => {
     await waitFor(() => {
       expect(container.textContent).toContain("方案讨论");
     });
+    const openRoom = Array.from(container.querySelectorAll("button")).find((button) =>
+      button.textContent?.includes("方案讨论"),
+    );
+    openRoom?.click();
     const textarea = container.querySelector("textarea") as HTMLTextAreaElement;
     const setValue = (value: string) => {
       const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")?.set;
@@ -286,5 +290,65 @@ describe("CoCreateRoomApp", () => {
       expect(apiPatch).toHaveBeenCalledWith("/projects/project-1/rooms/room-1", { archived: true });
       expect(container.textContent).toContain("已归档 1");
     });
+  });
+
+  it("发送中切换房间时，迟到响应不写进当前房间", async () => {
+    let release: (value: unknown) => void = () => undefined;
+    apiPost.mockImplementation(
+      (path: string) =>
+        new Promise((resolve) => {
+          if (String(path).includes("/messages")) release = resolve;
+          else resolve({ id: "room-new", title: "新对话", role_ids: [], writer_role_id: "", doc_version: 0 });
+        }),
+    );
+    apiGet.mockImplementation(async (path: string) => {
+      if (path.includes("/messages")) {
+        return { messages: [], doc_version: 0, content: "", output_id: null };
+      }
+      if (path.endsWith("/rooms")) {
+        return {
+          items: [
+            { id: "room-a", title: "房间甲", role_ids: [], writer_role_id: "", output_id: null, doc_version: 0 },
+            { id: "room-b", title: "房间乙", role_ids: [], writer_role_id: "", output_id: null, doc_version: 0 },
+          ],
+        };
+      }
+      if (path.includes("/brainstorm/roles")) return { items: [] };
+      if (path.endsWith("/files")) return { items: [] };
+      if (path.endsWith("/members")) return [];
+      return {};
+    });
+    const { container } = renderComponent(<CoCreateRoomApp />);
+    await waitFor(() => {
+      expect(container.textContent).toContain("房间甲");
+    });
+    const buttonNamed = (title: string) =>
+      Array.from(container.querySelectorAll("button")).find((button) => button.textContent?.includes(title));
+    buttonNamed("房间甲")?.click();
+    const fill = (value: string) => {
+      const node = container.querySelector("textarea") as HTMLTextAreaElement;
+      const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")?.set;
+      setter?.call(node, value);
+      node.dispatchEvent(new Event("input", { bubbles: true }));
+    };
+    fill("甲的发言");
+    clickElement(buttonNamed("发送") as HTMLButtonElement);
+    buttonNamed("房间乙")?.click();
+    fill("乙的草稿");
+    await act(async () => {
+      release({
+        id: "late",
+        seq: 1,
+        turn_id: "t",
+        author_type: "human",
+        author_id: "a",
+        author_name: "a",
+        content: "迟到回复A",
+        turn_state: "running",
+      });
+      await Promise.resolve();
+    });
+    expect(container.textContent ?? "").not.toContain("迟到回复A");
+    expect((container.querySelector("textarea") as HTMLTextAreaElement).value).toBe("乙的草稿");
   });
 });

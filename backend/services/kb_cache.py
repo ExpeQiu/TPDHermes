@@ -4,7 +4,6 @@ KBCache 服务：管理本地 SQLite kb_cache 表，与外部 ChromaDB 保持元
 
 import json
 import logging
-import uuid
 from datetime import datetime
 from typing import Any, Optional
 
@@ -13,7 +12,7 @@ from sqlalchemy import delete, or_, select
 from backend.models.kb_cache import KBCache
 from backend.db import engine, async_session_maker
 from backend.db import Base
-from backend.services.kb_ids import kb_doc_id_from_ref
+from backend.services.kb_ids import cache_row_id, kb_doc_id_from_ref
 from backend.services.kb_metadata import normalize_kb_metadata_dict
 
 ALL_PROJECT_IDS = {"__all__", "*", "all"}
@@ -61,7 +60,7 @@ class KBCacheService:
             同步结果统计 {"synced": n, "failed": n, "skipped": n}
         """
         await self.ensure_table()
-        results = {"synced": 0, "failed": 0, "skipped": 0}
+        results = {"synced": 0, "failed": 0, "skipped": 0, "removed": 0, "reconcile": "complete"}
 
         async def _notify(event_type: str, **extra: object) -> None:
             try:
@@ -105,67 +104,55 @@ class KBCacheService:
                             results["skipped"] += 1
                             continue
 
-                        get_resp = await client.post(
-                            f"{external_kb_url}/api/v1/collections/{collection_ref}/get",
-                            json={
-                                "limit": 10000,
-                                "offset": 0,
-                                "include": ["metadatas", "documents"],
-                            },
+                        page = await self._read_collection_page(
+                            client,
+                            external_kb_url,
+                            collection_ref,
                         )
-                        get_resp.raise_for_status()
-                        query_data = get_resp.json()
-
-                        docs_raw = query_data.get("documents") or []
-                        metas_raw = query_data.get("metadatas") or []
-                        if docs_raw and isinstance(docs_raw[0], list):
-                            docs_list: list = docs_raw[0]
-                        else:
-                            docs_list = docs_raw if isinstance(docs_raw, list) else []
-                        if metas_raw and isinstance(metas_raw[0], list):
-                            metas_list: list = metas_raw[0]
-                        else:
-                            metas_list = metas_raw if isinstance(metas_raw, list) else []
-
-                        # 逐条写入本地缓存
+                        if not page.get("complete"):
+                            results["failed"] += 1
+                            results["reconcile"] = "incomplete"
+                            logger.warning(
+                                "kb_cache sync incomplete project=%s collection=%s",
+                                project_id,
+                                display_name,
+                            )
+                            continue
+                        ids_list = page["ids"]
+                        docs_list = page["docs"]
+                        metas_list = page["metas"]
+                        seen_sources: set[str] = set()
                         async with async_session_maker() as db:
                             for i, doc in enumerate(docs_list):
                                 metadata = (metas_list[i] if i < len(metas_list) else {}) or {}
                                 if not isinstance(metadata, dict):
                                     metadata = {}
                                 metadata = normalize_kb_metadata_dict(metadata)
-                                entry_id = metadata.get("id") or str(uuid.uuid4())
-
-                                existing = await db.execute(
-                                    select(KBCache).where(
-                                        KBCache.id == entry_id,
-                                        KBCache.project_id == project_id,
-                                    )
+                                if metadata.get("kb_active") is False:
+                                    continue
+                                source_id = str(ids_list[i]).strip() if i < len(ids_list) else ""
+                                if not source_id:
+                                    results["failed"] += 1
+                                    results["reconcile"] = "incomplete"
+                                    continue
+                                seen_sources.add(source_id)
+                                await self._upsert_scoped_row(
+                                    db,
+                                    project_id=project_id,
+                                    collection=display_name,
+                                    source_chunk_id=source_id,
+                                    content=str(doc or ""),
+                                    metadata=metadata,
                                 )
-                                existing_entry = existing.scalar_one_or_none()
-
-                                now = datetime.now().isoformat()
-                                if existing_entry:
-                                    existing_entry.content = doc
-                                    existing_entry.metadata_ = json.dumps(metadata)
-                                    existing_entry.updated_at = now
-                                    existing_entry.sync_status = "synced"
-                                else:
-                                    new_entry = KBCache(
-                                        id=entry_id,
-                                        project_id=project_id,
-                                        collection=display_name,
-                                        content=doc,
-                                        metadata_=json.dumps(metadata),
-                                        source=metadata.get("source", ""),
-                                        created_at=now,
-                                        updated_at=now,
-                                        sync_status="synced",
-                                        reliability=0.8,
-                                        version=1,
-                                    )
-                                    db.add(new_entry)
                                 results["synced"] += 1
+                            if results.get("reconcile") != "incomplete":
+                                removed = await self._delete_missing_sources(
+                                    db,
+                                    project_id=project_id,
+                                    collection=display_name,
+                                    seen=seen_sources,
+                                )
+                                results["removed"] = int(results.get("removed") or 0) + removed
                             await db.commit()
                     except Exception:
                         results["failed"] += 1
@@ -199,6 +186,140 @@ class KBCacheService:
         docs = docs_raw if isinstance(docs_raw, list) else []
         metas = metas_raw if isinstance(metas_raw, list) else []
         return ids, docs, metas
+
+    async def _read_collection_page(self, client, external_kb_url: str, collection_ref: str) -> dict:
+        """分页读完整集合。任一页失败则 complete=False，调用方不得差集删除。"""
+        page_size = 1000
+        offset = 0
+        ids: list[str] = []
+        docs: list[Any] = []
+        metas: list[Any] = []
+        while True:
+            get_resp = await client.post(
+                f"{external_kb_url}/api/v1/collections/{collection_ref}/get",
+                json={
+                    "limit": page_size,
+                    "offset": offset,
+                    "include": ["metadatas", "documents"],
+                },
+            )
+            get_resp.raise_for_status()
+            chunk_ids, chunk_docs, chunk_metas = self._flatten_rows(get_resp.json())
+            if chunk_ids and len(chunk_ids) != len(chunk_docs):
+                return {"complete": False, "ids": ids, "docs": docs, "metas": metas}
+            ids.extend(chunk_ids)
+            docs.extend(chunk_docs)
+            metas.extend(chunk_metas)
+            if len(chunk_docs) < page_size:
+                break
+            offset += len(chunk_docs)
+            if offset > 200_000:
+                return {"complete": False, "ids": ids, "docs": docs, "metas": metas}
+        return {"complete": True, "ids": ids, "docs": docs, "metas": metas}
+
+    async def _find_scoped_row(
+        self,
+        db,
+        *,
+        project_id: str,
+        collection: str,
+        source_chunk_id: str,
+    ) -> KBCache | None:
+        scoped = cache_row_id(project_id, collection, source_chunk_id)
+        row = await db.get(KBCache, scoped)
+        if row:
+            return row
+        found = await db.execute(
+            select(KBCache).where(
+                KBCache.project_id == project_id,
+                KBCache.collection == collection,
+                or_(
+                    KBCache.source_chunk_id == source_chunk_id,
+                    KBCache.id == source_chunk_id,
+                ),
+            )
+        )
+        return found.scalar_one_or_none()
+
+    async def _upsert_scoped_row(
+        self,
+        db,
+        *,
+        project_id: str,
+        collection: str,
+        source_chunk_id: str,
+        content: str,
+        metadata: dict,
+    ) -> None:
+        now = datetime.now().isoformat()
+        row = await self._find_scoped_row(
+            db,
+            project_id=project_id,
+            collection=collection,
+            source_chunk_id=source_chunk_id,
+        )
+        payload = json.dumps(metadata, ensure_ascii=False)
+        source = str(metadata.get("source") or "")
+        if row:
+            row.content = content
+            row.collection = collection
+            row.project_id = project_id
+            row.source_chunk_id = source_chunk_id
+            row.metadata_ = payload
+            row.source = source
+            row.updated_at = now
+            row.sync_status = "synced"
+            return
+        db.add(
+            KBCache(
+                id=cache_row_id(project_id, collection, source_chunk_id),
+                project_id=project_id,
+                collection=collection,
+                source_chunk_id=source_chunk_id,
+                content=content,
+                metadata_=payload,
+                source=source,
+                created_at=now,
+                updated_at=now,
+                sync_status="synced",
+                reliability=0.8,
+                version=1,
+            )
+        )
+
+    async def _delete_missing_sources(
+        self,
+        db,
+        *,
+        project_id: str,
+        collection: str,
+        seen: set[str],
+    ) -> int:
+        rows = (
+            await db.execute(
+                select(KBCache).where(
+                    KBCache.project_id == project_id,
+                    KBCache.collection == collection,
+                )
+            )
+        ).scalars().all()
+        removed = 0
+        for row in rows:
+            source = str(row.source_chunk_id or row.id or "")
+            if source in seen:
+                continue
+            if "::" in str(row.id) and str(row.id).split("::", 2)[-1] in seen:
+                continue
+            await db.delete(row)
+            removed += 1
+        if removed:
+            logger.info(
+                "kb_cache reconcile removed project=%s collection=%s count=%s",
+                project_id,
+                collection,
+                removed,
+            )
+        return removed
 
     async def delete_entries_by_doc_ids(
         self,
@@ -399,7 +520,6 @@ class KBCacheService:
         await self.ensure_table()
         pid = str(project_id).strip() or "__all__"
         col = str(collection).strip()
-        now = datetime.now().isoformat()
         written = 0
 
         async def _notify(event_type: str, **extra: object) -> None:
@@ -419,38 +539,17 @@ class KBCacheService:
                 metadata = normalize_kb_metadata_dict(
                     raw.get("metadata") if isinstance(raw.get("metadata"), dict) else {}
                 )
-                entry_id = str(metadata.get("id") or chunk_id)
-                existing = await db.execute(
-                    select(KBCache).where(
-                        KBCache.id == entry_id,
-                        KBCache.project_id == pid,
-                    )
+                if metadata.get("kb_active") is False:
+                    continue
+                source_id = str(metadata.get("id") or chunk_id)
+                await self._upsert_scoped_row(
+                    db,
+                    project_id=pid,
+                    collection=col,
+                    source_chunk_id=source_id,
+                    content=content,
+                    metadata=metadata,
                 )
-                row = existing.scalar_one_or_none()
-                source = str(metadata.get("source") or "")
-                if row:
-                    row.content = content
-                    row.collection = col
-                    row.metadata_ = json.dumps(metadata, ensure_ascii=False)
-                    row.source = source
-                    row.updated_at = now
-                    row.sync_status = "synced"
-                else:
-                    db.add(
-                        KBCache(
-                            id=entry_id,
-                            project_id=pid,
-                            collection=col,
-                            content=content,
-                            metadata_=json.dumps(metadata, ensure_ascii=False),
-                            source=source,
-                            created_at=now,
-                            updated_at=now,
-                            sync_status="synced",
-                            reliability=0.8,
-                            version=1,
-                        )
-                    )
                 written += 1
             await db.commit()
 
@@ -470,6 +569,7 @@ class KBCacheService:
         offset: int = 0,
         *,
         include_content: bool = True,
+        project_ids: Optional[list[str]] = None,
     ) -> list[dict]:
         """
         按 project_id 读取本地 kb_cache 缓存条目
@@ -499,7 +599,9 @@ class KBCacheService:
                     KBCache.created_at,
                     KBCache.updated_at,
                 )
-            if project_id not in ALL_PROJECT_IDS:
+            if project_ids is not None:
+                query = query.where(KBCache.project_id.in_(project_ids or ["__none__"]))
+            elif project_id not in ALL_PROJECT_IDS:
                 query = query.where(KBCache.project_id == project_id)
             if collection:
                 query = query.where(KBCache.collection == collection)
@@ -517,6 +619,7 @@ class KBCacheService:
     def _format_cache_row(self, e: KBCache) -> dict:
         return {
             "id": e.id,
+            "source_chunk_id": e.source_chunk_id or e.id,
             "project_id": e.project_id,
             "collection": e.collection,
             "content": e.content,
@@ -569,6 +672,13 @@ class KBCacheService:
             return None
         async with async_session_maker() as db:
             row = await db.get(KBCache, eid)
+            if row is None:
+                matches = (
+                    await db.execute(
+                        select(KBCache).where(KBCache.source_chunk_id == eid).limit(2)
+                    )
+                ).scalars().all()
+                row = matches[0] if len(matches) == 1 else None
             if row:
                 return self._format_cache_row(row)
             doc_id = kb_doc_id_from_ref(eid)

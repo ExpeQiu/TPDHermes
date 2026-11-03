@@ -499,6 +499,7 @@ async def apply_file_action(
     session_id: str | None = None,
     message_id: str | None = None,
     proposal_id: str | None = None,
+    commit: bool = True,
 ) -> dict[str, Any]:
     action_type = action.get("type")
     now = datetime.now().isoformat()
@@ -568,6 +569,7 @@ async def apply_file_action(
                 result=result,
                 project_id=project_id,
                 proposal_id=proposal,
+                commit=commit,
             )
         row = OutputAsset(
             id=str(uuid.uuid4()),
@@ -608,6 +610,7 @@ async def apply_file_action(
             result=result,
             project_id=project_id,
             proposal_id=proposal,
+            commit=commit,
         )
 
     if action_type == "patch":
@@ -645,6 +648,7 @@ async def apply_file_action(
             result=result,
             project_id=project_id,
             proposal_id=proposal,
+            commit=commit,
         )
 
     raise ValueError(f"不支持的动作类型: {action_type}")
@@ -657,6 +661,7 @@ async def _finish_file_action(
     result: dict[str, Any],
     project_id: str,
     proposal_id: str,
+    commit: bool = True,
 ) -> dict[str, Any]:
     if claimed is not None:
         claimed.status = "applied"
@@ -664,18 +669,28 @@ async def _finish_file_action(
         claimed.target_file_id = result.get("source_file_id") or claimed.target_file_id
         result["action_id"] = claimed.id
         claimed.result_json = json.dumps(result, ensure_ascii=False)
-    await db.commit()
     result_file_id = str(result.get("result_file_id") or "")
-    if result_file_id:
-        schedule_ingest_output(result_file_id)
-    logger.info(
-        "[file-actions] applied project_id=%s proposal_id=%s operation=%s result_file_id=%s version=%s",
-        project_id,
-        proposal_id,
-        result.get("operation"),
-        result_file_id,
-        result.get("result_version"),
-    )
+    if commit:
+        await db.commit()
+        if result_file_id:
+            schedule_ingest_output(result_file_id)
+        logger.info(
+            "[file-actions] applied project_id=%s proposal_id=%s operation=%s result_file_id=%s version=%s",
+            project_id,
+            proposal_id,
+            result.get("operation"),
+            result_file_id,
+            result.get("result_version"),
+        )
+    else:
+        result["defer_ingest"] = True
+        logger.info(
+            "[file-actions] staged project_id=%s proposal_id=%s result_file_id=%s version=%s",
+            project_id,
+            proposal_id,
+            result_file_id,
+            result.get("result_version"),
+        )
     return result
 
 

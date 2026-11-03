@@ -16,7 +16,13 @@ import json
 from datetime import datetime
 from typing import Any, AsyncGenerator, Dict, Optional
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Depends, Query
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from backend.db import get_db
+from backend.services.kb_access import authorize_kb_operation
+from backend.services.rbac import require_system_admin
+from backend.services.user_identity import get_effective_user_id
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
@@ -94,7 +100,7 @@ class KBSubscriptionManager:
 
     async def subscribe(self) -> KBSubscriber:
         """注册一个新订阅者"""
-        queue: asyncio.Queue[KBEvent] = asyncio.Queue()
+        queue: asyncio.Queue[KBEvent] = asyncio.Queue(maxsize=64)
         sub = KBSubscriber(queue)
         async with self._lock:
             self._subscribers.append(sub)
@@ -117,6 +123,15 @@ class KBSubscriptionManager:
                 else:
                     try:
                         sub.queue.put_nowait(event)
+                    except asyncio.QueueFull:
+                        try:
+                            sub.queue.get_nowait()
+                        except asyncio.QueueEmpty:
+                            pass
+                        try:
+                            sub.queue.put_nowait(event)
+                        except asyncio.QueueFull:
+                            pass
                     except Exception:
                         dead.append(sub)
             for d in dead:
@@ -160,7 +175,13 @@ async def _sse_stream(sub: KBSubscriber) -> AsyncGenerator[str, None]:
 @router.get("/events")
 async def kb_events_subscribe(
     project_id: Optional[str] = Query(None, description="限定项目 ID"),
+    db: AsyncSession = Depends(get_db),
+    user_id: str = Depends(get_effective_user_id),
 ):
+    scope = await authorize_kb_operation(
+        db, user_id, project_id=project_id, operation="read"
+    )
+    allowed = scope["allowed_project_ids"]
     """
     SSE 知识库事件订阅端点。
     GET /kb/events
@@ -190,7 +211,10 @@ async def kb_events_subscribe(
                     try:
                         data_str = line.split("data: ", 1)[1].strip()
                         evt = json.loads(data_str)
-                        if evt.get("project_id") and evt["project_id"] != project_id:
+                        evt_pid = evt.get("project_id")
+                        if project_id and evt_pid and evt_pid != project_id:
+                            continue
+                        if allowed is not None and evt_pid and evt_pid not in allowed and evt_pid not in {"__all__", "*", "all"}:
                             continue
                     except Exception:
                         pass
@@ -222,7 +246,10 @@ class PublishEventRequest(BaseModel):
 
 
 @router.post("/events/publish")
-async def publish_kb_event(req: PublishEventRequest):
+async def publish_kb_event(
+    req: PublishEventRequest,
+    _role: str = Depends(require_system_admin),
+):
     """
     手动触发一条 KB 事件（供内部服务调用，向所有 SSE 订阅者广播）。
     POST /kb/events/publish

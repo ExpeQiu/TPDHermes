@@ -110,6 +110,10 @@ async def lifespan(app: FastAPI):
     await growth_scheduler.start()
     await kb_ingest_worker.start()
     await kb_reconcile_scheduler.start()
+    from backend.services.project_room_service import recover_incomplete_turns
+
+    recovered = await recover_incomplete_turns()
+    logger.info("co-create rooms recovered count=%s", len(recovered))
     yield
     await kb_reconcile_scheduler.stop()
     await kb_ingest_worker.stop()

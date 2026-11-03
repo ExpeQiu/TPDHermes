@@ -4,7 +4,7 @@ import os
 from sqlalchemy import event, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase
-from sqlalchemy.pool import StaticPool
+from sqlalchemy.pool import NullPool, StaticPool
 
 logger = logging.getLogger("tpdx.hermes")
 
@@ -15,11 +15,26 @@ class Base(DeclarativeBase):
 
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite+aiosqlite:///./tphermes.db")
 
-engine = create_async_engine(
-    DATABASE_URL,
-    connect_args={"check_same_thread": False},
-    poolclass=StaticPool,
-)
+
+def sqlite_uses_static_pool(url: str) -> bool:
+    """内存库必须共用一条连接；文件库共用连接会让并发提交互相冲掉。"""
+    lowered = url.lower()
+    return ":memory:" in lowered or "mode=memory" in lowered
+
+
+def _engine_kwargs(url: str) -> dict:
+    if not url.startswith("sqlite"):
+        return {}
+    memory = sqlite_uses_static_pool(url)
+    pool = StaticPool if memory else NullPool
+    logger.info("sqlite pool=%s memory=%s", pool.__name__, memory)
+    return {
+        "connect_args": {"check_same_thread": False},
+        "poolclass": pool,
+    }
+
+
+engine = create_async_engine(DATABASE_URL, **_engine_kwargs(DATABASE_URL))
 
 
 @event.listens_for(engine.sync_engine, "connect")

@@ -9,6 +9,8 @@ class KBCache(Base):
     id = Column(String, primary_key=True)
     project_id = Column(String, nullable=False, index=True)
     collection = Column(String, nullable=False, index=True)
+    # Chroma 源 chunk id。本地主键可以是 project::collection::source_chunk_id。
+    source_chunk_id = Column(String, nullable=True, index=True)
     content = Column(Text, nullable=False)
     embedding = Column(Text)  # JSON string, optional
     metadata_ = Column(Text, name="metadata", default="{}")  # JSON string

@@ -5,37 +5,50 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import re
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any, Awaitable, Callable
 
 from fastapi import BackgroundTasks, HTTPException
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.db import async_session_maker
 from backend.models.output_asset import OutputAsset
 from backend.models.project import Project
+from backend.models.project_file_domain import ProjectFileActionLog
 from backend.models.project_member import ProjectMember
 from backend.models.project_room import ProjectRoom, ProjectRoomMessage
-from backend.services.file_action_service import apply_file_action
+from backend.services.file_action_service import FileActionConflict, FileNameConflict, apply_file_action
 from backend.services.multi_agent_resources import MultiAgentResourceError, get_role, list_roles
 from backend.services.project_access import require_project_for_user
+from backend.services.project_kb_ingest import schedule_ingest_output
 from backend.services.rbac import project_perm_allowed
+from backend.services.room_contract import (
+    allows_file_write,
+    delivery_document,
+    is_plan_confirm,
+    resolve_room_files,
+    writer_driver_name,
+)
+from backend.services.room_writer import complete_with_hermes
 
 logger = logging.getLogger("tpdx.hermes.co_create_room")
 
 MENTION_RE = re.compile(r"@([^\s@]+)")
 _AGENT_MODES = {"ask", "agent", "plan"}
-_PLAN_CONFIRM_RE = re.compile(
-    r"^(确认(执行|计划)?|开始执行|按计划执行|执行计划|继续执行|ok|go|yes)$",
-    re.I,
-)
+_TERMINAL_TURN_STATES = {"succeeded", "failed", "cancelled", "done"}
+_LEASE_SECONDS = int(os.getenv("ROOM_TURN_LEASE_SECONDS", "120"))
+_MAX_TURN_RETRY = int(os.getenv("ROOM_TURN_MAX_RETRY", "3"))
 RoomCompleter = Callable[[dict[str, Any], dict[str, Any]], Awaitable[str]]
+TurnHook = Callable[[], Awaitable[None]]
 
 _room_locks: dict[str, asyncio.Lock] = {}
 _completer: RoomCompleter | None = None
+_turn_commit_hook: TurnHook | None = None
 
 
 def normalize_room_agent_mode(value: str | None) -> str:
@@ -43,11 +56,7 @@ def normalize_room_agent_mode(value: str | None) -> str:
     return mode if mode in _AGENT_MODES else "agent"
 
 
-def is_plan_confirm(text: str) -> bool:
-    return bool(_PLAN_CONFIRM_RE.match((text or "").strip()))
-
-
-_DOC_NEED_RE = re.compile(r"写|生成|产出|成稿|文档|修订|改写|起草|输出|整理成|行动计划")
+_DOC_NEED_RE = re.compile(r"写一版|写一稿|生成|产出|成稿|修订|改写|起草|落稿|删除原句|正式稿")
 
 
 def agent_turn_needs_document(text: str) -> bool:
@@ -59,24 +68,35 @@ def agent_turn_needs_document(text: str) -> bool:
 
 
 def effective_room_mode(mode: str, text: str) -> str:
-    """Plan 确认后按 Agent 执行。"""
+    """回复语气：已确认的计划按执行口吻回答。是否落稿由 allows_file_write 决定。"""
     resolved = normalize_room_agent_mode(mode)
-    if resolved == "plan" and is_plan_confirm(text):
+    if is_plan_confirm(text) and resolved != "ask":
         return "agent"
     return resolved
 
 
 def room_turn_writes_document(mode: str, text: str) -> bool:
-    """Ask 与规划中的 Plan 不写文档；Agent 按需创建或修订。"""
-    resolved = effective_room_mode(mode, text)
-    if resolved != "agent":
+    allowed, _reason = allows_file_write(
+        mode=normalize_room_agent_mode(mode),
+        text=text,
+        has_plan=False,
+        plan_version=0,
+        confirm_plan_version=None,
+        archived=False,
+    )
+    if is_plan_confirm(text):
         return False
-    return agent_turn_needs_document(text)
+    return allowed
 
 
 def set_room_completer_for_tests(fn: RoomCompleter | None) -> None:
     global _completer
     _completer = fn
+
+
+def set_turn_commit_hook_for_tests(fn: TurnHook | None) -> None:
+    global _turn_commit_hook
+    _turn_commit_hook = fn
 
 
 def _lock_for(room_id: str) -> asyncio.Lock:
@@ -117,7 +137,15 @@ def message_to_dict(row: ProjectRoomMessage) -> dict[str, Any]:
         "file_actions": _loads(row.file_actions_json, []),
         "agent_mode": normalize_room_agent_mode(getattr(row, "agent_mode", None)),
         "turn_state": row.turn_state,
+        "client_message_id": getattr(row, "client_message_id", None) or "",
+        "event_seq": int(getattr(row, "event_seq", 0) or 0),
+        "error_summary": getattr(row, "error_summary", "") or "",
+        "error_code": getattr(row, "error_code", None),
+        "warnings": _loads(getattr(row, "warnings_json", None), []),
+        "materials": _loads(getattr(row, "materials_json", None), []),
+        "run_id": getattr(row, "run_id", None) or "",
         "created_at": row.created_at,
+        "replayed": False,
     }
 
 
@@ -134,6 +162,12 @@ def room_to_dict(row: ProjectRoom, *, content: str = "") -> dict[str, Any]:
         "content": content,
         "active_turn_id": row.active_turn_id,
         "archived_at": row.archived_at,
+        "plan_id": getattr(row, "plan_id", None) or "",
+        "plan_version": int(getattr(row, "plan_version", 0) or 0),
+        "plan_summary": getattr(row, "plan_summary", "") or "",
+        "plan_confirmed_version": getattr(row, "plan_confirmed_version", None),
+        "writer_driver": writer_driver_name(),
+        "latest_event": int(getattr(row, "event_counter", 0) or 0),
         "created_at": row.created_at,
         "updated_at": row.updated_at,
     }
@@ -243,15 +277,12 @@ def compose_room_document(
     human_text: str,
     discussion: list[tuple[str, str]],
 ) -> str:
-    lines = [f"### {human_text.strip()}"]
-    for name, text in discussion:
-        cleaned = (text or "").strip()
-        if cleaned:
-            lines.append(f"- {name}：{cleaned}")
-    block = "\n".join(lines).strip() + "\n"
-    if not (previous or "").strip():
-        return f"# {title}\n\n{block}"
-    return previous.rstrip() + "\n\n" + block
+    """正式稿只收主笔交付。讨论留在消息里，不再追加到正文。"""
+    del previous, human_text
+    delivery = ""
+    if discussion:
+        delivery = discussion[-1][1]
+    return delivery_document(title, delivery)
 
 
 async def mock_room_reply(role: dict[str, Any], ctx: dict[str, Any]) -> str:
@@ -289,16 +320,48 @@ async def mock_room_reply(role: dict[str, Any], ctx: dict[str, Any]) -> str:
 async def complete_room_turn(role: dict[str, Any], ctx: dict[str, Any]) -> str:
     if _completer is not None:
         return await _completer(role, ctx)
-    return await mock_room_reply(role, ctx)
+    driver = writer_driver_name()
+    if driver == "mock":
+        logger.info("[co-create-room] writer driver=mock role_id=%s", role.get("id"))
+        return await mock_room_reply(role, ctx)
+    logger.info("[co-create-room] writer driver=%s role_id=%s", driver, role.get("id"))
+    return await complete_with_hermes(role, ctx)
 
 
-async def _alloc_human_seq(db: AsyncSession, room_id: str) -> int:
-    """每轮占用 1000 个序号。后入库的人话用下一轮的整段，上一轮 Agent 仍能插在它前面。"""
-    current = await db.scalar(
-        select(func.max(ProjectRoomMessage.seq)).where(ProjectRoomMessage.room_id == room_id)
+async def _alloc_human_seq(db: AsyncSession, room_id: str) -> tuple[int, int]:
+    """房间行上的计数与消息插入同一事务。进程锁不能代替这次更新。"""
+    result = await db.execute(
+        text(
+            """
+            UPDATE project_rooms
+            SET seq_counter = MAX(
+                  COALESCE(seq_counter, 0),
+                  COALESCE((SELECT MAX(seq) FROM project_room_messages WHERE room_id = :room_id), 0)
+                ) + 1000,
+                event_counter = COALESCE(event_counter, 0) + 1
+            WHERE id = :room_id
+            RETURNING seq_counter, event_counter
+            """
+        ),
+        {"room_id": room_id},
     )
-    turn_index = int(current or 0) // 1000 + 1
-    return turn_index * 1000
+    row = result.one()
+    return int(row.seq_counter), int(row.event_counter)
+
+
+async def _alloc_event_seq(db: AsyncSession, room_id: str) -> int:
+    result = await db.execute(
+        text(
+            """
+            UPDATE project_rooms
+            SET event_counter = COALESCE(event_counter, 0) + 1
+            WHERE id = :room_id
+            RETURNING event_counter
+            """
+        ),
+        {"room_id": room_id},
+    )
+    return int(result.scalar_one())
 
 
 async def _alloc_agent_seq(db: AsyncSession, room_id: str, human_seq: int) -> int:
@@ -454,28 +517,57 @@ async def list_messages(
     room_id: str,
     user_id: str,
     after_seq: int = 0,
+    after_event: int | None = None,
+    known_doc_version: int | None = None,
 ) -> dict[str, Any]:
     await _project_role(db, project_id, user_id)
     room = await _require_room(db, project_id, room_id)
+    filters = [ProjectRoomMessage.room_id == room_id]
+    if after_event is not None:
+        filters.append(ProjectRoomMessage.event_seq > after_event)
+    elif after_seq:
+        filters.append(ProjectRoomMessage.seq > after_seq)
     rows = (
         await db.execute(
-            select(ProjectRoomMessage)
-            .where(ProjectRoomMessage.room_id == room_id, ProjectRoomMessage.seq > after_seq)
-            .order_by(ProjectRoomMessage.seq.asc())
+            select(ProjectRoomMessage).where(*filters).order_by(ProjectRoomMessage.seq.asc())
         )
     ).scalars().all()
-    content = await _output_content(db, room.output_id)
+    version = int(room.doc_version or 0)
+    include_content = known_doc_version is None or int(known_doc_version) != version
+    content = await _output_content(db, room.output_id) if include_content else ""
     logger.info(
-        "[co-create-room] list messages room_id=%s project_id=%s user_id=%s after=%s count=%s",
+        "[co-create-room] list messages room_id=%s project_id=%s user_id=%s after_seq=%s after_event=%s count=%s content=%s",
         room_id,
         project_id,
         user_id,
         after_seq,
+        after_event,
         len(rows),
+        include_content,
     )
     payload = room_to_dict(room, content=content)
+    payload["content_omitted"] = not include_content
     payload["messages"] = [message_to_dict(row) for row in rows]
     return payload
+
+
+async def _find_client_message(
+    db: AsyncSession,
+    *,
+    room_id: str,
+    user_id: str,
+    client_message_id: str,
+) -> ProjectRoomMessage | None:
+    return (
+        await db.execute(
+            select(ProjectRoomMessage).where(
+                ProjectRoomMessage.room_id == room_id,
+                ProjectRoomMessage.author_id == user_id,
+                ProjectRoomMessage.client_message_id == client_message_id,
+                ProjectRoomMessage.author_type == "human",
+            )
+        )
+    ).scalar_one_or_none()
 
 
 async def enqueue_human_message(
@@ -489,6 +581,10 @@ async def enqueue_human_message(
     mention_user_ids: list[str] | None = None,
     mention_file_ids: list[str] | None = None,
     agent_mode: str | None = None,
+    client_message_id: str | None = None,
+    files: list[dict[str, Any]] | None = None,
+    plan_id: str | None = None,
+    plan_version: int | None = None,
 ) -> dict[str, Any]:
     role = await _project_role(db, project_id, user_id)
     if not project_perm_allowed(role, "read"):
@@ -497,28 +593,56 @@ async def enqueue_human_message(
     if not text:
         raise HTTPException(status_code=400, detail="发言不能为空")
     room = await _require_room(db, project_id, room_id)
+    client_id = (client_message_id or "").strip()
+    if client_id:
+        existing = await _find_client_message(db, room_id=room_id, user_id=user_id, client_message_id=client_id)
+        if existing:
+            if (existing.content or "") != text:
+                raise HTTPException(status_code=409, detail="同一消息标识不能复用不同正文")
+            payload = message_to_dict(existing)
+            payload["replayed"] = True
+            logger.info(
+                "[co-create-room] message replay room_id=%s project_id=%s user_id=%s client_message_id=%s",
+                room_id,
+                project_id,
+                user_id,
+                client_id,
+            )
+            return payload
     seated_ids = _loads(room.role_ids_json, [])
+    requested = [str(item).strip() for item in (mention_role_ids or []) if str(item).strip()]
+    unseated = [rid for rid in requested if rid not in seated_ids]
+    if unseated:
+        raise HTTPException(status_code=400, detail={"message": "角色未入座，不能唤起", "role_ids": unseated})
     seated_roles = [await _role_detail(rid) for rid in seated_ids]
     members = await _member_ids(db, project_id)
     roles, users = resolve_mentions(
         text,
         roles=seated_roles,
         member_ids=members,
-        explicit_role_ids=mention_role_ids,
+        explicit_role_ids=requested,
         explicit_user_ids=mention_user_ids,
     )
-    files = [str(item).strip() for item in (mention_file_ids or []) if str(item).strip()]
+    materials = await resolve_room_files(
+        db,
+        project_id=project_id,
+        files=files,
+        mention_file_ids=mention_file_ids,
+    )
+    file_ids = [item["file_id"] for item in materials]
     mode = normalize_room_agent_mode(agent_mode)
     turn_id = str(uuid.uuid4())
-    seq = await _alloc_human_seq(db, room_id)
+    seq, event_seq = await _alloc_human_seq(db, room_id)
     state = "queued" if room.active_turn_id else "running"
     if state == "running":
         room.active_turn_id = turn_id
+        room.lease_until = _lease_deadline()
     now = _now()
     row = ProjectRoomMessage(
         id=str(uuid.uuid4()),
         room_id=room_id,
         seq=seq,
+        event_seq=event_seq,
         turn_id=turn_id,
         author_type="human",
         author_id=user_id,
@@ -526,21 +650,41 @@ async def enqueue_human_message(
         content=text,
         mention_role_ids_json=json.dumps(roles, ensure_ascii=False),
         mention_user_ids_json=json.dumps(users, ensure_ascii=False),
-        mention_file_ids_json=json.dumps(files, ensure_ascii=False),
+        mention_file_ids_json=json.dumps(file_ids, ensure_ascii=False),
+        materials_json=json.dumps(materials, ensure_ascii=False),
+        warnings_json="[]",
         file_actions_json="[]",
         agent_mode=mode,
         turn_state=state,
+        client_message_id=client_id or None,
+        plan_id=(plan_id or "").strip() or None,
+        plan_version=plan_version,
         created_at=now,
     )
     room.updated_at = now
     db.add(row)
-    await db.commit()
+    try:
+        await db.commit()
+    except IntegrityError as exc:
+        await db.rollback()
+        if client_id:
+            existing = await _find_client_message(
+                db, room_id=room_id, user_id=user_id, client_message_id=client_id
+            )
+            if existing and (existing.content or "") == text:
+                payload = message_to_dict(existing)
+                payload["replayed"] = True
+                return payload
+            if existing:
+                raise HTTPException(status_code=409, detail="同一消息标识不能复用不同正文") from exc
+        raise HTTPException(status_code=409, detail="消息序号冲突，请重试") from exc
     logger.info(
-        "[co-create-room] message saved room_id=%s project_id=%s user_id=%s seq=%s turn_id=%s state=%s agent_mode=%s mentions=%s",
+        "[co-create-room] message saved room_id=%s project_id=%s user_id=%s seq=%s event_seq=%s turn_id=%s state=%s agent_mode=%s mentions=%s",
         room_id,
         project_id,
         user_id,
         seq,
+        event_seq,
         turn_id,
         state,
         mode,
@@ -565,6 +709,10 @@ async def drain_room(db: AsyncSession, room_id: str) -> None:
         await _drain_with_session(db, room_id)
 
 
+def _lease_deadline() -> str:
+    return (datetime.now() + timedelta(seconds=_LEASE_SECONDS)).isoformat()
+
+
 async def _drain_with_session(db: AsyncSession, room_id: str) -> None:
     while True:
         turn_id = await _claim_turn(db, room_id)
@@ -572,17 +720,14 @@ async def _drain_with_session(db: AsyncSession, room_id: str) -> None:
             return
         try:
             await _execute_turn(db, room_id, turn_id)
-        except Exception:
+        except Exception as exc:
             logger.exception("[co-create-room] turn failed room_id=%s turn_id=%s", room_id, turn_id)
-        finally:
-            room = await db.get(ProjectRoom, room_id)
-            human = await _human_message(db, room_id, turn_id)
-            if human and human.turn_state != "done":
-                human.turn_state = "done"
-            if room and room.active_turn_id == turn_id:
-                room.active_turn_id = None
-                room.updated_at = _now()
-            await db.commit()
+            await db.rollback()
+            db.expire_all()
+            code = getattr(exc, "status_code", None)
+            if isinstance(exc, FileActionConflict):
+                code = 409
+            await _mark_turn_failed(room_id, turn_id, str(exc), code if isinstance(code, int) else None)
 
 
 async def _human_message(db: AsyncSession, room_id: str, turn_id: str) -> ProjectRoomMessage | None:
@@ -598,16 +743,19 @@ async def _human_message(db: AsyncSession, room_id: str, turn_id: str) -> Projec
 
 
 async def _claim_turn(db: AsyncSession, room_id: str) -> str | None:
+    db.expire_all()
     room = await db.get(ProjectRoom, room_id)
     if not room:
         return None
     if room.active_turn_id:
         human = await _human_message(db, room_id, room.active_turn_id)
-        if human and human.turn_state != "done":
+        if human and human.turn_state not in _TERMINAL_TURN_STATES:
             human.turn_state = "running"
+            room.lease_until = _lease_deadline()
             await db.commit()
             return room.active_turn_id
         room.active_turn_id = None
+        room.lease_until = None
     queued = (
         await db.execute(
             select(ProjectRoomMessage)
@@ -623,6 +771,7 @@ async def _claim_turn(db: AsyncSession, room_id: str) -> str | None:
         await db.commit()
         return None
     room.active_turn_id = queued.turn_id
+    room.lease_until = _lease_deadline()
     queued.turn_state = "running"
     await db.commit()
     return queued.turn_id
@@ -655,19 +804,104 @@ async def _recent_transcript(db: AsyncSession, room_id: str, before_seq: int) ->
     return lines
 
 
-async def _file_names(db: AsyncSession, file_ids: list[str]) -> list[str]:
-    names: list[str] = []
-    for file_id in file_ids:
-        row = await db.get(OutputAsset, file_id)
-        if row and row.title:
-            names.append(str(row.title))
-    return names
+async def _mark_turn_failed(room_id: str, turn_id: str, summary: str, code: int | None) -> None:
+    async with async_session_maker() as db:
+        human = await _human_message(db, room_id, turn_id)
+        room = await db.get(ProjectRoom, room_id)
+        if human and human.turn_state not in {"succeeded", "cancelled"}:
+            human.turn_state = "failed"
+            human.error_summary = (summary or "回合失败")[:500]
+            human.error_code = code
+        if room and room.active_turn_id == turn_id:
+            room.active_turn_id = None
+            room.lease_until = None
+            room.updated_at = _now()
+        await db.commit()
+        logger.info(
+            "[co-create-room] turn failed persisted room_id=%s turn_id=%s code=%s",
+            room_id,
+            turn_id,
+            code,
+        )
+
+
+async def _commit_turn(db: AsyncSession) -> None:
+    if _turn_commit_hook is not None:
+        await _turn_commit_hook()
+    await db.commit()
+
+
+def _target_from_materials(materials: list[dict[str, Any]], output_id: str | None) -> dict[str, Any]:
+    for item in materials:
+        if item.get("purpose") in {"target", "revise", "modify"}:
+            return item
+    if output_id:
+        return {"file_id": output_id, "kind": "output", "purpose": "target", "version": "", "excerpt": ""}
+    return {}
+
+
+async def _open_run(db: AsyncSession, *, room: ProjectRoom, human: ProjectRoomMessage) -> str:
+    from backend.services.run_log_service import create_run
+
+    run_id = str(uuid.uuid4())
+    await create_run(
+        db,
+        run_id=run_id,
+        project_id=room.project_id,
+        entrypoint="co_create_room",
+        user_id=human.author_id,
+        request_json=json.dumps(
+            {"room_id": room.id, "turn_id": human.turn_id, "mode": human.agent_mode},
+            ensure_ascii=False,
+        ),
+        snapshot_json=json.dumps({"writer_driver": writer_driver_name()}, ensure_ascii=False),
+    )
+    human.run_id = run_id
+    await db.commit()
+    logger.info(
+        "[co-create-room] run opened room_id=%s turn_id=%s run_id=%s driver=%s",
+        room.id,
+        human.turn_id,
+        run_id,
+        writer_driver_name(),
+    )
+    return run_id
+
+
+async def _finish_without_write(
+    db: AsyncSession,
+    *,
+    room: ProjectRoom,
+    human: ProjectRoomMessage,
+    reason: str,
+) -> None:
+    human.turn_state = "succeeded"
+    human.error_summary = ""
+    human.error_code = None
+    if room.active_turn_id == human.turn_id:
+        room.active_turn_id = None
+        room.lease_until = None
+    room.updated_at = _now()
+    await _commit_turn(db)
+    logger.info(
+        "[co-create-room] skip doc write room_id=%s project_id=%s user_id=%s turn_id=%s reason=%s",
+        room.id,
+        room.project_id,
+        human.author_id,
+        human.turn_id,
+        reason,
+    )
 
 
 async def _execute_turn(db: AsyncSession, room_id: str, turn_id: str) -> None:
     room = await db.get(ProjectRoom, room_id)
     human = await _human_message(db, room_id, turn_id)
     if not room or not human:
+        return
+    if human.turn_state == "cancelled":
+        room.active_turn_id = None
+        room.lease_until = None
+        await db.commit()
         return
     project = await db.get(Project, room.project_id)
     from backend.services.project_member_service import get_project_role
@@ -679,6 +913,27 @@ async def _execute_turn(db: AsyncSession, room_id: str, turn_id: str) -> None:
         project=project,
     )
     can_write = bool(author_role and project_perm_allowed(author_role, "write"))
+    archived = bool(room.archived_at) or bool(project and (project.status or "").lower() == "archived")
+    materials = _loads(getattr(human, "materials_json", None), [])
+    target = _target_from_materials(materials, room.output_id)
+    base_version = ""
+    if target.get("file_id"):
+        current = await db.get(OutputAsset, str(target["file_id"]))
+        if current and current.project_id == room.project_id:
+            base_version = str(current.version or "1")
+            target["version"] = base_version
+            if not target.get("excerpt"):
+                target["excerpt"] = current.content or ""
+    allowed, reason = allows_file_write(
+        mode=normalize_room_agent_mode(getattr(human, "agent_mode", None)),
+        text=human.content or "",
+        has_plan=bool(room.plan_id) and int(room.plan_version or 0) > 0,
+        plan_version=int(room.plan_version or 0),
+        confirm_plan_version=getattr(human, "plan_version", None),
+        archived=archived,
+    )
+    if not can_write and allowed:
+        allowed, reason = False, "forbidden"
     seated_ids = _loads(room.role_ids_json, [])
     mentioned = _loads(human.mention_role_ids_json, [])
     speakers = [rid for rid in speaker_role_ids(mentioned, room.writer_role_id or "") if rid in seated_ids]
@@ -688,41 +943,63 @@ async def _execute_turn(db: AsyncSession, room_id: str, turn_id: str) -> None:
         if row.author_type == "agent"
     }
     transcript = await _recent_transcript(db, room_id, human.seq)
-    file_names = await _file_names(db, _loads(human.mention_file_ids_json, []))
+    if not getattr(human, "run_id", None):
+        await _open_run(db, room=room, human=human)
+        room = await db.get(ProjectRoom, room_id)
+        human = await _human_message(db, room_id, turn_id)
+        if not room or not human:
+            return
     discussion: list[tuple[str, str]] = []
+    writer_reply = ""
     for existing in await _turn_messages(db, room_id, turn_id):
         if existing.author_type == "agent":
             discussion.append((existing.author_name, existing.content or ""))
+            if existing.author_id == room.writer_role_id:
+                writer_reply = existing.content or ""
 
     for rid in speakers:
         if rid in already:
             continue
+        fresh = await _human_message(db, room_id, turn_id)
+        if fresh and fresh.turn_state == "cancelled":
+            room.active_turn_id = None
+            room.lease_until = None
+            await db.commit()
+            return
         role = await _role_detail(rid)
         if role.get("missing"):
             continue
         prior = "\n".join(text for _, text in discussion if text)
+        await db.commit()
         ctx = {
             "human_text": human.content,
             "prior_agent_text": prior,
             "transcript": transcript + [f"{name}: {text}" for name, text in discussion],
             "project_name": project.name if project else "",
             "project_background": (project.background or "") if project else "",
-            "document": await _output_content(db, room.output_id),
-            "file_names": file_names,
+            "document": target.get("excerpt") or await _output_content(db, room.output_id),
+            "materials": materials,
+            "target": target,
+            "allow_write": allowed,
+            "write_reason": reason,
             "is_writer": rid == room.writer_role_id,
-            "agent_mode": effective_room_mode(
-                getattr(human, "agent_mode", None),
-                human.content or "",
-            ),
+            "agent_mode": effective_room_mode(getattr(human, "agent_mode", None), human.content or ""),
             "system": role.get("system") or "",
+            "run_id": human.run_id,
         }
         reply = (await complete_room_turn(role, ctx)).strip() or f"{role.get('name') or rid} 暂无补充。"
+        room = await db.get(ProjectRoom, room_id)
+        human = await _human_message(db, room_id, turn_id)
+        if not room or not human:
+            return
         seq = await _alloc_agent_seq(db, room_id, human.seq)
+        event_seq = await _alloc_event_seq(db, room_id)
         now = _now()
         agent_row = ProjectRoomMessage(
             id=str(uuid.uuid4()),
             room_id=room_id,
             seq=seq,
+            event_seq=event_seq,
             turn_id=turn_id,
             author_type="agent",
             author_id=rid,
@@ -732,55 +1009,86 @@ async def _execute_turn(db: AsyncSession, room_id: str, turn_id: str) -> None:
             mention_user_ids_json="[]",
             mention_file_ids_json="[]",
             file_actions_json="[]",
-            turn_state="done",
+            materials_json="[]",
+            warnings_json="[]",
+            turn_state="succeeded",
+            run_id=human.run_id,
             created_at=now,
         )
         db.add(agent_row)
         room.updated_at = now
         await db.commit()
         discussion.append((agent_row.author_name, reply))
+        if rid == room.writer_role_id:
+            writer_reply = reply
         logger.info(
-            "[co-create-room] agent reply room_id=%s project_id=%s role_id=%s seq=%s turn_id=%s",
+            "[co-create-room] agent reply room_id=%s project_id=%s role_id=%s seq=%s event_seq=%s turn_id=%s run_id=%s",
             room_id,
             room.project_id,
             rid,
             seq,
+            event_seq,
             turn_id,
+            human.run_id,
         )
-
-    mode = effective_room_mode(getattr(human, "agent_mode", None), human.content or "")
-    if not can_write or not room_turn_writes_document(mode, human.content or ""):
-        logger.info(
-            "[co-create-room] skip doc write room_id=%s project_id=%s user_id=%s turn_id=%s agent_mode=%s can_write=%s",
-            room_id,
-            room.project_id,
-            human.author_id,
-            turn_id,
-            mode,
-            can_write,
-        )
-        return
 
     room = await db.get(ProjectRoom, room_id)
-    if not room:
+    human = await _human_message(db, room_id, turn_id)
+    if not room or not human:
         return
-    previous = await _output_content(db, room.output_id)
-    document = compose_room_document(
-        title=room.title,
-        previous=previous,
-        human_text=human.content,
-        discussion=discussion,
-    )
+    if human.agent_mode == "plan" and not is_plan_confirm(human.content or ""):
+        summary = writer_reply or human.content or ""
+        room.plan_version = int(room.plan_version or 0) + 1
+        room.plan_id = room.plan_id or str(uuid.uuid4())
+        room.plan_summary = summary[:2000]
+        room.plan_confirmed_version = None
+        room.plan_confirmed_by = None
+        human.plan_id = room.plan_id
+    if not allowed:
+        await _finish_without_write(db, room=room, human=human, reason=reason)
+        return
+
     proposal_id = f"room-{turn_id}"
-    if room.output_id:
-        action = {
+    applied = (
+        await db.execute(
+            select(ProjectFileActionLog).where(
+                ProjectFileActionLog.project_id == room.project_id,
+                ProjectFileActionLog.proposal_id == proposal_id,
+                ProjectFileActionLog.status == "applied",
+            )
+        )
+    ).scalar_one_or_none()
+    if applied and applied.result_file_id:
+        room.output_id = applied.result_file_id
+        human.turn_state = "succeeded"
+        if room.active_turn_id == turn_id:
+            room.active_turn_id = None
+            room.lease_until = None
+        if reason == "plan_confirmed":
+            room.plan_confirmed_version = int(room.plan_version or 0)
+            room.plan_confirmed_by = human.author_id
+        await _commit_turn(db)
+        logger.info(
+            "[co-create-room] file action reused room_id=%s turn_id=%s proposal_id=%s",
+            room_id,
+            turn_id,
+            proposal_id,
+        )
+        return
+
+    document = delivery_document(room.title, writer_reply)
+    target_id = str(target.get("file_id") or room.output_id or "")
+    if target_id:
+        action: dict[str, Any] = {
             "type": "patch",
-            "file_id": room.output_id,
+            "file_id": target_id,
+            "target_file_id": target_id,
             "file_kind": "output",
             "file_name": f"{room.title}.md",
             "edit_mode": "full",
             "content": document,
             "summary": "共创修订",
+            "base_version": base_version or target.get("version") or None,
         }
     else:
         action = {
@@ -790,21 +1098,31 @@ async def _execute_turn(db: AsyncSession, room_id: str, turn_id: str) -> None:
             "content": document,
             "summary": "共创创建",
         }
-    result = await apply_file_action(
-        db,
-        room.project_id,
-        effective_uid=human.author_id,
-        action=action,
-        session_id=room_id,
-        message_id=human.id,
-        proposal_id=proposal_id,
-    )
-    room = await db.get(ProjectRoom, room_id)
-    if not room:
-        return
+    try:
+        result = await apply_file_action(
+            db,
+            room.project_id,
+            effective_uid=human.author_id,
+            action=action,
+            session_id=None,
+            message_id=human.id,
+            proposal_id=proposal_id,
+            commit=False,
+        )
+    except FileNameConflict:
+        raise
     room.output_id = str(result.get("result_file_id") or room.output_id or "")
     room.doc_version = int(room.doc_version or 0) + 1
     room.updated_at = _now()
+    if reason == "plan_confirmed":
+        room.plan_confirmed_version = int(room.plan_version or 0)
+        room.plan_confirmed_by = human.author_id
+    human.turn_state = "succeeded"
+    human.error_summary = ""
+    human.error_code = None
+    if room.active_turn_id == turn_id:
+        room.active_turn_id = None
+        room.lease_until = None
     last_agent = (
         await db.execute(
             select(ProjectRoomMessage)
@@ -821,15 +1139,169 @@ async def _execute_turn(db: AsyncSession, room_id: str, turn_id: str) -> None:
         "type": action["type"],
         "file_id": room.output_id,
         "summary": action["summary"],
+        "base_version": action.get("base_version"),
     }
     if last_agent:
         last_agent.file_actions_json = json.dumps([file_action], ensure_ascii=False)
-    await db.commit()
+    await _commit_turn(db)
+    if result.get("defer_ingest") and room.output_id:
+        schedule_ingest_output(str(room.output_id))
     logger.info(
-        "[co-create-room] doc updated room_id=%s project_id=%s user_id=%s output_id=%s doc_version=%s",
+        "[co-create-room] doc updated room_id=%s project_id=%s user_id=%s output_id=%s doc_version=%s run_id=%s reason=%s",
         room_id,
         room.project_id,
         human.author_id,
         room.output_id,
         room.doc_version,
+        human.run_id,
+        reason,
     )
+
+
+async def assert_room_manual_write(
+    db: AsyncSession,
+    *,
+    project_id: str,
+    room_id: str,
+    user_id: str,
+) -> ProjectRoom:
+    """手工保存走房间合同，不把 room_id 当成 ChatSession。"""
+    project = await require_project_for_user(db, project_id, user_id, min_perm="write")
+    room = await _require_room(db, project_id, room_id)
+    if room.archived_at or (project.status or "").lower() == "archived":
+        raise HTTPException(status_code=403, detail="归档后不能写入")
+    logger.info(
+        "[co-create-room] manual write allowed room_id=%s project_id=%s user_id=%s",
+        room_id,
+        project_id,
+        user_id,
+    )
+    return room
+
+
+async def cancel_room_turn(
+    db: AsyncSession,
+    *,
+    project_id: str,
+    room_id: str,
+    turn_id: str,
+    user_id: str,
+) -> dict[str, Any]:
+    await _project_role(db, project_id, user_id)
+    room = await _require_room(db, project_id, room_id)
+    human = await _human_message(db, room_id, turn_id)
+    if not human:
+        raise HTTPException(status_code=404, detail="回合不存在")
+    if human.turn_state in _TERMINAL_TURN_STATES and human.turn_state != "done":
+        return message_to_dict(human)
+    human.turn_state = "cancelled"
+    human.error_summary = "已取消"
+    if room.active_turn_id == turn_id:
+        room.active_turn_id = None
+        room.lease_until = None
+    room.updated_at = _now()
+    await db.commit()
+    logger.info("[co-create-room] turn cancelled room_id=%s turn_id=%s user_id=%s", room_id, turn_id, user_id)
+    return message_to_dict(human)
+
+
+async def retry_room_turn(
+    db: AsyncSession,
+    *,
+    project_id: str,
+    room_id: str,
+    turn_id: str,
+    user_id: str,
+) -> dict[str, Any]:
+    await require_project_for_user(db, project_id, user_id, min_perm="write")
+    room = await _require_room(db, project_id, room_id)
+    human = await _human_message(db, room_id, turn_id)
+    if not human:
+        raise HTTPException(status_code=404, detail="回合不存在")
+    if human.turn_state != "failed":
+        raise HTTPException(status_code=409, detail="只有失败回合可以重试")
+    if int(room.turn_retry or 0) >= _MAX_TURN_RETRY:
+        raise HTTPException(status_code=409, detail="重试次数已用完")
+    room.turn_retry = int(room.turn_retry or 0) + 1
+    human.turn_state = "queued" if room.active_turn_id else "running"
+    human.error_summary = ""
+    human.error_code = None
+    if not room.active_turn_id:
+        room.active_turn_id = turn_id
+        room.lease_until = _lease_deadline()
+    room.updated_at = _now()
+    await db.commit()
+    logger.info(
+        "[co-create-room] turn retry room_id=%s turn_id=%s retry=%s",
+        room_id,
+        turn_id,
+        room.turn_retry,
+    )
+    return message_to_dict(human)
+
+
+async def recover_incomplete_turns() -> list[str]:
+    """启动时领回过期回合。已成功的文件动作只对账，不重复落稿。"""
+    recovered: list[str] = []
+    async with async_session_maker() as db:
+        rooms = (
+            await db.execute(select(ProjectRoom).where(ProjectRoom.active_turn_id.is_not(None)))
+        ).scalars().all()
+        now = _now()
+        for room in rooms:
+            if room.lease_until and room.lease_until > now:
+                continue
+            turn_id = room.active_turn_id or ""
+            human = await _human_message(db, room.id, turn_id)
+            if not human:
+                room.active_turn_id = None
+                room.lease_until = None
+                continue
+            if human.turn_state in _TERMINAL_TURN_STATES:
+                room.active_turn_id = None
+                room.lease_until = None
+                continue
+            proposal_id = f"room-{turn_id}"
+            applied = (
+                await db.execute(
+                    select(ProjectFileActionLog).where(
+                        ProjectFileActionLog.project_id == room.project_id,
+                        ProjectFileActionLog.proposal_id == proposal_id,
+                        ProjectFileActionLog.status == "applied",
+                    )
+                )
+            ).scalar_one_or_none()
+            if applied and applied.result_file_id:
+                room.output_id = room.output_id or applied.result_file_id
+                human.turn_state = "succeeded"
+                room.active_turn_id = None
+                room.lease_until = None
+                logger.info(
+                    "[co-create-room] recover reused action room_id=%s turn_id=%s proposal_id=%s",
+                    room.id,
+                    turn_id,
+                    proposal_id,
+                )
+                continue
+            room.turn_retry = int(room.turn_retry or 0) + 1
+            if room.turn_retry > _MAX_TURN_RETRY:
+                human.turn_state = "failed"
+                human.error_summary = "回合超时，已停止重试"
+                room.active_turn_id = None
+                room.lease_until = None
+                logger.info("[co-create-room] recover gave up room_id=%s turn_id=%s", room.id, turn_id)
+                continue
+            human.turn_state = "queued"
+            room.active_turn_id = None
+            room.lease_until = None
+            recovered.append(room.id)
+            logger.info(
+                "[co-create-room] recover requeue room_id=%s turn_id=%s retry=%s",
+                room.id,
+                turn_id,
+                room.turn_retry,
+            )
+        await db.commit()
+    for room_id in recovered:
+        await drain_project_room(room_id)
+    return recovered

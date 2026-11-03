@@ -15,7 +15,7 @@ from backend.models.kb_cache import KBCache
 from backend.models.kb_catalog import KbCatalogItem
 from backend.services.kb_contract import KB_DOMAIN_ENUM
 from backend.services.kb_entry_manage import create_kb_manual_entry, delete_kb_entry, update_kb_entry
-from backend.services.kb_ids import kb_doc_id_from_ref
+from backend.services.kb_ids import catalog_index_doc_id, folder_catalog_item_id, kb_doc_id_from_ref
 
 log = logging.getLogger("tpdx.hermes")
 
@@ -133,9 +133,11 @@ async def _usage() -> dict[str, Any]:
     domain_collections: dict[str, set[str]] = {}
     docs: list[dict[str, str]] = []
     async with async_session_maker() as db:
-        result = await db.execute(select(KBCache.id, KBCache.collection, KBCache.metadata_).limit(8000))
+        result = await db.execute(
+            select(KBCache.id, KBCache.project_id, KBCache.collection, KBCache.metadata_).limit(8000)
+        )
         cached = result.all()
-    for row_id, collection, raw_meta in cached:
+    for row_id, project_id, collection, raw_meta in cached:
         meta = _meta(raw_meta)
         domain = str(meta.get("domain") or "").strip()
         folder = str(meta.get("folder_path") or "").strip().strip("/")
@@ -160,6 +162,7 @@ async def _usage() -> dict[str, Any]:
                     "id": str(row_id),
                     "doc_id": doc_id,
                     "collection": col,
+                    "project_id": str(project_id or ""),
                     "folder": folder,
                     "domain": domain,
                     "title": str(meta.get("title") or ""),
@@ -366,29 +369,50 @@ async def create_folder(
     await ensure_catalog_table()
     now = _now()
     async with async_session_maker() as db:
-        row = await db.get(KbCatalogItem, _item_id("folder", folder))
+        item_id = folder_catalog_item_id(
+            scope=sc,
+            project_id=(project_id or "").strip(),
+            collection=col,
+            folder=folder,
+        )
+        row = await db.get(KbCatalogItem, item_id)
         if row:
             row.parent_key = dom
             row.scope = sc
+            row.project_id = (project_id or "").strip()
+            row.collection = col
             row.label = folder.split("/")[-1]
             row.updated_at = now
         else:
             db.add(
                 KbCatalogItem(
-                    id=_item_id("folder", folder),
+                    id=item_id,
                     kind="folder",
                     item_key=folder,
                     label=folder.split("/")[-1],
                     parent_key=dom,
                     scope=sc,
+                    project_id=(project_id or "").strip(),
+                    collection=col,
                     builtin="0",
                     created_at=now,
                     updated_at=now,
                 )
             )
         await db.commit()
-    doc_id = "pathcat_" + re.sub(r"[^a-zA-Z0-9_]+", "_", folder)[:40]
-    already = len((await _usage())["folder_docs"].get(folder) or ())
+    doc_id = catalog_index_doc_id(
+        scope=sc,
+        project_id=(project_id or "").strip(),
+        collection=col,
+        folder=folder,
+    )
+    usage_now = await _usage()
+    already = any(
+        item["folder"] == folder
+        and item["collection"] == col
+        and item.get("source_type") == "catalog_index"
+        for item in usage_now["docs"]
+    )
     if already:
         log.info("kb catalog folder stored path=%s domain=%s docs=%s", folder, dom, already)
         return {"ok": True, "path": folder, "domain": dom, "scope": sc, "collection": col, "index_ok": True}
@@ -444,9 +468,17 @@ async def _patch_cache_folder(doc_id: str, folder: str) -> int:
     return changed
 
 
-async def rename_folder(*, path: str, new_path: str) -> dict[str, Any]:
+async def rename_folder(
+    *,
+    path: str,
+    new_path: str,
+    project_id: str = "",
+    collection: str = "",
+) -> dict[str, Any]:
     old = normalize_folder_path(path)
     new = normalize_folder_path(new_path)
+    pid = (project_id or "").strip()
+    col_filter = (collection or "").strip()
     if not old or not new:
         return {"ok": False, "message": "invalid_folder_path"}
     if old == new:
@@ -456,6 +488,10 @@ async def rename_folder(*, path: str, new_path: str) -> dict[str, Any]:
     for doc in usage["docs"]:
         folder = doc["folder"]
         if not _folder_matches(folder, old):
+            continue
+        if col_filter and doc["collection"] != col_filter:
+            continue
+        if pid and doc.get("project_id") not in {pid, "", "__all__"}:
             continue
         grouped[(doc["collection"], doc["doc_id"])] = _rewrite_folder(folder, old, new)
     updated = 0
@@ -492,14 +528,25 @@ async def rename_folder(*, path: str, new_path: str) -> dict[str, Any]:
         for row in rows:
             if not _folder_matches(row.item_key, old):
                 continue
+            if pid and (row.project_id or "") not in {pid, ""}:
+                continue
+            if col_filter and (row.collection or "") not in {col_filter, ""}:
+                continue
             rewritten = _rewrite_folder(row.item_key, old, new)
             replacement = KbCatalogItem(
-                id=_item_id("folder", rewritten),
+                id=folder_catalog_item_id(
+                    scope=row.scope or "",
+                    project_id=row.project_id or pid,
+                    collection=row.collection or col_filter,
+                    folder=rewritten,
+                ),
                 kind="folder",
                 item_key=rewritten,
                 label=rewritten.split("/")[-1],
                 parent_key=row.parent_key,
                 scope=row.scope,
+                project_id=row.project_id or pid,
+                collection=row.collection or col_filter,
                 builtin="0",
                 created_at=row.created_at or now,
                 updated_at=now,

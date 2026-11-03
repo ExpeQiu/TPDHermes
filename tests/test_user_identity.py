@@ -53,7 +53,34 @@ def test_derive_user_id_with_x_forwarded_for():
     assert result.startswith("auto_")
 
 
-def test_effective_user_id_ignores_body_by_default():
+def test_effective_user_id_ignores_untrusted_header(monkeypatch):
+    scope = {
+        "type": "http",
+        "headers": [(b"x-user-id", b"forged")],
+        "client": ("127.0.0.1", 1),
+    }
+    req = Request(scope)
+    monkeypatch.delenv("TPDHERMES_TRUST_USER_ID_HEADER", raising=False)
+    assert effective_user_id_for_api(req).startswith("auto_")
+
+
+def test_feishu_session_beats_user_header(monkeypatch):
+    scope = {
+        "type": "http",
+        "headers": [(b"x-user-id", b"forged")],
+        "client": ("127.0.0.1", 1),
+    }
+    req = Request(scope)
+    monkeypatch.setenv("TPDHERMES_TRUST_USER_ID_HEADER", "1")
+    monkeypatch.setattr(
+        "backend.services.user_identity.feishu_effective_user_id",
+        lambda _request: "feishu:real-user",
+    )
+    assert effective_user_id_for_api(req) == "feishu:real-user"
+
+
+def test_effective_user_id_ignores_body_by_default(monkeypatch):
+    monkeypatch.setenv("TPDHERMES_TRUST_USER_ID_HEADER", "1")
     scope = {
         "type": "http",
         "headers": [
@@ -79,7 +106,8 @@ def test_effective_user_id_body_override_when_enabled(monkeypatch):
     assert effective_user_id_for_api(req, body_user_id="from-body") == "from-body"
 
 
-def test_effective_user_id_header_before_fingerprint():
+def test_effective_user_id_header_before_fingerprint(monkeypatch):
+    monkeypatch.setenv("TPDHERMES_TRUST_USER_ID_HEADER", "1")
     scope = {
         "type": "http",
         "headers": [(b"x-user-id", b"h1")],

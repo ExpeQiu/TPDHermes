@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""将 docs/26年发言稿.md 拆分并导入 public.release_assets.speeches。"""
+"""将 data/corpus/26年发言稿.md 拆分并导入 public.release_assets.speeches。"""
 
 from __future__ import annotations
 
@@ -17,7 +17,7 @@ from typing import Any
 import httpx
 
 ROOT = Path(__file__).resolve().parents[1]
-SOURCE = ROOT / "docs" / "26年发言稿.md"
+SOURCE = ROOT / "data" / "corpus" / "26年发言稿.md"
 OUTPUT_DIR = ROOT / "data" / "kb_imports" / "speeches_2026"
 MANIFEST_PATH = ROOT / "data" / "obsidian_imports" / "manifests" / "speeches_2026.manifest.json"
 COLLECTION = "public.release_assets.speeches"
@@ -203,7 +203,7 @@ def upload_and_ingest(
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="导入 docs/26年发言稿.md 到发言稿真源集合")
+    parser = argparse.ArgumentParser(description="导入 data/corpus/26年发言稿.md 到发言稿真源集合")
     parser.add_argument("--source", default=str(SOURCE), help="源 Markdown 路径")
     parser.add_argument("--split-only", action="store_true", help="仅拆分并生成 manifest")
     parser.add_argument("--api-base", default="http://47.113.225.93:8033", help="Hermes API 根地址")

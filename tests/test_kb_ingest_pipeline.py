@@ -343,7 +343,9 @@ async def test_sync_selection_from_external_upserts_and_purges(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_process_ingest_job_updates_result(tmp_path, monkeypatch):
-    monkeypatch.setenv("KB_UPLOAD_DIR", str(tmp_path / "up"))
+    upload_dir = tmp_path / "up"
+    upload_dir.mkdir()
+    monkeypatch.setenv("KB_UPLOAD_DIR", str(upload_dir))
     from backend.services.kb_ingest_job_service import (
         create_ingest_job,
         normalize_ingest_request,
@@ -358,10 +360,10 @@ async def test_process_ingest_job_updates_result(tmp_path, monkeypatch):
         "manifest": {
             "collection": "public.test.async",
             "defaults": {"domain": "structured_tech", "folder_path": "02-知识库/导入"},
-            "documents": [{"doc_id": "d1", "file_path": str(tmp_path / "d1.md")}],
+            "documents": [{"doc_id": "d1", "file_path": str(upload_dir / "d1.md")}],
         },
     }
-    (tmp_path / "d1.md").write_text("# d1\n", encoding="utf-8")
+    (upload_dir / "d1.md").write_text("# d1\n", encoding="utf-8")
     normalized = await normalize_ingest_request(payload)
     created = await create_ingest_job(normalized=normalized, created_by=None)
 

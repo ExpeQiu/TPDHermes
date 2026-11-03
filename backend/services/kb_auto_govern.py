@@ -130,11 +130,13 @@ async def run_auto_govern(policy_id: str, *, dry_run: bool) -> dict[str, Any]:
             groups[key] = groups.get(key, 0) + 1
 
         updated = 0
+        chroma_failed = 0
         if not dry_run and planned:
             now = datetime.now().isoformat()
             cache_rows = (await db.execute(select(KBCache).limit(8000))).scalars().all()
+            pending = []
             for row in cache_rows:
-                doc_id = kb_doc_id_from_ref(str(row.id))
+                doc_id = kb_doc_id_from_ref(str(row.source_chunk_id or row.id))
                 plan = planned.get(doc_id)
                 if not plan:
                     continue
@@ -142,11 +144,35 @@ async def run_auto_govern(policy_id: str, *, dry_run: bool) -> dict[str, Any]:
                 meta["domain"] = plan[0]
                 meta["folder_path"] = plan[1]
                 meta["governed_by_policy"] = policy.id
+                source_id = str(row.source_chunk_id or row.id)
+                pending.append((row, meta, source_id))
+            try:
+                from backend.services.chroma_client import ChromaHttpClient
+                from backend.services.kb_proxy import CHROMA_HOST
+
+                client = ChromaHttpClient(CHROMA_HOST)
+                if not client.heartbeat():
+                    raise RuntimeError("chroma_unavailable")
+                grouped: dict[str, list[tuple[str, dict]]] = {}
+                for _row, meta, source_id in pending:
+                    grouped.setdefault(str(_row.collection), []).append((source_id, meta))
+                for collection_name, items in grouped.items():
+                    client.update(
+                        collection_name,
+                        [item[0] for item in items],
+                        [item[1] for item in items],
+                    )
+            except Exception as exc:
+                logger.warning("kb auto_govern chroma write failed: %s", exc)
+                chroma_failed = len(pending)
+                pending = []
+            for row, meta, _source_id in pending:
                 row.metadata_ = json.dumps(meta, ensure_ascii=False)
                 row.updated_at = now
                 row.version = int(row.version or 1) + 1
                 updated += 1
-            await db.commit()
+            if updated:
+                await db.commit()
 
         policy_view = {"id": policy.id, "code": policy.code, "name": policy.name}
 
@@ -172,7 +198,8 @@ async def run_auto_govern(policy_id: str, *, dry_run: bool) -> dict[str, Any]:
         updated,
     )
     return {
-        "ok": True,
+        "ok": chroma_failed == 0,
+        "chroma_failed": chroma_failed,
         "dry_run": dry_run,
         "policy": policy_view,
         "eligible_domains": eligible,

@@ -12,6 +12,12 @@ import {
 import { FilePreviewPanel } from "@/app/projects/[id]/co-create/components/FilePreviewPanel";
 import { ProjectFilesPanel } from "@/app/projects/[id]/co-create/components/ProjectFilesPanel";
 import { useFileWorkspace } from "@/app/projects/[id]/co-create/hooks/use-file-workspace";
+import {
+  acceptRoomPayload,
+  buildRoomFileRef,
+  seatedRoles,
+  type RoomFileRef,
+} from "@/app/projects/[id]/co-create/room-client-state";
 import { apiGet, apiPatch, apiPost } from "@/lib/api";
 import {
   encodeProjectFileSelectValue,
@@ -45,6 +51,8 @@ type RoomMessage = {
   author_name: string;
   content: string;
   turn_state: string;
+  event_seq?: number;
+  error_summary?: string;
 };
 
 const POLL_MS = 2000;
@@ -176,6 +184,12 @@ export default function CoCreateRoomApp() {
   }, []);
   const activeIdRef = useRef<string | null>(null);
   activeIdRef.current = activeId;
+  const epochRef = useRef(0);
+  const draftsRef = useRef<Record<string, string>>({});
+  const errorsRef = useRef<Record<string, string>>({});
+  const eventCursorRef = useRef<Record<string, number>>({});
+  const roundFileRef = useRef<RoomFileRef | null>(null);
+  const [writerDriver, setWriterDriver] = useState("");
   const activeRoom = rooms.find((room) => room.id === activeId) ?? null;
 
   const loadRooms = useCallback(async () => {
@@ -230,38 +244,65 @@ export default function CoCreateRoomApp() {
     };
   }, [projectId, loadRooms]);
 
+  const selectRoom = (roomId: string | null) => {
+    if (activeIdRef.current) {
+      draftsRef.current[activeIdRef.current] = draft;
+      errorsRef.current[activeIdRef.current] = error;
+    }
+    epochRef.current += 1;
+    setActiveId(roomId);
+    setMessages([]);
+    setDraft(roomId ? draftsRef.current[roomId] ?? "" : "");
+    setError(roomId ? errorsRef.current[roomId] ?? "" : "");
+    roundFileRef.current = null;
+  };
+
   const refreshRoom = useCallback(
-    async (roomId: string) => {
-      const data = await apiGet<RoomSummary & { messages: RoomMessage[] }>(
-        `/projects/${projectId}/rooms/${roomId}/messages?after=0`,
-      );
-      if (activeIdRef.current !== roomId) return data;
-      setMessages((prev) => mergeMessages(prev, data.messages ?? []));
-      setDocVersion(data.doc_version ?? 0);
-      setOutputId(data.output_id ?? null);
+    async (roomId: string, epoch: number) => {
+      const cursor = eventCursorRef.current[roomId] ?? 0;
+      const params = new URLSearchParams();
+      if (cursor > 0) {
+        params.set("after_event", String(cursor));
+        params.set("known_doc_version", String(docVersion));
+      }
+      const query = params.toString();
+      const data = await apiGet<
+        RoomSummary & { messages: RoomMessage[]; content_omitted?: boolean; writer_driver?: string }
+      >(`/projects/${projectId}/rooms/${roomId}/messages${query ? `?${query}` : ""}`);
+      const incoming = data.messages ?? [];
+      const maxEvent = incoming.reduce((max, item) => Math.max(max, item.event_seq ?? 0), cursor);
+      eventCursorRef.current[roomId] = maxEvent;
+      if (!acceptRoomPayload(roomId, activeIdRef.current, epoch, epochRef.current)) return data;
+      setMessages((prev) => mergeMessages(cursor > 0 ? prev : [], incoming));
+      if (!data.content_omitted) {
+        setDocVersion(data.doc_version ?? 0);
+        setOutputId(data.output_id ?? null);
+      }
+      setWriterDriver(data.writer_driver || "");
       setRooms((prev) =>
         prev.map((room) =>
           room.id === roomId
             ? {
                 ...room,
-                output_id: data.output_id,
-                doc_version: data.doc_version,
-                content: data.content,
+                output_id: data.output_id ?? room.output_id,
+                doc_version: data.doc_version ?? room.doc_version,
+                content: data.content_omitted ? room.content : data.content,
               }
             : room,
         ),
       );
       return data;
     },
-    [projectId],
+    [docVersion, projectId],
   );
 
   useEffect(() => {
     if (!projectId || !activeId) return;
     let cancelled = false;
-    refreshRoom(activeId)
+    const epoch = epochRef.current;
+    refreshRoom(activeId, epoch)
       .then((data) => {
-        if (cancelled) return;
+        if (cancelled || !acceptRoomPayload(activeId, activeIdRef.current, epoch, epochRef.current)) return;
         console.info("[co-create-room] 打开对话", {
           projectId,
           roomId: activeId,
@@ -269,10 +310,14 @@ export default function CoCreateRoomApp() {
         });
       })
       .catch((err: Error) => {
-        if (!cancelled) setError(err.message);
+        if (!cancelled && acceptRoomPayload(activeId, activeIdRef.current, epoch, epochRef.current)) {
+          errorsRef.current[activeId] = err.message;
+          setError(err.message);
+        }
       });
     const timer = window.setInterval(() => {
-      refreshRoom(activeId).catch((err: Error) => {
+      const tickEpoch = epochRef.current;
+      refreshRoom(activeId, tickEpoch).catch((err: Error) => {
         console.warn("[co-create-room] 轮询失败", { projectId, roomId: activeId, err });
       });
     }, POLL_MS);
@@ -323,7 +368,7 @@ export default function CoCreateRoomApp() {
       setFileSaving(true);
       try {
         await applyFileAction(fileProjectId, {
-          session_id: activeId ?? undefined,
+          room_id: activeId,
           proposal_id: crypto.randomUUID(),
           action: {
             type: "patch",
@@ -332,6 +377,7 @@ export default function CoCreateRoomApp() {
             content,
             file_name: fileWorkspace.tabLabels[fileKey],
             save_mode: "overwrite",
+            base_version: fileWorkspace.previewDetail?.version ?? undefined,
           },
         });
         fileWorkspace.patchTabContent(fileKey, content);
@@ -366,7 +412,7 @@ export default function CoCreateRoomApp() {
       setFileSaving(true);
       try {
         await applyFileAction(fileProjectId, {
-          session_id: activeId ?? undefined,
+          room_id: activeId,
           proposal_id: crypto.randomUUID(),
           action: {
             type: "patch",
@@ -375,6 +421,7 @@ export default function CoCreateRoomApp() {
             content: detail.content ?? "",
             file_name: version.title ?? fileWorkspace.tabLabels[fileKey],
             save_mode: "overwrite",
+            base_version: fileWorkspace.previewDetail?.version ?? detail.version ?? undefined,
           },
         });
         await fileWorkspace.reloadFileTab(fileKey);
@@ -390,10 +437,8 @@ export default function CoCreateRoomApp() {
     if (!mention) return [];
     const q = mention.query.trim().toLowerCase();
     if (mention.kind === "role") {
-      const seated = new Set(activeRoom?.role_ids ?? []);
-      return roles
+      return seatedRoles(roles, activeRoom?.role_ids ?? [])
         .filter((role) => !q || role.name.toLowerCase().includes(q) || role.id.toLowerCase().includes(q))
-        .sort((a, b) => Number(seated.has(b.id)) - Number(seated.has(a.id)))
         .map((role) => ({ kind: "role" as const, id: role.id, label: role.name }));
     }
     return fileWorkspace.files
@@ -436,18 +481,49 @@ export default function CoCreateRoomApp() {
     if (!text || sending) return;
     setSending(true);
     setError("");
+    let roomId = activeId;
     try {
-      let roomId = activeId;
       if (!roomId) {
         roomId = await createRoom("chat", text.slice(0, 24));
         if (!roomId) return;
       }
+      const epoch = epochRef.current;
+      const seated = new Set(activeRoom?.role_ids ?? []);
+      const unseated = roles.filter(
+        (role) => !seated.has(role.id) && mentionTokenPresent(text, "@", role.name),
+      );
+      if (unseated.length > 0) {
+        const message = `角色未入座，不能唤起：${unseated.map((role) => role.name).join("、")}`;
+        errorsRef.current[roomId] = message;
+        if (acceptRoomPayload(roomId, activeIdRef.current, epoch, epochRef.current)) setError(message);
+        return;
+      }
       const mentionRoleIds = roles
-        .filter((role) => mentionTokenPresent(text, "@", role.name))
+        .filter((role) => seated.has(role.id) && mentionTokenPresent(text, "@", role.name))
         .map((role) => role.id);
-      const mentionFileIds = fileWorkspace.files
+      const hashed = fileWorkspace.files
         .filter((file) => mentionTokenPresent(text, "#", file.title))
-        .map((file) => file.id);
+        .map((file) =>
+          buildRoomFileRef(
+            {
+              projectId: fileProjectId,
+              fileId: file.id,
+              kind: file.kind,
+              version: file.version,
+            },
+            "material",
+          ),
+        );
+      const roundFile = roundFileRef.current;
+      const files = roundFile
+        ? [roundFile, ...hashed.filter((item) => item.file_id !== roundFile.file_id)]
+        : hashed;
+      if (files.some((item) => item.project_id !== projectId)) {
+        const message = "跨项目材料未授权，不能进入共享群聊";
+        errorsRef.current[roomId] = message;
+        if (acceptRoomPayload(roomId, activeIdRef.current, epoch, epochRef.current)) setError(message);
+        return;
+      }
       const modeToSend: CoCreateAgentMode =
         agentMode === "plan" && isPlanConfirmPrompt(text) ? "agent" : agentMode;
       if (modeToSend !== agentMode) {
@@ -459,16 +535,22 @@ export default function CoCreateRoomApp() {
         {
           content: text,
           mention_role_ids: mentionRoleIds,
-          mention_file_ids: mentionFileIds,
+          files,
+          client_message_id: crypto.randomUUID(),
           agent_mode: modeToSend,
         },
       );
+      draftsRef.current[roomId] = "";
+      roundFileRef.current = null;
+      if (!acceptRoomPayload(roomId, activeIdRef.current, epoch, epochRef.current)) return;
       setMessages((prev) => mergeMessages(prev, [message]));
       setDraft("");
       setMention(null);
       console.info("[co-create-room] 发送", { projectId, roomId, seq: message.seq, agentMode: modeToSend });
     } catch (err) {
-      setError(err instanceof Error ? err.message : "发送失败");
+      const messageText = err instanceof Error ? err.message : "发送失败";
+      if (roomId) errorsRef.current[roomId] = messageText;
+      if (roomId && activeIdRef.current === roomId) setError(messageText);
     } finally {
       setSending(false);
     }
@@ -492,7 +574,8 @@ export default function CoCreateRoomApp() {
       setOutputId(null);
       setDocVersion(0);
       openedDocRef.current = "";
-      setActiveId(room.id);
+      eventCursorRef.current[room.id] = 0;
+      selectRoom(room.id);
       return room.id;
     } catch (err) {
       setError(err instanceof Error ? err.message : "创建失败");
@@ -507,7 +590,8 @@ export default function CoCreateRoomApp() {
     setOutputId(room.output_id);
     setDocVersion(room.doc_version ?? 0);
     openedDocRef.current = "";
-    setActiveId(room.id);
+    eventCursorRef.current[room.id] = 0;
+    selectRoom(room.id);
   };
 
   const saveRoomTitle = async (roomId: string) => {
@@ -542,7 +626,7 @@ export default function CoCreateRoomApp() {
       const updated = await apiPatch<RoomSummary>(`/projects/${projectId}/rooms/${room.id}`, { archived });
       setRooms((prev) => prev.map((item) => (item.id === room.id ? { ...item, ...updated } : item)));
       if (archived && activeId === room.id) {
-        setActiveId(null);
+        selectRoom(null);
         setMessages([]);
         setOutputId(null);
         setDocVersion(0);
@@ -786,6 +870,7 @@ export default function CoCreateRoomApp() {
         <div className="flex h-[41px] shrink-0 items-center border-b border-slate-300 px-3 dark:border-slate-700">
           <p className="truncate text-xs font-semibold text-slate-700 dark:text-slate-200">
             {activeRoom?.title || "共创对话"}
+            {writerDriver ? ` · ${writerDriver}` : ""}
           </p>
         </div>
         <div ref={listRef} className="min-h-0 flex-1 space-y-3 overflow-y-auto px-4 py-4">
@@ -801,7 +886,47 @@ export default function CoCreateRoomApp() {
                 <p className="text-[11px] text-slate-500">
                   {message.author_type === "agent" ? "Agent" : "成员"} · {message.author_name}
                   {message.turn_state === "queued" ? " · 排队" : ""}
+                  {message.turn_state === "running" ? " · 生成中" : ""}
+                  {message.turn_state === "failed" ? " · 失败" : ""}
+                  {message.turn_state === "cancelled" ? " · 已取消" : ""}
+                  {message.turn_state === "succeeded" ? " · 完成" : ""}
                 </p>
+                {message.error_summary ? (
+                  <p className="text-[11px] text-red-600">{message.error_summary}</p>
+                ) : null}
+                {message.author_type === "human" &&
+                (message.turn_state === "queued" || message.turn_state === "running") ? (
+                  <button
+                    type="button"
+                    className="text-[11px] text-slate-500 underline"
+                    onClick={() =>
+                      void apiPost(
+                        `/projects/${projectId}/rooms/${activeId}/turns/${message.turn_id}/cancel`,
+                        {},
+                      ).then(() => {
+                        if (activeId) void refreshRoom(activeId, epochRef.current);
+                      })
+                    }
+                  >
+                    取消
+                  </button>
+                ) : null}
+                {message.author_type === "human" && message.turn_state === "failed" ? (
+                  <button
+                    type="button"
+                    className="text-[11px] text-slate-500 underline"
+                    onClick={() =>
+                      void apiPost(
+                        `/projects/${projectId}/rooms/${activeId}/turns/${message.turn_id}/retry`,
+                        {},
+                      ).then(() => {
+                        if (activeId) void refreshRoom(activeId, epochRef.current);
+                      })
+                    }
+                  >
+                    重试
+                  </button>
+                ) : null}
                 <div
                   className={`mt-1 rounded-2xl px-3 py-2 text-sm leading-relaxed ${
                     message.author_type === "agent"
@@ -817,6 +942,9 @@ export default function CoCreateRoomApp() {
         </div>
         {error ? <p className="px-4 text-xs text-red-600">{error}</p> : null}
         <div className="relative border-t border-slate-200 p-3 dark:border-slate-800">
+          {mention?.kind === "role" && mentionItems.length === 0 ? (
+            <p className="absolute bottom-full left-3 mb-1 text-xs text-slate-500">当前对话没有入座角色</p>
+          ) : null}
           {mention && mentionItems.length > 0 ? (
             <div
               role="listbox"
@@ -955,12 +1083,36 @@ export default function CoCreateRoomApp() {
             onRenameFile={handleRenameFile}
             onRestoreVersion={handleRestoreVersion}
             onAskInterpret={(key) => {
+              const decoded = decodeProjectFileSelectValue(key);
               fileWorkspace.openFileTab(key);
+              if (!decoded) return;
+              roundFileRef.current = buildRoomFileRef(
+                {
+                  projectId: fileProjectId,
+                  fileId: decoded.id,
+                  kind: decoded.kind,
+                  version: fileWorkspace.previewDetail?.version,
+                },
+                "interpret",
+              );
               setDraft("请解读当前打开的文件，给出要点摘要。");
+              console.info("[co-create-room] 解读文件", { projectId: fileProjectId, fileId: decoded.id });
             }}
             onAskModify={(key) => {
+              const decoded = decodeProjectFileSelectValue(key);
               fileWorkspace.openFileTab(key);
+              if (!decoded) return;
+              roundFileRef.current = buildRoomFileRef(
+                {
+                  projectId: fileProjectId,
+                  fileId: decoded.id,
+                  kind: decoded.kind,
+                  version: fileWorkspace.previewDetail?.version,
+                },
+                "revise",
+              );
               setDraft("请基于当前打开的文件修订右侧文档。");
+              console.info("[co-create-room] 修改文件", { projectId: fileProjectId, fileId: decoded.id });
             }}
           />
         </div>

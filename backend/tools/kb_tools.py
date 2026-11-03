@@ -296,10 +296,6 @@ async def kb_query(
                 return True
         return False
 
-    def _precision_fallback_enabled() -> bool:
-        raw = os.getenv("KB_QUERY_CROSS_COLLECTION_FALLBACK", "1").strip().lower()
-        return raw not in ("0", "false", "no", "off")
-
     result = await kb_proxy_service.query_collection(
         collection_name=resolved_name,
         query_text=query,
@@ -324,53 +320,23 @@ async def kb_query(
                     resolved_name,
                 )
 
-    # 精准词兜底：当前集合语义命中但词面不匹配时，跨集合再查一次，减少“命中但不相关”。
+    # 指定集合未命中词面时，不扩大到其他集合或其他项目草稿。
     rows = list(filtered.get("results") or [])
     if (
-        _precision_fallback_enabled()
-        and query.strip()
+        query.strip()
         and rows
         and not _has_lexical_hit(rows, query)
     ):
-        cross = await kb_proxy_service.query_all_collections(
-            query_text=query,
-            n_results=max(limit * 3, limit),
-            project_id=project_id,
-            collection=None,
+        logger.info(
+            "kb_query lexical miss kept in collection query=%r resolved=%s",
+            query,
+            resolved_name,
         )
-        cross_rows = list(cross.get("results") or [])
-        terms = _keyword_terms(query)
-        lexical_rows = [
-            r for r in cross_rows if any(t in _to_text(r) for t in terms)
-        ]
-        if lexical_rows:
-            logger.info(
-                "kb_query precision fallback triggered query=%r resolved=%s cross_hits=%d",
-                query,
-                resolved_name,
-                len(lexical_rows),
-            )
-            merged_warning = merge_kb_warnings(
-                filtered.get("warning"),
-                "semantic_miss_switched_to_cross_collection_lexical",
-            )
-            narrowed = await filter_results_by_eligible_domains(
-                {
-                    "results": lexical_rows[:limit],
-                    "source": cross.get("source", filtered.get("source", "chroma")),
-                    "count": min(len(lexical_rows), limit),
-                    "warning": merge_kb_warnings(merged_warning, resolve_warning),
-                    "collection_resolved": resolved_name,
-                    "fallback_scope": "__all__",
-                },
-                project_id,
-            )
-            return await _apply_kb_source_capture(
-                narrowed,
-                tphermes_run_id=tphermes_run_id,
-                project_id=project_id,
-                collection_name=resolved_name,
-            )
+        filtered["warning"] = merge_kb_warnings(
+            filtered.get("warning"),
+            "semantic_miss_kept_in_collection",
+        )
+        filtered["fallback_scope"] = resolved_name
 
     filtered["warning"] = merge_kb_warnings(filtered.get("warning"), resolve_warning)
     if resolved_name != str(collection_name or "").strip():

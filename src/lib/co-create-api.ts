@@ -39,6 +39,7 @@ export interface ProjectFileVersionItem {
 
 export interface FileActionApplyRequest {
   session_id?: string | null;
+  room_id?: string | null;
   message_id?: string | null;
   proposal_id: string;
   action: {

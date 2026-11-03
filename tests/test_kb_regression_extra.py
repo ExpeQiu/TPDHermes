@@ -36,14 +36,17 @@ async def test_kb_subscription_unsubscribe_drops_subscriber():
 
 
 @pytest.mark.asyncio
-async def test_cache_get_entry_by_id_roundtrip():
+async def test_cache_get_entry_by_id_roundtrip(monkeypatch):
+    monkeypatch.setenv("TPDHERMES_GLOBAL_ADMIN_USER_IDS", "default")
+    monkeypatch.setenv("TPDHERMES_TRUST_USER_ID_HEADER", "1")
     await kb_cache_service.ensure_table()
     rid = f"unit-{uuid.uuid4()}"
+    headers = {"X-User-ID": "default"}
     async with async_session_maker() as db:
         db.add(
             KBCache(
                 id=rid,
-                project_id="p-x",
+                project_id="__all__",
                 collection="col_deep",
                 content="unique marker alpha-beta tree open",
                 metadata_='{"title":"T1","projects":[7]}',
@@ -58,14 +61,14 @@ async def test_cache_get_entry_by_id_roundtrip():
         await db.commit()
 
     with TestClient(app) as client:
-        r = client.get(f"/api/v1/kb/cache/entry/{rid}")
+        r = client.get(f"/api/v1/kb/cache/entry/{rid}", headers=headers)
     assert r.status_code == 200
     body = r.json()
     assert body["id"] == rid
     assert "alpha-beta" in body["content"]
 
     with TestClient(app) as client:
-        dr = client.delete(f"/api/v1/kb/cache/entry/{rid}")
+        dr = client.delete(f"/api/v1/kb/cache/entry/{rid}", headers=headers)
     assert dr.status_code == 200
     with TestClient(app) as client:
         assert client.get(f"/api/v1/kb/cache/entry/{rid}").status_code == 404

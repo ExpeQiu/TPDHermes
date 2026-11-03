@@ -515,23 +515,43 @@ class KBProxyService:
 
         self._readonly_mode = True
         await _notify_kb("query_fallback", source="kb_proxy", collection=collection_name)
+        from backend.services.kb_lexical import is_catalog_metadata, lexical_score
+
         cached = await kb_cache_service.get_cached_entries(
             project_id=project_id or "__all__",
             collection=collection_name,
-            limit=n_results,
+            limit=500,
+        )
+        ranked = []
+        for entry in cached:
+            meta = dict(entry.get("metadata") or {})
+            if is_catalog_metadata(meta):
+                continue
+            score = lexical_score(query_text, str(entry.get("content") or ""))
+            if score <= 0:
+                continue
+            meta["collection"] = meta.get("collection") or collection_name
+            ranked.append((score, entry, meta))
+        ranked.sort(key=lambda item: item[0], reverse=True)
+        picked = ranked[:n_results]
+        logger.info(
+            "kb offline lexical collection=%s query_len=%s hits=%s",
+            collection_name,
+            len((query_text or "").strip()),
+            len(picked),
         )
         return {
             "results": [
                 {
-                    "content": e["content"],
-                    "metadata": {**(e.get("metadata") or {}), "collection": collection_name},
-                    "distance": 1.0 - float(e.get("reliability", 0.5)),
+                    "content": entry["content"],
+                    "metadata": meta,
+                    "distance": 1.0 / (1.0 + score),
                 }
-                for e in cached
+                for score, entry, meta in picked
             ],
             "source": "cache",
-            "count": len(cached),
-            "warning": "readonly cache mode - external KB unavailable",
+            "count": len(picked),
+            "warning": "lexical_cache_fallback" if picked else "lexical_cache_empty",
         }
 
     async def query_all_collections(
@@ -589,7 +609,7 @@ class KBProxyService:
                             )
                             continue
                         merged.extend(part)
-                merged.sort(key=lambda r: float(r.get("distance") or 1.0))
+                merged.sort(key=lambda r: 1.0 if r.get("distance") is None else float(r["distance"]))
                 sliced = merged[:n_results]
                 return {"results": sliced, "source": "chroma", "count": len(sliced)}
             except Exception as e:
@@ -618,13 +638,13 @@ class KBProxyService:
                             "distance": 1.0 - float(e.get("reliability", 0.5)),
                         }
                     )
-        combined.sort(key=lambda r: float(r.get("distance") or 1.0))
+        combined.sort(key=lambda r: 1.0 if r.get("distance") is None else float(r["distance"]))
         sliced = combined[:n_results]
         return {
             "results": sliced,
             "source": "cache",
             "count": len(sliced),
-            "warning": col_res.get("warning") or "readonly cache mode - multi collection scan",
+            "warning": "lexical_cache_empty" if not sliced else "lexical_cache_fallback",
         }
 
     async def list_collections(

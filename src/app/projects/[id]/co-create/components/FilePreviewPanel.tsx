@@ -137,8 +137,8 @@ export function FilePreviewPanel({
   onReloadTab,
   onAddToRound: _onAddToRound,
   onPin: _onPin,
-  onAskInterpret: _onAskInterpret,
-  onAskModify: _onAskModify,
+  onAskInterpret,
+  onAskModify,
   onSaveContent,
   onRenameFile,
   onRestoreVersion,
@@ -596,7 +596,24 @@ export function FilePreviewPanel({
             {renameError ? (
               <p className="min-w-0 truncate text-[10px] text-red-500">{renameError}</p>
             ) : null}
-            {/* 加入本轮 / 固定引用 / AI 解读 / AI 修改 暂隐藏，后续按需恢复 */}
+            {activeFileKey ? (
+              <>
+                <button
+                  type="button"
+                  onClick={() => onAskInterpret(activeFileKey)}
+                  className="shrink-0 rounded-md border border-slate-300 px-2 py-0.5 text-[10px] text-slate-700 dark:border-slate-600 dark:text-slate-200"
+                >
+                  解读
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onAskModify(activeFileKey)}
+                  className="shrink-0 rounded-md border border-slate-300 px-2 py-0.5 text-[10px] text-slate-700 dark:border-slate-600 dark:text-slate-200"
+                >
+                  修改
+                </button>
+              </>
+            ) : null}
             <div className="ml-auto flex items-center gap-1">
               {onTogglePreviewMaximize ? (
                 <ViewTabBtn

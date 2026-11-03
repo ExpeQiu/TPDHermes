@@ -446,6 +446,7 @@ export function useChatSessionStore({
   const pendingMessageSyncRef = useRef<
     Map<string, { messages: Map<string, Record<string, unknown>>; removedMessageIds: Set<string> }>
   >(new Map());
+  const messageSyncChainRef = useRef<Map<string, Promise<void>>>(new Map());
 
   preferredProjectIdRef.current = preferredProjectId;
 
@@ -514,6 +515,39 @@ export function useChatSessionStore({
     [scopeUserId],
   );
 
+  const dispatchMessageSync = useCallback(
+    (sessionId: string, payload: { messages: Record<string, unknown>[]; removedMessageIds?: string[] }) => {
+      const prev = messageSyncChainRef.current.get(sessionId) ?? Promise.resolve();
+      const run = prev.catch(() => undefined).then(async () => {
+        console.info("[chat-metrics] message sync", {
+          session_id: sessionId,
+          payload_bytes: calcPayloadBytes(payload),
+          message_count: payload.messages.length,
+          removed_count: payload.removedMessageIds?.length ?? 0,
+        });
+        const result = await syncChatSessionMessagesOnServer(sessionId, payload);
+        setSessionsSyncError("");
+        console.info("[chat-metrics] message rewrite", {
+          session_id: sessionId,
+          created: result.stats.created,
+          rewritten: result.stats.rewritten,
+          deleted: result.stats.deleted,
+        });
+      }).catch((err) => {
+        const msg = err instanceof Error ? err.message : String(err);
+        setSessionsSyncError(msg);
+        console.warn("[chat] 消息 sync 失败", err);
+      });
+      const settled = run.then(
+        () => undefined,
+        () => undefined,
+      );
+      messageSyncChainRef.current.set(sessionId, settled);
+      return run;
+    },
+    [],
+  );
+
   const queueMessageSync = useCallback(
     (sessionId: string, messages: Message[], removedMessageIds: string[] = [], delayMs = 160) => {
       if (!scopeUserId) return;
@@ -549,31 +583,11 @@ export function useChatSessionStore({
           messages: Array.from(nextPending.messages.values()),
           removedMessageIds: Array.from(nextPending.removedMessageIds),
         };
-        console.info("[chat-metrics] message sync", {
-          session_id: sessionId,
-          payload_bytes: calcPayloadBytes(payload),
-          message_count: payload.messages.length,
-          removed_count: payload.removedMessageIds.length,
-        });
-        void syncChatSessionMessagesOnServer(sessionId, payload)
-          .then((result) => {
-            setSessionsSyncError("");
-            console.info("[chat-metrics] message rewrite", {
-              session_id: sessionId,
-              created: result.stats.created,
-              rewritten: result.stats.rewritten,
-              deleted: result.stats.deleted,
-            });
-          })
-          .catch((err) => {
-            const msg = err instanceof Error ? err.message : String(err);
-            setSessionsSyncError(msg);
-            console.warn("[chat] 消息 sync 失败", err);
-          });
+        void dispatchMessageSync(sessionId, payload);
       }, delayMs);
       messageSyncTimersRef.current.set(sessionId, timer);
     },
-    [scopeUserId],
+    [dispatchMessageSync, scopeUserId],
   );
 
   const flushSessionToServer = useCallback(
@@ -593,6 +607,8 @@ export function useChatSessionStore({
         messageSyncTimersRef.current.delete(sessionId);
         pendingMessageSyncRef.current.delete(sessionId);
       }
+      const inflight = messageSyncChainRef.current.get(sessionId);
+      if (inflight) await inflight;
       const payload = sessionToServerPayload(session);
       console.info("[chat-metrics] full session flush", {
         session_id: sessionId,
@@ -902,15 +918,11 @@ export function useChatSessionStore({
               session_id: session.id,
               message_count: session.messages.length,
             });
-            try {
-              await syncChatSessionMessagesOnServer(session.id, {
-                messages: session.messages.map((message, index) =>
-                  messageToSyncPayload(message, index),
-                ),
-              });
-            } catch (err) {
-              console.warn("[chat] 补同步消息失败", session.id, err);
-            }
+            await dispatchMessageSync(session.id, {
+              messages: session.messages.map((message, index) =>
+                messageToSyncPayload(message, index),
+              ),
+            });
           });
           if (cancelled || bootstrapGen !== bootstrapGenRef.current) return;
           // 共创命名空间：跨项目一次扫掉历史误建空壳（本地立即生效，后台 patch）
@@ -987,7 +999,7 @@ export function useChatSessionStore({
       cancelled = true;
     };
     // preferredProjectId 用 ref 读取，避免仅项目切换时整表 bootstrap 用空壳冲掉已打开对话
-  }, [scopeUserId, storageNamespace]);
+  }, [dispatchMessageSync, scopeUserId, storageNamespace]);
 
   return {
     sessions,

@@ -18,4 +18,6 @@ class KbSourceFile(Base):
     mime_type = Column(String(255), nullable=True)
     size = Column(Integer, nullable=False, default=0)
     doc_id_hint = Column(Text, nullable=True)
+    created_by = Column(String, nullable=True)
+    project_id = Column(String, nullable=True)
     created_at = Column(String, default=lambda: datetime.now().isoformat())

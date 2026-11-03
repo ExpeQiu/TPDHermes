@@ -6,7 +6,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import os
 import uuid
 from datetime import datetime
 from pathlib import Path
@@ -42,6 +41,7 @@ from backend.services.kb_entry_manage import (
     update_kb_entry,
 )
 from backend.services.kb_write import add_kb_harvest_entry
+from backend.services.kb_access import authorize_kb_operation, reject_client_chroma_url, upload_root
 from backend.services.project_access import require_project_for_user
 from backend.services.project_kb import (
     is_project_kb_collection,
@@ -57,9 +57,6 @@ router = APIRouter(
     dependencies=[Depends(require_feature("knowledge"))],
 )
 log = logging.getLogger("tpdx.hermes")
-
-KB_UPLOAD_DIR = os.getenv("KB_UPLOAD_DIR", str(Path("./data/kb_uploads").resolve()))
-
 
 class KbIngestRequest(BaseModel):
     source_type: str = Field(..., description="manifest | upload")
@@ -182,10 +179,16 @@ async def kb_create_harvest_entry(
 async def kb_upload(
     file: UploadFile = File(...),
     doc_id: Optional[str] = Form(None),
+    project_id: str = Form("__all__"),
+    db: AsyncSession = Depends(get_db),
+    effective_uid: str = Depends(get_effective_user_id),
 ):
+    await authorize_kb_operation(
+        db, effective_uid, project_id=project_id, operation="write"
+    )
     """multipart 上传，写入 KB_UPLOAD_DIR 并登记 kb_source_files。"""
     upload_id = str(uuid.uuid4())
-    base = Path(KB_UPLOAD_DIR).resolve()
+    base = upload_root()
     base.mkdir(parents=True, exist_ok=True)
     safe_name = Path(file.filename or "upload.bin").name.replace("..", "_")
     dest = base / f"{upload_id}_{safe_name}"
@@ -225,6 +228,8 @@ async def kb_upload(
             size=size,
             created_at=created,
             doc_id_hint=hint,
+            created_by=effective_uid,
+            project_id=project_id,
         )
         db.add(row)
         await db.commit()
@@ -252,19 +257,46 @@ async def kb_upload(
 
 
 @router.post("/ingest")
-async def kb_ingest(body: KbIngestRequest):
+async def kb_ingest(
+    body: KbIngestRequest,
+    db: AsyncSession = Depends(get_db),
+    effective_uid: str = Depends(get_effective_user_id),
+):
     """创建异步 ingestion 任务并立即返回 job_id。"""
-    normalized = await normalize_ingest_request(body.model_dump())
-    created = await create_ingest_job(normalized=normalized, created_by=None)
+    await authorize_kb_operation(
+        db,
+        effective_uid,
+        project_id=body.project_id,
+        operation="write",
+        collection=body.collection,
+    )
+    payload = body.model_dump()
+    payload["created_by"] = effective_uid
+    payload["chroma_url"] = reject_client_chroma_url(body.chroma_url)
+    normalized = await normalize_ingest_request(payload)
+    created = await create_ingest_job(normalized=normalized, created_by=effective_uid)
     await queue_ingest_job(str(created["job_id"]))
     return created
 
 
 @router.get("/ingest-jobs/{job_id}")
-async def kb_ingest_job_get(job_id: str):
+async def kb_ingest_job_get(
+    job_id: str,
+    db: AsyncSession = Depends(get_db),
+    effective_uid: str = Depends(get_effective_user_id),
+):
     row = await get_ingest_job(job_id)
     if not row:
         raise HTTPException(status_code=404, detail="job 不存在")
+    owner = str(row.get("created_by") or "")
+    if owner and owner != effective_uid:
+        await authorize_kb_operation(
+            db,
+            effective_uid,
+            project_id=str(row.get("project_id") or "__all__"),
+            operation="manage",
+            collection=str(row.get("collection") or ""),
+        )
     return row
 
 
@@ -377,8 +409,19 @@ async def kb_delete_entry(
 
 
 @router.post("/publish")
-async def kb_publish(body: KbPublishRequest):
-    chroma = (body.chroma_url or CHROMA_HOST).strip()
+async def kb_publish(
+    body: KbPublishRequest,
+    db: AsyncSession = Depends(get_db),
+    effective_uid: str = Depends(get_effective_user_id),
+):
+    await authorize_kb_operation(
+        db,
+        effective_uid,
+        project_id=body.project_id,
+        operation="manage",
+        collection=body.collection,
+    )
+    chroma = reject_client_chroma_url(body.chroma_url)
     if not body.doc_ids:
         raise HTTPException(status_code=400, detail="doc_ids 不能为空")
 

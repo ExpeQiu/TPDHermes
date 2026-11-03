@@ -20,3 +20,8 @@ class KbIngestJob(Base):
     created_at = Column(String, default=lambda: datetime.now().isoformat())
     updated_at = Column(String, default=lambda: datetime.now().isoformat())
     created_by = Column(String, nullable=True)
+    project_id = Column(String, nullable=True)
+    operation_id = Column(String, nullable=True)
+    worker_id = Column(String, nullable=True)
+    lease_until = Column(String, nullable=True)
+    error_message = Column(Text, nullable=True)

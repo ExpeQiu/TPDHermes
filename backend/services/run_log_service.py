@@ -10,6 +10,7 @@ import uuid
 from datetime import datetime
 from typing import Any
 
+from sqlalchemy.exc import IntegrityError, InvalidRequestError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.models.orchestration_run import OrchestrationRun
@@ -56,7 +57,55 @@ async def create_run(
     )
     db.add(row)
     await db.commit()
-    await db.refresh(row)
+    created_at = row.created_at or datetime.now().isoformat()
+    try:
+        await db.refresh(row)
+    except InvalidRequestError:
+        # 共用连接时，并发提交可能让刚写入的行在 refresh 时不可见。
+        logger.warning(
+            "run_log refresh missed run_id=%s entrypoint=%s user_id=%s",
+            run_id,
+            entrypoint,
+            user_id or "default",
+        )
+        db.expunge(row)
+        reloaded = await db.get(OrchestrationRun, run_id)
+        if reloaded is not None:
+            row = reloaded
+            logger.info("run_log reloaded after refresh miss run_id=%s", run_id)
+        else:
+            logger.error(
+                "run_log row missing after commit run_id=%s entrypoint=%s, retry insert",
+                run_id,
+                entrypoint,
+            )
+            retry = OrchestrationRun(
+                id=run_id,
+                project_id=project_id,
+                scenario_id=scenario_id,
+                entrypoint=entrypoint,
+                user_id=(user_id or "default"),
+                status="running",
+                request_json=request_json,
+                snapshot_json=snapshot_json,
+                skills_policy_json=skills_policy_json,
+                exec_token_hash=digest,
+                exec_token_expires_at=expires,
+                created_at=created_at,
+                updated_at=datetime.now().isoformat(),
+            )
+            try:
+                db.add(retry)
+                await db.commit()
+                await db.refresh(retry)
+            except IntegrityError:
+                await db.rollback()
+                retry = await db.get(OrchestrationRun, run_id)
+                if retry is None:
+                    logger.error("run_log retry insert lost run_id=%s", run_id)
+                    raise
+                logger.info("run_log retry insert raced, loaded existing run_id=%s", run_id)
+            row = retry
     _issued_exec_tokens[run_id] = token
     logger.info("run_log created run_id=%s entrypoint=%s exec_grant=issued", run_id, entrypoint)
     return row

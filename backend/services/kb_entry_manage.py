@@ -119,20 +119,11 @@ async def delete_cached_entry_by_id(entry_id: str, *, collection: str | None = N
             log.info("kb_cache delete by id=%s", eid)
             return True
     doc_id = kb_doc_id_from_ref(eid)
-    if doc_id and doc_id != eid:
+    if doc_id and doc_id != eid and collection:
         removed = await delete_cached_entries_by_doc_id(doc_id, collection=collection)
         if removed > 0:
             log.info("kb_cache delete by doc_id=%s (from ref=%s) removed=%s", doc_id, eid, removed)
             return True
-        if collection:
-            removed = await delete_cached_entries_by_doc_id(doc_id, collection=None)
-            if removed > 0:
-                log.info(
-                    "kb_cache delete by doc_id=%s cross-collection removed=%s",
-                    doc_id,
-                    removed,
-                )
-                return True
     return False
 
 
@@ -140,8 +131,11 @@ async def delete_cached_entries_by_doc_id(
     doc_id: str,
     collection: str | None = None,
 ) -> int:
-    """从本地 kb_cache 移除 doc_id 对应 chunk（Chroma 删除后即时清理）。"""
+    """从本地 kb_cache 移除 doc_id 对应 chunk。未指定 collection 时不删除。"""
     await kb_cache_service.ensure_table()
+    if not (collection or "").strip():
+        log.warning("kb_cache purge refused without collection doc_id=%s", doc_id)
+        return 0
     prefix = f"{doc_id}_chunk_"
     removed = 0
     async with async_session_maker() as db:
@@ -149,6 +143,8 @@ async def delete_cached_entries_by_doc_id(
             or_(
                 KBCache.id == doc_id,
                 KBCache.id.like(f"{prefix}%"),
+                KBCache.source_chunk_id == doc_id,
+                KBCache.source_chunk_id.like(f"{prefix}%"),
             )
         )
         if collection:

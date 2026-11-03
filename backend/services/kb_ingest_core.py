@@ -320,25 +320,52 @@ def run_kb_ingestion(
             doc_succeeded += 1
             continue
 
+        op = str(job_id or batch_id or "op")
+        stage_ids = [f"{cid}__stage__{op}" for cid in ids]
+        stage_metas = []
+        active_metas = []
+        for cid, meta in zip(ids, metas_out):
+            staged = dict(meta)
+            staged["kb_active"] = False
+            staged["kb_stage_of"] = cid
+            stage_metas.append(staged)
+            active = dict(meta)
+            active["kb_active"] = True
+            active_metas.append(active)
+        staged_written: list[str] = []
+        activated = False
         try:
-            for i in range(0, len(ids), batch_chunk_size):
-                batch_ids = ids[i : i + batch_chunk_size]
-                batch_docs = docs_out[i : i + batch_chunk_size]
-                batch_metas = metas_out[i : i + batch_chunk_size]
-                batch_embeddings = None
-                if embed_on_upsert_enabled():
+            embeddings_all: list[list[float]] | None = None
+            if embed_on_upsert_enabled():
+                embeddings_all = []
+                for i in range(0, len(ids), batch_chunk_size):
                     embed_inputs = [
                         extract_searchable_text(doc, meta)
-                        for doc, meta in zip(batch_docs, batch_metas)
+                        for doc, meta in zip(
+                            docs_out[i : i + batch_chunk_size],
+                            active_metas[i : i + batch_chunk_size],
+                        )
                     ]
-                    batch_embeddings = embed_texts_sync(embed_inputs)
+                    embeddings_all.extend(embed_texts_sync(embed_inputs))
+            for i in range(0, len(ids), batch_chunk_size):
                 client.upsert(
                     col,
-                    batch_ids,
-                    batch_docs,
-                    batch_metas,
-                    embeddings=batch_embeddings,
+                    stage_ids[i : i + batch_chunk_size],
+                    docs_out[i : i + batch_chunk_size],
+                    stage_metas[i : i + batch_chunk_size],
+                    embeddings=None if embeddings_all is None else embeddings_all[i : i + batch_chunk_size],
                 )
+                staged_written.extend(stage_ids[i : i + batch_chunk_size])
+            client.upsert(
+                col,
+                ids,
+                docs_out,
+                active_metas,
+                embeddings=embeddings_all,
+            )
+            activated = True
+            if staged_written:
+                client.delete(col, staged_written)
             chunks_deleted_stale += delete_stale_chunks_for_doc(
                 client, col, doc_id, set(ids)
             )
@@ -348,7 +375,12 @@ def run_kb_ingestion(
             doc_failed += 1
             msg = str(e)
             errors.append({"doc": doc_id, "error": f"chroma_upsert:{msg}"})
-            logger.exception("kb ingest upsert failed doc_id=%s", doc_id)
+            logger.exception("kb ingest upsert failed doc_id=%s activated=%s", doc_id, activated)
+            if staged_written and not activated:
+                try:
+                    client.delete(col, staged_written)
+                except Exception:
+                    logger.exception("kb ingest staging cleanup failed doc_id=%s", doc_id)
 
     try:
         from backend.services.kb_proxy import kb_proxy_service
@@ -358,7 +390,12 @@ def run_kb_ingestion(
         pass
 
     finished = _iso_now()
-    status = "failed" if doc_succeeded == 0 and doc_failed > 0 else "completed"
+    if doc_failed and doc_succeeded:
+        status = "partial"
+    elif doc_failed and doc_succeeded == 0:
+        status = "failed"
+    else:
+        status = "completed"
     report = {
         "job_id": job_id,
         "batch_id": batch_id,
