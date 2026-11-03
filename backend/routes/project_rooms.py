@@ -14,6 +14,7 @@ from backend.services.project_room_service import (
     list_messages,
     list_rooms,
     schedule_room_drain,
+    update_room,
 )
 from backend.services.user_identity import get_effective_user_id
 
@@ -26,11 +27,17 @@ class RoomCreateBody(BaseModel):
     writer_role_id: str = ""
 
 
+class RoomUpdateBody(BaseModel):
+    title: str | None = None
+    archived: bool | None = None
+
+
 class MessageCreateBody(BaseModel):
     content: str
     mention_role_ids: list[str] = Field(default_factory=list)
     mention_user_ids: list[str] = Field(default_factory=list)
     mention_file_ids: list[str] = Field(default_factory=list)
+    agent_mode: str = "agent"
 
 
 @router.get("/{project_id}/rooms")
@@ -57,6 +64,24 @@ async def api_create_room(
         title=body.title,
         role_ids=body.role_ids,
         writer_role_id=body.writer_role_id,
+    )
+
+
+@router.patch("/{project_id}/rooms/{room_id}")
+async def api_update_room(
+    project_id: str,
+    room_id: str,
+    body: RoomUpdateBody,
+    db: AsyncSession = Depends(get_db),
+    user_id: str = Depends(get_effective_user_id),
+):
+    return await update_room(
+        db,
+        project_id=project_id,
+        room_id=room_id,
+        user_id=user_id,
+        title=body.title,
+        archived=body.archived,
     )
 
 
@@ -105,6 +130,7 @@ async def api_post_message(
         mention_role_ids=body.mention_role_ids,
         mention_user_ids=body.mention_user_ids,
         mention_file_ids=body.mention_file_ids,
+        agent_mode=body.agent_mode,
     )
     schedule_room_drain(background_tasks, room_id)
     return message

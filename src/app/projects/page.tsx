@@ -224,10 +224,10 @@ export default function ProjectsPage() {
                           头脑风暴
                         </Link>
                         <Link
-                          href={`/workshop?project_id=${project.id}`}
+                          href={`/studio?project_id=${project.id}`}
                           className="pointer-events-auto relative z-20 rounded-xl border border-slate-300 dark:border-slate-700 bg-white/90 dark:bg-slate-900/60 px-4 py-2.5 text-center text-sm text-slate-700 dark:text-slate-300 transition hover:border-slate-300 dark:border-slate-600 hover:bg-slate-200 dark:hover:bg-slate-900"
                         >
-                          场景输出
+                          场景创作
                         </Link>
                         <Link
                           href={`/chat?project_id=${project.id}&new_chat=1`}

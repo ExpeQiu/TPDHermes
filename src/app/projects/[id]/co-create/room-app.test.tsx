@@ -1,12 +1,13 @@
 import type { ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { cleanupDom, renderComponent } from "@/test-utils/component-test-utils";
+import { act, cleanupDom, clickElement, renderComponent, setInputValue } from "@/test-utils/component-test-utils";
 import { waitFor } from "@/test-utils/hook-test-utils";
-import CoCreateRoomApp from "./room-app";
+import CoCreateRoomApp, { readRoomComposerMention } from "./room-app";
 
 const apiGet = vi.fn();
 const apiPost = vi.fn();
+const apiPatch = vi.fn();
 
 vi.mock("next/navigation", () => ({
   useParams: () => ({ id: "project-1" }),
@@ -21,13 +22,24 @@ vi.mock("next/link", () => ({
 vi.mock("@/lib/api", () => ({
   apiGet: (...args: unknown[]) => apiGet(...args),
   apiPost: (...args: unknown[]) => apiPost(...args),
+  apiPatch: (...args: unknown[]) => apiPatch(...args),
 }));
+
+describe("readRoomComposerMention", () => {
+  it("@ 关联 Bot，# 引用文档，后出现的触发符生效", () => {
+    expect(readRoomComposerMention("你好 @主")).toEqual({ kind: "role", query: "主" });
+    expect(readRoomComposerMention("看一下 #共创")).toEqual({ kind: "file", query: "共创" });
+    expect(readRoomComposerMention("#方案 @")).toEqual({ kind: "role", query: "" });
+    expect(readRoomComposerMention("普通发言")).toBeNull();
+  });
+});
 
 describe("CoCreateRoomApp", () => {
   afterEach(() => {
     cleanupDom();
     apiGet.mockReset();
     apiPost.mockReset();
+    apiPatch.mockReset();
   });
 
   it("没有配置角色时指向 Roles", async () => {
@@ -45,6 +57,10 @@ describe("CoCreateRoomApp", () => {
     await waitFor(() => {
       expect(container.textContent).toContain("可以先建对话");
     });
+    const modes = container.querySelector('[aria-label="创作模式"]');
+    expect(modes?.textContent).toContain("Ask");
+    expect(modes?.textContent).toContain("Agent");
+    expect(modes?.textContent).toContain("Plan");
     const link = container.querySelector('a[href="/settings?tab=roles"]');
     expect(link).not.toBeNull();
     const create = Array.from(container.querySelectorAll("button")).find((button) =>
@@ -130,5 +146,145 @@ describe("CoCreateRoomApp", () => {
     const text = container.textContent ?? "";
     expect(text.indexOf("先发言")).toBeLessThan(text.indexOf("主笔收束"));
     expect(text.indexOf("主笔收束")).toBeLessThan(text.indexOf("后发言"));
+  });
+
+  it("@ 只列出 Bot，# 只列出文档", async () => {
+    apiGet.mockImplementation(async (path: string) => {
+      if (path.includes("/messages")) {
+        return { messages: [], doc_version: 0, content: "", output_id: null };
+      }
+      if (path.endsWith("/rooms")) {
+        return {
+          items: [
+            {
+              id: "room-1",
+              title: "方案讨论",
+              role_ids: ["writer"],
+              writer_role_id: "writer",
+              output_id: null,
+              doc_version: 0,
+            },
+          ],
+        };
+      }
+      if (path.includes("/brainstorm/roles")) {
+        return { items: [{ id: "writer", name: "主笔" }] };
+      }
+      if (path.endsWith("/files")) {
+        return {
+          items: [
+            {
+              id: "file-1",
+              kind: "output",
+              title: "共创文档.md",
+              path: "/输出/共创文档.md",
+              file_type: "md",
+            },
+          ],
+        };
+      }
+      if (path.endsWith("/members")) return [];
+      return {};
+    });
+    const { container } = renderComponent(<CoCreateRoomApp />);
+    await waitFor(() => {
+      expect(container.textContent).toContain("方案讨论");
+    });
+    const textarea = container.querySelector("textarea") as HTMLTextAreaElement;
+    const setValue = (value: string) => {
+      const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")?.set;
+      setter?.call(textarea, value);
+      textarea.dispatchEvent(new Event("input", { bubbles: true }));
+    };
+    const optionLabels = () =>
+      Array.from(container.querySelectorAll('[role="option"]')).map((node) => node.textContent ?? "");
+
+    setValue("@");
+    await waitFor(() => {
+      const labels = optionLabels();
+      expect(labels.some((label) => label.includes("主笔") && label.includes("Bot"))).toBe(true);
+      expect(labels.some((label) => label.includes("文档"))).toBe(false);
+    });
+
+    setValue("#共创");
+    await waitFor(() => {
+      const labels = optionLabels();
+      expect(labels.some((label) => label.includes("共创文档.md") && label.includes("文档"))).toBe(true);
+      expect(labels.some((label) => label.includes("Bot"))).toBe(false);
+    });
+  });
+
+  it("可以改名并归档对话", async () => {
+    apiGet.mockImplementation(async (path: string) => {
+      if (path.includes("/messages")) {
+        return { messages: [], doc_version: 0, content: "", output_id: null };
+      }
+      if (path.endsWith("/rooms")) {
+        return {
+          items: [
+            {
+              id: "room-1",
+              title: "方案讨论",
+              role_ids: [],
+              writer_role_id: "",
+              output_id: null,
+              doc_version: 0,
+              archived_at: null,
+            },
+          ],
+        };
+      }
+      if (path.includes("/brainstorm/roles")) return { items: [] };
+      if (path.endsWith("/files")) return { items: [] };
+      if (path.endsWith("/members")) return [];
+      return {};
+    });
+    apiPatch.mockImplementation(async (_path: string, body: { title?: string; archived?: boolean }) => {
+      if (body.archived) {
+        return {
+          id: "room-1",
+          title: "发布会讨论",
+          role_ids: [],
+          writer_role_id: "",
+          output_id: null,
+          doc_version: 0,
+          archived_at: "2026-11-03T00:00:00",
+        };
+      }
+      return {
+        id: "room-1",
+        title: body.title,
+        role_ids: [],
+        writer_role_id: "",
+        output_id: null,
+        doc_version: 0,
+        archived_at: null,
+      };
+    });
+    const { container } = renderComponent(<CoCreateRoomApp />);
+    await waitFor(() => {
+      expect(container.textContent).toContain("改名");
+      expect(container.textContent).toContain("归档");
+    });
+    const rename = Array.from(container.querySelectorAll("button")).find((button) => button.textContent === "改名");
+    expect(rename).toBeTruthy();
+    clickElement(rename as HTMLButtonElement);
+    await waitFor(() => {
+      expect(container.querySelector('input[aria-label="对话名称"]')).not.toBeNull();
+    });
+    const input = container.querySelector('input[aria-label="对话名称"]') as HTMLInputElement;
+    setInputValue(input, "发布会讨论");
+    act(() => {
+      input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    });
+    await waitFor(() => {
+      expect(apiPatch).toHaveBeenCalledWith("/projects/project-1/rooms/room-1", { title: "发布会讨论" });
+    });
+    const archive = Array.from(container.querySelectorAll("button")).find((button) => button.textContent === "归档");
+    clickElement(archive as HTMLButtonElement);
+    await waitFor(() => {
+      expect(apiPatch).toHaveBeenCalledWith("/projects/project-1/rooms/room-1", { archived: true });
+      expect(container.textContent).toContain("已归档 1");
+    });
   });
 });

@@ -568,6 +568,8 @@ export interface TaskExecuteBody {
   pinned_file_ids?: string[] | null;
   /** 项目共创创作模式 */
   co_create_agent_mode?: "ask" | "agent" | "plan" | null;
+  /** 项目共创应用策略：auto 自动应用，review 人工审阅 */
+  co_create_apply_mode?: "auto" | "review" | null;
 }
 
 export interface OrchestrationPreviewResponse {

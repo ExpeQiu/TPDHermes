@@ -4,10 +4,14 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
+import {
+  coCreateAgentModeMeta,
+  type CoCreateAgentMode,
+} from "@/app/projects/[id]/co-create/co-create-agent-utils";
 import { FilePreviewPanel } from "@/app/projects/[id]/co-create/components/FilePreviewPanel";
 import { ProjectFilesPanel } from "@/app/projects/[id]/co-create/components/ProjectFilesPanel";
 import { useFileWorkspace } from "@/app/projects/[id]/co-create/hooks/use-file-workspace";
-import { apiGet, apiPost } from "@/lib/api";
+import { apiGet, apiPatch, apiPost } from "@/lib/api";
 import { encodeProjectFileSelectValue, decodeProjectFileSelectValue } from "@/lib/chat-context";
 import {
   applyFileAction,
@@ -25,6 +29,7 @@ type RoomSummary = {
   writer_role_id: string;
   output_id: string | null;
   doc_version: number;
+  archived_at?: string | null;
   content?: string;
 };
 type RoomMessage = {
@@ -39,6 +44,29 @@ type RoomMessage = {
 };
 
 const POLL_MS = 2000;
+const ROOM_AGENT_MODES: CoCreateAgentMode[] = ["ask", "agent", "plan"];
+
+export type RoomMentionKind = "role" | "file";
+
+/** 输入框末尾的触发符：@ 关联 Bot，# 引用文档。后出现的触发符生效。 */
+export function readRoomComposerMention(
+  value: string,
+): { kind: RoomMentionKind; query: string } | null {
+  const at = /@([^\s@#]*)$/.exec(value);
+  const hash = /#([^\s@#]*)$/.exec(value);
+  const atIndex = at?.index ?? -1;
+  const hashIndex = hash?.index ?? -1;
+  if (at && atIndex >= hashIndex) return { kind: "role", query: at[1] ?? "" };
+  if (hash) return { kind: "file", query: hash[1] ?? "" };
+  return null;
+}
+
+function mentionTokenPresent(text: string, trigger: "@" | "#", label: string): boolean {
+  const name = label.trim();
+  if (!name) return false;
+  const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(`${trigger}${escaped}(?=\\s|$)`).test(text);
+}
 
 function mergeMessages(current: RoomMessage[], incoming: RoomMessage[]): RoomMessage[] {
   const byId = new Map(current.map((item) => [item.id, item]));
@@ -63,14 +91,20 @@ export default function CoCreateRoomApp() {
   const [docVersion, setDocVersion] = useState(0);
   const [outputId, setOutputId] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
-  const [mentionFileIds, setMentionFileIds] = useState<string[]>([]);
+  const [agentMode, setAgentMode] = useState<CoCreateAgentMode>("agent");
   const [sending, setSending] = useState(false);
   const [creating, setCreating] = useState(false);
+  const [showArchived, setShowArchived] = useState(false);
+  const [editingRoomId, setEditingRoomId] = useState<string | null>(null);
+  const [titleDraft, setTitleDraft] = useState("");
+  const [roomActingId, setRoomActingId] = useState<string | null>(null);
   const [selectedRoles, setSelectedRoles] = useState<string[]>([]);
   const [writerRoleId, setWriterRoleId] = useState("");
   const [error, setError] = useState("");
-  const [mentionQuery, setMentionQuery] = useState<string | null>(null);
+  const [mention, setMention] = useState<{ kind: RoomMentionKind; query: string } | null>(null);
+  const [mentionIndex, setMentionIndex] = useState(0);
   const listRef = useRef<HTMLDivElement>(null);
+  const skipTitleBlurRef = useRef(false);
 
   const revealFiles = () => {
     if (filesHideTimer.current) window.clearTimeout(filesHideTimer.current);
@@ -94,11 +128,6 @@ export default function CoCreateRoomApp() {
   const activeIdRef = useRef<string | null>(null);
   activeIdRef.current = activeId;
   const activeRoom = rooms.find((room) => room.id === activeId) ?? null;
-
-  const seatedRoles = useMemo(() => {
-    const ids = new Set(activeRoom?.role_ids ?? []);
-    return roles.filter((role) => ids.has(role.id));
-  }, [activeRoom, roles]);
 
   const loadRooms = useCallback(async () => {
     const data = await apiGet<{ items: RoomSummary[] }>(`/projects/${projectId}/rooms`);
@@ -284,31 +313,46 @@ export default function CoCreateRoomApp() {
   );
 
   const mentionItems = useMemo(() => {
-    if (mentionQuery == null) return [];
-    const q = mentionQuery.toLowerCase();
-    const roleItems = seatedRoles
-      .filter((role) => !q || role.name.toLowerCase().includes(q) || role.id.toLowerCase().includes(q))
-      .map((role) => ({ kind: "role" as const, id: role.id, label: role.name }));
-    const fileItems = fileWorkspace.files
-      .filter((file) => !q || file.title.toLowerCase().includes(q))
-      .slice(0, 6)
+    if (!mention) return [];
+    const q = mention.query.trim().toLowerCase();
+    if (mention.kind === "role") {
+      const seated = new Set(activeRoom?.role_ids ?? []);
+      return roles
+        .filter((role) => !q || role.name.toLowerCase().includes(q) || role.id.toLowerCase().includes(q))
+        .sort((a, b) => Number(seated.has(b.id)) - Number(seated.has(a.id)))
+        .map((role) => ({ kind: "role" as const, id: role.id, label: role.name }));
+    }
+    return fileWorkspace.files
+      .filter(
+        (file) =>
+          !q ||
+          file.title.toLowerCase().includes(q) ||
+          file.path.toLowerCase().includes(q),
+      )
+      .slice(0, 8)
       .map((file) => ({ kind: "file" as const, id: file.id, label: file.title }));
-    return [...roleItems, ...fileItems];
-  }, [mentionQuery, seatedRoles, fileWorkspace.files]);
+  }, [activeRoom?.role_ids, fileWorkspace.files, mention, roles]);
+
+  useEffect(() => {
+    setMentionIndex(0);
+  }, [mention?.kind, mention?.query]);
 
   const onDraftChange = (value: string) => {
     setDraft(value);
-    const match = /@([^\s@]*)$/.exec(value);
-    setMentionQuery(match ? match[1] : null);
+    setMention(readRoomComposerMention(value));
   };
 
-  const insertMention = (item: { kind: "role" | "file"; id: string; label: string }) => {
-    const next = draft.replace(/@([^\s@]*)$/, `@${item.label} `);
+  const insertMention = (item: { kind: RoomMentionKind; id: string; label: string }) => {
+    const trigger = item.kind === "role" ? "@" : "#";
+    const next = draft.replace(/[@#]([^\s@#]*)$/, `${trigger}${item.label} `);
     setDraft(next);
-    setMentionQuery(null);
-    if (item.kind === "file") {
-      setMentionFileIds((prev) => (prev.includes(item.id) ? prev : [...prev, item.id]));
-    }
+    setMention(null);
+    console.info("[co-create-room] 插入引用", {
+      projectId,
+      kind: item.kind === "role" ? "bot" : "file",
+      id: item.id,
+      label: item.label,
+    });
   };
 
   const send = async () => {
@@ -322,15 +366,25 @@ export default function CoCreateRoomApp() {
         roomId = await createRoom("chat", text.slice(0, 24));
         if (!roomId) return;
       }
+      const mentionRoleIds = roles
+        .filter((role) => mentionTokenPresent(text, "@", role.name))
+        .map((role) => role.id);
+      const mentionFileIds = fileWorkspace.files
+        .filter((file) => mentionTokenPresent(text, "#", file.title))
+        .map((file) => file.id);
       const message = await apiPost<RoomMessage>(
         `/projects/${projectId}/rooms/${roomId}/messages`,
-        { content: text, mention_file_ids: mentionFileIds },
+        {
+          content: text,
+          mention_role_ids: mentionRoleIds,
+          mention_file_ids: mentionFileIds,
+          agent_mode: agentMode,
+        },
       );
       setMessages((prev) => mergeMessages(prev, [message]));
       setDraft("");
-      setMentionFileIds([]);
-      setMentionQuery(null);
-      console.info("[co-create-room] 发送", { projectId, roomId, seq: message.seq });
+      setMention(null);
+      console.info("[co-create-room] 发送", { projectId, roomId, seq: message.seq, agentMode });
     } catch (err) {
       setError(err instanceof Error ? err.message : "发送失败");
     } finally {
@@ -366,17 +420,75 @@ export default function CoCreateRoomApp() {
     }
   };
 
+  const openRoom = (room: RoomSummary) => {
+    setMessages([]);
+    setOutputId(room.output_id);
+    setDocVersion(room.doc_version ?? 0);
+    openedDocRef.current = "";
+    setActiveId(room.id);
+  };
+
+  const saveRoomTitle = async (roomId: string) => {
+    const title = titleDraft.trim();
+    if (!title) {
+      setError("名称不能为空");
+      return;
+    }
+    const current = rooms.find((room) => room.id === roomId);
+    if (current?.title === title) {
+      setEditingRoomId(null);
+      return;
+    }
+    setRoomActingId(roomId);
+    setError("");
+    try {
+      const updated = await apiPatch<RoomSummary>(`/projects/${projectId}/rooms/${roomId}`, { title });
+      setRooms((prev) => prev.map((room) => (room.id === roomId ? { ...room, ...updated } : room)));
+      setEditingRoomId(null);
+      console.info("[co-create-room] 对话改名", { projectId, roomId, title: updated.title });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "改名失败");
+    } finally {
+      setRoomActingId(null);
+    }
+  };
+
+  const setRoomArchived = async (room: RoomSummary, archived: boolean) => {
+    setRoomActingId(room.id);
+    setError("");
+    try {
+      const updated = await apiPatch<RoomSummary>(`/projects/${projectId}/rooms/${room.id}`, { archived });
+      setRooms((prev) => prev.map((item) => (item.id === room.id ? { ...item, ...updated } : item)));
+      if (archived && activeId === room.id) {
+        setActiveId(null);
+        setMessages([]);
+        setOutputId(null);
+        setDocVersion(0);
+        openedDocRef.current = "";
+      }
+      console.info("[co-create-room] 对话归档", {
+        projectId,
+        roomId: room.id,
+        archived,
+      });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : archived ? "归档失败" : "恢复失败");
+    } finally {
+      setRoomActingId(null);
+    }
+  };
+
   if (!projectId) {
     return <div className="p-8 text-sm text-slate-500">缺少项目 ID</div>;
   }
 
   const roomList = (
       <aside className="flex h-full min-h-0 flex-col border-r border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900">
-        <div className="flex items-center justify-between gap-2 border-b border-slate-200 px-3 py-2 dark:border-slate-800">
+        <div className="flex h-[41px] shrink-0 items-center justify-between gap-2 border-b border-slate-300 px-3 dark:border-slate-700">
           <Link href={`/projects/${projectId}`} className="shrink-0 text-xs text-slate-500 hover:text-slate-800 dark:hover:text-slate-200">
             ← 项目
           </Link>
-          <h1 className="truncate text-sm font-semibold">共创对话</h1>
+          <h1 className="truncate text-xs font-semibold">共创对话</h1>
         </div>
         <div className="min-h-0 flex-1 space-y-1 overflow-y-auto p-2">
           <button
@@ -387,30 +499,113 @@ export default function CoCreateRoomApp() {
           >
             新建对话
           </button>
-          {rooms.map((room) => (
+          {rooms.filter((room) => !room.archived_at).map((room) => {
+            const selected = room.id === activeId;
+            const editing = editingRoomId === room.id;
+            return (
+              <div
+                key={room.id}
+                className={`rounded-lg px-2 py-1.5 text-sm ${
+                  selected
+                    ? "bg-blue-500/15 text-blue-700 dark:text-blue-200"
+                    : "hover:bg-slate-100 dark:hover:bg-slate-800"
+                }`}
+              >
+                {editing ? (
+                  <input
+                    aria-label="对话名称"
+                    value={titleDraft}
+                    disabled={roomActingId === room.id}
+                    autoFocus
+                    onChange={(event) => setTitleDraft(event.target.value)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter") {
+                        event.preventDefault();
+                        void saveRoomTitle(room.id);
+                      }
+                      if (event.key === "Escape") {
+                        skipTitleBlurRef.current = true;
+                        setEditingRoomId(null);
+                      }
+                    }}
+                    onBlur={() => {
+                      if (skipTitleBlurRef.current) {
+                        skipTitleBlurRef.current = false;
+                        return;
+                      }
+                      void saveRoomTitle(room.id);
+                    }}
+                    className="w-full rounded border border-slate-300 bg-white px-1 py-0.5 text-sm text-slate-900 outline-none dark:border-slate-600 dark:bg-slate-950 dark:text-slate-100"
+                  />
+                ) : (
+                  <button type="button" onClick={() => openRoom(room)} className="block w-full truncate px-1 text-left font-medium">
+                    {room.title}
+                  </button>
+                )}
+                <div className="mt-0.5 flex items-center justify-between gap-1 px-1">
+                  <span className="truncate text-[11px] text-slate-500">
+                    {room.doc_version > 0 ? `文档 v${room.doc_version}` : ""}
+                  </span>
+                  <span className="flex shrink-0 gap-1">
+                    <button
+                      type="button"
+                      disabled={roomActingId === room.id}
+                      onMouseDown={(event) => event.preventDefault()}
+                      onClick={() => {
+                        setEditingRoomId(room.id);
+                        setTitleDraft(room.title);
+                      }}
+                      className="rounded px-1 text-[10px] text-slate-500 hover:bg-white hover:text-slate-800 disabled:opacity-40 dark:hover:bg-slate-800 dark:hover:text-slate-100"
+                    >
+                      改名
+                    </button>
+                    <button
+                      type="button"
+                      disabled={roomActingId === room.id}
+                      onMouseDown={() => {
+                        skipTitleBlurRef.current = true;
+                      }}
+                      onClick={() => void setRoomArchived(room, true)}
+                      className="rounded px-1 text-[10px] text-slate-500 hover:bg-white hover:text-slate-800 disabled:opacity-40 dark:hover:bg-slate-800 dark:hover:text-slate-100"
+                    >
+                      归档
+                    </button>
+                  </span>
+                </div>
+              </div>
+            );
+          })}
+          {rooms.some((room) => !room.archived_at) ? null : (
+            <p className="px-2 py-4 text-xs text-slate-500">还没有共创对话</p>
+          )}
+          {rooms.some((room) => room.archived_at) ? (
             <button
-              key={room.id}
               type="button"
-              onClick={() => {
-                setMessages([]);
-                setOutputId(room.output_id);
-                setDocVersion(room.doc_version ?? 0);
-                openedDocRef.current = "";
-                setActiveId(room.id);
-              }}
-              className={`w-full rounded-lg px-3 py-2 text-left text-sm ${
-                room.id === activeId
-                  ? "bg-blue-500/15 text-blue-700 dark:text-blue-200"
-                  : "hover:bg-slate-100 dark:hover:bg-slate-800"
-              }`}
+              onClick={() => setShowArchived((prev) => !prev)}
+              className="w-full px-2 py-1 text-left text-[11px] text-slate-500 hover:text-slate-800 dark:hover:text-slate-200"
             >
-              <span className="block truncate font-medium">{room.title}</span>
-              <span className="text-[11px] text-slate-500">
-                {room.doc_version > 0 ? `文档 v${room.doc_version}` : "待创建"}
-              </span>
+              {showArchived ? "收起" : "已归档"} {rooms.filter((room) => room.archived_at).length}
             </button>
-          ))}
-          {rooms.length === 0 ? <p className="px-2 py-4 text-xs text-slate-500">还没有共创对话</p> : null}
+          ) : null}
+          {showArchived
+            ? rooms
+                .filter((room) => room.archived_at)
+                .map((room) => (
+                  <div key={room.id} className="rounded-lg px-2 py-1.5 text-sm text-slate-500">
+                    <span className="block truncate px-1">{room.title}</span>
+                    <div className="mt-0.5 flex justify-end px-1">
+                      <button
+                        type="button"
+                        disabled={roomActingId === room.id}
+                        onClick={() => void setRoomArchived(room, false)}
+                        className="rounded px-1 text-[10px] hover:bg-slate-100 hover:text-slate-800 disabled:opacity-40 dark:hover:bg-slate-800 dark:hover:text-slate-100"
+                      >
+                        恢复
+                      </button>
+                    </div>
+                  </div>
+                ))
+            : null}
         </div>
         <div className="flex h-[31rem] shrink-0 flex-col gap-2 border-t border-slate-200 p-3 dark:border-slate-800">
           {roles.length === 0 ? (
@@ -489,12 +684,17 @@ export default function CoCreateRoomApp() {
 
   const conversation = (
       <section className="flex h-full min-h-0 min-w-0 flex-1 flex-col bg-slate-100 text-slate-900 dark:bg-slate-950 dark:text-slate-100">
+        <div className="flex h-[41px] shrink-0 items-center border-b border-slate-300 px-3 dark:border-slate-700">
+          <p className="truncate text-xs font-semibold text-slate-700 dark:text-slate-200">
+            {activeRoom?.title || "共创对话"}
+          </p>
+        </div>
         <div ref={listRef} className="min-h-0 flex-1 space-y-3 overflow-y-auto px-4 py-4">
           {!activeRoom ? (
-            <p className="pt-16 text-center text-sm text-slate-500">选择一场对话，或在左侧新建。</p>
+            <p className="pt-16 text-center text-sm text-slate-500">与你的团队成员+AIbot进行共创项目</p>
           ) : messages.length === 0 ? (
             <p className="pt-16 text-center text-sm text-slate-500">
-              成员可以直接发言。用 @ 叫入座角色一起讨论，主笔会把这轮收成右侧文档。
+              成员可以直接发言。用 @ 叫 Bot，用 # 引用文档。
             </p>
           ) : (
             messages.map((message) => (
@@ -518,23 +718,35 @@ export default function CoCreateRoomApp() {
         </div>
         {error ? <p className="px-4 text-xs text-red-600">{error}</p> : null}
         <div className="relative border-t border-slate-200 p-3 dark:border-slate-800">
-          {mentionQuery != null && mentionItems.length > 0 ? (
-            <div className="absolute bottom-full left-3 right-3 mb-1 max-h-48 overflow-y-auto rounded-xl border border-slate-200 bg-white shadow-lg dark:border-slate-700 dark:bg-slate-900">
-              {mentionItems.map((item) => (
+          {mention && mentionItems.length > 0 ? (
+            <div
+              role="listbox"
+              aria-label={mention.kind === "role" ? "选择 Bot" : "选择文档"}
+              className="absolute bottom-full left-3 right-3 mb-1 max-h-48 overflow-y-auto rounded-xl border border-slate-200 bg-white shadow-lg dark:border-slate-700 dark:bg-slate-900"
+            >
+              {mentionItems.map((item, index) => (
                 <button
                   key={`${item.kind}-${item.id}`}
                   type="button"
+                  role="option"
+                  aria-selected={index === mentionIndex}
                   onMouseDown={(event) => event.preventDefault()}
+                  onMouseEnter={() => setMentionIndex(index)}
                   onClick={() => insertMention(item)}
-                  className="flex w-full items-center justify-between px-3 py-1.5 text-left text-sm hover:bg-slate-50 dark:hover:bg-slate-800"
+                  className={`flex w-full items-center justify-between px-3 py-1.5 text-left text-sm ${
+                    index === mentionIndex
+                      ? "bg-blue-50 text-blue-800 dark:bg-blue-950/40 dark:text-blue-100"
+                      : "hover:bg-slate-50 dark:hover:bg-slate-800"
+                  }`}
                 >
                   <span>{item.label}</span>
-                  <span className="text-[10px] text-slate-400">{item.kind === "role" ? "角色" : "文件"}</span>
+                  <span className="text-[10px] text-slate-400">{item.kind === "role" ? "Bot" : "文档"}</span>
                 </button>
               ))}
             </div>
           ) : null}
           <div className="flex items-end gap-2 rounded-2xl border border-slate-300 bg-white px-3 py-2 dark:border-slate-700 dark:bg-slate-900">
+            <div className="flex min-w-0 flex-1 flex-col gap-1.5">
             <textarea
               value={draft}
               aria-label="发言"
@@ -542,14 +754,71 @@ export default function CoCreateRoomApp() {
               rows={2}
               onChange={(event) => onDraftChange(event.target.value)}
               onKeyDown={(event) => {
+                if (mention && mentionItems.length > 0) {
+                  if (event.key === "ArrowDown") {
+                    event.preventDefault();
+                    setMentionIndex((prev) => (prev + 1) % mentionItems.length);
+                    return;
+                  }
+                  if (event.key === "ArrowUp") {
+                    event.preventDefault();
+                    setMentionIndex((prev) => (prev - 1 + mentionItems.length) % mentionItems.length);
+                    return;
+                  }
+                  if (event.key === "Escape") {
+                    event.preventDefault();
+                    setMention(null);
+                    return;
+                  }
+                  if (event.key === "Enter" || event.key === "Tab") {
+                    event.preventDefault();
+                    const picked = mentionItems[mentionIndex] ?? mentionItems[0];
+                    if (picked) insertMention(picked);
+                    return;
+                  }
+                }
                 if (event.key === "Enter" && !event.shiftKey) {
                   event.preventDefault();
                   void send();
                 }
               }}
-              placeholder="直接输入，回车发送。还没有对话时会自动新建"
-              className="max-h-32 min-h-[2.5rem] flex-1 resize-none bg-transparent text-sm outline-none"
+              placeholder="直接输入，回车发送。@ 关联 Bot，# 引用文档"
+              className="max-h-32 min-h-[2.5rem] w-full flex-1 resize-none bg-transparent text-sm outline-none"
             />
+            <div
+              className="inline-flex self-start rounded-lg border border-slate-200 bg-slate-50 p-0.5 dark:border-slate-700 dark:bg-slate-800/80"
+              role="group"
+              aria-label="创作模式"
+            >
+              {ROOM_AGENT_MODES.map((mode) => {
+                const meta = coCreateAgentModeMeta(mode);
+                const active = agentMode === mode;
+                return (
+                  <button
+                    key={mode}
+                    type="button"
+                    disabled={sending}
+                    title={meta.description}
+                    onClick={() => {
+                      setAgentMode(mode);
+                      console.info("[co-create-room] 对话模式切换", {
+                        projectId,
+                        roomId: activeId,
+                        mode,
+                      });
+                    }}
+                    className={`rounded-md px-2 py-0.5 text-[11px] font-medium transition disabled:opacity-50 ${
+                      active
+                        ? `${meta.badgeClassName} border`
+                        : "border border-transparent text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200"
+                    }`}
+                  >
+                    {meta.label}
+                  </button>
+                );
+              })}
+            </div>
+            </div>
             <button
               type="button"
               disabled={sending || !draft.trim()}
@@ -602,8 +871,8 @@ export default function CoCreateRoomApp() {
           />
         </div>
         <div
-          className={`h-full shrink-0 overflow-hidden border-l border-slate-300 transition-[width] duration-150 dark:border-slate-700 ${
-            filesOpen ? "w-60" : "w-7"
+          className={`h-full shrink-0 overflow-hidden border-l transition-[width] duration-150 ${
+            filesOpen ? "w-60 border-slate-300 dark:border-slate-700" : "w-7 border-blue-500/40"
           }`}
           onMouseEnter={revealFiles}
           onMouseLeave={concealFiles}
@@ -646,7 +915,7 @@ export default function CoCreateRoomApp() {
               type="button"
               aria-label="显示项目文件"
               onClick={() => setFilesPinned(true)}
-              className="flex h-full w-full items-center justify-center bg-slate-100 text-slate-500 hover:bg-slate-200 hover:text-slate-800 dark:bg-slate-900/40 dark:hover:bg-slate-800"
+              className="flex h-full w-full items-center justify-center bg-blue-500/15 text-blue-700 transition hover:bg-blue-500/25 dark:text-blue-200"
             >
               <span className="text-[10px] tracking-widest [writing-mode:vertical-rl]">项目文件</span>
             </button>

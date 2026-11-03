@@ -3,7 +3,7 @@ import type { ReactNode } from "react";
 
 export const metadata: Metadata = {
   title: "项目共创",
-  description: "项目成员与角色 Agent 的共创对话，讨论会创建或修订右侧文档。",
+  description: "项目成员与角色 Agent 的共创对话。讨论不会自动新建文档。",
 };
 
 export default function CoCreateLayout({ children }: { children: ReactNode }) {

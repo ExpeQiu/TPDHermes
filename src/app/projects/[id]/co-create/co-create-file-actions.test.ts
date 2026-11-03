@@ -241,6 +241,7 @@ describe("co-create-file-actions", () => {
           fileId: "f1",
           fileKind: "output",
           fileName: "稿.md",
+          summary: "改写",
           before: "a",
           after: "b",
           status: "proposed",

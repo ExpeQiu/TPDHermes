@@ -8,7 +8,8 @@ RUN apk add --no-cache libc6-compat
 WORKDIR /app
 
 COPY package.json package-lock.json* ./
-RUN npm install
+# 国内 ECS：npm 走 npmmirror，避免 registry.npmjs.org 过慢
+RUN npm config set registry https://registry.npmmirror.com && npm install
 
 # Rebuild the source code only when needed
 FROM base AS builder

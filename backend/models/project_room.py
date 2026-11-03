@@ -22,6 +22,7 @@ class ProjectRoom(Base):
     output_id = Column(String)
     doc_version = Column(Integer, nullable=False, default=0)
     active_turn_id = Column(String)
+    archived_at = Column(String)
     created_at = Column(String, default=lambda: datetime.now().isoformat())
     updated_at = Column(String, default=lambda: datetime.now().isoformat())
 
@@ -45,5 +46,6 @@ class ProjectRoomMessage(Base):
     mention_user_ids_json = Column(Text, nullable=False, default="[]")
     mention_file_ids_json = Column(Text, nullable=False, default="[]")
     file_actions_json = Column(Text, nullable=False, default="[]")
+    agent_mode = Column(String, nullable=False, default="agent")  # ask | agent | plan
     turn_state = Column(String, nullable=False, default="done")  # queued | running | done
     created_at = Column(String, default=lambda: datetime.now().isoformat())

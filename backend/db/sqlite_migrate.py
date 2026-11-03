@@ -46,6 +46,9 @@ def run_sqlite_migrations(connection: Connection) -> None:
     ).fetchall()
     names = {str(r[0]) for r in tables}
 
+    if "project_rooms" in names:
+        _add_columns(connection, "project_rooms", [("archived_at", "TEXT")])
+
     if "projects" in names:
         _add_columns(
             connection,
@@ -398,6 +401,13 @@ def run_sqlite_migrations(connection: Connection) -> None:
             text("CREATE INDEX IF NOT EXISTS idx_project_members_user ON project_members (user_id)")
         )
         logger.info("sqlite_migrate: created table project_members")
+
+    if "project_room_messages" in names:
+        _add_columns(
+            connection,
+            "project_room_messages",
+            [("agent_mode", "TEXT NOT NULL DEFAULT 'agent'")],
+        )
 
     ensure_suppression_table(connection)
     _seed_builtin_scenarios(connection)

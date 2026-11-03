@@ -545,9 +545,7 @@ export function FilePreviewPanel({
             </div>
             {renameError ? (
               <p className="text-[10px] text-red-500">{renameError}</p>
-            ) : (
-              <p className="text-[10px] text-slate-400">可直接修改文件名，回车或失焦保存</p>
-            )}
+            ) : null}
           </div>
         ) : null}
         {openTabKeys.length > 0 ? (
@@ -603,6 +601,7 @@ export function FilePreviewPanel({
       {activeFileKey ? (
         <>
           <div className="flex shrink-0 flex-wrap items-center gap-1 border-b border-slate-300 p-2 dark:border-slate-700">
+            <p className="min-w-0 text-[10px] text-slate-400">可直接修改文件名，回车或失焦保存</p>
             {/* 加入本轮 / 固定引用 / AI 解读 / AI 修改 暂隐藏，后续按需恢复 */}
             <div className="ml-auto flex items-center gap-1">
               {onTogglePreviewMaximize ? (

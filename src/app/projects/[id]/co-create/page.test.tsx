@@ -64,9 +64,9 @@ vi.mock("@/lib/co-create-api", async () => {
 });
 
 vi.mock("@/lib/chat-session-utils", async () => {
-  const actual = await vi.importActual<typeof import("@/lib/chat-session-utils")>(
+  const actual = (await vi.importActual(
     "@/lib/chat-session-utils",
-  );
+  )) as typeof import("@/lib/chat-session-utils");
   return {
     ...actual,
     projectCoCreateSessionDefaults: mocks.projectCoCreateSessionDefaults,

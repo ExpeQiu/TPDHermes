@@ -10,3 +10,5 @@ data/
 *.db
 *.log
 hermes-agent/
+.env
+.env.*

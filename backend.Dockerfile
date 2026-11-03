@@ -34,7 +34,10 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir --default-timeout=600 --retries 5 \
       torch --index-url https://download.pytorch.org/whl/cpu
 
-RUN pip install --no-cache-dir --default-timeout=600 --retries 5 -r requirements.txt
+# 国内 ECS：PyPI 走阿里云镜像。torch 仍用上一层的 CPU 官方源。
+RUN pip install --no-cache-dir --default-timeout=600 --retries 5 \
+      -i https://mirrors.aliyun.com/pypi/simple/ --trusted-host mirrors.aliyun.com \
+      -r requirements.txt
 
 # 预下载 embedding 模型（失败不阻断镜像构建，运行时仍会懒加载）
 RUN mkdir -p /app/.cache/huggingface \
@@ -43,6 +46,7 @@ RUN mkdir -p /app/.cache/huggingface \
 
 COPY main.py .
 COPY backend ./backend
+COPY tpdhermes ./tpdhermes
 COPY skills ./skills
 COPY scripts/docker/backend-entrypoint.sh /app/scripts/docker/backend-entrypoint.sh
 COPY schema.sql .

@@ -60,7 +60,7 @@ export const WORKFLOW_NAV_ITEMS: WorkflowNavItem[] = [
     href: "/projects?entry=co-create",
     label: "项目共创",
     shortLabel: "项目共创",
-    description: "项目成员与角色 Agent 一起讨论，并创建或修订右侧文档。",
+    description: "项目成员与角色 Agent 一起讨论，不自动新建文档。",
     matchActive: isCoCreateNavPath,
     resolveHref: resolveCoCreateNavHref,
   },

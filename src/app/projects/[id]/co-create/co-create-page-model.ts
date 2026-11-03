@@ -10,11 +10,11 @@ import type {
   PatchEditMode,
 } from "@/app/projects/[id]/co-create/co-create-types";
 import { isCoCreateWritableFileKind } from "@/app/projects/[id]/co-create/co-create-file-policy";
-import type { AutoPatchTargetFile } from "@/app/projects/[id]/co-create/co-create-auto-patch";
 import {
-  isDocumentGenerationPrompt,
   isRewritePrompt,
-} from "@/app/projects/[id]/co-create/co-create-auto-draft";
+  type AutoPatchTargetFile,
+} from "@/app/projects/[id]/co-create/co-create-auto-patch";
+import { isDocumentGenerationPrompt } from "@/app/projects/[id]/co-create/co-create-auto-draft";
 import { normalizeCreateFilePath } from "@/app/projects/[id]/co-create/co-create-file-actions";
 
 export function decodeFileIds(keys: string[]): string[] {
