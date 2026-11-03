@@ -4,6 +4,7 @@ import Link from "next/link";
 
 import { useUserAccess } from "@/lib/admin-access";
 import type { FeatureKey } from "@/lib/rbac";
+import { isSystemAdminRole } from "@/lib/user-admin";
 
 type EntryItem = {
   href: string;
@@ -22,14 +23,16 @@ const HREF_FEATURE: Partial<Record<string, FeatureKey>> = {
 };
 
 export default function HomeEntrySection({ entries }: { entries: readonly EntryItem[] }) {
-  const { canAccess, isAdmin, ready } = useUserAccess();
+  const { access, canAccess, isAdmin, ready } = useUserAccess();
   const visibleEntries = entries.filter((item) => {
+    if (item.adminOnly) {
+      return ready && (isAdmin || isSystemAdminRole(access?.platform_role));
+    }
     const feature = item.requiredFeature ?? HREF_FEATURE[item.href];
     if (feature) {
       if (!ready) return false;
       return canAccess(feature);
     }
-    if (item.adminOnly) return ready && isAdmin;
     return true;
   });
 

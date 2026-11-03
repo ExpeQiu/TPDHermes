@@ -168,7 +168,7 @@ export function ProjectFilesPanel({
             return (
               <div
                 key={fileKey}
-                className={`group flex w-full items-stretch gap-1 rounded-md text-xs transition ${
+                className={`group flex w-full items-stretch gap-1 rounded-md text-[11px] transition ${
                   isActive
                     ? "bg-blue-50 dark:bg-blue-950/30"
                     : isOpen
@@ -190,9 +190,9 @@ export function ProjectFilesPanel({
                     });
                     onSelectPreview(fileKey);
                   }}
-                  className="flex min-w-0 flex-1 items-start gap-2 rounded-md px-2 py-2 text-left no-underline"
+                  className="flex min-w-0 flex-1 items-start gap-1.5 rounded-md px-1.5 py-1 text-left no-underline"
                 >
-                  <span className="relative shrink-0 text-sm leading-none">
+                  <span className="relative shrink-0 text-[11px] leading-none">
                     {file.kind === "output" ? "📄" : "📎"}
                     {isOpen ? (
                       <span
@@ -238,7 +238,7 @@ export function ProjectFilesPanel({
           type="button"
           onClick={handlePickAttachment}
           disabled={uploading || !projectId}
-          className="w-full rounded-xl border border-blue-300 bg-blue-50 px-3 py-2 text-xs font-medium text-blue-800 transition hover:border-blue-400 hover:bg-blue-100 disabled:opacity-50 dark:border-blue-500/40 dark:bg-blue-500/10 dark:text-blue-200 dark:hover:bg-blue-500/20"
+          className="w-full rounded-lg border border-blue-300 bg-blue-50 px-2 py-1 text-[11px] font-medium text-blue-800 transition hover:border-blue-400 hover:bg-blue-100 disabled:opacity-50 dark:border-blue-500/40 dark:bg-blue-500/10 dark:text-blue-200 dark:hover:bg-blue-500/20"
         >
           {uploading ? "上传中…" : "上传附件"}
         </button>

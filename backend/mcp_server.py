@@ -236,6 +236,28 @@ async def project_get(id: str, user_id: str = "") -> dict:
     return await _get(id, user_id=user_id)
 
 
+@mcp.tool(
+    title="Studio Apply",
+    description=(
+        "Choose one tech-card workspace action: extract, locate, lock, merge, merge-cross, gaps, or help. "
+        "Pass the current workspace state. This tool does not author card content."
+    ),
+)
+async def studio_apply(
+    operation: str,
+    state: dict[str, Any] | None = None,
+    term: str = "",
+    message: str = "",
+) -> dict:
+    """Apply one studio operation chosen by the agent."""
+    from backend.services.tech_card_studio import apply_operation
+
+    if not isinstance(state, dict):
+        return {"ok": False, "error": "studio_apply 需要当前工作区 state"}
+    text = term or message
+    return apply_operation(state, operation, text)
+
+
 # Optional external MCP mounts — 本地 Tavily 工具优先（带来源捕获），无 API Key 时回退远程代理
 import os
 

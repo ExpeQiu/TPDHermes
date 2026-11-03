@@ -3,7 +3,7 @@ import type { ReactNode } from "react";
 
 export const metadata: Metadata = {
   title: "项目共创",
-  description: "基于项目文件的 Agent 协同创作工作台。",
+  description: "项目成员与角色 Agent 的共创对话，讨论会创建或修订右侧文档。",
 };
 
 export default function CoCreateLayout({ children }: { children: ReactNode }) {

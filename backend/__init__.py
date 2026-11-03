@@ -181,10 +181,13 @@ from backend.routes.metrics import router as metrics_router
 from backend.routes.feedback import router as feedback_router, learning_router
 from backend.routes.brainstorm import router as brainstorm_router
 from backend.routes.system_config import router as system_config_router
+from backend.routes.studio import router as studio_router
+from backend.routes.project_rooms import router as project_rooms_router
 
 include_router_with_version(me_router)
 include_router_with_version(mcp_router, strip_prefix="/mcp")
 include_router_with_version(projects_router, strip_prefix="/projects")
+include_router_with_version(project_rooms_router, strip_prefix="/projects")
 include_router_with_version(kb_router,       strip_prefix="/kb")
 include_router_with_version(kb_ingest_router, strip_prefix="/kb")
 include_router_with_version(kb_policies_router, strip_prefix="/kb")
@@ -205,6 +208,7 @@ include_router_with_version(feedback_router, strip_prefix="/feedback")
 include_router_with_version(learning_router, strip_prefix="/learning")
 include_router_with_version(brainstorm_router, strip_prefix="/brainstorm")
 include_router_with_version(system_config_router, strip_prefix="/system")
+include_router_with_version(studio_router, strip_prefix="/studio")
 
 
 # ── 根路径 & 健康检查 ───────────────────────────────────────

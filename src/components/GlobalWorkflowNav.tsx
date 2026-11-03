@@ -6,9 +6,9 @@ import { usePathname } from "next/navigation";
 import { useUserAccess } from "@/lib/admin-access";
 import {
   WORKFLOW_NAV_ITEMS,
+  isWorkflowPageAccessible,
   type WorkflowNavItem,
 } from "@/lib/workflow-nav";
-import type { FeatureKey } from "@/lib/rbac";
 import { useEffectiveUserScopeId } from "@/lib/use-effective-user-scope-id";
 
 function isNavItemActive(item: WorkflowNavItem, pathname: string): boolean {
@@ -25,7 +25,7 @@ function navItemHref(item: WorkflowNavItem, scopeUserId: string, mounted: boolea
 export default function GlobalWorkflowNav() {
   const pathname = usePathname();
   const scopeUserId = useEffectiveUserScopeId();
-  const { canAccess, ready } = useUserAccess();
+  const { access, ready } = useUserAccess();
   const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
@@ -33,22 +33,17 @@ export default function GlobalWorkflowNav() {
   }, []);
 
   const navItems = useMemo(() => {
-    const isRestricted = (item: (typeof WORKFLOW_NAV_ITEMS)[number]) =>
-      Boolean(item.requiredFeature || item.adminOnly);
-
     // 权限未就绪时隐藏受限入口，避免无权限用户短暂看到「场景编排 / 知识库」等
-    if (!mounted || !ready) {
-      return WORKFLOW_NAV_ITEMS.filter((item) => !isRestricted(item));
+    if (!mounted || !ready || !access) {
+      return WORKFLOW_NAV_ITEMS.filter((item) => isWorkflowPageAccessible(item, null));
     }
-
-    return WORKFLOW_NAV_ITEMS.filter((item) => {
-      if (item.requiredFeature) return canAccess(item.requiredFeature);
-      if (item.adminOnly) {
-        return canAccess("create" as FeatureKey) || canAccess("knowledge" as FeatureKey);
-      }
-      return true;
-    });
-  }, [mounted, ready, canAccess]);
+    return WORKFLOW_NAV_ITEMS.filter((item) =>
+      isWorkflowPageAccessible(item, {
+        features: access.features,
+        platformRole: access.platform_role,
+      }),
+    );
+  }, [mounted, ready, access]);
 
   return (
     <header className="z-40 shrink-0 border-b border-slate-200 bg-white/85 backdrop-blur-md dark:border-slate-800 dark:bg-slate-950/85">

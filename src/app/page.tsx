@@ -36,6 +36,14 @@ const entries = [
     desc: "在项目内按已绑定场景生成与沉淀结果",
     accent: "from-slate-600 to-slate-800",
     eyebrow: "工坊",
+    adminOnly: true,
+  },
+  {
+    href: "/studio",
+    title: "场景创作",
+    desc: "按技能卡进入创作。当前接入技术卡核对",
+    accent: "from-amber-500 to-lime-600",
+    eyebrow: "验证",
   },
   {
     href: "/create",

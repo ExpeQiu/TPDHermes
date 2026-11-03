@@ -864,7 +864,7 @@ function RestoreIcon() {
   return (
     <svg
       viewBox="0 0 24 24"
-      className="h-3.5 w-3.5"
+      className="h-3 w-3"
       fill="none"
       stroke="currentColor"
       strokeWidth="2"
@@ -909,7 +909,7 @@ function ViewTabBtn({
       title={label}
       aria-label={label}
       onClick={onClick}
-      className={`inline-flex h-6 w-6 items-center justify-center rounded-md transition ${
+      className={`inline-flex h-5 w-5 items-center justify-center rounded-md transition ${
         active
           ? "bg-blue-600 text-white"
           : "bg-slate-200 text-slate-600 hover:bg-slate-300 dark:bg-slate-700 dark:text-slate-300 dark:hover:bg-slate-600"
@@ -924,7 +924,7 @@ function EyeIcon() {
   return (
     <svg
       viewBox="0 0 24 24"
-      className="h-3.5 w-3.5"
+      className="h-3 w-3"
       fill="none"
       stroke="currentColor"
       strokeWidth="2"
@@ -942,7 +942,7 @@ function PencilIcon() {
   return (
     <svg
       viewBox="0 0 24 24"
-      className="h-3.5 w-3.5"
+      className="h-3 w-3"
       fill="none"
       stroke="currentColor"
       strokeWidth="2"
@@ -960,7 +960,7 @@ function HistoryIcon() {
   return (
     <svg
       viewBox="0 0 24 24"
-      className="h-3.5 w-3.5"
+      className="h-3 w-3"
       fill="none"
       stroke="currentColor"
       strokeWidth="2"
@@ -979,7 +979,7 @@ function WindowMaximizeIcon() {
   return (
     <svg
       viewBox="0 0 24 24"
-      className="h-3.5 w-3.5"
+      className="h-3 w-3"
       fill="none"
       stroke="currentColor"
       strokeWidth="2"
@@ -996,7 +996,7 @@ function WindowRestoreIcon() {
   return (
     <svg
       viewBox="0 0 24 24"
-      className="h-3.5 w-3.5"
+      className="h-3 w-3"
       fill="none"
       stroke="currentColor"
       strokeWidth="2"

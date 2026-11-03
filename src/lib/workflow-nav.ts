@@ -1,3 +1,5 @@
+import { isSystemAdminRole } from "./user-admin";
+
 export type WorkflowNavItem = {
   href: string;
   label: string;
@@ -5,6 +7,8 @@ export type WorkflowNavItem = {
   description: string;
   /** @deprecated 使用 requiredFeature */
   adminOnly?: boolean;
+  /** 默认仅系统管理员 / 平台管理员可见 */
+  systemAdminOnly?: boolean;
   requiredFeature?: import("./rbac").FeatureKey;
   /** 覆盖默认 pathname 高亮规则 */
   matchActive?: (pathname: string) => boolean;
@@ -56,7 +60,7 @@ export const WORKFLOW_NAV_ITEMS: WorkflowNavItem[] = [
     href: "/projects?entry=co-create",
     label: "项目共创",
     shortLabel: "项目共创",
-    description: "基于项目文件的 Agent 协同工作台。",
+    description: "项目成员与角色 Agent 一起讨论，并创建或修订右侧文档。",
     matchActive: isCoCreateNavPath,
     resolveHref: resolveCoCreateNavHref,
   },
@@ -71,6 +75,13 @@ export const WORKFLOW_NAV_ITEMS: WorkflowNavItem[] = [
     label: "场景输出",
     shortLabel: "场景输出",
     description: "在项目与场景上下文中沉淀与优化输出物。",
+    systemAdminOnly: true,
+  },
+  {
+    href: "/studio",
+    label: "场景创作",
+    shortLabel: "场景创作",
+    description: "按技能卡进入场景创作。当前接入技术卡提取与核对。",
   },
   {
     href: "/create",
@@ -78,6 +89,7 @@ export const WORKFLOW_NAV_ITEMS: WorkflowNavItem[] = [
     shortLabel: "场景编排",
     description: "定义任务边界、知识范围和期望输出。",
     adminOnly: true,
+    systemAdminOnly: true,
     requiredFeature: "create",
   },
   {
@@ -86,6 +98,7 @@ export const WORKFLOW_NAV_ITEMS: WorkflowNavItem[] = [
     shortLabel: "知识库",
     description: "配置知识范围并验证检索效果。",
     adminOnly: true,
+    systemAdminOnly: true,
     requiredFeature: "knowledge",
   },
   {
@@ -107,6 +120,7 @@ export const WORKFLOW_NAV_ITEMS: WorkflowNavItem[] = [
     label: "配置",
     shortLabel: "配置",
     description: "运行配置、工作台 CLI、用户身份、MCP、协作包与角色。",
+    systemAdminOnly: true,
   },
 ];
 
@@ -124,4 +138,29 @@ export function getWorkflowNavItem(pathname: string) {
     WORKFLOW_NAV_ITEMS.find((item) => isWorkflowNavItemActive(item, pathname)) ??
     WORKFLOW_NAV_ITEMS[0]
   );
+}
+
+export type WorkflowPageAccess = {
+  features?: readonly string[] | null;
+  platformRole?: string | null;
+};
+
+/** 与顶栏一致：未就绪或非管理员时隐藏管理员入口；其余按 requiredFeature 过滤。 */
+export function isWorkflowPageAccessible(
+  item: WorkflowNavItem,
+  access: WorkflowPageAccess | null | undefined,
+): boolean {
+  if (item.systemAdminOnly && !isSystemAdminRole(access?.platformRole)) return false;
+  const features = access?.features;
+  const restricted = Boolean(item.requiredFeature || item.adminOnly);
+  if (!features) return !restricted;
+  if (item.requiredFeature) return features.includes(item.requiredFeature);
+  if (item.adminOnly) return features.includes("create") || features.includes("knowledge");
+  return true;
+}
+
+export function accessibleWorkflowPages(
+  access: WorkflowPageAccess | null | undefined,
+): WorkflowNavItem[] {
+  return WORKFLOW_NAV_ITEMS.filter((item) => isWorkflowPageAccessible(item, access));
 }

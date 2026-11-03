@@ -26,6 +26,12 @@ TPHERMES_TOOL_CATALOG: list[dict[str, str]] = [
     {"name": "project_list", "group": "project", "title": "项目列表", "description": "列出项目"},
     {"name": "project_create", "group": "project", "title": "创建项目", "description": "新建项目"},
     {"name": "project_get", "group": "project", "title": "项目详情", "description": "按 ID 获取项目"},
+    {
+        "name": "studio_apply",
+        "group": "studio",
+        "title": "技术卡动作",
+        "description": "选择提取、定位、锁定、合并或查看缺口；卡片内容由服务端目录写入",
+    },
     {"name": "tavily_search", "group": "web", "title": "Tavily 搜索", "description": "联网搜索（经 tphermes 代理 Tavily MCP）"},
     {"name": "tavily_extract", "group": "web", "title": "Tavily 抽取", "description": "网页内容抽取（经 tphermes 代理）"},
     {"name": "list_resources", "group": "web", "title": "列出资源", "description": "MCP 资源列表（Tavily 代理）"},
@@ -38,6 +44,7 @@ TOOL_GROUP_LABELS: dict[str, str] = {
     "knowledge": "知识库",
     "workshop": "结果工坊",
     "project": "项目",
+    "studio": "技术卡工作区",
     "web": "联网 / Tavily",
 }
 

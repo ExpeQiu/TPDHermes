@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useCallback, useEffect, useState } from "react";
+import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { apiGet } from "@/lib/api";
@@ -22,6 +22,7 @@ import {
   type UserIdentityState,
 } from "@/lib/user-identity-sync";
 import { fetchUserAccess, type UserAccessState } from "@/lib/rbac";
+import { accessibleWorkflowPages } from "@/lib/workflow-nav";
 import { isSystemAdminRole } from "@/lib/user-admin";
 import { CONTENT_MAX_CLASS } from "@/lib/content-shell";
 import ExternalMcpPanel from "@/components/settings/ExternalMcpPanel";
@@ -89,6 +90,57 @@ const THEME_OPTIONS: { value: "light" | "dark"; label: string }[] = [
   { value: "light", label: "浅色" },
   { value: "dark", label: "深色" },
 ];
+
+function PageAccessPanel({ access }: { access: UserAccessState | null }) {
+  const pages = useMemo(
+    () =>
+      access
+        ? accessibleWorkflowPages({
+            features: access.features,
+            platformRole: access.platform_role,
+          })
+        : [],
+    [access],
+  );
+
+  useEffect(() => {
+    if (!access) return;
+    console.info("[settings] 当前用户可访问页面", {
+      user_id: access.user_id,
+      platform_role: access.platform_role,
+      pages: pages.map((page) => page.href),
+    });
+  }, [access, pages]);
+
+  return (
+    <aside
+      aria-label="权限管理"
+      className="rounded-2xl border border-slate-200 bg-white/80 p-6 dark:border-slate-800 dark:bg-slate-900/50"
+    >
+      <h2 className="text-sm font-medium text-slate-900 dark:text-slate-100">权限管理</h2>
+      <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+        {access
+          ? `当前角色「${access.platform_role_label || access.platform_role}」可访问的页面`
+          : "正在读取当前用户可访问的页面"}
+      </p>
+      {!access ? (
+        <p className="mt-4 text-sm text-slate-500">正在读取权限…</p>
+      ) : (
+        <ul className="mt-4 space-y-2">
+          {pages.map((page) => (
+            <li
+              key={page.href}
+              className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 dark:border-slate-800 dark:bg-slate-900/80"
+            >
+              <p className="text-sm font-medium text-slate-900 dark:text-slate-100">{page.label}</p>
+              <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">{page.description}</p>
+            </li>
+          ))}
+        </ul>
+      )}
+    </aside>
+  );
+}
 
 function parseTab(raw: string | null): SettingsTab {
   if (raw === "external") return "mcp";
@@ -286,7 +338,8 @@ function SettingsPageContent() {
 
           {activeTab === "identity" && (
             <>
-              <div className="mt-4 max-w-lg space-y-4 rounded-2xl border border-slate-200 bg-white/80 p-6 dark:border-slate-800 dark:bg-slate-900/50">
+              <div className="mt-4 grid items-start gap-4 lg:grid-cols-2">
+              <div className="space-y-4 rounded-2xl border border-slate-200 bg-white/80 p-6 dark:border-slate-800 dark:bg-slate-900/50">
               {me && (
                 <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm dark:border-slate-800 dark:bg-slate-900/80">
                   <p>
@@ -344,6 +397,9 @@ function SettingsPageContent() {
               >
                 {saving ? "保存中…" : "保存并同步"}
               </button>
+              </div>
+
+              <PageAccessPanel access={access} />
               </div>
 
               {canManageUserGroups && (

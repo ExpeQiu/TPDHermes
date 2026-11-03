@@ -89,3 +89,5 @@ from backend.models.project_file_domain import ProjectFileActionLog as _ProjectF
 from backend.models.user_preference import UserPreference as _UserPreference  # noqa: E402, F401
 from backend.models.skill import Skill as _Skill  # noqa: E402, F401
 from backend.models.project_member import ProjectMember as _ProjectMember  # noqa: E402, F401
+from backend.models.project_room import ProjectRoom as _ProjectRoom  # noqa: E402, F401
+from backend.models.project_room import ProjectRoomMessage as _ProjectRoomMessage  # noqa: E402, F401
