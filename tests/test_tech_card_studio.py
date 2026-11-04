@@ -77,7 +77,7 @@ def test_studio_route_returns_turn(monkeypatch):
     with TestClient(app) as client:
         response = client.post(
             "/api/v1/studio/turn",
-            json={"message": "查看缺口", "state": studio.create_state()},
+            json={"message": "查看缺口", "state": studio.create_state(), "demo": True},
         )
     assert response.status_code == 200
     body = response.json()

@@ -10,15 +10,18 @@ import {
   type CoCreateAgentMode,
 } from "@/app/projects/[id]/co-create/co-create-agent-utils";
 import { FilePreviewPanel } from "@/app/projects/[id]/co-create/components/FilePreviewPanel";
+import { ChatMarkdownWithCitations } from "@/components/chat-markdown-with-citations";
 import { ProjectFilesPanel } from "@/app/projects/[id]/co-create/components/ProjectFilesPanel";
 import { useFileWorkspace } from "@/app/projects/[id]/co-create/hooks/use-file-workspace";
 import {
   acceptRoomPayload,
   buildRoomFileRef,
-  seatedRoles,
+  formatElapsedSeconds,
+  questionClock,
   type RoomFileRef,
 } from "@/app/projects/[id]/co-create/room-client-state";
 import { apiGet, apiPatch, apiPost } from "@/lib/api";
+import { randomUUID } from "@/lib/random-id";
 import {
   encodeProjectFileSelectValue,
   decodeProjectFileSelectValue,
@@ -52,6 +55,14 @@ type RoomMessage = {
   content: string;
   turn_state: string;
   event_seq?: number;
+  error_summary?: string;
+  created_at?: string | null;
+};
+
+type RoomTurnState = {
+  id: string;
+  turn_id: string;
+  turn_state: string;
   error_summary?: string;
 };
 
@@ -102,7 +113,42 @@ function layoutRoleCloud(ids: string[]): Map<string, { x: number; y: number; dur
   return new Map(points.map((point) => [point.id, point]));
 }
 
-export type RoomMentionKind = "role" | "file";
+type CloudChip = {
+  key: string;
+  kind: "member" | "bot";
+  id: string;
+  label: string;
+};
+
+/** 成员芯片上的短名。优先用户名，避免露出随机 user_id。 */
+export function memberChipLabel(userId: string, displayName?: string): string {
+  const named = (displayName || "").trim();
+  if (named && !named.startsWith("user_") && !named.startsWith("auto_")) return named;
+  const id = userId.trim();
+  if (!id) return "成员";
+  if (id.startsWith("auto_")) return `成员 ${id.slice(5, 9)}`;
+  if (id.startsWith("feishu:")) {
+    const tail = id.slice(7);
+    return tail.length > 6 ? `飞书 ${tail.slice(-4)}` : `飞书 ${tail}`;
+  }
+  if (id.length > 16) return `${id.slice(0, 8)}…`;
+  return id;
+}
+
+function chipMark(kind: CloudChip["kind"], label: string): string {
+  const source = kind === "member" ? label.replace(/^成员\s*/, "").replace(/^飞书\s*/, "") : label;
+  const ch = [...source].find((item) => /[A-Za-z0-9\u4e00-\u9fff]/.test(item));
+  return (ch || (kind === "member" ? "人" : "B")).toUpperCase();
+}
+
+export type RoomMentionKind = "role" | "member" | "file";
+
+type MentionItem = {
+  kind: RoomMentionKind;
+  id: string;
+  label: string;
+  seat?: boolean;
+};
 
 /** 输入框末尾的触发符：@ 关联 Bot，# 引用文档。后出现的触发符生效。 */
 export function readRoomComposerMention(
@@ -130,12 +176,40 @@ function mergeMessages(current: RoomMessage[], incoming: RoomMessage[]): RoomMes
   return Array.from(byId.values()).sort((a, b) => a.seq - b.seq);
 }
 
+function applyTurnStates(messages: RoomMessage[], states: RoomTurnState[] | undefined): RoomMessage[] {
+  if (!states?.length) return messages;
+  const byId = new Map(states.map((item) => [item.id, item]));
+  return messages.map((message) => {
+    const state = byId.get(message.id);
+    if (!state || (state.turn_state === message.turn_state && (state.error_summary || "") === (message.error_summary || ""))) {
+      return message;
+    }
+    return {
+      ...message,
+      turn_state: state.turn_state,
+      error_summary: state.error_summary || message.error_summary,
+    };
+  });
+}
+
+function useNow(active: boolean): number {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!active) return;
+    const timer = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, [active]);
+  return now;
+}
+
 export default function CoCreateRoomApp() {
   const params = useParams();
   const projectId = String(params?.id || "");
   const [fileProjectId, setFileProjectId] = useState(projectId);
   const [bindableProjects, setBindableProjects] = useState<ProjectRecord[]>([]);
   const [roles, setRoles] = useState<RoleMeta[]>([]);
+  const [members, setMembers] = useState<{ user_id: string; display_name?: string }[]>([]);
+  const [voices, setVoices] = useState<{ users: string[]; roles: string[] }>({ users: [], roles: [] });
   const [fileSaving, setFileSaving] = useState(false);
   const [filesPinned, setFilesPinned] = useState(false);
   const [filesRevealed, setFilesRevealed] = useState(false);
@@ -184,6 +258,8 @@ export default function CoCreateRoomApp() {
   }, []);
   const activeIdRef = useRef<string | null>(null);
   activeIdRef.current = activeId;
+  const roomsRef = useRef<RoomSummary[]>([]);
+  roomsRef.current = rooms;
   const epochRef = useRef(0);
   const draftsRef = useRef<Record<string, string>>({});
   const errorsRef = useRef<Record<string, string>>({});
@@ -191,6 +267,9 @@ export default function CoCreateRoomApp() {
   const roundFileRef = useRef<RoomFileRef | null>(null);
   const [writerDriver, setWriterDriver] = useState("");
   const activeRoom = rooms.find((room) => room.id === activeId) ?? null;
+  const clockNow = useNow(
+    messages.some((message) => questionClock(message, messages, Date.now()).pending),
+  );
 
   const loadRooms = useCallback(async () => {
     const data = await apiGet<{ items: RoomSummary[] }>(`/projects/${projectId}/rooms`);
@@ -236,6 +315,11 @@ export default function CoCreateRoomApp() {
       }
     };
     void load<{ items: RoleMeta[] }>("/brainstorm/roles", (data) => setRoles(data.items ?? []));
+    void load<{ user_id: string; display_name?: string }[]>("/projects/" + projectId + "/members", (data) => {
+      const rows = Array.isArray(data) ? data : [];
+      setMembers(rows.filter((item) => item?.user_id));
+      console.info("[co-create-room] 项目成员", { projectId, count: rows.length });
+    });
     loadRooms().catch((err: Error) => {
       if (!cancelled) setError(err.message);
     });
@@ -267,13 +351,18 @@ export default function CoCreateRoomApp() {
       }
       const query = params.toString();
       const data = await apiGet<
-        RoomSummary & { messages: RoomMessage[]; content_omitted?: boolean; writer_driver?: string }
+        RoomSummary & {
+          messages: RoomMessage[];
+          turn_states?: RoomTurnState[];
+          content_omitted?: boolean;
+          writer_driver?: string;
+        }
       >(`/projects/${projectId}/rooms/${roomId}/messages${query ? `?${query}` : ""}`);
       const incoming = data.messages ?? [];
       const maxEvent = incoming.reduce((max, item) => Math.max(max, item.event_seq ?? 0), cursor);
       eventCursorRef.current[roomId] = maxEvent;
       if (!acceptRoomPayload(roomId, activeIdRef.current, epoch, epochRef.current)) return data;
-      setMessages((prev) => mergeMessages(cursor > 0 ? prev : [], incoming));
+      setMessages((prev) => applyTurnStates(mergeMessages(cursor > 0 ? prev : [], incoming), data.turn_states));
       if (!data.content_omitted) {
         setDocVersion(data.doc_version ?? 0);
         setOutputId(data.output_id ?? null);
@@ -369,7 +458,7 @@ export default function CoCreateRoomApp() {
       try {
         await applyFileAction(fileProjectId, {
           room_id: activeId,
-          proposal_id: crypto.randomUUID(),
+          proposal_id: randomUUID(),
           action: {
             type: "patch",
             target_file_id: decoded.id,
@@ -413,7 +502,7 @@ export default function CoCreateRoomApp() {
       try {
         await applyFileAction(fileProjectId, {
           room_id: activeId,
-          proposal_id: crypto.randomUUID(),
+          proposal_id: randomUUID(),
           action: {
             type: "patch",
             target_file_id: decoded.id,
@@ -437,9 +526,27 @@ export default function CoCreateRoomApp() {
     if (!mention) return [];
     const q = mention.query.trim().toLowerCase();
     if (mention.kind === "role") {
-      return seatedRoles(roles, activeRoom?.role_ids ?? [])
+      const seatedIds = new Set(activeRoom?.role_ids ?? []);
+      const roleItems = roles
         .filter((role) => !q || role.name.toLowerCase().includes(q) || role.id.toLowerCase().includes(q))
-        .map((role) => ({ kind: "role" as const, id: role.id, label: role.name }));
+        .map((role) => ({
+          kind: "role" as const,
+          id: role.id,
+          label: role.name,
+          seat: !seatedIds.has(role.id),
+        }));
+      const memberItems = members
+        .filter((member) => {
+          const label = memberChipLabel(member.user_id, member.display_name).toLowerCase();
+          return !q || label.includes(q) || member.user_id.toLowerCase().includes(q);
+        })
+        .map((member) => ({
+          kind: "member" as const,
+          id: member.user_id,
+          label: memberChipLabel(member.user_id, member.display_name),
+          seat: false,
+        }));
+      return [...roleItems, ...memberItems];
     }
     return fileWorkspace.files
       .filter(
@@ -449,10 +556,73 @@ export default function CoCreateRoomApp() {
           file.path.toLowerCase().includes(q),
       )
       .slice(0, 8)
-      .map((file) => ({ kind: "file" as const, id: file.id, label: file.title }));
-  }, [activeRoom?.role_ids, fileWorkspace.files, mention, roles]);
+      .map((file) => ({ kind: "file" as const, id: file.id, label: file.title, seat: false }));
+  }, [activeRoom?.role_ids, fileWorkspace.files, members, mention, roles]);
 
-  const roleCloud = useMemo(() => layoutRoleCloud(roles.map((role) => role.id)), [roles]);
+  const activeUsers = useMemo(() => {
+    const ids = new Set(voices.users);
+    for (const message of messages) {
+      if (message.author_type === "human" && message.author_id) ids.add(message.author_id);
+    }
+    return ids;
+  }, [messages, voices.users]);
+  const activeRoles = useMemo(() => {
+    const ids = new Set(voices.roles);
+    for (const message of messages) {
+      if (message.author_type === "agent" && message.author_id) ids.add(message.author_id);
+    }
+    return ids;
+  }, [messages, voices.roles]);
+  const cloudChips = useMemo(() => {
+    const chips: CloudChip[] = [];
+    const seen = new Set<string>();
+    for (const member of members) {
+      const id = member.user_id.trim();
+      if (!id || seen.has(id)) continue;
+      seen.add(id);
+      chips.push({
+        key: `user:${id}`,
+        kind: "member",
+        id,
+        label: memberChipLabel(id, member.display_name),
+      });
+    }
+    const nameById = new Map(members.map((member) => [member.user_id, member.display_name] as const));
+    for (const id of activeUsers) {
+      if (seen.has(id)) continue;
+      seen.add(id);
+      chips.push({ key: `user:${id}`, kind: "member", id, label: memberChipLabel(id, nameById.get(id)) });
+    }
+    for (const role of roles) {
+      chips.push({ key: `bot:${role.id}`, kind: "bot", id: role.id, label: role.name });
+    }
+    return chips;
+  }, [activeUsers, members, roles]);
+  const roleCloud = useMemo(() => layoutRoleCloud(cloudChips.map((chip) => chip.key)), [cloudChips]);
+
+  useEffect(() => {
+    if (!projectId) return;
+    let cancelled = false;
+    apiGet<{ user_ids?: string[]; role_ids?: string[] }>(`/projects/${projectId}/rooms/voices`)
+      .then((data) => {
+        if (cancelled) return;
+        setVoices({
+          users: data.user_ids ?? [],
+          roles: data.role_ids ?? [],
+        });
+        console.info("[co-create-room] 已发声", {
+          projectId,
+          users: data.user_ids?.length ?? 0,
+          roles: data.role_ids?.length ?? 0,
+        });
+      })
+      .catch((err) => {
+        console.warn("[co-create-room] 发声记录加载失败", err);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [projectId, messages.length]);
 
   useEffect(() => {
     setMentionIndex(0);
@@ -463,17 +633,9 @@ export default function CoCreateRoomApp() {
     setMention(readRoomComposerMention(value));
   };
 
-  const insertMention = (item: { kind: RoomMentionKind; id: string; label: string }) => {
-    const trigger = item.kind === "role" ? "@" : "#";
-    const next = draft.replace(/[@#]([^\s@#]*)$/, `${trigger}${item.label} `);
-    setDraft(next);
-    setMention(null);
-    console.info("[co-create-room] 插入引用", {
-      projectId,
-      kind: item.kind === "role" ? "bot" : "file",
-      id: item.id,
-      label: item.label,
-    });
+  const mentionText = (item: MentionItem) => {
+    const trigger = item.kind === "file" ? "#" : "@";
+    return draft.replace(/[@#]([^\s@#]*)$/, `${trigger}${item.label} `);
   };
 
   const send = async () => {
@@ -501,6 +663,13 @@ export default function CoCreateRoomApp() {
       const mentionRoleIds = roles
         .filter((role) => seated.has(role.id) && mentionTokenPresent(text, "@", role.name))
         .map((role) => role.id);
+      const mentionUserIds = members
+        .filter(
+          (member) =>
+            mentionTokenPresent(text, "@", memberChipLabel(member.user_id, member.display_name)) ||
+            mentionTokenPresent(text, "@", member.user_id),
+        )
+        .map((member) => member.user_id);
       const hashed = fileWorkspace.files
         .filter((file) => mentionTokenPresent(text, "#", file.title))
         .map((file) =>
@@ -535,8 +704,9 @@ export default function CoCreateRoomApp() {
         {
           content: text,
           mention_role_ids: mentionRoleIds,
+          mention_user_ids: mentionUserIds,
           files,
-          client_message_id: crypto.randomUUID(),
+          client_message_id: randomUUID(),
           agent_mode: modeToSend,
         },
       );
@@ -556,20 +726,26 @@ export default function CoCreateRoomApp() {
     }
   };
 
-  const createRoom = async (kind: "chat" | "bot", title?: string): Promise<string | null> => {
+  const createRoom = async (
+    kind: "chat" | "bot",
+    title?: string,
+    seating?: { roleIds: string[]; writerRoleId: string; draft?: string },
+  ): Promise<string | null> => {
     if (creating) return null;
     setCreating(true);
     setError("");
-    const roleIds = kind === "bot" ? selectedRoles : [];
-    const writerId = kind === "bot" ? writerRoleId || selectedRoles[0] || "" : "";
+    const roleIds = seating?.roleIds ?? (kind === "bot" ? selectedRoles : []);
+    const writerId = seating?.writerRoleId ?? (kind === "bot" ? writerRoleId || selectedRoles[0] || "" : "");
     try {
       const room = await apiPost<RoomSummary>(`/projects/${projectId}/rooms`, {
         title: title?.trim() || (kind === "bot" ? "新 Bot" : "共创对话"),
         role_ids: roleIds,
         writer_role_id: writerId,
       });
-      console.info("[co-create-room] 创建对话", { projectId, roomId: room.id, kind });
+      console.info("[co-create-room] 创建对话", { projectId, roomId: room.id, kind, roles: roleIds.join(",") });
+      if (seating?.draft !== undefined) draftsRef.current[room.id] = seating.draft;
       await loadRooms();
+      setRooms((prev) => (prev.some((item) => item.id === room.id) ? prev : [room, ...prev]));
       setMessages([]);
       setOutputId(null);
       setDocVersion(0);
@@ -583,6 +759,57 @@ export default function CoCreateRoomApp() {
     } finally {
       setCreating(false);
     }
+  };
+
+  const seatRole = async (roleId: string, nextDraft: string): Promise<"created" | "updated" | null> => {
+    if (!activeId) {
+      const roomId = await createRoom("bot", undefined, {
+        roleIds: [roleId],
+        writerRoleId: roleId,
+        draft: nextDraft,
+      });
+      return roomId ? "created" : null;
+    }
+    const room = roomsRef.current.find((item) => item.id === activeId) ?? null;
+    if (room?.archived_at) {
+      setError("已归档对话不能调整入座角色");
+      return null;
+    }
+    const current = room?.role_ids ?? [];
+    if (current.includes(roleId)) return "updated";
+    try {
+      const roleIds = [...current, roleId];
+      const updated = await apiPatch<RoomSummary>(`/projects/${projectId}/rooms/${activeId}`, {
+        role_ids: roleIds,
+        writer_role_id: room?.writer_role_id || roleId,
+      });
+      setRooms((prev) => prev.map((room) => (room.id === activeId ? { ...room, ...updated } : room)));
+      console.info("[co-create-room] 角色入座", { projectId, roomId: activeId, roleId, roles: roleIds.join(",") });
+      return "updated";
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "入座失败");
+      return null;
+    }
+  };
+
+  const applyMention = async (item: MentionItem) => {
+    const next = mentionText(item);
+    if (item.seat) {
+      const seated = await seatRole(item.id, next);
+      if (!seated) return;
+      if (seated === "updated") setDraft(next);
+      setMention(null);
+      console.info("[co-create-room] 插入引用", { projectId, kind: "bot", id: item.id, label: item.label, seated: true });
+      return;
+    }
+    setDraft(next);
+    setMention(null);
+    console.info("[co-create-room] 插入引用", {
+      projectId,
+      kind: item.kind === "role" ? "bot" : item.kind === "member" ? "member" : "file",
+      id: item.id,
+      label: item.label,
+    });
   };
 
   const openRoom = (room: RoomSummary) => {
@@ -783,7 +1010,7 @@ export default function CoCreateRoomApp() {
               里添加，再点选入座。
             </p>
           ) : null}
-              <div className="relative min-h-0 flex-1 overflow-hidden" role="group" aria-label="入座角色">
+              <div className="relative min-h-0 flex-1 overflow-hidden" role="group" aria-label="项目成员与 Bot">
                 <style>{`
                   @keyframes co-create-role-drift {
                     0%, 100% { transform: translate(-50%, -50%) translate(0, 0); }
@@ -793,38 +1020,74 @@ export default function CoCreateRoomApp() {
                     .co-create-role-point { animation: none !important; }
                   }
                 `}</style>
-                {roles.map((role) => {
-                  const selected = selectedRoles.includes(role.id);
-                  const point = roleCloud.get(role.id);
+                {cloudChips.map((chip) => {
+                  const selected = chip.kind === "bot" && selectedRoles.includes(chip.id);
+                  const voiced = chip.kind === "member" ? activeUsers.has(chip.id) : activeRoles.has(chip.id);
+                  const point = roleCloud.get(chip.key);
+                  const className = `co-create-role-point absolute inline-flex items-center justify-center whitespace-nowrap rounded-full border px-2 py-0.5 text-center text-[10px] leading-4 hover:z-10 hover:[animation-play-state:paused] ${
+                    voiced
+                      ? "z-[2] border-blue-500/40 bg-blue-500/15 text-blue-700 shadow-[0_0_12px_rgba(59,130,246,0.35)] dark:text-blue-200"
+                      : selected
+                        ? "z-[2] border-blue-500/50 bg-white text-slate-700 ring-2 ring-blue-500/40 dark:bg-slate-950 dark:text-slate-100"
+                        : "border-slate-200/80 bg-white/80 text-slate-600 hover:border-slate-300 hover:bg-white dark:border-slate-700 dark:bg-slate-900/70 dark:text-slate-300"
+                  }`;
+                  const style = {
+                    left: `${point?.x ?? 50}%`,
+                    top: `${point?.y ?? 50}%`,
+                    animation: `co-create-role-drift ${point?.duration ?? 7}s ease-in-out ${point?.delay ?? 0}s infinite`,
+                    ["--drift-x" as string]: `${point?.dx ?? 4}px`,
+                    ["--drift-y" as string]: `${point?.dy ?? 6}px`,
+                  };
+                  const body = (
+                    <>
+                      <span
+                        className={`mr-1 inline-flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded-full text-[8px] font-semibold ${
+                          voiced ? "bg-blue-500 text-white" : "bg-slate-200 text-slate-500 dark:bg-slate-700 dark:text-slate-300"
+                        }`}
+                      >
+                        {chipMark(chip.kind, chip.label)}
+                      </span>
+                      {chip.label}
+                    </>
+                  );
+                  if (chip.kind === "member") {
+                    return (
+                      <span
+                        key={chip.key}
+                        data-kind="member"
+                        data-id={chip.id}
+                        data-voice={voiced ? "on" : "off"}
+                        title={chip.id}
+                        className={className}
+                        style={style}
+                      >
+                        {body}
+                      </span>
+                    );
+                  }
                   return (
                     <button
-                      key={role.id}
+                      key={chip.key}
                       type="button"
+                      data-kind="bot"
+                      data-id={chip.id}
+                      data-voice={voiced ? "on" : "off"}
                       aria-pressed={selected}
+                      title={chip.label}
                       onClick={() => {
                         setSelectedRoles((prev) => {
-                          const next = prev.includes(role.id)
-                            ? prev.filter((id) => id !== role.id)
-                            : [...prev, role.id];
+                          const next = prev.includes(chip.id)
+                            ? prev.filter((id) => id !== chip.id)
+                            : [...prev, chip.id];
                           if (!next.includes(writerRoleId)) setWriterRoleId(next[0] ?? "");
                           else if (!writerRoleId && next[0]) setWriterRoleId(next[0]);
                           return next;
                         });
                       }}
-                      className={`co-create-role-point absolute inline-flex items-center justify-center whitespace-nowrap rounded-full border px-2 py-0.5 text-center text-[10px] leading-4 hover:z-10 hover:[animation-play-state:paused] ${
-                        selected
-                          ? "z-[2] border-blue-500/40 bg-blue-500/15 text-blue-700 shadow-[0_0_12px_rgba(59,130,246,0.35)] dark:text-blue-200"
-                          : "border-slate-200/80 bg-white/80 text-slate-600 hover:border-slate-300 hover:bg-white dark:border-slate-700 dark:bg-slate-900/70 dark:text-slate-300"
-                      }`}
-                      style={{
-                        left: `${point?.x ?? 50}%`,
-                        top: `${point?.y ?? 50}%`,
-                        animation: `co-create-role-drift ${point?.duration ?? 7}s ease-in-out ${point?.delay ?? 0}s infinite`,
-                        ["--drift-x" as string]: `${point?.dx ?? 4}px`,
-                        ["--drift-y" as string]: `${point?.dy ?? 6}px`,
-                      }}
+                      className={className}
+                      style={style}
                     >
-                      {role.name}
+                      {body}
                     </button>
                   );
                 })}
@@ -878,38 +1141,65 @@ export default function CoCreateRoomApp() {
             <p className="pt-16 text-center text-sm text-slate-500">与你的团队成员+AIbot进行共创项目</p>
           ) : messages.length === 0 ? (
             <p className="pt-16 text-center text-sm text-slate-500">
-              成员可以直接发言。用 @ 叫 Bot，用 # 引用文档。
+              不 @ 任何人时，直接和 Hermes 对话。@ 已入座的 Bot 并说明如何改，会按顺序修订当前文稿。用 # 引用文档。
             </p>
           ) : (
-            messages.map((message) => (
-              <article key={message.id} className="max-w-3xl">
-                <p className="text-[11px] text-slate-500">
-                  {message.author_type === "agent" ? "Agent" : "成员"} · {message.author_name}
-                  {message.turn_state === "queued" ? " · 排队" : ""}
-                  {message.turn_state === "running" ? " · 生成中" : ""}
-                  {message.turn_state === "failed" ? " · 失败" : ""}
-                  {message.turn_state === "cancelled" ? " · 已取消" : ""}
-                  {message.turn_state === "succeeded" ? " · 完成" : ""}
-                </p>
+            messages.map((message) => {
+              const clock = questionClock(message, messages, clockNow);
+              const elapsed = clock.elapsedMs == null ? "" : formatElapsedSeconds(clock.elapsedMs);
+              const statusClass =
+                clock.status === "失败"
+                  ? "bg-red-500/10 text-red-600"
+                  : clock.status === "生成中"
+                    ? "bg-blue-500/10 text-blue-700 dark:text-blue-200"
+                    : clock.status === "排队"
+                      ? "bg-amber-500/10 text-amber-700 dark:text-amber-200"
+                      : "bg-slate-200/70 text-slate-500 dark:bg-slate-800 dark:text-slate-400";
+              return (
+              <article key={message.id} className="w-full">
+                <div className="flex items-center gap-2 text-[11px]">
+                  <p className="min-w-0 truncate text-slate-500">
+                    {message.author_type === "agent" ? "Agent" : "成员"} · {message.author_name}
+                  </p>
+                  <span className={`inline-flex shrink-0 items-center gap-1 rounded-full px-1.5 py-0.5 ${statusClass}`}>
+                    {clock.pending ? <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-current" /> : null}
+                    {clock.status}
+                  </span>
+                  <span className="ml-auto flex shrink-0 items-center gap-2">
+                    {elapsed ? (
+                      <time
+                        dateTime={message.created_at || undefined}
+                        className={`tabular-nums ${clock.pending ? "font-medium text-slate-800 dark:text-slate-100" : "text-slate-400"}`}
+                      >
+                        {elapsed}
+                      </time>
+                    ) : null}
+                    {message.author_type === "human" && clock.pending ? (
+                      <button
+                        type="button"
+                        className="text-slate-500 underline"
+                        onClick={() =>
+                          void apiPost(
+                            `/projects/${projectId}/rooms/${activeId}/turns/${message.turn_id}/cancel`,
+                            {},
+                          ).then(() => {
+                            if (activeId) void refreshRoom(activeId, epochRef.current);
+                          })
+                        }
+                      >
+                        取消
+                      </button>
+                    ) : null}
+                  </span>
+                </div>
                 {message.error_summary ? (
-                  <p className="text-[11px] text-red-600">{message.error_summary}</p>
-                ) : null}
-                {message.author_type === "human" &&
-                (message.turn_state === "queued" || message.turn_state === "running") ? (
-                  <button
-                    type="button"
-                    className="text-[11px] text-slate-500 underline"
-                    onClick={() =>
-                      void apiPost(
-                        `/projects/${projectId}/rooms/${activeId}/turns/${message.turn_id}/cancel`,
-                        {},
-                      ).then(() => {
-                        if (activeId) void refreshRoom(activeId, epochRef.current);
-                      })
-                    }
+                  <p
+                    className={`text-[11px] ${
+                      message.turn_state === "queued" ? "text-amber-700 dark:text-amber-200" : "text-red-600"
+                    }`}
                   >
-                    取消
-                  </button>
+                    {message.error_summary}
+                  </p>
                 ) : null}
                 {message.author_type === "human" && message.turn_state === "failed" ? (
                   <button
@@ -928,27 +1218,44 @@ export default function CoCreateRoomApp() {
                   </button>
                 ) : null}
                 <div
-                  className={`mt-1 rounded-2xl px-3 py-2 text-sm leading-relaxed ${
+                  className={`mt-1 max-w-3xl rounded-2xl px-3 py-2 ${
                     message.author_type === "agent"
                       ? "bg-white dark:bg-slate-900"
-                      : "bg-blue-500/10"
+                      : "bg-blue-500/10 text-sm leading-relaxed whitespace-pre-wrap"
                   }`}
                 >
-                  {message.content}
+                  {message.author_type === "agent" ? (
+                    <ChatMarkdownWithCitations content={message.content} />
+                  ) : (
+                    message.content
+                  )}
                 </div>
               </article>
-            ))
+              );
+            })
           )}
         </div>
         {error ? <p className="px-4 text-xs text-red-600">{error}</p> : null}
         <div className="relative border-t border-slate-200 p-3 dark:border-slate-800">
           {mention?.kind === "role" && mentionItems.length === 0 ? (
-            <p className="absolute bottom-full left-3 mb-1 text-xs text-slate-500">当前对话没有入座角色</p>
+            <p className="absolute bottom-full left-3 mb-1 text-xs text-slate-500">
+              {roles.length === 0 && members.length === 0 ? (
+                <>
+                  还没有角色，去配置
+                  <Link href="/settings?tab=roles" className="mx-1 text-blue-600 hover:underline">
+                    Roles
+                  </Link>
+                  添加后再入座。
+                </>
+              ) : (
+                "没有匹配的 Bot 或成员"
+              )}
+            </p>
           ) : null}
           {mention && mentionItems.length > 0 ? (
             <div
               role="listbox"
-              aria-label={mention.kind === "role" ? "选择 Bot" : "选择文档"}
+              aria-label={mention.kind === "role" ? "选择 Bot 或成员" : "选择文档"}
               className="absolute bottom-full left-3 right-3 mb-1 max-h-48 overflow-y-auto rounded-xl border border-slate-200 bg-white shadow-lg dark:border-slate-700 dark:bg-slate-900"
             >
               {mentionItems.map((item, index) => (
@@ -959,7 +1266,7 @@ export default function CoCreateRoomApp() {
                   aria-selected={index === mentionIndex}
                   onMouseDown={(event) => event.preventDefault()}
                   onMouseEnter={() => setMentionIndex(index)}
-                  onClick={() => insertMention(item)}
+                  onClick={() => void applyMention(item)}
                   className={`flex w-full items-center justify-between px-3 py-1.5 text-left text-sm ${
                     index === mentionIndex
                       ? "bg-blue-50 text-blue-800 dark:bg-blue-950/40 dark:text-blue-100"
@@ -967,7 +1274,9 @@ export default function CoCreateRoomApp() {
                   }`}
                 >
                   <span>{item.label}</span>
-                  <span className="text-[10px] text-slate-400">{item.kind === "role" ? "Bot" : "文档"}</span>
+                  <span className="text-[10px] text-slate-400">
+                    {item.seat ? "入座" : item.kind === "role" ? "Bot" : item.kind === "member" ? "成员" : "文档"}
+                  </span>
                 </button>
               ))}
             </div>
@@ -1000,7 +1309,7 @@ export default function CoCreateRoomApp() {
                   if (event.key === "Enter" || event.key === "Tab") {
                     event.preventDefault();
                     const picked = mentionItems[mentionIndex] ?? mentionItems[0];
-                    if (picked) insertMention(picked);
+                    if (picked) void applyMention(picked);
                     return;
                   }
                 }
@@ -1009,7 +1318,7 @@ export default function CoCreateRoomApp() {
                   void send();
                 }
               }}
-              placeholder="直接输入，回车发送。@ 关联 Bot，# 引用文档"
+              placeholder="直接输入即和 Hermes 对话。@ 已入座 Bot 修订当前文稿，# 引用文档"
               className="max-h-32 min-h-[2.5rem] w-full flex-1 resize-none bg-transparent text-sm outline-none"
             />
             <div

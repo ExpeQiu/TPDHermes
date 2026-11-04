@@ -41,7 +41,7 @@ FEATURES_BY_PLATFORM_ROLE: dict[str, frozenset[str]] = {
     "tenant_editor": frozenset(
         {"create", "knowledge", "skills", "projects", "chat", "workshop", "settings"}
     ),
-    "tenant_partner": frozenset({"projects", "chat", "workshop", "settings"}),
+    "tenant_partner": frozenset({"projects", "chat", "workshop", "skills", "settings"}),
 }
 
 PROJECT_PERMS_BY_ROLE: dict[str, frozenset[str]] = {
@@ -57,8 +57,8 @@ PLATFORM_ROLE_LABELS: dict[str, str] = {
     "tenant_partner": "项目成员",
 }
 
-# 非 default 用户的默认平台分组（项目管理员）
-DEFAULT_MEMBER_PLATFORM_ROLE: str = "tenant_editor"
+# 新用户默认平台分组：项目成员
+DEFAULT_MEMBER_PLATFORM_ROLE: str = "tenant_partner"
 
 PROJECT_ROLE_LABELS: dict[str, str] = {
     "owner": "负责人",

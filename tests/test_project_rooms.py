@@ -156,6 +156,48 @@ def test_create_room_without_agents(room_roles):
         assert body["writer_role_id"] == ""
 
 
+def test_seat_role_into_existing_room(room_roles):
+    owner = f"room_owner_{uuid.uuid4().hex[:8]}"
+    with TestClient(app) as client:
+        project_id = _create_project(client, owner)
+        created = client.post(
+            f"/api/v1/projects/{project_id}/rooms",
+            headers=_headers(owner),
+            json={"title": "先开会"},
+        )
+        assert created.status_code == 200, created.text
+        room_id = created.json()["id"]
+        seated = client.patch(
+            f"/api/v1/projects/{project_id}/rooms/{room_id}",
+            headers=_headers(owner),
+            json={"role_ids": ["alpha"], "writer_role_id": "alpha"},
+        )
+        assert seated.status_code == 200, seated.text
+        body = seated.json()
+        assert body["role_ids"] == ["alpha"]
+        assert body["writer_role_id"] == "alpha"
+
+        unknown = client.patch(
+            f"/api/v1/projects/{project_id}/rooms/{room_id}",
+            headers=_headers(owner),
+            json={"role_ids": ["missing"]},
+        )
+        assert unknown.status_code == 400
+
+        archived = client.patch(
+            f"/api/v1/projects/{project_id}/rooms/{room_id}",
+            headers=_headers(owner),
+            json={"archived": True},
+        )
+        assert archived.status_code == 200, archived.text
+        denied = client.patch(
+            f"/api/v1/projects/{project_id}/rooms/{room_id}",
+            headers=_headers(owner),
+            json={"role_ids": ["writer"], "writer_role_id": "writer"},
+        )
+        assert denied.status_code == 400
+
+
 def test_human_visible_before_agents_and_queue(room_roles):
     owner = f"room_owner_{uuid.uuid4().hex[:8]}"
     with TestClient(app) as client:
@@ -179,7 +221,7 @@ def test_human_visible_before_agents_and_queue(room_roles):
         kinds = [item["author_type"] for item in done["messages"]]
         assert kinds == ["human", "agent", "human", "agent"]
         assert done["messages"][0]["content"] == "第一句甲"
-        assert done["messages"][1]["author_id"] == "writer"
+        assert done["messages"][1]["author_id"] == "hermes-agent"
         assert done["messages"][2]["content"] == "第二句乙"
         assert done["messages"][2]["seq"] > done["messages"][1]["seq"]
         assert "第一句甲" in done["messages"][3]["content"]
@@ -309,3 +351,134 @@ def test_viewer_does_not_write_and_outsider_cannot_read(room_roles):
         assert after["output_id"] == before["output_id"]
         assert "只读成员插一句" not in after["content"]
         assert any(item["content"] == "只读成员插一句" for item in after["messages"])
+
+
+def test_room_voices_include_speakers_and_mentions(room_roles):
+    owner = f"room_owner_{uuid.uuid4().hex[:8]}"
+    with TestClient(app) as client:
+        project_id = _create_project(client, owner)
+        room_id = _create_room(client, owner, project_id)["id"]
+        spoken = client.post(
+            f"/api/v1/projects/{project_id}/rooms/{room_id}/messages",
+            headers=_headers(owner),
+            json={"content": "请角色甲看一下", "mention_role_ids": ["alpha"]},
+        )
+        assert spoken.status_code == 200, spoken.text
+        voices = client.get(f"/api/v1/projects/{project_id}/rooms/voices", headers=_headers(owner))
+        assert voices.status_code == 200, voices.text
+        body = voices.json()
+        assert owner in body["user_ids"]
+        assert "alpha" in body["role_ids"]
+
+
+def test_mentioned_agents_revise_existing_document_in_order(room_roles):
+    owner = f"room_owner_{uuid.uuid4().hex[:8]}"
+    with TestClient(app) as client:
+        project_id = _create_project(client, owner)
+        room_id = _create_room(client, owner, project_id, title="竞品对标")["id"]
+        _post(client, owner, project_id, room_id, "将以上整理成文稿")
+
+    asyncio.run(rooms.drain_project_room(room_id))
+
+    with TestClient(app) as client:
+        created = _messages(client, owner, project_id, room_id)
+        assert created["doc_version"] == 1
+        revised = client.post(
+            f"/api/v1/projects/{project_id}/rooms/{room_id}/messages",
+            headers=_headers(owner),
+            json={
+                "content": "@角色甲 @角色乙 请修订文稿",
+                "mention_role_ids": ["alpha", "beta"],
+            },
+        )
+        assert revised.status_code == 200, revised.text
+
+    asyncio.run(rooms.drain_project_room(room_id))
+
+    with TestClient(app) as client:
+        done = _messages(client, owner, project_id, room_id)
+        assert done["doc_version"] == 2
+        assert done["output_id"] == created["output_id"]
+        humans = [item for item in done["messages"] if item["content"] == "@角色甲 @角色乙 请修订文稿"]
+        agents = [item for item in done["messages"] if item["turn_id"] == humans[0]["turn_id"] and item["author_type"] == "agent"]
+        assert [item["author_id"] for item in agents] == ["alpha", "beta"]
+        assert "角色乙回应" in done["content"]
+
+
+def test_document_intent_separates_chat_create_and_revise():
+    from backend.services.room_contract import classify_document_intent, manuscript_for_file
+
+    assert classify_document_intent("将以上整理成文稿") == "create"
+    assert classify_document_intent("转成报告") == "create"
+    assert classify_document_intent("帮我写个方案") == "create"
+    assert classify_document_intent("删除原句待删句子") == "revise"
+    assert classify_document_intent("@角色甲 请修订文稿") == "revise"
+    assert classify_document_intent("@角色甲 只叫甲") == "chat"
+    assert classify_document_intent("文稿和话术有什么区别") == "chat"
+    assert classify_document_intent("生成式人工智能是什么") == "chat"
+    assert classify_document_intent("不要生成文档，请写一版") == "deny"
+    saved = manuscript_for_file("已整理成稿，并落盘于 /opt/data/输出/报告.md（平台写入被标记为禁止）。\n\n# 千里浩瀚\n\n正文")
+    assert saved.startswith("# 千里浩瀚")
+
+
+def test_arrange_into_manuscript_creates_project_file(room_roles):
+    owner = f"room_owner_{uuid.uuid4().hex[:8]}"
+    with TestClient(app) as client:
+        project_id = _create_project(client, owner)
+        room_id = _create_room(client, owner, project_id, title="竞品对标")["id"]
+        _post(client, owner, project_id, room_id, "先讨论千里浩瀚")
+        _post(client, owner, project_id, room_id, "将以上整理成文稿")
+
+    asyncio.run(rooms.drain_project_room(room_id))
+
+    with TestClient(app) as client:
+        done = _messages(client, owner, project_id, room_id)
+        assert done["doc_version"] >= 1
+        assert done["output_id"]
+        assert "整理成文稿" in done["content"]
+        chat = client.post(
+            f"/api/v1/projects/{project_id}/rooms/{room_id}/messages",
+            headers=_headers(owner),
+            json={"content": "文稿和话术有什么区别"},
+        )
+        assert chat.status_code == 200, chat.text
+        chat_turn = chat.json()["turn_id"]
+
+    asyncio.run(rooms.drain_project_room(room_id))
+
+    with TestClient(app) as client:
+        after = _messages(client, owner, project_id, room_id)
+        assert after["doc_version"] == done["doc_version"]
+        spoken = next(item for item in after["messages"] if item["turn_id"] == chat_turn and item["author_type"] == "agent")
+        assert spoken["author_id"] == "hermes-agent"
+
+
+def test_plain_message_talks_to_hermes_member_mention_does_not(room_roles):
+    owner = f"room_owner_{uuid.uuid4().hex[:8]}"
+    editor = f"room_editor_{uuid.uuid4().hex[:8]}"
+    with TestClient(app) as client:
+        project_id = _create_project(client, owner)
+        _add_member(client, owner, project_id, editor, "editor")
+        room_id = _create_room(client, owner, project_id)["id"]
+        _post(client, owner, project_id, room_id, "你好")
+        mentioned = client.post(
+            f"/api/v1/projects/{project_id}/rooms/{room_id}/messages",
+            headers=_headers(owner),
+            json={"content": f"@{editor} 你看一下", "mention_user_ids": [editor]},
+        )
+        assert mentioned.status_code == 200, mentioned.text
+
+    asyncio.run(rooms.drain_project_room(room_id))
+
+    with TestClient(app) as client:
+        payload = _messages(client, owner, project_id, room_id)
+        by_turn: dict[str, list[dict]] = {}
+        humans = [item for item in payload["messages"] if item["author_type"] == "human"]
+        for item in payload["messages"]:
+            if item["author_type"] == "agent":
+                by_turn.setdefault(item["turn_id"], []).append(item)
+        assert [item["author_id"] for item in by_turn[humans[0]["turn_id"]]] == ["hermes-agent"]
+        assert humans[0]["content"] == "你好"
+        assert "Hermes回应：你好" in by_turn[humans[0]["turn_id"]][0]["content"]
+        assert humans[1]["turn_id"] not in by_turn
+        assert humans[1]["turn_state"] == "succeeded"

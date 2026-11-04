@@ -7,6 +7,7 @@ import {
   ensureDerivedUserId,
   getEffectiveUserIdSync,
   loadFeishuSessionFromStorage,
+  loadLocalSessionToken,
   normalizeUserId,
 } from "./user-id";
 
@@ -18,7 +19,7 @@ export function loadUserRoleFromStorage(): string {
   if (fromStorage) return fromStorage;
   const fromEnv = process.env.NEXT_PUBLIC_DEFAULT_USER_ROLE?.trim();
   if (fromEnv) return fromEnv;
-  return "tenant_editor";
+  return "tenant_partner";
 }
 
 export function getApiHeaders(): Record<string, string> {
@@ -37,6 +38,10 @@ export function getApiHeaders(): Record<string, string> {
       : "");
   if (sess) {
     headers["X-Feishu-Session-Token"] = sess;
+  }
+  const localSession = loadLocalSessionToken();
+  if (localSession) {
+    headers["X-Local-Session-Token"] = localSession;
   }
   return headers;
 }

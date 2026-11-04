@@ -17,6 +17,9 @@ logger = logging.getLogger("tpdx.hermes.user_preference")
 PREF_KEY_UNIFIED_USER_ID = "unified_user_id"
 PREF_KEY_ACTIVE_CHAT_SESSION = "active_chat_session_id"
 PREF_KEY_PLATFORM_ROLE = "platform_role"
+PREF_KEY_DISPLAY_NAME = "display_name"
+PREF_KEY_EMPLOYEE_ID = "employee_id"
+PREF_KEY_ORG_ID = "org_id"
 
 
 def _load_prefs(raw: str | None) -> dict[str, Any]:

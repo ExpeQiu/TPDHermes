@@ -188,6 +188,7 @@ from backend.routes.tasks import router as tasks_router, runs_router as runs_rou
 from backend.routes.scenarios import router as scenarios_router
 from backend.routes.templates import router as templates_router
 from backend.routes.me import router as me_router
+from backend.routes.local_auth import router as local_auth_router
 from backend.routes.mcp import router as mcp_router
 from backend.routes.metrics import router as metrics_router
 from backend.routes.feedback import router as feedback_router, learning_router
@@ -197,6 +198,7 @@ from backend.routes.studio import router as studio_router
 from backend.routes.project_rooms import router as project_rooms_router
 
 include_router_with_version(me_router)
+include_router_with_version(local_auth_router)
 include_router_with_version(mcp_router, strip_prefix="/mcp")
 include_router_with_version(projects_router, strip_prefix="/projects")
 include_router_with_version(project_rooms_router, strip_prefix="/projects")

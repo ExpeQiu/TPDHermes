@@ -17,6 +17,7 @@ def test_platform_role_persist_and_access_features():
         access = client.get("/api/v1/me/access", headers=HDR_PARTNER).json()
         assert access["platform_role"] == "tenant_partner"
         assert "create" not in access["features"]
+        assert "skills" in access["features"]
         assert "projects" in access["features"]
 
 
@@ -133,14 +134,15 @@ def test_default_user_is_not_platform_admin_unless_enabled(monkeypatch):
         ).json()
         assert default_access["platform_role"] != "platform_admin"
 
-        editor_access = client.get(
+        member_access = client.get(
             "/api/v1/me/access",
             headers={"X-User-ID": "new_member_user"},
         ).json()
-        assert editor_access["platform_role"] == "tenant_editor"
-        assert "create" in editor_access["features"]
-        assert "knowledge" in editor_access["features"]
-        assert "ops" not in editor_access["features"]
+        assert member_access["platform_role"] == "tenant_partner"
+        assert member_access["platform_role_label"] == "项目成员"
+        assert "projects" in member_access["features"]
+        assert "create" not in member_access["features"]
+        assert "ops" not in member_access["features"]
 
 
 def test_default_user_platform_admin_when_compat_enabled(monkeypatch):

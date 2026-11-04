@@ -29,6 +29,7 @@ export type TechCard = {
   scope: string;
   quotes: Record<FieldKey, string>;
   status: "candidate" | "locked";
+  sources?: Partial<Record<FieldKey, { source_id: string; line_start: number; line_end: number; quote: string } | null>>;
 };
 
 export type StudioState = {
@@ -40,6 +41,8 @@ export type StudioState = {
   lastOperation: string | null;
   lastRunId: string | null;
   blockedReason: string | null;
+  source_sha256?: string;
+  issues?: { message: string; source_id: string; quote: string }[];
 };
 
 export type StudioLog = {

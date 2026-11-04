@@ -27,6 +27,7 @@ services:
     volumes:
       - hermes-agent-data:/opt/data
       - ./skills:/opt/project-skills
+      - ./skills:/app/skills:ro
     networks:
       - tphermes-net
 

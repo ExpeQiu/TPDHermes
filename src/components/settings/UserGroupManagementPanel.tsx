@@ -3,13 +3,16 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   PLATFORM_ROLE_OPTIONS,
+  featuresForPlatformRole,
   type PlatformRole,
 } from "@/lib/rbac";
 import {
   assignUserPlatformRole,
   fetchManagedUsers,
+  updateManagedUserProfile,
   type ManagedUserRow,
 } from "@/lib/user-admin";
+import { accessibleWorkflowPages } from "@/lib/workflow-nav";
 
 const ASSIGNABLE_ROLES = PLATFORM_ROLE_OPTIONS.filter((opt) => opt.value !== "platform_admin");
 
@@ -24,7 +27,10 @@ export default function UserGroupManagementPanel({ enabled = true }: { enabled?:
   const [err, setErr] = useState("");
   const [query, setQuery] = useState("");
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [draftRole, setDraftRole] = useState<PlatformRole>("tenant_editor");
+  const [draftRole, setDraftRole] = useState<PlatformRole>("tenant_partner");
+  const [draftName, setDraftName] = useState("");
+  const [draftEmployeeId, setDraftEmployeeId] = useState("");
+  const [draftOrgId, setDraftOrgId] = useState("");
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -66,8 +72,9 @@ export default function UserGroupManagementPanel({ enabled = true }: { enabled?:
     if (!q) return users;
     return users.filter(
       (user) =>
-        user.user_id.toLowerCase().includes(q) ||
         user.display_name.toLowerCase().includes(q) ||
+        (user.employee_id || "").toLowerCase().includes(q) ||
+        (user.org_id || "").toLowerCase().includes(q) ||
         (user.platform_role_label || "").toLowerCase().includes(q) ||
         user.resolved_platform_role_label.toLowerCase().includes(q),
     );
@@ -82,48 +89,63 @@ export default function UserGroupManagementPanel({ enabled = true }: { enabled?:
     if (!selected) return;
     const current = (selected.platform_role || selected.resolved_platform_role) as PlatformRole;
     setDraftRole(current);
+    setDraftName(selected.display_name || "");
+    setDraftEmployeeId(selected.employee_id || "");
+    setDraftOrgId(selected.org_id || "");
   }, [selected]);
+
+  const permissionPages = useMemo(
+    () =>
+      accessibleWorkflowPages({
+        features: featuresForPlatformRole(draftRole),
+        platformRole: draftRole,
+      }),
+    [draftRole],
+  );
+  const draftRoleLabel = PLATFORM_ROLE_OPTIONS.find((opt) => opt.value === draftRole)?.label || draftRole;
 
   const handleSave = async () => {
     if (!selected) return;
     setSaving(true);
     setErr("");
     try {
+      await updateManagedUserProfile(selected.user_id, {
+        display_name: draftName.trim(),
+        employee_id: draftEmployeeId.trim(),
+        org_id: draftOrgId.trim(),
+      });
       await assignUserPlatformRole(selected.user_id, draftRole);
+      console.info("[settings] 已保存用户与分组", {
+        user_id: selected.user_id,
+        role: draftRole,
+      });
       await refresh();
     } catch (e: unknown) {
-      setErr(e instanceof Error ? e.message : "保存分组失败");
+      setErr(e instanceof Error ? e.message : "保存失败");
     } finally {
       setSaving(false);
     }
   };
 
-  const draftHint = ASSIGNABLE_ROLES.find((opt) => opt.value === draftRole)?.hint;
-
   if (!enabled) return null;
 
   return (
-    <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white/80 dark:border-slate-800 dark:bg-slate-900/50">
-      <div className="border-b border-slate-200 px-5 py-4 dark:border-slate-800">
-        <h2 className="text-sm font-medium text-slate-900 dark:text-slate-100">用户分组管理</h2>
-        <p className="mt-1 text-xs text-slate-500">
-          左侧选择 User ID，右侧查看详情并编辑平台分组（系统管理员专属）。
-        </p>
-      </div>
-
-      <div className="grid min-h-[360px] grid-cols-1 lg:grid-cols-[minmax(240px,300px)_1fr]">
-        <aside className="border-b border-slate-200 lg:border-b-0 lg:border-r dark:border-slate-800">
+    <div className="mt-4 grid items-start gap-4 lg:grid-cols-2">
+      <aside className="overflow-hidden rounded-2xl border border-slate-200 bg-white/80 dark:border-slate-800 dark:bg-slate-900/50">
+        <div className="border-b border-slate-200 px-4 py-3 dark:border-slate-800">
+          <h2 className="text-sm font-medium text-slate-900 dark:text-slate-100">用户</h2>
+        </div>
           <div className="border-b border-slate-200 p-3 dark:border-slate-800">
             <input
               type="search"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              placeholder="搜索 User ID / 昵称 / 分组"
+              placeholder="搜索用户名、工号或组织"
               className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
             />
           </div>
 
-          <div className="max-h-[420px] overflow-y-auto">
+          <div className="max-h-[640px] overflow-y-auto">
             {loading && <p className="p-4 text-sm text-slate-500">加载中…</p>}
             {!loading && filteredUsers.length === 0 && (
               <p className="p-4 text-sm text-slate-500">暂无已同步 User ID 的用户。</p>
@@ -150,8 +172,10 @@ export default function UserGroupManagementPanel({ enabled = true }: { enabled?:
                       <span className="block truncate text-sm font-medium text-slate-900 dark:text-slate-100">
                         {user.display_name}
                       </span>
-                      <span className="mt-0.5 block truncate font-mono text-[11px] text-slate-500">
-                        {user.user_id}
+                      <span className="mt-0.5 block truncate text-[11px] text-slate-500">
+                        {user.employee_id || user.org_id
+                          ? `工号 ${user.employee_id || "未填写"} · 组织 ${user.org_id || "未填写"}`
+                          : "工号未填写"}
                       </span>
                       <span className="mt-1 inline-block rounded-full bg-slate-100 px-2 py-0.5 text-[10px] text-slate-600 dark:bg-slate-800 dark:text-slate-300">
                         {badge}
@@ -161,80 +185,92 @@ export default function UserGroupManagementPanel({ enabled = true }: { enabled?:
                 );
               })}
           </div>
-        </aside>
+      </aside>
 
-        <div className="p-5">
-          {!selected && !loading && (
-            <p className="text-sm text-slate-500">请从左侧选择一个 User ID 查看详情。</p>
-          )}
-
-          {selected && (
-            <div className="space-y-5">
-              <div>
-                <p className="text-xs uppercase tracking-wide text-slate-400">用户详情</p>
-                <h3 className="mt-1 text-lg font-semibold text-slate-900 dark:text-slate-100">
-                  {selected.display_name}
-                </h3>
-                <dl className="mt-4 space-y-3 text-sm">
-                  <div>
-                    <dt className="text-slate-500">User ID</dt>
-                    <dd className="mt-0.5 break-all font-mono text-slate-900 dark:text-slate-100">
-                      {selected.user_id}
-                    </dd>
-                  </div>
-                  <div>
-                    <dt className="text-slate-500">统一 ID</dt>
-                    <dd className="mt-0.5 break-all font-mono text-slate-900 dark:text-slate-100">
-                      {selected.unified_user_id}
-                    </dd>
-                  </div>
-                  <div>
-                    <dt className="text-slate-500">当前生效分组</dt>
-                    <dd className="mt-0.5 text-slate-900 dark:text-slate-100">
-                      {selected.resolved_platform_role_label}
-                    </dd>
-                  </div>
-                  <div>
-                    <dt className="text-slate-500">已保存分组</dt>
-                    <dd className="mt-0.5 text-slate-900 dark:text-slate-100">
-                      {selected.platform_role_label || "未单独保存（使用默认规则）"}
-                    </dd>
-                  </div>
-                </dl>
-              </div>
-
-              <div className="rounded-xl border border-slate-200 p-4 dark:border-slate-800">
+      <section
+        aria-label="权限管理"
+        className="rounded-2xl border border-slate-200 bg-white/80 p-6 dark:border-slate-800 dark:bg-slate-900/50"
+      >
+        {!selected && !loading && <p className="text-sm text-slate-500">请从左侧选择一个用户。</p>}
+        {selected && (
+          <div className="space-y-5">
+            <div>
+              <h2 className="text-sm font-medium text-slate-900 dark:text-slate-100">用户详情</h2>
+              <div className="mt-4 space-y-3">
                 <label className="block text-sm">
-                  <span className="text-slate-500 dark:text-slate-400">编辑平台分组</span>
+                  <span className="text-slate-500">用户名</span>
+                  <input
+                    value={draftName}
+                    onChange={(e) => setDraftName(e.target.value)}
+                    className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+                  />
+                </label>
+                <label className="block text-sm">
+                  <span className="text-slate-500">工号</span>
+                  <input
+                    value={draftEmployeeId}
+                    onChange={(e) => setDraftEmployeeId(e.target.value)}
+                    placeholder="未填写"
+                    className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+                  />
+                </label>
+                <label className="block text-sm">
+                  <span className="text-slate-500">组织</span>
+                  <input
+                    value={draftOrgId}
+                    onChange={(e) => setDraftOrgId(e.target.value)}
+                    placeholder="未填写"
+                    className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+                  />
+                </label>
+                <label className="block text-sm">
+                  <span className="text-slate-500">分组</span>
                   <select
-                    className="mt-2 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+                    className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
                     value={draftRole}
                     onChange={(e) => setDraftRole(e.target.value as PlatformRole)}
                     disabled={saving}
                   >
-                    {ASSIGNABLE_ROLES.map((opt) => (
+                    {PLATFORM_ROLE_OPTIONS.map((opt) => (
                       <option key={opt.value} value={opt.value}>
                         {opt.label}
                       </option>
                     ))}
                   </select>
                 </label>
-                {draftHint && <p className="mt-2 text-xs text-slate-500">{draftHint}</p>}
-                <button
-                  type="button"
-                  onClick={() => void handleSave()}
-                  disabled={saving}
-                  className="mt-4 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-500 disabled:opacity-60"
-                >
-                  {saving ? "保存中…" : "保存分组"}
-                </button>
               </div>
             </div>
-          )}
 
-          {err && <p className="mt-4 text-sm text-red-500 dark:text-red-400">{err}</p>}
-        </div>
-      </div>
+            <div>
+              <h2 className="text-sm font-medium text-slate-900 dark:text-slate-100">权限管理</h2>
+              <p className="mt-1 text-xs text-slate-500">
+                分组「{draftRoleLabel}」可访问的页面
+              </p>
+              <ul className="mt-3 space-y-2">
+                {permissionPages.map((page) => (
+                  <li
+                    key={page.href}
+                    className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 dark:border-slate-800 dark:bg-slate-900/80"
+                  >
+                    <p className="text-sm font-medium text-slate-900 dark:text-slate-100">{page.label}</p>
+                    <p className="mt-0.5 text-xs text-slate-500">{page.description}</p>
+                  </li>
+                ))}
+              </ul>
+            </div>
+
+            {err && <p className="text-sm text-red-500">{err}</p>}
+            <button
+              type="button"
+              onClick={() => void handleSave()}
+              disabled={saving || !draftName.trim()}
+              className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-500 disabled:opacity-60"
+            >
+              {saving ? "保存中…" : "保存"}
+            </button>
+          </div>
+        )}
+      </section>
     </div>
   );
 }

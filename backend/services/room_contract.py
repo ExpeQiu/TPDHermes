@@ -22,7 +22,16 @@ from backend.services.project_files_service import (
 logger = logging.getLogger("tpdx.hermes.co_create_room")
 
 _DENY_WRITE_RE = re.compile(r"不要(生成|写|落稿|输出|创建|修订)|别写|不要生成文档|不要写文档")
-_EXPLICIT_WRITE_RE = re.compile(r"写一版|写一稿|生成|修订|改写|起草|成稿|产出|落稿|删除原句|正式稿")
+_DELIVERABLE = r"文稿|文档|稿件|方案|报告|纪要|提纲|正式稿"
+_CREATE_RE = re.compile(
+    rf"(?:整理|梳理|汇总|转成|转为|写成|起草|拟定|产出|落成)(?:成|为|出)?(?:一[份个])?(?:{_DELIVERABLE})"
+    rf"|(?:写|做|出|生成)(?:一[份个版稿]|个)?(?:{_DELIVERABLE})"
+    r"|写一版|写一稿|出一版|出稿|成稿"
+)
+_STRONG_CREATE_RE = re.compile(r"整理成|转成|转为|写成|写一版|写一稿|出一版|起草|落成|成稿")
+_REVISE_RE = re.compile(r"修订|改写|删除原句|补一节|更新文稿|更新文档|改一版|再写一版|重写|改一下|润色|参与修改")
+_QUESTION_RE = re.compile(r"[?？]|什么|怎么|为什么|哪些|是否|吗")
+_META_PREAMBLE_RE = re.compile(r"落盘|被标记为禁止|仅本地|已整理成稿|write_file")
 _PLAN_CONFIRM_RE = re.compile(
     r"^(确认(执行|计划)?|开始执行|按计划执行|执行计划|继续执行|ok|go|yes)$",
     re.I,
@@ -43,10 +52,53 @@ def denies_write(text: str) -> bool:
     return bool(_DENY_WRITE_RE.search(text or ""))
 
 
+def classify_document_intent(text: str) -> str:
+    """成稿策略：deny 不写；create 新建；revise 覆盖当前文稿；chat 只回答。"""
+    raw = (text or "").strip()
+    if not raw:
+        return "chat"
+    if denies_write(raw):
+        return "deny"
+    if _QUESTION_RE.search(raw) and not _STRONG_CREATE_RE.search(raw):
+        return "chat"
+    if _REVISE_RE.search(raw):
+        return "revise"
+    if _CREATE_RE.search(raw):
+        return "create"
+    return "chat"
+
+
 def explicit_write_intent(text: str) -> bool:
-    if denies_write(text):
-        return False
-    return bool(_EXPLICIT_WRITE_RE.search(text or ""))
+    return classify_document_intent(text) in {"create", "revise"}
+
+
+def manuscript_for_file(reply: str) -> str:
+    """落盘时丢掉「已写入某路径」这类说明，从标题开始保存。"""
+    text = (reply or "").strip()
+    if not text:
+        return ""
+    lines = text.splitlines()
+    for index, line in enumerate(lines):
+        if not line.lstrip().startswith("#"):
+            continue
+        preamble = "\n".join(lines[:index])
+        if index == 0 or _META_PREAMBLE_RE.search(preamble):
+            return "\n".join(lines[index:]).strip()
+        return text
+    return text
+
+
+def document_file_stem(body: str, fallback: str) -> str:
+    title = ""
+    for line in (body or "").splitlines():
+        stripped = line.strip()
+        if stripped.startswith("# "):
+            title = stripped[2:].strip()
+            break
+    title = title or (fallback or "").strip() or "共创文稿"
+    title = re.sub(r"[\\/:*?\"<>|\r\n]+", " ", title)
+    title = re.sub(r"\s+", " ", title).strip(" .")
+    return (title[:40] or "共创文稿")
 
 
 def allows_file_write(
@@ -74,8 +126,10 @@ def allows_file_write(
         return True, "plan_confirmed"
     if resolved == "plan":
         return False, "plan_draft"
-    if resolved == "agent" and explicit_write_intent(text):
-        return True, "explicit"
+    if resolved == "agent":
+        intent = classify_document_intent(text)
+        if intent in {"create", "revise"}:
+            return True, intent
     return False, "unclear"
 
 

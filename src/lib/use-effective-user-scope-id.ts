@@ -7,6 +7,7 @@ import {
   getEffectiveUserIdSync,
   hasStoredUserId,
 } from "./user-id";
+import { USER_CHANGED_EVENT } from "./local-account";
 import { adoptServerUnifiedUserIdIfNeeded } from "./user-identity-sync";
 
 /** 与 API 头一致的有效用户 ID；随 localStorage / 匿名推导 / 焦点同步（多标签） */
@@ -30,12 +31,14 @@ export function useEffectiveUserScopeId(): string {
     };
     void bootstrap();
     window.addEventListener("focus", sync);
+    window.addEventListener(USER_CHANGED_EVENT, sync);
     const onStorage = (event: StorageEvent) => {
       if (event.key === USER_ID_STORAGE_KEY) sync();
     };
     window.addEventListener("storage", onStorage);
     return () => {
       window.removeEventListener("focus", sync);
+      window.removeEventListener(USER_CHANGED_EVENT, sync);
       window.removeEventListener("storage", onStorage);
     };
   }, []);

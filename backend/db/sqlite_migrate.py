@@ -494,8 +494,13 @@ def run_sqlite_migrations(connection: Connection) -> None:
     _seed_builtin_scenarios(connection)
     _backfill_project_scenario_bindings(connection)
     _backfill_project_owner_members(connection)
+    if "local_accounts" in names:
+        _add_columns(
+            connection,
+            "local_accounts",
+            [("employee_id", "TEXT"), ("org_id", "TEXT")],
+        )
     _backfill_member_default_platform_roles(connection)
-    _upgrade_member_platform_role_to_editor(connection)
     _ensure_growth_tables(connection)
     # 诊断修复：幂等补索引 → 清孤儿/僵死 → 归一化类型（顺序保证 FK 开启前先干净）
     _ensure_performance_indexes(connection)
@@ -1191,7 +1196,7 @@ def _backfill_project_owner_members(connection: Connection) -> None:
 
 
 def _backfill_member_default_platform_roles(connection: Connection) -> None:
-    """非 default 用户：未设置 / 旧 alias tenant_viewer → tenant_editor。"""
+    """非 default 用户：未设置 / 旧 alias tenant_viewer → 项目成员 tenant_partner。"""
     tables = connection.execute(
         text("SELECT name FROM sqlite_master WHERE type='table'")
     ).fetchall()
@@ -1217,7 +1222,7 @@ def _backfill_member_default_platform_roles(connection: Connection) -> None:
         role = str(prefs.get("platform_role") or "").strip()
         if role not in ("", "tenant_viewer"):
             continue
-        prefs["platform_role"] = "tenant_editor"
+        prefs["platform_role"] = "tenant_partner"
         connection.execute(
             text(
                 """
@@ -1233,7 +1238,7 @@ def _backfill_member_default_platform_roles(connection: Connection) -> None:
             },
         )
         changed += 1
-        logger.info("sqlite_migrate: platform_role -> tenant_editor user=%s", uid[:24])
+        logger.info("sqlite_migrate: platform_role -> tenant_partner user=%s", uid[:24])
     if changed:
         logger.info("sqlite_migrate: backfilled platform_role count=%s", changed)
 

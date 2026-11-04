@@ -5,6 +5,8 @@ export const USER_ID_STORAGE_KEY = "tpdhermes_user_id";
 
 export const FEISHU_SESSION_STORAGE_KEY = "tpdhermes_feishu_session";
 
+export const LOCAL_SESSION_STORAGE_KEY = "tpdhermes_local_session";
+
 let derivedUserIdCache: string | null = null;
 let derivedUserIdPromise: Promise<string> | null = null;
 
@@ -56,4 +58,9 @@ export async function ensureDerivedUserId(): Promise<string> {
 export function loadFeishuSessionFromStorage(): string {
   if (typeof window === "undefined") return "";
   return window.localStorage.getItem(FEISHU_SESSION_STORAGE_KEY)?.trim() || "";
+}
+
+export function loadLocalSessionToken(): string {
+  if (typeof window === "undefined") return "";
+  return window.localStorage.getItem(LOCAL_SESSION_STORAGE_KEY)?.trim() || "";
 }

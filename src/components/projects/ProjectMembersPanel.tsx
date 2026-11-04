@@ -21,9 +21,18 @@ interface ProjectMemberRow {
 interface RegisteredUserRow {
   user_id: string;
   display_name: string;
+  employee_id?: string;
+  org_id?: string;
   avatar_initial: string;
   platform_role: string | null;
   platform_role_label: string | null;
+}
+
+function identityLine(employeeId?: string, orgId?: string): string {
+  const employee = employeeId?.trim();
+  const org = orgId?.trim();
+  if (!employee && !org) return "工号未填写";
+  return `工号 ${employee || "未填写"} · 组织 ${org || "未填写"}`;
 }
 
 function MemberAvatar({
@@ -157,6 +166,8 @@ export default function ProjectMembersPanel({
       (u) =>
         u.user_id.toLowerCase().includes(q) ||
         u.display_name.toLowerCase().includes(q) ||
+        (u.employee_id || "").toLowerCase().includes(q) ||
+        (u.org_id || "").toLowerCase().includes(q) ||
         (u.platform_role_label || "").toLowerCase().includes(q),
     );
   }, [registeredUsers, search]);
@@ -236,8 +247,10 @@ export default function ProjectMembersPanel({
   const displayForMember = (userId: string) => {
     const reg = registeredUsers.find((u) => u.user_id === userId);
     return {
-      displayName: reg?.display_name || userId,
-      initial: reg?.avatar_initial || userId.slice(0, 1).toUpperCase(),
+      displayName: reg?.display_name || "未登记用户",
+      employeeId: reg?.employee_id,
+      orgId: reg?.org_id,
+      initial: reg?.avatar_initial || "人",
       platformRoleLabel: reg?.platform_role_label,
     };
   };
@@ -263,7 +276,7 @@ export default function ProjectMembersPanel({
               className="mt-2 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm dark:border-slate-600 dark:bg-slate-950"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              placeholder="搜索姓名或 User ID"
+              placeholder="搜索用户名、工号或组织"
             />
           </div>
           <ul className="flex-1 space-y-1 overflow-y-auto p-2">
@@ -307,7 +320,9 @@ export default function ProjectMembersPanel({
                         <p className="truncate text-sm font-medium text-slate-900 dark:text-white">
                           {user.display_name}
                         </p>
-                        <p className="truncate text-xs text-slate-500">{user.user_id}</p>
+                        <p className="truncate text-xs text-slate-500">
+                          {identityLine(user.employee_id, user.org_id)}
+                        </p>
                         {user.platform_role_label ? (
                           <p className="truncate text-[11px] text-slate-400">{user.platform_role_label}</p>
                         ) : null}
@@ -342,7 +357,9 @@ export default function ProjectMembersPanel({
                       <p className="truncate text-sm font-medium text-slate-900 dark:text-white">
                         {info.displayName}
                       </p>
-                      <p className="truncate text-xs text-slate-500">{m.user_id}</p>
+                      <p className="truncate text-xs text-slate-500">
+                        {identityLine(info.employeeId, info.orgId)}
+                      </p>
                       <div className="mt-2">
                         <RoleTagPicker
                           role={m.role}

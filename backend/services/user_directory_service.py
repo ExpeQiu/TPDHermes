@@ -83,11 +83,15 @@ async def list_registered_users(db: AsyncSession) -> list[dict[str, str | None]]
     for uid in sorted(user_ids, key=lambda x: user_display_name(x).lower()):
         prefs = pref_map.get(uid, {})
         platform_role = str(prefs.get(PREF_KEY_PLATFORM_ROLE) or "").strip() or None
+        stored_name = str(prefs.get("display_name") or "").strip()
+        display_name = stored_name or user_display_name(uid)
         out.append(
             {
                 "user_id": uid,
-                "display_name": user_display_name(uid),
-                "avatar_initial": user_avatar_initial(uid),
+                "display_name": display_name,
+                "employee_id": str(prefs.get("employee_id") or "").strip(),
+                "org_id": str(prefs.get("org_id") or "").strip(),
+                "avatar_initial": user_avatar_initial(uid, display_name),
                 "platform_role": platform_role,
                 "platform_role_label": PLATFORM_ROLE_LABELS.get(platform_role or "", platform_role),
             }
@@ -120,12 +124,16 @@ async def list_identity_claimed_users(db: AsyncSession) -> list[dict[str, str | 
     for uid in sorted(canonical_ids, key=lambda x: user_display_name(x).lower()):
         prefs = await get_user_preferences(db, uid)
         stored_role = str(prefs.get(PREF_KEY_PLATFORM_ROLE) or "").strip() or None
+        stored_name = str(prefs.get("display_name") or "").strip()
+        display_name = stored_name or user_display_name(uid)
         out.append(
             {
                 "user_id": uid,
                 "unified_user_id": uid,
-                "display_name": user_display_name(uid),
-                "avatar_initial": user_avatar_initial(uid),
+                "display_name": display_name,
+                "employee_id": str(prefs.get("employee_id") or "").strip(),
+                "org_id": str(prefs.get("org_id") or "").strip(),
+                "avatar_initial": user_avatar_initial(uid, display_name),
                 "platform_role": stored_role,
                 "platform_role_label": PLATFORM_ROLE_LABELS.get(stored_role or "", stored_role),
             }

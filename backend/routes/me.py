@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -10,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.db import get_db
 from backend.services.feishu_auth import get_user_session
+from backend.services.local_auth import profile_from_token, read_session_token, session_token_from_request
 from backend.services.rbac import (
     PLATFORM_ROLE_LABELS,
     PROJECT_ROLE_LABELS,
@@ -37,6 +39,8 @@ from backend.services.user_preference_service import (
     set_unified_user_id,
 )
 
+logger = logging.getLogger("tpdx.hermes.me")
+
 router = APIRouter(tags=["user"])
 
 
@@ -52,6 +56,8 @@ class ManagedUserResponse(BaseModel):
     user_id: str
     unified_user_id: str
     display_name: str
+    employee_id: str = ""
+    org_id: str = ""
     avatar_initial: str
     platform_role: str | None = None
     platform_role_label: str | None = None
@@ -61,6 +67,12 @@ class ManagedUserResponse(BaseModel):
 
 class AssignManagedUserRoleIn(BaseModel):
     platform_role: str = Field(min_length=1, max_length=64)
+
+
+class ManagedProfileIn(BaseModel):
+    display_name: str = Field(min_length=1, max_length=32)
+    employee_id: str = Field(default="", max_length=32)
+    org_id: str = Field(default="", max_length=32)
 
 
 @router.get("/me/derived-user-id")
@@ -88,6 +100,10 @@ async def api_me(
         if u:
             name = u.name or None
             avatar_url = u.avatar_url
+    if not name:
+        local_payload = read_session_token(session_token_from_request(req))
+        if local_payload:
+            name = profile_from_token(local_payload)["display_name"]
     return {
         "user_id": uid,
         "role": platform_role,
@@ -205,6 +221,8 @@ async def api_list_managed_users(
                 user_id=uid,
                 unified_user_id=str(row.get("unified_user_id") or uid),
                 display_name=str(row.get("display_name") or uid),
+                employee_id=str(row.get("employee_id") or ""),
+                org_id=str(row.get("org_id") or ""),
                 avatar_initial=str(row.get("avatar_initial") or "U"),
                 platform_role=row.get("platform_role"),
                 platform_role_label=row.get("platform_role_label"),
@@ -230,6 +248,7 @@ async def api_assign_managed_user_role(
     role = assert_admin_assignable_platform_role(actor_uid, body.platform_role)
     await set_platform_role(db, target, role)
     resolved = await resolve_platform_role(db, None, target)
+    logger.info("managed user role assigned target=%s role=%s actor=%s", target[:24], role, actor_uid[:24])
     return {
         "ok": True,
         "user_id": target,
@@ -238,3 +257,26 @@ async def api_assign_managed_user_role(
         "platform_role_label": PLATFORM_ROLE_LABELS.get(role, role),
         "features": list_features(resolved),
     }
+
+
+@router.put("/me/managed-users/{target_user_id}/profile")
+async def api_update_managed_user_profile(
+    target_user_id: str,
+    body: ManagedProfileIn,
+    db: AsyncSession = Depends(get_db),
+    _admin_role: str = Depends(require_system_admin()),
+):
+    """系统管理员：修改用户名、工号、组织。"""
+    from backend.services.local_auth import update_managed_profile
+
+    target = normalize_user_id(target_user_id.strip())
+    if not is_claimed_user_id(target):
+        raise HTTPException(status_code=400, detail="仅可修改已同步用户")
+    saved = await update_managed_profile(
+        db,
+        user_id=target,
+        display_name=body.display_name,
+        employee_id=body.employee_id,
+        org_id=body.org_id,
+    )
+    return {"ok": True, "user_id": target, **saved}

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import { ProjectFilesRail } from "@/components/project-files-rail";
 import { apiGet, apiPost } from "@/lib/api";
@@ -19,7 +19,6 @@ import {
   type StudioLog,
   type StudioState,
   type TechCard,
-  applyStudioCommand,
   createStudioState,
   emptyFields,
   quoteFor,
@@ -29,7 +28,8 @@ import {
 type StudioTurnResponse = {
   state: StudioState;
   reply: string;
-  driver: "hermes" | "mock";
+  driver: "tpcstore" | "hermes" | "mock";
+  source?: { id: string; text: string; version: string; sha256: string };
   fallback_reason: string | null;
   log: StudioLog & { driver?: string; project_id?: string | null; file_id?: string | null; file_kind?: string | null };
 };
@@ -38,17 +38,18 @@ type ChatMessage = { id: string; role: "user" | "assistant"; content: string };
 
 const PROMPTS = ["提取技术卡", "查看缺口", "锁定当前卡", "合并同域", "合并氛围灯"];
 
-function SourcePane({ quote }: { quote: string }) {
-  const start = quote ? SOURCE_TEXT.indexOf(quote) : -1;
+export function SourcePane({ quote, text = SOURCE_TEXT, lineStart }: { quote: string; text?: string; lineStart?: number }) {
+  const offset = lineStart ? text.split("\n").slice(0, lineStart - 1).reduce((sum, line) => sum + line.length + 1, 0) : 0;
+  const start = quote ? text.indexOf(quote, offset) : -1;
   if (start < 0) {
-    return <p className="whitespace-pre-wrap text-sm leading-7 text-slate-700 dark:text-slate-200">{SOURCE_TEXT}</p>;
+    return <p className="whitespace-pre-wrap text-sm leading-7 text-slate-700 dark:text-slate-200">{text}</p>;
   }
   const end = start + quote.length;
   return (
     <p className="whitespace-pre-wrap text-sm leading-7 text-slate-700 dark:text-slate-200">
-      {SOURCE_TEXT.slice(0, start)}
-      <mark className="rounded bg-amber-300/80 px-0.5 text-slate-950 dark:bg-amber-300">{SOURCE_TEXT.slice(start, end)}</mark>
-      {SOURCE_TEXT.slice(end)}
+      {text.slice(0, start)}
+      <mark className="rounded bg-amber-300/80 px-0.5 text-slate-950 dark:bg-amber-300">{text.slice(start, end)}</mark>
+      {text.slice(end)}
     </p>
   );
 }
@@ -77,17 +78,19 @@ function FieldButton({
     >
       <span className="block text-[10px] uppercase tracking-wide text-slate-500">{FIELD_LABEL[field]}</span>
       <span className="mt-0.5 block">{value || "未记载"}</span>
+      {card.sources?.[field] ? <span className="block text-[10px] text-slate-500">L{card.sources[field]!.line_start}–L{card.sources[field]!.line_end}</span> : null}
     </button>
   );
 }
 
 function driverLabel(driver: string, fallback: string | null): string {
+  if (driver === "tpcstore") return "TPCstore · 会话预览";
   if (driver === "hermes") return "Hermes 内核";
   if (fallback) return "Mock 内核 · Hermes 未就绪";
   return "Mock 内核";
 }
 
-export default function StudioClient() {
+export default function StudioClient({ initialProjectId = "" }: { initialProjectId?: string }) {
   const [studio, setStudio] = useState<StudioState>(createStudioState);
   const [kernelLabel, setKernelLabel] = useState("内核连接中");
   const [pending, setPending] = useState(false);
@@ -95,14 +98,17 @@ export default function StudioClient() {
     {
       id: "hello",
       role: "assistant",
-      content: "这是技术卡核对验证。说「提取技术卡」，候选会出现在右侧。点字段可看原文，锁定后再次提取不会覆盖。",
+      content: "请选择项目资料后提取技术卡。候选与来源由 TPCstore 返回，当前仅保留会话预览。",
     },
   ]);
   const [draft, setDraft] = useState("");
   const [skillId, setSkillId] = useState("V04");
   const [projects, setProjects] = useState<ProjectRecord[]>([]);
-  const [projectId, setProjectId] = useState("");
-  const [includeProject, setIncludeProject] = useState(false);
+  const [projectId, setProjectId] = useState(initialProjectId);
+  const [includeProject, setIncludeProject] = useState(Boolean(initialProjectId));
+  const [demo, setDemo] = useState(false);
+  const [sourceSnapshot, setSourceSnapshot] = useState<StudioTurnResponse["source"]>();
+  const requestEpoch = useRef(0);
   const [fileKey, setFileKey] = useState<string | null>(null);
   const [projectFiles, setProjectFiles] = useState<ProjectFileItem[]>([]);
   const [projectFilesLoading, setProjectFilesLoading] = useState(false);
@@ -115,6 +121,13 @@ export default function StudioClient() {
 
   const selected = studio.cards.find((card) => card.id === studio.selectedCardId) ?? null;
   const activeQuote = selected && studio.selectedField ? quoteFor(selected, studio.selectedField) : "";
+
+  useEffect(() => {
+    requestEpoch.current += 1;
+    setStudio(createStudioState());
+    setSourceSnapshot(undefined);
+    setMessages([{ id: "context", role: "assistant", content: demo ? "样本演示已开启，不使用项目资料。" : "请选择资料后提取；候选仅保留于本次会话，刷新后需重新提取。" }]);
+  }, [boundProjectId, fileKey, demo]);
 
   useEffect(() => {
     let cancelled = false;
@@ -173,16 +186,16 @@ export default function StudioClient() {
     return () => {
       cancelled = true;
     };
-  }, [boundProjectId, fileKey]);
+  }, [boundProjectId, fileKey, projectFilesRefreshKey]);
 
   useEffect(() => {
     let cancelled = false;
-    apiGet<{ driver: string }>("/studio/config")
+    apiGet<{ driver: string; connected: boolean; configured: boolean; reason?: string }>("/studio/config")
       .then((config) => {
-        if (!cancelled) setKernelLabel(driverLabel(config.driver, null));
+        if (!cancelled) setKernelLabel(config.connected ? config.configured ? "TPCstore 已连接 · 模型鉴权待调用验证" : "TPCstore 已连接 · 模型未配置" : config.reason || "TPCstore 未连接");
       })
       .catch(() => {
-        if (!cancelled) setKernelLabel("本地回退");
+        if (!cancelled) setKernelLabel("TPCstore 连接检查失败");
       });
     return () => {
       cancelled = true;
@@ -219,17 +232,22 @@ export default function StudioClient() {
     }
     setPending(true);
     setDraft("");
+    const epoch = requestEpoch.current;
     try {
       const linked = fileKey ? decodeProjectFileSelectValue(fileKey) : null;
+      if (!demo && (!boundProjectId || !linked)) throw new Error("请选择项目和资料，或显式开启样本演示。");
       const result = await apiPost<StudioTurnResponse>("/studio/turn", {
         message: content,
         state: base,
-        project_id: boundProjectId || null,
-        file_id: linked?.id ?? null,
-        file_kind: linked?.kind ?? null,
+        project_id: demo ? null : boundProjectId || null,
+        file_id: demo ? null : linked?.id ?? null,
+        file_kind: demo ? null : linked?.kind ?? null,
+        demo,
       });
+      if (epoch !== requestEpoch.current) return;
       console.info("[studio]", result.log);
       setStudio(result.state);
+      setSourceSnapshot(result.source);
       setKernelLabel(driverLabel(result.driver, result.fallback_reason));
       setMessages((current) => [
         ...current,
@@ -237,14 +255,12 @@ export default function StudioClient() {
         { id: `assistant_${current.length}`, role: "assistant", content: result.reply },
       ]);
     } catch (error) {
-      const result = applyStudioCommand(base, content);
-      console.info("[studio]", { ...result.log, driver: "local-fallback", error: String(error) });
-      setStudio(result.state);
-      setKernelLabel("本地回退");
+      if (epoch !== requestEpoch.current) return;
+      setKernelLabel("调用未完成 · 未采用新结果");
       setMessages((current) => [
         ...current,
         { id: `user_${current.length}`, role: "user", content },
-        { id: `assistant_${current.length}`, role: "assistant", content: result.reply },
+        { id: `assistant_${current.length}`, role: "assistant", content: error instanceof Error ? error.message : String(error) },
       ]);
     } finally {
       setPending(false);
@@ -350,8 +366,12 @@ export default function StudioClient() {
             void commit(draft);
           }}
         >
+          <label className="flex items-center gap-2 text-xs text-slate-500">
+            <input type="checkbox" checked={demo} disabled={pending} onChange={(event) => setDemo(event.target.checked)} />
+            样本演示（不使用项目资料）
+          </label>
           <div className="flex flex-wrap gap-1.5">
-            {PROMPTS.map((prompt) => (
+            {(demo ? PROMPTS : PROMPTS.slice(0, 3)).map((prompt) => (
               <button
                 key={prompt}
                 type="button"
@@ -393,6 +413,11 @@ export default function StudioClient() {
             {summary}
           </p>
         </header>
+        <div className="flex items-center justify-between gap-2 border-b border-slate-200 px-4 py-2 text-xs text-slate-500 dark:border-slate-800">
+          <span>{demo ? "样本演示" : "会话预览 · 未持久保存 · 未审核"}{sourceSnapshot ? ` · 来源版本 ${sourceSnapshot.version}` : ""}</span>
+          <button type="button" disabled={pending} onClick={() => { requestEpoch.current += 1; setStudio(createStudioState()); setSourceSnapshot(undefined); }} className="underline disabled:opacity-50">清空预览</button>
+        </div>
+        {studio.issues?.length ? <div className="border-b border-amber-200 bg-amber-50 px-4 py-2 text-xs text-amber-900">{studio.issues.map((issue, index) => <p key={index}>{issue.message}</p>)}</div> : null}
         {studio.blockedReason ? (
           <p className="border-b border-amber-300 bg-amber-50 px-4 py-2 text-sm text-amber-900 dark:border-amber-700 dark:bg-amber-950 dark:text-amber-100">
             {studio.blockedReason}
@@ -410,13 +435,7 @@ export default function StudioClient() {
         <div className="grid min-h-0 flex-1 grid-rows-2 lg:grid-cols-[minmax(0,1fr)_22rem] lg:grid-rows-1">
           <div className="min-h-0 overflow-y-auto border-b border-slate-200 p-4 dark:border-slate-800 lg:border-b-0 lg:border-r">
             <p className="mb-2 text-xs text-slate-500">{linkedFile ? `关联文件 · ${linkedFile.title}` : "原文"}</p>
-            {linkedFile ? (
-              <p className="whitespace-pre-wrap text-sm leading-7 text-slate-700 dark:text-slate-200">
-                {linkedFile.content?.trim() || "这份文件没有正文。"}
-              </p>
-            ) : (
-              <SourcePane quote={activeQuote} />
-            )}
+            <SourcePane quote={activeQuote} text={demo ? SOURCE_TEXT : sourceSnapshot?.text ?? linkedFile?.content ?? "请选择资料。"} lineStart={studio.selectedField ? selected?.sources?.[studio.selectedField]?.line_start : undefined} />
           </div>
           <div className="min-h-0 overflow-y-auto p-4">
             <p className="mb-2 text-xs text-slate-500">技术卡</p>

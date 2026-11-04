@@ -1,27 +1,9 @@
 "use client";
 
-import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
+import { Suspense, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { apiGet } from "@/lib/api";
-import {
-  FEISHU_SESSION_STORAGE_KEY,
-  USER_ID_STORAGE_KEY,
-  ensureDerivedUserId,
-  fetchDerivedUserId,
-  getEffectiveUserIdSync,
-  loadFeishuSessionFromStorage,
-  loadUserIdFromStorage,
-  normalizeUserId,
-} from "@/lib/user-id";
-import {
-  adoptServerUnifiedUserIdIfNeeded,
-  fetchServerIdentity,
-  saveUnifiedUserIdLocally,
-  syncUnifiedUserIdToServer,
-  type UserIdentityState,
-} from "@/lib/user-identity-sync";
-import { fetchUserAccess, type UserAccessState } from "@/lib/rbac";
+import { featuresForPlatformRole, fetchUserAccess, type PlatformRole, type UserAccessState } from "@/lib/rbac";
 import { accessibleWorkflowPages } from "@/lib/workflow-nav";
 import { isSystemAdminRole } from "@/lib/user-admin";
 import { CONTENT_MAX_CLASS } from "@/lib/content-shell";
@@ -35,24 +17,13 @@ import RoleManagementPanel from "@/components/settings/RoleManagementPanel";
 import UserGroupManagementPanel from "@/components/settings/UserGroupManagementPanel";
 import { useThemeStore } from "@/lib/store";
 
-interface MeResponse {
-  user_id: string;
-  role: string;
-  platform_role?: string;
-  is_global_admin?: boolean;
-  feishu_bound: boolean;
-  name: string | null;
-  avatar_url: string | null;
-}
-
 type SettingsTab = "runtime" | "cli" | "theme" | "identity" | "mcp" | "pteam" | "roles";
 
 const SETTINGS_TABS: { id: SettingsTab; label: string; description: string }[] = [
   {
     id: "identity",
     label: "用户与身份",
-    description:
-      "统一 User ID 用于跨 PC 同步对话与场景记录；飞书登录自动绑定 feishu:*，也可生成或填写自定义 ID。",
+    description: "选择用户，编辑资料与分组；右侧列出该分组可访问的页面。",
   },
   {
     id: "runtime",
@@ -92,25 +63,15 @@ const THEME_OPTIONS: { value: "light" | "dark"; label: string }[] = [
 ];
 
 function PageAccessPanel({ access }: { access: UserAccessState | null }) {
-  const pages = useMemo(
-    () =>
-      access
-        ? accessibleWorkflowPages({
-            features: access.features,
-            platformRole: access.platform_role,
-          })
-        : [],
-    [access],
-  );
-
-  useEffect(() => {
-    if (!access) return;
-    console.info("[settings] 当前用户可访问页面", {
-      user_id: access.user_id,
-      platform_role: access.platform_role,
-      pages: pages.map((page) => page.href),
+  const pages = useMemo(() => {
+    if (!access) return [];
+    return accessibleWorkflowPages({
+      features: access.features.length
+        ? access.features
+        : featuresForPlatformRole(access.platform_role as PlatformRole),
+      platformRole: access.platform_role,
     });
-  }, [access, pages]);
+  }, [access]);
 
   return (
     <aside
@@ -182,12 +143,7 @@ function SettingsPageContent() {
     searchParams.get("tab") === "external" ? "autocar" : "geely",
   );
 
-  const [userId, setUserId] = useState("");
   const [access, setAccess] = useState<UserAccessState | null>(null);
-  const [me, setMe] = useState<MeResponse | null>(null);
-  const [identity, setIdentity] = useState<UserIdentityState | null>(null);
-  const [saving, setSaving] = useState(false);
-  const [err, setErr] = useState("");
   const theme = useThemeStore((s) => s.theme);
   const setTheme = useThemeStore((s) => s.setTheme);
 
@@ -195,58 +151,13 @@ function SettingsPageContent() {
     router.replace(`/settings?tab=${tab}`, { scroll: false });
   };
 
-  const refreshMe = useCallback(async () => {
-    try {
-      const m = await apiGet<MeResponse>("/me");
-      setMe(m);
-      setErr("");
-    } catch (e: unknown) {
-      setErr(e instanceof Error ? e.message : "加载失败");
-    }
-  }, []);
-
   useEffect(() => {
-    void adoptServerUnifiedUserIdIfNeeded().then((adopted) => {
-      const stored = (adopted || loadUserIdFromStorage()).trim();
-      if (stored) {
-        setUserId(stored);
-      } else {
-        void fetchDerivedUserId()
-          .then((id) => setUserId(id))
-          .catch(() => setUserId(getEffectiveUserIdSync()));
-      }
-    });
     void fetchUserAccess()
       .then(setAccess)
       .catch(() => setAccess(null));
-    refreshMe();
-    void fetchServerIdentity()
-      .then(setIdentity)
-      .catch(() => setIdentity(null));
-  }, [refreshMe]);
+  }, []);
 
   const canManageUserGroups = Boolean(access && isSystemAdminRole(access.platform_role));
-
-  const save = async () => {
-    if (typeof window === "undefined") return;
-    setSaving(true);
-    setErr("");
-    try {
-      const raw = userId.trim();
-      const u = raw ? normalizeUserId(raw) : await ensureDerivedUserId();
-      saveUnifiedUserIdLocally(u);
-      setUserId(u);
-      const synced = await syncUnifiedUserIdToServer(u);
-      setIdentity(synced);
-      const nextAccess = await fetchUserAccess();
-      setAccess(nextAccess);
-      await refreshMe();
-    } catch (e: unknown) {
-      setErr(e instanceof Error ? e.message : "保存失败");
-    } finally {
-      setSaving(false);
-    }
-  };
 
   const currentTab = SETTINGS_TABS.find((tab) => tab.id === activeTab) ?? SETTINGS_TABS[0];
 
@@ -336,79 +247,14 @@ function SettingsPageContent() {
             </div>
           )}
 
-          {activeTab === "identity" && (
-            <>
-              <div className="mt-4 grid items-start gap-4 lg:grid-cols-2">
-              <div className="space-y-4 rounded-2xl border border-slate-200 bg-white/80 p-6 dark:border-slate-800 dark:bg-slate-900/50">
-              {me && (
-                <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm dark:border-slate-800 dark:bg-slate-900/80">
-                  <p>
-                    <span className="text-slate-500">服务端解析 ID：</span>
-                    <span className="text-slate-800 dark:text-slate-200">{me.user_id}</span>
-                  </p>
-                  <p className="mt-1">
-                    <span className="text-slate-500">角色：</span>
-                    {me.role}
-                    {me.feishu_bound ? " · 已绑定飞书会话" : ""}
-                  </p>
-                  {me.name && (
-                    <p className="mt-1 text-slate-600 dark:text-slate-400">
-                      {me.name}
-                      {me.avatar_url ? "（有头像）" : ""}
-                    </p>
-                  )}
-                </div>
-              )}
-
-              {identity && (
-                <div className="rounded-lg border border-blue-200 bg-blue-50 p-3 text-xs text-blue-900 dark:border-blue-900/40 dark:bg-blue-950/30 dark:text-blue-200">
-                  <p>
-                    云端统一 ID：<span className="font-medium">{identity.unified_user_id}</span>
-                    （{identity.source === "feishu" ? "飞书" : identity.source === "custom" ? "自定义" : "匿名"}）
-                  </p>
-                  <p className="mt-1 text-blue-800/80 dark:text-blue-300/80">
-                    在其他 PC 填写相同 ID 并保存，即可同步对话与场景历史记录。
-                  </p>
-                </div>
-              )}
-
-              <label className="block text-sm">
-                <span className="text-slate-500 dark:text-slate-400">统一 User ID</span>
-                <div className="mt-1">
-                  <input
-                    className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
-                    value={userId}
-                    onChange={(e) => setUserId(e.target.value)}
-                    placeholder="user_… 或 feishu:…"
-                  />
-                </div>
-              </label>
-              <p className="text-xs text-slate-500">
-                保存后写入本机 <code>{USER_ID_STORAGE_KEY}</code> 并同步至服务端；历史对话按此 ID 隔离。
-                飞书会话键 <code>{FEISHU_SESSION_STORAGE_KEY}</code>
-                ，当前{loadFeishuSessionFromStorage() ? "已设置" : "未设置"}。
-              </p>
-              {err && <p className="text-sm text-red-500 dark:text-red-400">{err}</p>}
-              <button
-                type="button"
-                onClick={save}
-                disabled={saving}
-                className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-500 disabled:opacity-60"
-              >
-                {saving ? "保存中…" : "保存并同步"}
-              </button>
+          {activeTab === "identity" &&
+            (canManageUserGroups ? (
+              <UserGroupManagementPanel enabled={canManageUserGroups} />
+            ) : (
+              <div className="mt-4">
+                <PageAccessPanel access={access} />
               </div>
-
-              <PageAccessPanel access={access} />
-              </div>
-
-              {canManageUserGroups && (
-                <div className="mt-8">
-                  <UserGroupManagementPanel enabled={canManageUserGroups} />
-                </div>
-              )}
-            </>
-          )}
+            ))}
 
           {activeTab === "mcp" && (
             <div className="mt-4 space-y-8">

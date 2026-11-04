@@ -114,9 +114,11 @@ def test_t02_client_message_id_is_idempotent(room_roles):
 def test_t03_stale_base_version_returns_conflict(room_roles):
     owner = f"room_owner_{uuid.uuid4().hex[:8]}"
     other = f"room_editor_{uuid.uuid4().hex[:8]}"
+    calls = {"n": 0}
 
     async def editor(role, ctx):
         del role
+        calls["n"] += 1
         version = str((ctx.get("target") or {}).get("version") or "")
         file_id = str((ctx.get("target") or {}).get("file_id") or "")
         async with async_session_maker() as db:
@@ -127,7 +129,7 @@ def test_t03_stale_base_version_returns_conflict(room_roles):
                 action={
                     "type": "patch",
                     "target_file_id": file_id,
-                    "content": "# 别人\n\n别人的版本\n",
+                    "content": f"# 别人\n\n别人的版本 {calls['n']}\n",
                     "edit_mode": "full",
                     "base_version": version,
                     "file_name": "共创结果.md",
@@ -153,9 +155,62 @@ def test_t03_stale_base_version_returns_conflict(room_roles):
         done = _messages(client, owner, project_id, room_id)
         assert "别人的版本" in done["content"]
         assert "主笔新稿" not in done["content"]
+        assert calls["n"] >= 2
         failed = [item for item in done["messages"] if item["content"] == "再写一版"]
         assert failed[0]["turn_state"] == "failed"
         assert failed[0]["error_code"] == 409
+
+
+def test_version_conflict_requeues_and_writes_latest(room_roles):
+    owner = f"room_owner_{uuid.uuid4().hex[:8]}"
+    other = f"room_editor_{uuid.uuid4().hex[:8]}"
+    calls = {"n": 0}
+
+    async def editor(role, ctx):
+        del role
+        calls["n"] += 1
+        version = str((ctx.get("target") or {}).get("version") or "")
+        file_id = str((ctx.get("target") or {}).get("file_id") or "")
+        if calls["n"] == 1:
+            async with async_session_maker() as db:
+                await apply_file_action(
+                    db,
+                    ctx_project,
+                    effective_uid=other,
+                    action={
+                        "type": "patch",
+                        "target_file_id": file_id,
+                        "content": "# 别人\n\n别人的版本\n",
+                        "edit_mode": "full",
+                        "base_version": version,
+                        "file_name": "共创结果.md",
+                    },
+                    proposal_id=f"other-{uuid.uuid4().hex}",
+                )
+            return "# 主笔\n\n过期稿\n"
+        assert "别人的版本" in str(ctx.get("document") or "")
+        return "# 主笔\n\n排队后的修订\n"
+
+    with TestClient(app) as client:
+        project_id = _create_project(client, owner)
+        from tests.test_project_rooms import _add_member
+
+        _add_member(client, owner, project_id, other, "editor")
+        room_id = _create_room(client, owner, project_id, title="共创结果")["id"]
+        _post(client, owner, project_id, room_id, "负责人先写一版")
+    asyncio.run(rooms.drain_project_room(room_id))
+    ctx_project = project_id
+    rooms.set_room_completer_for_tests(editor)
+    with TestClient(app) as client:
+        _post(client, owner, project_id, room_id, "再写一版")
+    asyncio.run(rooms.drain_project_room(room_id))
+    with TestClient(app) as client:
+        done = _messages(client, owner, project_id, room_id)
+        assert calls["n"] >= 2
+        assert "排队后的修订" in done["content"]
+        assert "过期稿" not in done["content"]
+        revised = [item for item in done["messages"] if item["content"] == "再写一版"]
+        assert revised[0]["turn_state"] == "succeeded"
 
 
 def test_t04_archived_project_and_room_do_not_write(room_roles):
@@ -587,7 +642,11 @@ def test_t12_writer_reads_attachment_and_revises(room_roles, tmp_path: Path, mon
         assert "待删句子BETA" not in revised["content"]
         assert "附件原句ALPHA" in revised["content"]
     assert calls
-    prompt = build_writer_messages({"id": "writer", "system": "主笔"}, {"materials": [], "human_text": "", "allow_write": True})
+    prompt = build_writer_messages(
+        {"id": "writer", "system": "主笔"},
+        {"materials": [], "human_text": "", "allow_write": True, "run_id": "run-1"},
+    )
+    assert "tphermes_run_id=run-1" in prompt[0]["content"]
     assert prompt[0]["role"] == "system"
 
 
@@ -637,5 +696,8 @@ def test_event_cursor_sees_interleaved_agent_message(room_roles):
             params={"after_event": 1},
         )
         assert page.status_code == 200, page.text
-        contents = [item["content"] for item in page.json()["messages"]]
+        body = page.json()
+        contents = [item["content"] for item in body["messages"]]
         assert contents == ["后插入的前轮回复"]
+        states = {item["turn_id"]: item["turn_state"] for item in body["turn_states"]}
+        assert states["late-human"] == "succeeded"

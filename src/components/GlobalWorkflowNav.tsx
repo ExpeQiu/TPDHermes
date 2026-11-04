@@ -10,6 +10,7 @@ import {
   type WorkflowNavItem,
 } from "@/lib/workflow-nav";
 import { useEffectiveUserScopeId } from "@/lib/use-effective-user-scope-id";
+import UserAccountMenu from "@/components/UserAccountMenu";
 
 function isNavItemActive(item: WorkflowNavItem, pathname: string): boolean {
   if (item.matchActive) return item.matchActive(pathname);
@@ -63,8 +64,9 @@ export default function GlobalWorkflowNav() {
           </Link>
         </div>
 
+        <div className="flex min-w-0 flex-1 items-center justify-end gap-3 pr-4 sm:pr-6 md:pr-8">
         <nav
-          className="flex min-w-0 shrink items-center gap-2 overflow-x-auto pb-1 pr-4 sm:pr-6 md:pr-8 lg:justify-end"
+          className="flex min-w-0 flex-1 items-center justify-end gap-2 overflow-x-auto pb-1"
           aria-label="全站工作流导航"
         >
           {navItems.map((item) => {
@@ -85,6 +87,8 @@ export default function GlobalWorkflowNav() {
             );
           })}
         </nav>
+        <UserAccountMenu />
+        </div>
       </div>
     </header>
   );

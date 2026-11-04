@@ -146,6 +146,9 @@ describe("CoCreateRoomApp", () => {
     const text = container.textContent ?? "";
     expect(text.indexOf("先发言")).toBeLessThan(text.indexOf("主笔收束"));
     expect(text.indexOf("主笔收束")).toBeLessThan(text.indexOf("后发言"));
+    expect(container.querySelector('[data-kind="member"][data-id="ada"]')?.getAttribute("data-voice")).toBe("on");
+    expect(container.querySelector('[data-kind="member"][data-id="bob"]')?.getAttribute("data-voice")).toBe("on");
+    expect(container.querySelector('[data-kind="bot"][data-id="writer"]')?.getAttribute("data-voice")).toBe("on");
   });
 
   it("@ 只列出 Bot，# 只列出文档", async () => {
@@ -207,6 +210,7 @@ describe("CoCreateRoomApp", () => {
     await waitFor(() => {
       const labels = optionLabels();
       expect(labels.some((label) => label.includes("主笔") && label.includes("Bot"))).toBe(true);
+      expect(labels.some((label) => label.includes("入座"))).toBe(false);
       expect(labels.some((label) => label.includes("文档"))).toBe(false);
     });
 
@@ -215,6 +219,69 @@ describe("CoCreateRoomApp", () => {
       const labels = optionLabels();
       expect(labels.some((label) => label.includes("共创文档.md") && label.includes("文档"))).toBe(true);
       expect(labels.some((label) => label.includes("Bot"))).toBe(false);
+    });
+  });
+
+  it("@ 对未入座角色提供入座，并写回当前对话", async () => {
+    apiGet.mockImplementation(async (path: string) => {
+      if (path.includes("/messages")) {
+        return { messages: [], doc_version: 0, content: "", output_id: null };
+      }
+      if (path.endsWith("/rooms")) {
+        return {
+          items: [
+            {
+              id: "room-1",
+              title: "方案讨论",
+              role_ids: [],
+              writer_role_id: "",
+              output_id: null,
+              doc_version: 0,
+            },
+          ],
+        };
+      }
+      if (path.includes("/brainstorm/roles")) {
+        return { items: [{ id: "writer", name: "主笔" }] };
+      }
+      if (path.endsWith("/files")) return { items: [] };
+      if (path.endsWith("/members")) return [];
+      return {};
+    });
+    apiPatch.mockResolvedValue({
+      id: "room-1",
+      title: "方案讨论",
+      role_ids: ["writer"],
+      writer_role_id: "writer",
+      output_id: null,
+      doc_version: 0,
+    });
+    const { container } = renderComponent(<CoCreateRoomApp />);
+    await waitFor(() => {
+      expect(container.textContent).toContain("方案讨论");
+    });
+    const openRoom = Array.from(container.querySelectorAll("button")).find((button) =>
+      button.textContent?.includes("方案讨论"),
+    );
+    openRoom?.click();
+    const textarea = container.querySelector("textarea") as HTMLTextAreaElement;
+    const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")?.set;
+    setter?.call(textarea, "@");
+    textarea.dispatchEvent(new Event("input", { bubbles: true }));
+    await waitFor(() => {
+      expect(container.textContent).toContain("入座");
+      expect(container.textContent).not.toContain("当前对话没有入座角色");
+    });
+    const seat = Array.from(container.querySelectorAll('[role="option"]')).find((node) =>
+      node.textContent?.includes("主笔"),
+    );
+    clickElement(seat as HTMLButtonElement);
+    await waitFor(() => {
+      expect(apiPatch).toHaveBeenCalledWith("/projects/project-1/rooms/room-1", {
+        role_ids: ["writer"],
+        writer_role_id: "writer",
+      });
+      expect((container.querySelector("textarea") as HTMLTextAreaElement).value).toBe("@主笔 ");
     });
   });
 

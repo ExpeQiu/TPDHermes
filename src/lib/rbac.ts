@@ -65,6 +65,18 @@ export async function syncPlatformRoleToServer(platformRole: PlatformRole): Prom
   return fetchUserAccess();
 }
 
+const FEATURES_BY_PLATFORM_ROLE: Record<PlatformRole, FeatureKey[]> = {
+  platform_admin: ["create", "knowledge", "skills", "projects", "chat", "workshop", "ops", "settings"],
+  tenant_admin: ["create", "knowledge", "skills", "projects", "chat", "workshop", "ops", "settings"],
+  tenant_editor: ["create", "knowledge", "skills", "projects", "chat", "workshop", "settings"],
+  tenant_partner: ["projects", "chat", "workshop", "skills", "settings"],
+};
+
+export function featuresForPlatformRole(role: string | null | undefined): FeatureKey[] {
+  const key = (role || "").trim() as PlatformRole;
+  return FEATURES_BY_PLATFORM_ROLE[key] ?? FEATURES_BY_PLATFORM_ROLE.tenant_partner;
+}
+
 export const PLATFORM_ROLE_OPTIONS: { value: PlatformRole; label: string; hint: string }[] = [
   {
     value: "tenant_admin",
@@ -79,7 +91,7 @@ export const PLATFORM_ROLE_OPTIONS: { value: PlatformRole; label: string; hint: 
   {
     value: "tenant_partner",
     label: "项目成员",
-    hint: "首页，项目中心，对话创作，场景输出，配置",
+    hint: "首页，项目中心，项目共创，对话创作，场景创作，技能工坊",
   },
   { value: "platform_admin", label: "平台管理员", hint: "全部功能（需全局管理员身份）" },
 ];

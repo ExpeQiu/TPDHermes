@@ -9,6 +9,7 @@ from typing import Optional
 from fastapi import Query, Request
 
 from backend.services.feishu_auth import get_user_session
+from backend.services.local_auth import local_session_user_id
 
 logger = logging.getLogger("tpdx.hermes.user_identity")
 
@@ -108,9 +109,18 @@ def _header_user_id(request: Request) -> str:
 
 
 def _resolve_from_trusted_sources(request: Request) -> str:
-    """飞书会话优先。客户端 X-User-ID 不能绕过已登录主体，且默认不信任。"""
-    fs = feishu_effective_user_id(request)
+    """本机登录优先，其次飞书会话。客户端 X-User-ID 不能绕过已登录主体，且默认不信任。"""
+    local_uid = local_session_user_id(request)
     header_uid = _header_user_id(request)
+    if local_uid:
+        if header_uid and normalize_user_id(header_uid) != local_uid:
+            logger.warning(
+                "ignored X-User-ID bypass of local session claimed=%s session=%s",
+                header_uid[:24],
+                local_uid[:24],
+            )
+        return local_uid
+    fs = feishu_effective_user_id(request)
     if fs:
         if header_uid and normalize_user_id(header_uid) != fs:
             logger.warning(
@@ -179,7 +189,7 @@ def viewer_role(request: Request | None) -> str:
         return "platform_admin"
     if uid == "default" and default_is_platform_admin_enabled():
         return "platform_admin"
-    return os.getenv("TPDHERMES_DEFAULT_USER_ROLE", "tenant_editor") or "tenant_editor"
+    return os.getenv("TPDHERMES_DEFAULT_USER_ROLE", "tenant_partner") or "tenant_partner"
 
 
 def is_global_admin_user(user_id: str) -> bool:

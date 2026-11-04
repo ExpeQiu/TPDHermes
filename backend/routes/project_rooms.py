@@ -13,6 +13,7 @@ from backend.services.project_room_service import (
     enqueue_human_message,
     get_room,
     list_messages,
+    list_project_voices,
     list_rooms,
     retry_room_turn,
     schedule_room_drain,
@@ -32,6 +33,8 @@ class RoomCreateBody(BaseModel):
 class RoomUpdateBody(BaseModel):
     title: str | None = None
     archived: bool | None = None
+    role_ids: list[str] | None = None
+    writer_role_id: str | None = None
 
 
 class RoomFileRefBody(BaseModel):
@@ -62,6 +65,15 @@ async def api_list_rooms(
 ):
     items = await list_rooms(db, project_id=project_id, user_id=user_id)
     return {"items": items}
+
+
+@router.get("/{project_id}/rooms/voices")
+async def api_list_room_voices(
+    project_id: str,
+    db: AsyncSession = Depends(get_db),
+    user_id: str = Depends(get_effective_user_id),
+):
+    return await list_project_voices(db, project_id=project_id, user_id=user_id)
 
 
 @router.post("/{project_id}/rooms")
@@ -96,6 +108,8 @@ async def api_update_room(
         user_id=user_id,
         title=body.title,
         archived=body.archived,
+        role_ids=body.role_ids,
+        writer_role_id=body.writer_role_id,
     )
 
 

@@ -405,7 +405,10 @@ function chromaDocIdFromParts(
   return null;
 }
 
-function resolveChromaDocId(entry: Pick<KBEntry, "id" | "doc_id">): string | null {
+function resolveChromaDocId(entry: {
+  id?: string | null;
+  doc_id?: string | null;
+}): string | null {
   const raw = entry.id?.trim() ?? "";
   let doc = entry.doc_id?.trim() ?? "";
   if (doc && (isKbCachePrimaryId(doc) || (raw && doc === raw && isKbCachePrimaryId(raw)))) {

@@ -5,6 +5,8 @@ export interface ManagedUserRow {
   user_id: string;
   unified_user_id: string;
   display_name: string;
+  employee_id?: string;
+  org_id?: string;
   avatar_initial: string;
   platform_role: PlatformRole | null;
   platform_role_label: string | null;
@@ -14,6 +16,13 @@ export interface ManagedUserRow {
 
 export async function fetchManagedUsers(): Promise<ManagedUserRow[]> {
   return apiGet<ManagedUserRow[]>("/me/managed-users");
+}
+
+export async function updateManagedUserProfile(
+  userId: string,
+  profile: { display_name: string; employee_id: string; org_id: string },
+): Promise<{ ok: boolean; display_name: string; employee_id: string; org_id: string }> {
+  return apiPut(`/me/managed-users/${encodeURIComponent(userId)}/profile`, profile);
 }
 
 export async function assignUserPlatformRole(

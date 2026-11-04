@@ -195,12 +195,17 @@ class ProjectMemberResponse(BaseModel):
     role: str
     created_at: str
     updated_at: str
+    display_name: str = ""
+    employee_id: str = ""
+    org_id: str = ""
 
 
 class RegisteredUserResponse(BaseModel):
     user_id: str
     display_name: str
     avatar_initial: str
+    employee_id: str = ""
+    org_id: str = ""
     platform_role: str | None = None
     platform_role_label: str | None = None
 
@@ -1851,17 +1856,25 @@ async def list_project_members_api(
 ):
     await require_project_for_user(db, project_id, effective_uid, min_perm="read")
     rows = await list_project_members(db, project_id)
-    return [
-        ProjectMemberResponse(
-            id=row.id,
-            project_id=row.project_id,
-            user_id=row.user_id,
-            role=row.role,
-            created_at=row.created_at,
-            updated_at=row.updated_at,
+    from backend.services.user_preference_service import get_user_preferences
+
+    profiles = []
+    for row in rows:
+        prefs = await get_user_preferences(db, row.user_id)
+        profiles.append(
+            ProjectMemberResponse(
+                id=row.id,
+                project_id=row.project_id,
+                user_id=row.user_id,
+                role=row.role,
+                created_at=row.created_at,
+                updated_at=row.updated_at,
+                display_name=str(prefs.get("display_name") or "").strip(),
+                employee_id=str(prefs.get("employee_id") or "").strip(),
+                org_id=str(prefs.get("org_id") or "").strip(),
+            )
         )
-        for row in rows
-    ]
+    return profiles
 
 
 @router.get("/{project_id}/registered-users", response_model=list[RegisteredUserResponse])
