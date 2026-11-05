@@ -406,7 +406,12 @@ def test_mentioned_agents_revise_existing_document_in_order(room_roles):
 
 
 def test_document_intent_separates_chat_create_and_revise():
-    from backend.services.room_contract import classify_document_intent, manuscript_for_file
+    from backend.services.room_contract import (
+        authorized_hermes_action,
+        classify_document_intent,
+        manuscript_for_file,
+        project_file_body,
+    )
 
     assert classify_document_intent("将以上整理成文稿") == "create"
     assert classify_document_intent("转成报告") == "create"
@@ -416,9 +421,50 @@ def test_document_intent_separates_chat_create_and_revise():
     assert classify_document_intent("@角色甲 只叫甲") == "chat"
     assert classify_document_intent("文稿和话术有什么区别") == "chat"
     assert classify_document_intent("生成式人工智能是什么") == "chat"
+    assert classify_document_intent("存档以上文档") == "create"
     assert classify_document_intent("不要生成文档，请写一版") == "deny"
+    archived = project_file_body(
+        "已存档于 /opt/data/输出/报告.md。平台写入被标记为禁止，未落库。",
+        ["Hermes: # 千里浩瀚\n\n正式正文"],
+    )
+    assert archived.startswith("# 千里浩瀚")
+    parsed = authorized_hermes_action(
+        "说明\n```tphermes_file_actions\n- action: create\n- path: /输出/新文档 版本.md\n- content: |\n    # 千里浩瀚\n    正文\n```"
+    )
+    assert parsed is not None
+    assert parsed["file_name"] == "新文档 版本.md"
+    assert parsed["content"].startswith("# 千里浩瀚")
     saved = manuscript_for_file("已整理成稿，并落盘于 /opt/data/输出/报告.md（平台写入被标记为禁止）。\n\n# 千里浩瀚\n\n正文")
     assert saved.startswith("# 千里浩瀚")
+
+
+def test_hermes_file_action_is_executed(room_roles):
+    owner = f"room_owner_{uuid.uuid4().hex[:8]}"
+
+    async def editor(role, ctx):
+        del role, ctx
+        return (
+            "已按授权准备落库。\n\n"
+            "```tphermes_file_actions\n"
+            '{"actions":[{"type":"create","fileName":"竞品洞察.md","path":"/输出/竞品洞察.md",'
+            '"content":"# 竞品洞察\\n\\n正式正文"}]}\n'
+            "```"
+        )
+
+    rooms.set_room_completer_for_tests(editor)
+    with TestClient(app) as client:
+        project_id = _create_project(client, owner)
+        room_id = _create_room(client, owner, project_id, title="竞品洞察")["id"]
+        _post(client, owner, project_id, room_id, "你好")
+
+    asyncio.run(rooms.drain_project_room(room_id))
+
+    with TestClient(app) as client:
+        done = _messages(client, owner, project_id, room_id)
+        assert done["doc_version"] >= 1
+        assert done["output_id"]
+        assert "正式正文" in done["content"]
+        assert "tphermes_file_actions" not in done["content"]
 
 
 def test_arrange_into_manuscript_creates_project_file(room_roles):

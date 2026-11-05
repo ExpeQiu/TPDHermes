@@ -27,7 +27,11 @@ _CREATE_RE = re.compile(
     rf"(?:整理|梳理|汇总|转成|转为|写成|起草|拟定|产出|落成)(?:成|为|出)?(?:一[份个])?(?:{_DELIVERABLE})"
     rf"|(?:写|做|出|生成)(?:一[份个版稿]|个)?(?:{_DELIVERABLE})"
     r"|写一版|写一稿|出一版|出稿|成稿"
+    r"|存档(?:以上|这段|这份)?(?:文稿|文档)?"
+    r"|归档(?:以上|这段|这份)?(?:文稿|文档)?"
+    r"|保存到项目文件|存到项目文件|落入项目文件"
 )
+_DISK_NOTICE_RE = re.compile(r"未落库|被标记为禁止|/opt/data/输出|tphermes_file_actions")
 _STRONG_CREATE_RE = re.compile(r"整理成|转成|转为|写成|写一版|写一稿|出一版|起草|落成|成稿")
 _REVISE_RE = re.compile(r"修订|改写|删除原句|补一节|更新文稿|更新文档|改一版|再写一版|重写|改一下|润色|参与修改")
 _QUESTION_RE = re.compile(r"[?？]|什么|怎么|为什么|哪些|是否|吗")
@@ -86,6 +90,75 @@ def manuscript_for_file(reply: str) -> str:
             return "\n".join(lines[index:]).strip()
         return text
     return text
+
+
+def _yaml_file_action(reply: str) -> dict[str, Any] | None:
+    """Hermes 常把动作写成缩进文本，而不是 JSON。"""
+    match = re.search(r"```tphermes_file_actions\s*\n(.*?)```", reply or "", re.S)
+    if not match:
+        return None
+    action_type = "create"
+    path = ""
+    content_lines: list[str] = []
+    in_content = False
+    for line in match.group(1).splitlines():
+        stripped = line.strip()
+        if not in_content and re.match(r"-?\s*action\s*:", stripped):
+            action_type = stripped.split(":", 1)[1].strip() or "create"
+            continue
+        if not in_content and re.match(r"-?\s*path\s*:", stripped):
+            path = stripped.split(":", 1)[1].strip()
+            continue
+        if re.match(r"\s*-?\s*content\s*:\s*\|", line):
+            in_content = True
+            continue
+        if in_content:
+            content_lines.append(line)
+    body = "\n".join(content_lines)
+    indents = [len(line) - len(line.lstrip(" ")) for line in body.splitlines() if line.strip()]
+    if indents:
+        cut = min(indents)
+        body = "\n".join(line[cut:] if line.startswith(" " * cut) else line for line in body.splitlines())
+    body = body.strip()
+    if action_type not in {"create", "patch"} or not body:
+        return None
+    name = (path.rsplit("/", 1)[-1] if path else "").strip() or "共创文稿.md"
+    return {
+        "type": action_type,
+        "file_name": name,
+        "path": path or f"/输出/{name}",
+        "content": body,
+    }
+
+
+def authorized_hermes_action(reply: str) -> dict[str, Any] | None:
+    """Agent 模式下，带正文的 create/patch 提案由平台执行。"""
+    from backend.services.file_action_service import parse_file_actions_from_content
+
+    for action in parse_file_actions_from_content(reply or ""):
+        body = str(action.get("content") or action.get("after") or "").strip()
+        if str(action.get("type") or "") in {"create", "patch"} and body:
+            action = dict(action)
+            action["content"] = body
+            return action
+    return _yaml_file_action(reply)
+
+
+def project_file_body(reply: str, prior: list[str] | None = None) -> str:
+    """磁盘存档说明不是项目文件。正文过短时，改存此前对话里的文稿。"""
+    cleaned = manuscript_for_file(reply)
+    notice = bool(_DISK_NOTICE_RE.search(reply or ""))
+    if cleaned and not (notice and len(cleaned) < 800):
+        return cleaned
+    best = ""
+    for item in prior or []:
+        body = item.split(":", 1)[-1].strip()
+        if not body or _DISK_NOTICE_RE.search(body):
+            continue
+        extracted = manuscript_for_file(body)
+        if len(extracted) > len(best):
+            best = extracted
+    return best or cleaned
 
 
 def document_file_stem(body: str, fallback: str) -> str:

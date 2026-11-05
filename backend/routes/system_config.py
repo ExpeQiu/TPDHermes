@@ -12,6 +12,7 @@ logger = logging.getLogger("tpdx.hermes.system_config")
 from backend.services.cli_token import accept_agent_token, verify_access_token
 from backend.services.external_mcp import probe_external_mcp, resolve_external_mcp, save_external_mcp
 from backend.services.geelywiki_cli_config import probe_wiki_mcp, resolve_wiki_mcp, save_wiki_mcp
+from backend.services.hermes_model_config import read_hermes_model, save_hermes_model
 from backend.services.runtime_config import build_runtime_config
 from tpdhermes.capabilities import public_config, resolve_token, save_document
 
@@ -48,9 +49,33 @@ class ExternalMcpSave(BaseModel):
     mcp_url: str = ""
 
 
+class HermesModelSave(BaseModel):
+    provider: str
+    model: str
+    base_url: str = ""
+
+
 @router.get("/config")
 def system_config() -> dict:
     return build_runtime_config()
+
+
+@router.get("/hermes-model")
+def get_hermes_model() -> dict:
+    return read_hermes_model()
+
+
+@router.put("/hermes-model")
+def update_hermes_model(body: HermesModelSave) -> dict:
+    try:
+        saved = save_hermes_model(provider=body.provider, model=body.model, base_url=body.base_url)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except OSError as exc:
+        logger.error("hermes model write failed err=%s", exc)
+        raise HTTPException(status_code=500, detail=f"无法写入配置文件: {exc}") from exc
+    logger.info("hermes model updated provider=%s model=%s", saved["provider"], saved["model"])
+    return saved
 
 
 @router.get("/cli")

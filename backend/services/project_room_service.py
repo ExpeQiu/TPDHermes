@@ -32,7 +32,7 @@ from backend.services.room_contract import (
     classify_document_intent,
     delivery_document,
     document_file_stem,
-    manuscript_for_file,
+    project_file_body,
     is_plan_confirm,
     resolve_room_files,
     writer_driver_name,
@@ -1098,7 +1098,12 @@ async def _execute_turn(db: AsyncSession, room_id: str, turn_id: str) -> None:
         archived=archived,
     )
     if not can_write and allowed:
-        allowed, reason = False, "forbidden"
+        logger.info(
+            "[co-create-room] member write perm absent, hermes action still authorized room_id=%s user_id=%s role=%s",
+            room_id,
+            human.author_id,
+            author_role,
+        )
     seated_ids = _loads(room.role_ids_json, [])
     mentioned = _loads(human.mention_role_ids_json, [])
     mentioned_users = [str(item).strip() for item in _loads(human.mention_user_ids_json, []) if str(item).strip()]
@@ -1228,6 +1233,21 @@ async def _execute_turn(db: AsyncSession, room_id: str, turn_id: str) -> None:
         room.plan_confirmed_version = None
         room.plan_confirmed_by = None
         human.plan_id = room.plan_id
+    proposed = None
+    if reason not in {"ask", "plan_draft", "denied", "archived", "forbidden", "no_plan", "stale_plan"}:
+        from backend.services.room_contract import authorized_hermes_action
+
+        proposed = authorized_hermes_action(writer_reply or "")
+        if proposed and not allowed:
+            allowed = True
+            reason = "hermes_action"
+            logger.info(
+                "[co-create-room] hermes action authorized room_id=%s turn_id=%s type=%s file=%s",
+                room_id,
+                turn_id,
+                proposed.get("type"),
+                proposed.get("file_name") or proposed.get("file_id") or "",
+            )
     if not allowed:
         await _finish_without_write(db, room=room, human=human, reason=reason)
         return
@@ -1260,7 +1280,8 @@ async def _execute_turn(db: AsyncSession, room_id: str, turn_id: str) -> None:
         )
         return
 
-    document = delivery_document(room.title, manuscript_for_file(writer_reply))
+    source = str((proposed or {}).get("content") or "").strip() or project_file_body(writer_reply, transcript)
+    document = delivery_document(room.title, source)
     target_id = str(target.get("file_id") or room.output_id or "")
     if target_id and base_version:
         await db.commit()
@@ -1301,12 +1322,13 @@ async def _execute_turn(db: AsyncSession, room_id: str, turn_id: str) -> None:
             "base_version": base_version or target.get("version") or None,
         }
     else:
+        file_name = str((proposed or {}).get("file_name") or f"{file_stem}.md")
         action = {
             "type": "create",
-            "file_name": f"{file_stem}.md",
-            "path": f"/输出/{file_stem}.md",
+            "file_name": file_name,
+            "path": str((proposed or {}).get("path") or f"/输出/{file_name}"),
             "content": document,
-            "summary": "共创创建",
+            "summary": "共创创建" if reason != "hermes_action" else "Hermes 动作",
         }
     try:
         result = await apply_file_action(

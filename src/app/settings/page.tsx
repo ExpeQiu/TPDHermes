@@ -28,7 +28,8 @@ const SETTINGS_TABS: { id: SettingsTab; label: string; description: string }[] =
   {
     id: "runtime",
     label: "运行配置",
-    description: "当前进程的有效配置。对话上游、模型、Wiki 与 Mock 在此查看，密钥不展示。",
+    description:
+      "查看当前进程的对话上游与调用名。Hermes 实际使用的厂商、模型和地址在此修改，写入 deploy/hermes-agent/config.yaml，对新会话生效。密钥不展示。",
   },
   {
     id: "cli",

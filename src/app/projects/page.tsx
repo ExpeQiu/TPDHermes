@@ -74,7 +74,7 @@ export default function ProjectsPage() {
             <div>
               <h1 className="text-3xl font-bold sm:text-4xl">项目中心</h1>
               <p className="mt-2 max-w-2xl text-sm text-slate-400 sm:text-base">
-                管理项目并进入对话创作与场景输出（推荐先打开项目详情）。
+                管理项目并进入对话创作与场景创作（推荐先打开项目详情）。
               </p>
             </div>
             <Link
@@ -121,10 +121,10 @@ export default function ProjectsPage() {
                   compact
                 />
                 <ActionCard
-                  href="/workshop"
-                  title="场景输出"
+                  href="/studio"
+                  title="场景创作"
                   desc=""
-                  accent="from-amber-600 to-orange-600"
+                  accent="from-amber-500 to-lime-600"
                   compact
                 />
               </div>

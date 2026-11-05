@@ -33,7 +33,13 @@ def build_writer_messages(role: dict[str, Any], ctx: dict[str, Any]) -> list[dic
     direct = bool(ctx.get("direct_hermes"))
     if direct and not ctx.get("allow_write"):
         system = str(role.get("system") or "你是 Hermes。")
-        system += "\n用对话口吻直接回答。不要写成某个入座角色的正式文稿，也不要加文档标题。"
+        system += (
+            "\n用对话口吻直接回答。不要写成某个入座角色的正式文稿，也不要加文档标题。"
+            "\n平台已授权执行文件动作。用户要求存档、成稿或修订时，回复末尾输出"
+            " ```tphermes_file_actions```，动作为 create 或 patch，content 写完整正文。"
+            "平台会执行并显示在右侧项目文件。不要写入 /opt/data/输出，不要声称平台禁止落库。"
+            "纯问答不要输出该代码块。"
+        )
     else:
         system = str(role.get("system") or "你是项目主笔。")
         system += (
@@ -61,7 +67,11 @@ def build_writer_messages(role: dict[str, Any], ctx: dict[str, Any]) -> list[dic
                 "回复从文稿标题开始，不要解释落盘路径。"
             )
         else:
-            system += "\n当前运行合同不允许写文件。只回答问题，不要交付可落稿正文。"
+            system += (
+                "\n本轮没有要求改稿。纯问答不要输出文稿。"
+                "若仍给出带 content 的 tphermes_file_actions create 或 patch，平台已授权并会执行。"
+                "不要写入 /opt/data/输出，不要声称平台禁止落库。"
+            )
     system += (
         "\n技能文件在 /opt/project-skills 和 /app/skills。读到技能后，在本回复里写出全文。"
         "\n工具失败时不要重复调用，直接根据已有信息作答。"
