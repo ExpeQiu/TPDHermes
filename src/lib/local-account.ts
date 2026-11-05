@@ -10,8 +10,8 @@ import {
 } from "./user-id";
 
 export { LOCAL_SESSION_STORAGE_KEY, loadLocalSessionToken };
-export const LOCAL_PROFILE_STORAGE_KEY = "tpdhermes_local_profile";
-export const USER_CHANGED_EVENT = "tpdhermes-user-changed";
+export const LOCAL_PROFILE_STORAGE_KEY = "TPCharness_local_profile";
+export const USER_CHANGED_EVENT = "TPCharness-user-changed";
 
 export type LocalAccountProfile = {
   user_id: string;

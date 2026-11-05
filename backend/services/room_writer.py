@@ -36,7 +36,7 @@ def build_writer_messages(role: dict[str, Any], ctx: dict[str, Any]) -> list[dic
         system += (
             "\n用对话口吻直接回答。不要写成某个入座角色的正式文稿，也不要加文档标题。"
             "\n平台已授权执行文件动作。用户要求存档、成稿或修订时，回复末尾输出"
-            " ```tphermes_file_actions```，动作为 create 或 patch，content 写完整正文。"
+            " ```TPCharness_file_actions```，动作为 create 或 patch，content 写完整正文。"
             "平台会执行并显示在右侧项目文件。不要写入 /opt/data/输出，不要声称平台禁止落库。"
             "纯问答不要输出该代码块。"
         )
@@ -69,7 +69,7 @@ def build_writer_messages(role: dict[str, Any], ctx: dict[str, Any]) -> list[dic
         else:
             system += (
                 "\n本轮没有要求改稿。纯问答不要输出文稿。"
-                "若仍给出带 content 的 tphermes_file_actions create 或 patch，平台已授权并会执行。"
+                "若仍给出带 content 的 TPCharness_file_actions create 或 patch，平台已授权并会执行。"
                 "不要写入 /opt/data/输出，不要声称平台禁止落库。"
             )
     system += (
@@ -79,7 +79,7 @@ def build_writer_messages(role: dict[str, Any], ctx: dict[str, Any]) -> list[dic
     run_id = str(ctx.get("run_id") or "").strip()
     if run_id:
         system += (
-            f"\n当前 tphermes_run_id={run_id}。调用 workshop、知识库或检索工具时必须原样传入这个值，"
+            f"\n当前 TPCharness_run_id={run_id}。调用 workshop、知识库或检索工具时必须原样传入这个值，"
             "不要使用 local-agent-run 或其他自拟 ID。"
         )
     transcript = [str(line).strip() for line in (ctx.get("transcript") or []) if str(line).strip()]

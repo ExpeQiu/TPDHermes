@@ -18,7 +18,7 @@ import {
 } from "@/lib/chat-context";
 import { ensureDerivedUserId, getEffectiveUserIdSync } from "@/lib/user-id";
 import { formatApiError } from "@/lib/api";
-import { fetchRunKbSources, mergeStreamContent, parseTpHermesStreamMeta } from "@/lib/chat-citations";
+import { fetchRunKbSources, mergeStreamContent, parseTPCharnessStreamMeta } from "@/lib/chat-citations";
 
 import type {
   AssistantFileToolEvent,
@@ -230,7 +230,7 @@ function mergeAssistantToolEvents(
 
 function applyStreamMetaToAssistantMessage(
   message: Message,
-  meta: ReturnType<typeof parseTpHermesStreamMeta>,
+  meta: ReturnType<typeof parseTPCharnessStreamMeta>,
 ): Message {
   if (!meta) return message;
   const next: Message = { ...message };
@@ -253,7 +253,7 @@ const CHAT_CONTINUE_USER =
   "请接着上文直接输出后续内容，不要重复已经给出的段落。若已全部写完则只回复「（已结束）」三字。";
 const CHAT_MAX_CONTINUE_ROUNDS = 12;
 const CHAT_EMPTY_CONTENT_FALLBACK =
-  "（本轮未生成可见正文。Agent 可能仍在检索或仅执行了工具；请稍后重试，或检查 Hermes 上游是否正常。）";
+  "（本轮未生成可见正文。Agent 可能仍在检索或仅执行了工具；请稍后重试，或检查 Harness 上游是否正常。）";
 const CHAT_MAX_EMPTY_CONTENT_RETRIES = 1;
 
 function messagesToApiPayload(messages: Message[]): { role: string; content: string }[] {
@@ -573,7 +573,7 @@ export function useChatExecution(options: UseChatExecutionOptions) {
                   continue;
                 }
                 const { data } = parsedBlock;
-                const meta = parseTpHermesStreamMeta(data);
+                const meta = parseTPCharnessStreamMeta(data);
                 if (meta?.phase) setStreamingPhase(meta.phase);
                 if (meta?.emptyContent) streamMarkedEmpty = true;
                 if (
@@ -638,7 +638,7 @@ export function useChatExecution(options: UseChatExecutionOptions) {
                 const toolEvent = parseHermesToolProgressEvent(parsedBlock.data);
                 if (toolEvent) applyToolEvent(toolEvent);
               } else if (parsedBlock) {
-                const meta = parseTpHermesStreamMeta(parsedBlock.data);
+                const meta = parseTPCharnessStreamMeta(parsedBlock.data);
                 if (meta?.phase) setStreamingPhase(meta.phase);
                 if (meta?.emptyContent) streamMarkedEmpty = true;
                 if (
@@ -788,7 +788,7 @@ export function useChatExecution(options: UseChatExecutionOptions) {
                   if (toolEvent) applyToolEvent(toolEvent);
                   continue;
                 }
-                const streamMeta = parseTpHermesStreamMeta(parsedBlock.data);
+                const streamMeta = parseTPCharnessStreamMeta(parsedBlock.data);
                 const part = parseSSEDataPayload(parsedBlock.data);
                 if (part.errorText) throw new Error(part.errorText);
                 if (part.finishReason) roundFinish = part.finishReason;
@@ -817,7 +817,7 @@ export function useChatExecution(options: UseChatExecutionOptions) {
                 const toolEvent = parseHermesToolProgressEvent(parsedBlock.data);
                 if (toolEvent) applyToolEvent(toolEvent);
               } else if (parsedBlock) {
-                const streamMeta = parseTpHermesStreamMeta(parsedBlock.data);
+                const streamMeta = parseTPCharnessStreamMeta(parsedBlock.data);
                 const part = parseSSEDataPayload(parsedBlock.data);
                 if (part.errorText) throw new Error(part.errorText);
                 if (part.finishReason) roundFinish = part.finishReason;

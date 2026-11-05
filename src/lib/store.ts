@@ -45,7 +45,7 @@ export const useUserStore = create<UserState>()(
       setUser: (username, avatar) => set({ username, avatar, isLoggedIn: true }),
       logout: () => set({ username: '', avatar: '', isLoggedIn: false }),
     }),
-    { name: 'tphermes-user' }
+    { name: 'TPCharness-user' }
   )
 )
 
@@ -91,6 +91,6 @@ export const useThemeStore = create<ThemeState>()(
         }
       },
     }),
-    { name: 'tphermes-theme' }
+    { name: 'TPCharness-theme' }
   )
 )

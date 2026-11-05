@@ -55,7 +55,7 @@ import {
   type SessionHistoryCategory,
 } from "@/lib/chat-session-utils";
 
-const CHAT_INIT_KEY = "tphermes-chat-init";
+const CHAT_INIT_KEY = "TPCharness-chat-init";
 
 function useAutoScroll(depend: string) {
   const ref = useRef<HTMLDivElement>(null);
@@ -404,7 +404,7 @@ function ChatPageInner() {
     }
     if (targetId) {
       setActiveId(targetId);
-      localStorage.setItem(`tphermes-chat-active:${scopeUserId}`, targetId);
+      localStorage.setItem(`TPCharness-chat-active:${scopeUserId}`, targetId);
       setSidebarOpen(true);
     } else if (outputIdFromUrl) {
       setSidebarOpen(true);

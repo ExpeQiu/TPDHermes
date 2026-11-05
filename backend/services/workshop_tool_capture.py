@@ -71,7 +71,7 @@ async def append_workshop_tool_capture(
 
 
 async def _resolve_run_id_from_context(db: AsyncSession, ctx: dict[str, Any]) -> str | None:
-    run_id = (ctx.get("tphermes_run_id") or ctx.get("run_id") or "").strip()
+    run_id = (ctx.get("TPCharness_run_id") or ctx.get("run_id") or "").strip()
     if run_id:
         row = await db.get(OrchestrationRun, run_id)
         if row:
@@ -79,7 +79,7 @@ async def _resolve_run_id_from_context(db: AsyncSession, ctx: dict[str, Any]) ->
         logger.warning("workshop tool capture skipped: run not found run_id=%s", run_id)
         return None
 
-    logger.warning("workshop tool capture skipped: missing tphermes_run_id")
+    logger.warning("workshop tool capture skipped: missing TPCharness_run_id")
     return None
 
 
@@ -90,7 +90,7 @@ async def save_workshop_tool_capture_for_context(
     *,
     skill_name: str | None = None,
 ) -> None:
-    """供 workshop_tools / MCP 调用；context 必须显式携带 tphermes_run_id。"""
+    """供 workshop_tools / MCP 调用；context 必须显式携带 TPCharness_run_id。"""
     ctx = context or {}
     async with async_session_maker() as db:
         run_id = await _resolve_run_id_from_context(db, ctx)

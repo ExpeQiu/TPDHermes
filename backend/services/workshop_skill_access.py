@@ -59,9 +59,9 @@ async def workshop_viewer_user_id_from_context(
     """
     从工具 context 中解析 run_id 对应的执行用户。
 
-    仅在携带 tphermes_run_id 时返回用户，避免误将无上下文调用强绑到 default。
+    仅在携带 TPCharness_run_id 时返回用户，避免误将无上下文调用强绑到 default。
     """
-    rid = str((context or {}).get("tphermes_run_id") or "").strip()
+    rid = str((context or {}).get("TPCharness_run_id") or "").strip()
     if not rid:
         return None
     row = await db.execute(

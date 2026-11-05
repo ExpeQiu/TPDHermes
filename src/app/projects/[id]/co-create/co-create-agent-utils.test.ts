@@ -19,12 +19,12 @@ describe("co-create-agent-utils", () => {
     expect(buildAgentModeInstructions("agent")).toContain("/输出/");
   });
 
-  it("buildAgentModeInstructions plan 规划阶段含 skill 与 tphermes_plan", () => {
+  it("buildAgentModeInstructions plan 规划阶段含 skill 与 TPCharness_plan", () => {
     const planning = buildAgentModeInstructions("plan", {
       planPhase: "planning",
       availableSkills: ["tech_trend_skill", "video_script_skill"],
     });
-    expect(planning).toContain("tphermes_plan");
+    expect(planning).toContain("TPCharness_plan");
     expect(planning).toContain("tech_trend_skill");
     expect(planning).toContain("禁止 write_file");
   });
@@ -81,10 +81,10 @@ describe("co-create-agent-utils", () => {
     expect(result.effectivePipeline).toBe("co_create");
   });
 
-  it("parseAgentPlanFromContent 解析 tphermes_plan 块含 skill", () => {
+  it("parseAgentPlanFromContent 解析 TPCharness_plan 块含 skill", () => {
     const content = `先给计划：
 
-\`\`\`tphermes_plan
+\`\`\`TPCharness_plan
 {"title":"发布稿","steps":[{"id":"1","title":"检索资料","skill":"tech_trend_skill"},{"id":"2","title":"起草正文"}]}
 \`\`\`
 
@@ -93,7 +93,7 @@ describe("co-create-agent-utils", () => {
     expect(plan?.title).toBe("发布稿");
     expect(plan?.steps).toHaveLength(2);
     expect(plan?.steps[0]?.skill).toBe("tech_trend_skill");
-    expect(stripAgentPlanBlock(content)).not.toContain("tphermes_plan");
+    expect(stripAgentPlanBlock(content)).not.toContain("TPCharness_plan");
   });
 
   it("inferFileRecommendations 按关键词推荐文件", () => {

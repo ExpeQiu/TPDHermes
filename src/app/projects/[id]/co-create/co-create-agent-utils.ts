@@ -30,7 +30,7 @@ export type AgentPlan = {
   raw?: string;
 };
 
-const PLAN_BLOCK_RE = /```tphermes_plan\s*\n([\s\S]*?)```/i;
+const PLAN_BLOCK_RE = /```TPCharness_plan\s*\n([\s\S]*?)```/i;
 const CHECKLIST_LINE_RE = /^[-*]\s*\[[ xX]\]\s+(.+)$/;
 
 export function coCreateAgentModeMeta(mode: CoCreateAgentMode): {
@@ -115,8 +115,8 @@ function buildPlanPlanningInstructions(ctx: PlanModeInstructionContext): string 
   return [
     revising
       ? "【Plan 规划模式·修订计划】根据用户反馈更新计划，本轮仍不执行写文件。"
-      : "【Plan 规划模式·规划阶段】本轮仅输出可执行计划，禁止 write_file/patch，禁止 tphermes_file_actions。",
-    "回复须包含 ```tphermes_plan {\"title\":\"...\",\"steps\":[{\"id\":\"1\",\"title\":\"...\",\"detail\":\"...\",\"skill\":\"技能名\"}]} ``` JSON（steps 3–6 项，每项含 skill）。",
+      : "【Plan 规划模式·规划阶段】本轮仅输出可执行计划，禁止 write_file/patch，禁止 TPCharness_file_actions。",
+    "回复须包含 ```TPCharness_plan {\"title\":\"...\",\"steps\":[{\"id\":\"1\",\"title\":\"...\",\"detail\":\"...\",\"skill\":\"技能名\"}]} ``` JSON（steps 3–6 项，每项含 skill）。",
     formatSkillsHint(ctx.availableSkills ?? []),
     "计划末尾用 1–2 句说明各步 skill 与预期产出，并提示用户：确认后回复「开始执行」，或输入修改意见。",
   ].join(" ");
@@ -127,10 +127,10 @@ function buildPlanExecutionInstructions(ctx: PlanModeInstructionContext): string
   return [
     "【Plan 规划模式·执行阶段】用户已确认计划，按步骤逐步执行并产出结果。",
     "每步优先调用对应 skill 的 workshop_generate / workshop_generate_from_kb；必要时 kb_query、tavily_search。",
-    "涉及文件落地时使用 write_file/patch 并输出 tphermes_file_actions，沉淀至 /输出/（TPD outputs 表，右侧「输出物」可见）；引用标注 [^N]。",
+    "涉及文件落地时使用 write_file/patch 并输出 TPCharness_file_actions，沉淀至 /输出/（TPD outputs 表，右侧「输出物」可见）；引用标注 [^N]。",
     CO_CREATE_OUTPUT_WRITE_POLICY,
     "每完成一步在 steps 中标注 status=done；全部完成后汇总产出路径。",
-    `已确认计划：\n\`\`\`tphermes_plan\n${planJson}\n\`\`\``,
+    `已确认计划：\n\`\`\`TPCharness_plan\n${planJson}\n\`\`\``,
   ].join(" ");
 }
 
@@ -141,7 +141,7 @@ export function buildAgentModeInstructions(
   switch (mode) {
     case "ask":
       return [
-        "【Ask 只读模式】本轮仅做分析、检索与问答，禁止调用 write_file、patch，禁止输出 tphermes_file_actions。",
+        "【Ask 只读模式】本轮仅做分析、检索与问答，禁止调用 write_file、patch，禁止输出 TPCharness_file_actions。",
         "须依次检索：项目知识库 → 公共真源库（技术点、发言稿等）→ 不足时 tavily_search 联网；正文标注 [^N]。",
       ].join(" ");
     case "plan": {

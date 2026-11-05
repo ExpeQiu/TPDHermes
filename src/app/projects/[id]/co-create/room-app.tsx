@@ -1141,7 +1141,7 @@ export default function CoCreateRoomApp() {
             <p className="pt-16 text-center text-sm text-slate-500">与你的团队成员+AIbot进行共创项目</p>
           ) : messages.length === 0 ? (
             <p className="pt-16 text-center text-sm text-slate-500">
-              不 @ 任何人时，直接和 Hermes 对话。@ 已入座的 Bot 并说明如何改，会按顺序修订当前文稿。用 # 引用文档。
+              不 @ 任何人时，直接和 Harness 对话。@ 已入座的 Bot 并说明如何改，会按顺序修订当前文稿。用 # 引用文档。
             </p>
           ) : (
             messages.map((message) => {
@@ -1318,7 +1318,7 @@ export default function CoCreateRoomApp() {
                   void send();
                 }
               }}
-              placeholder="直接输入即和 Hermes 对话。@ 已入座 Bot 修订当前文稿，# 引用文档"
+              placeholder="直接输入即和 Harness 对话。@ 已入座 Bot 修订当前文稿，# 引用文档"
               className="max-h-32 min-h-[2.5rem] w-full flex-1 resize-none bg-transparent text-sm outline-none"
             />
             <div

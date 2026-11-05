@@ -1,12 +1,12 @@
 import { describe, expect, it } from "vitest";
 
-import { mergeStreamContent, parseTpHermesStreamMeta } from "@/lib/chat-citations";
+import { mergeStreamContent, parseTPCharnessStreamMeta } from "@/lib/chat-citations";
 
-describe("parseTpHermesStreamMeta", () => {
-  it("maps file tool events from tphermes_task meta", () => {
-    const meta = parseTpHermesStreamMeta(
+describe("parseTPCharnessStreamMeta", () => {
+  it("maps file tool events from TPCharness_task meta", () => {
+    const meta = parseTPCharnessStreamMeta(
       JSON.stringify({
-        tphermes_task: {
+        TPCharness_task: {
           run_id: "run-1",
           tool_events: [
             {
@@ -54,10 +54,10 @@ describe("parseTpHermesStreamMeta", () => {
     ]);
   });
 
-  it("maps empty_content and stream_error from tphermes_task meta", () => {
-    const meta = parseTpHermesStreamMeta(
+  it("maps empty_content and stream_error from TPCharness_task meta", () => {
+    const meta = parseTPCharnessStreamMeta(
       JSON.stringify({
-        tphermes_task: {
+        TPCharness_task: {
           run_id: "run-empty",
           status: "failed",
           empty_content: true,
@@ -73,9 +73,9 @@ describe("parseTpHermesStreamMeta", () => {
   });
 
   it("replaces streamed text instead of appending a second body", () => {
-    const meta = parseTpHermesStreamMeta(
+    const meta = parseTPCharnessStreamMeta(
       JSON.stringify({
-        tphermes_task: {
+        TPCharness_task: {
           content_replace: "最终成稿",
           delivery_status: "degraded",
           fallback_reason: "agent_tool_miss",

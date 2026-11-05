@@ -17,12 +17,12 @@ export function buildRegionAwarePatchInstructions(
   return [
     "【局部改写约束】用户引用了文件选段，你必须优先做局部修改，禁止改动选段以外的无关段落。",
     `涉及范围：${ranges}。`,
-    "同步到 TPDHermes 时，在 tphermes_file_actions 的 patch 动作中使用：",
+    "同步到 TPCharness 时，在 TPCharness_file_actions 的 patch 动作中使用：",
     '1) editMode:"search_replace" + oldString（须与选段原文完全一致）+ newString；或',
     '2) editMode:"line_range" + startLine/endLine（与选段行号一致）+ newText。',
     "除非用户明确要求重写全文，否则不要使用 editMode:\"full\" 或仅提供整篇 after。",
     CO_CREATE_OUTPUT_WRITE_POLICY,
-    "可先用 Hermes patch(mode=replace) 在沙箱验证，再输出 tphermes_file_actions。",
+    "可先用 Harness patch(mode=replace) 在沙箱验证，再输出 TPCharness_file_actions。",
   ].join(" ");
 }
 

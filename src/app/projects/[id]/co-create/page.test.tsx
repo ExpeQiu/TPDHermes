@@ -375,7 +375,7 @@ describe("CoCreatePage", () => {
         {
           id: "assistant-1",
           role: "assistant",
-          content: "（本轮未生成可见正文。Agent 可能仍在检索或仅执行了工具；请稍后重试，或检查 Hermes 上游是否正常。）",
+          content: "（本轮未生成可见正文。Agent 可能仍在检索或仅执行了工具；请稍后重试，或检查 Harness 上游是否正常。）",
         },
       ],
     });
@@ -535,7 +535,7 @@ describe("CoCreatePage", () => {
 这里是正文。
 \`\`\`
 
-\`\`\`tphermes_file_actions
+\`\`\`TPCharness_file_actions
 {"actions":[{"type":"create","fileName":"忽略.md"}]}
 \`\`\`
 `;

@@ -18,10 +18,10 @@ import {
 } from "@/app/projects/[id]/co-create/co-create-file-actions";
 
 describe("co-create-file-actions", () => {
-  it("stripFileActionsBlock 移除 tphermes 与裸露 actions JSON", () => {
+  it("stripFileActionsBlock 移除 TPCharness 与裸露 actions JSON", () => {
     const raw = `正文开头
 
-\`\`\`tphermes_file_actions
+\`\`\`TPCharness_file_actions
 {"actions":[{"type":"create"}]}
 \`\`\`
 
@@ -48,7 +48,7 @@ describe("co-create-file-actions", () => {
 
   it("resolveCreateActionContent 从正文补全空 content", () => {
     const body = "吉利超充技术发布会演讲稿\n" + "段落。\n".repeat(30);
-    const assistant = `说明\n${body}\n\`\`\`tphermes_file_actions\n{}\n\`\`\``;
+    const assistant = `说明\n${body}\n\`\`\`TPCharness_file_actions\n{}\n\`\`\``;
     expect(resolveCreateActionContent("", assistant, extractAutoCreateDraftBody)).toContain(
       "吉利超充技术发布会演讲稿",
     );

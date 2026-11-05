@@ -85,7 +85,7 @@ export function citationSourceLabel(source: Pick<CitationSource, "sourceKind" | 
   return name || "知识库";
 }
 
-export interface TpHermesStreamMeta {
+export interface TPCharnessStreamMeta {
   runId?: string;
   outputId?: string | null;
   validation?: unknown;
@@ -209,7 +209,7 @@ export function mapApiSourcesPayload(raw: unknown): {
 /** 流式正文：content_replace 覆盖已显示内容，普通 delta 才追加。 */
 export function mergeStreamContent(
   current: string,
-  meta: TpHermesStreamMeta | null,
+  meta: TPCharnessStreamMeta | null,
   delta: string,
 ): string {
   if (typeof meta?.contentReplace === "string") return meta.contentReplace;
@@ -217,13 +217,13 @@ export function mergeStreamContent(
   return current;
 }
 
-/** 解析 SSE data 中的 tphermes_task / tphermes_sources。 */
-export function parseTpHermesStreamMeta(data: string): TpHermesStreamMeta | null {
+/** 解析 SSE data 中的 TPCharness_task / TPCharness_sources。 */
+export function parseTPCharnessStreamMeta(data: string): TPCharnessStreamMeta | null {
   if (!data || data === "[DONE]") return null;
   try {
     const parsed = JSON.parse(data) as Record<string, unknown>;
-    const task = parsed.tphermes_task as Record<string, unknown> | undefined;
-    const sourcesRaw = parsed.tphermes_sources;
+    const task = parsed.TPCharness_task as Record<string, unknown> | undefined;
+    const sourcesRaw = parsed.TPCharness_sources;
     const mapped = mapApiSourcesPayload(sourcesRaw);
 
     const phase = typeof task?.phase === "string" ? task.phase : undefined;

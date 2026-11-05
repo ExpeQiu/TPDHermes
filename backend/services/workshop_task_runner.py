@@ -111,7 +111,7 @@ def sse_content_replace(content: str, *, delivery: dict[str, Any] | None = None)
         mode = delivery.get("execution_mode")
         if mode:
             task["execution_mode"] = mode
-    return f"data: {json.dumps({'tphermes_task': task}, ensure_ascii=False)}\n\n"
+    return f"data: {json.dumps({'TPCharness_task': task}, ensure_ascii=False)}\n\n"
 
 
 def sse_openai_delta(content: str) -> str:

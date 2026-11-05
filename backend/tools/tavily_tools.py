@@ -49,7 +49,7 @@ async def _finalize_web_tool_result(
     result: dict[str, Any],
     *,
     tool_name: str,
-    tphermes_run_id: str | None,
+    TPCharness_run_id: str | None,
     project_id: str | None,
 ) -> dict[str, Any]:
     from backend.services.kb_source_capture import (
@@ -57,10 +57,10 @@ async def _finalize_web_tool_result(
         save_web_sources_for_run,
     )
 
-    if not tphermes_run_id and not project_id:
+    if not TPCharness_run_id and not project_id:
         return result
     capture = await save_web_sources_for_run(
-        run_id=tphermes_run_id,
+        run_id=TPCharness_run_id,
         project_id=project_id,
         tool_name=tool_name,
         payload=result,
@@ -76,7 +76,7 @@ async def _finalize_web_tool_result(
 async def tavily_search(
     query: str,
     max_results: int = 5,
-    tphermes_run_id: str | None = None,
+    TPCharness_run_id: str | None = None,
     project_id: str | None = None,
 ) -> dict[str, Any]:
     """
@@ -112,14 +112,14 @@ async def tavily_search(
     return await _finalize_web_tool_result(
         result,
         tool_name="tavily_search",
-        tphermes_run_id=tphermes_run_id,
+        TPCharness_run_id=TPCharness_run_id,
         project_id=project_id,
     )
 
 
 async def tavily_extract(
     urls: list[str] | str,
-    tphermes_run_id: str | None = None,
+    TPCharness_run_id: str | None = None,
     project_id: str | None = None,
 ) -> dict[str, Any]:
     """抽取网页正文（Tavily）。"""
@@ -161,6 +161,6 @@ async def tavily_extract(
     return await _finalize_web_tool_result(
         result,
         tool_name="tavily_extract",
-        tphermes_run_id=tphermes_run_id,
+        TPCharness_run_id=TPCharness_run_id,
         project_id=project_id,
     )

@@ -64,7 +64,7 @@ def test_normalize_output_title():
 
 
 def test_parse_file_actions_normalizes_path():
-    content = """```tphermes_file_actions
+    content = """```TPCharness_file_actions
 {"actions": [{"type": "create", "fileName": "稿.md", "path": "/Users/x/稿.md", "content": "# hi"}]}
 ```"""
     actions = parse_file_actions_from_content(content)
@@ -72,7 +72,7 @@ def test_parse_file_actions_normalizes_path():
 
 
 def test_parse_file_actions_partial_patch_fields():
-    content = """```tphermes_file_actions
+    content = """```TPCharness_file_actions
 {"actions": [{
   "type": "patch",
   "proposalId": "p2",

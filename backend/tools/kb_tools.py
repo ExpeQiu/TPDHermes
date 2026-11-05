@@ -23,12 +23,12 @@ logger = logging.getLogger(__name__)
 async def _apply_kb_source_capture(
     result: dict[str, Any],
     *,
-    tphermes_run_id: str | None,
+    TPCharness_run_id: str | None,
     project_id: str | None,
     collection_name: str,
     tool_name: str = "kb_query",
 ) -> dict[str, Any]:
-    if not tphermes_run_id and not project_id:
+    if not TPCharness_run_id and not project_id:
         return result
     from backend.services.kb_source_capture import (
         annotate_results_with_capture,
@@ -39,7 +39,7 @@ async def _apply_kb_source_capture(
         str(result.get("collection_resolved") or collection_name or "").strip()
     )
     capture = await save_kb_sources_for_run(
-        run_id=tphermes_run_id,
+        run_id=TPCharness_run_id,
         project_id=project_id,
         tool_name=tool_name,
         payload=result,
@@ -56,16 +56,16 @@ async def _apply_kb_source_capture(
 async def _apply_kb_get_entry_capture(
     entry: dict[str, Any],
     *,
-    tphermes_run_id: str | None,
+    TPCharness_run_id: str | None,
     project_id: str | None,
     collection_name: str,
 ) -> dict[str, Any]:
-    if not entry or (not tphermes_run_id and not project_id):
+    if not entry or (not TPCharness_run_id and not project_id):
         return entry
     from backend.services.kb_source_capture import save_kb_sources_for_run
 
     capture = await save_kb_sources_for_run(
-        run_id=tphermes_run_id,
+        run_id=TPCharness_run_id,
         project_id=project_id,
         tool_name="kb_get_entry",
         payload=entry,
@@ -139,7 +139,7 @@ async def kb_query(
     collection_name: str,
     limit: int = 10,
     project_id: Optional[str] = None,
-    tphermes_run_id: Optional[str] = None,
+    TPCharness_run_id: Optional[str] = None,
 ) -> dict:
     """
     Query the knowledge base.
@@ -350,7 +350,7 @@ async def kb_query(
     filtered = await filter_results_by_eligible_domains(filtered, project_id)
     return await _apply_kb_source_capture(
         filtered,
-        tphermes_run_id=tphermes_run_id,
+        TPCharness_run_id=TPCharness_run_id,
         project_id=project_id,
         collection_name=resolved_name,
     )
@@ -377,7 +377,7 @@ async def kb_get_entry(
     collection_name: str,
     entry_id: str,
     project_id: str,
-    tphermes_run_id: Optional[str] = None,
+    TPCharness_run_id: Optional[str] = None,
 ) -> dict:
     """
     Retrieve a specific knowledge base entry by ID.
@@ -400,7 +400,7 @@ async def kb_get_entry(
         if entry.get("id") == entry_id:
             return await _apply_kb_get_entry_capture(
                 entry,
-                tphermes_run_id=tphermes_run_id,
+                TPCharness_run_id=TPCharness_run_id,
                 project_id=project_id,
                 collection_name=collection_name,
             )

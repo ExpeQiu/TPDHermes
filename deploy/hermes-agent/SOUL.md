@@ -33,6 +33,6 @@
 
 ## 项目文件写入
 
-- **交付真源**：回复末尾的 `tphermes_file_actions` 提案。服务端批准后写入数据库 `outputs.content`。虚拟路径 `/输出/{文件名}`。不要先 `write_file` / `patch` 再同步。
+- **交付真源**：回复末尾的 `TPCharness_file_actions` 提案。服务端批准后写入数据库 `outputs.content`。虚拟路径 `/输出/{文件名}`。不要先 `write_file` / `patch` 再同步。
 - **临时文件**（仅当工具必须落盘）：`/opt/data/projects/{项目ID}/runs/{run_id}/`。这不是正式输出目录。
 - **禁止**：写入共享目录 `/opt/data/输出/`、把 `/输出/…` 当容器根目录、`/opt/hermes/output/…`。

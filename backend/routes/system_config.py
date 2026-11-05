@@ -53,6 +53,7 @@ class HermesModelSave(BaseModel):
     provider: str
     model: str
     base_url: str = ""
+    api_key: str = ""
 
 
 @router.get("/config")
@@ -68,7 +69,12 @@ def get_hermes_model() -> dict:
 @router.put("/hermes-model")
 def update_hermes_model(body: HermesModelSave) -> dict:
     try:
-        saved = save_hermes_model(provider=body.provider, model=body.model, base_url=body.base_url)
+        saved = save_hermes_model(
+            provider=body.provider,
+            model=body.model,
+            base_url=body.base_url,
+            api_key=body.api_key,
+        )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except OSError as exc:

@@ -190,7 +190,7 @@ export function CoCreateMessageStream({
                   !agentPlan &&
                   !(message.toolEvents?.length) ? (
                     <p className="text-sm leading-relaxed text-slate-500 dark:text-slate-400">
-                      暂无回复内容。若长时间停留在此，请确认后端与 Hermes 上游已启动后重试。
+                      暂无回复内容。若长时间停留在此，请确认后端与 Harness 上游已启动后重试。
                     </p>
                   ) : null}
                 </>

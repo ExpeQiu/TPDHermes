@@ -23,8 +23,8 @@ export function isCoCreateNavPath(pathname: string): boolean {
 export function resolveCoCreateNavHref(scopeUserId: string): string {
   if (typeof window === "undefined") return "/projects?entry=co-create";
   try {
-    const activeId = window.localStorage.getItem(`tphermes-co-create-active:${scopeUserId}`);
-    const raw = window.localStorage.getItem(`tphermes-co-create-sessions:${scopeUserId}`);
+    const activeId = window.localStorage.getItem(`TPCharness-co-create-active:${scopeUserId}`);
+    const raw = window.localStorage.getItem(`TPCharness-co-create-sessions:${scopeUserId}`);
     if (!raw) return "/projects?entry=co-create";
     const sessions = JSON.parse(raw) as { id?: string; selectedProjectId?: string }[];
     if (!Array.isArray(sessions) || sessions.length === 0) {

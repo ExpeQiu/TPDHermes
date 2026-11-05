@@ -28,7 +28,7 @@ type UsageEventPayload = {
 const MAX_QUEUE_SIZE = 200;
 const FLUSH_INTERVAL_MS = 5000;
 const FLUSH_BATCH_SIZE = 20;
-const SESSION_KEY = "tpdhermes_usage_session_id";
+const SESSION_KEY = "TPCharness_usage_session_id";
 const warnedInvalidKeys = new Set<string>();
 
 const FEATURE_ACTION_WHITELIST: Record<string, Set<string>> = {

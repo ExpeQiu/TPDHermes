@@ -22,12 +22,20 @@ approvals:
 """
 
 
+def _isolate_hermes_home(monkeypatch, tmp_path):
+    home = tmp_path / "hermes-home"
+    home.mkdir()
+    monkeypatch.setenv("HERMES_HOME", str(home))
+    return home
+
+
 def test_read_ignores_chat_model_env_and_hides_key(monkeypatch, tmp_path):
     path = tmp_path / "config.yaml"
     path.write_text(_SAMPLE, encoding="utf-8")
     monkeypatch.setenv("HERMES_AGENT_CONFIG_PATH", str(path))
     monkeypatch.setenv("HERMES_CHAT_MODEL", "hermes-agent")
     monkeypatch.setenv("MINIMAX_CN_API_KEY", "sk-env-secret")
+    _isolate_hermes_home(monkeypatch, tmp_path)
 
     payload = read_hermes_model()
     blob = str(payload)
@@ -42,11 +50,67 @@ def test_read_ignores_chat_model_env_and_hides_key(monkeypatch, tmp_path):
     assert payload["model"] != "hermes-agent"
 
 
+def test_key_in_hermes_dotenv_counts_as_configured(monkeypatch, tmp_path):
+    path = tmp_path / "config.yaml"
+    path.write_text(_SAMPLE, encoding="utf-8")
+    home = _isolate_hermes_home(monkeypatch, tmp_path)
+    (home / ".env").write_text('MINIMAX_CN_API_KEY="sk-dotenv-secret"\n', encoding="utf-8")
+    monkeypatch.setenv("HERMES_AGENT_CONFIG_PATH", str(path))
+    monkeypatch.delenv("MINIMAX_CN_API_KEY", raising=False)
+
+    payload = read_hermes_model()
+
+    assert payload["key_configured"] is True
+    assert "sk-dotenv-secret" not in str(payload)
+
+
+def test_blank_key_keeps_existing_secret(monkeypatch, tmp_path):
+    path = tmp_path / "config.yaml"
+    path.write_text(_SAMPLE, encoding="utf-8")
+    home = _isolate_hermes_home(monkeypatch, tmp_path)
+    env_file = home / ".env"
+    env_file.write_text("MINIMAX_CN_API_KEY=sk-old\nOTHER=keep\n", encoding="utf-8")
+    monkeypatch.setenv("HERMES_AGENT_CONFIG_PATH", str(path))
+    monkeypatch.delenv("MINIMAX_CN_API_KEY", raising=False)
+
+    saved = save_hermes_model(provider="minimax-cn", model="MiniMax-Next", base_url="https://api.minimaxi.com/anthropic", api_key="  ")
+
+    assert saved["model"] == "MiniMax-Next"
+    assert "sk-old" not in str(saved)
+    assert env_file.read_text(encoding="utf-8") == "MINIMAX_CN_API_KEY=sk-old\nOTHER=keep\n"
+
+
+def test_filled_key_replaces_dotenv_without_echo(monkeypatch, tmp_path):
+    path = tmp_path / "config.yaml"
+    path.write_text(_SAMPLE, encoding="utf-8")
+    home = _isolate_hermes_home(monkeypatch, tmp_path)
+    env_file = home / ".env"
+    env_file.write_text('export MINIMAX_CN_API_KEY="sk-old"\nOTHER=keep\nMINIMAX_CN_API_KEY=sk-dup\n', encoding="utf-8")
+    monkeypatch.setenv("HERMES_AGENT_CONFIG_PATH", str(path))
+    monkeypatch.delenv("MINIMAX_CN_API_KEY", raising=False)
+
+    saved = save_hermes_model(
+        provider="minimax-cn",
+        model="MiniMax-M2.7-highspeed",
+        base_url="https://api.minimaxi.com/anthropic",
+        api_key="sk-new secret",
+    )
+    text = env_file.read_text(encoding="utf-8")
+
+    assert saved["key_configured"] is True
+    assert "sk-new secret" not in str(saved)
+    assert "sk-old" not in text
+    assert text.count("MINIMAX_CN_API_KEY=") == 1
+    assert 'MINIMAX_CN_API_KEY="sk-new secret"' in text
+    assert "OTHER=keep" in text
+
+
 def test_save_replaces_model_block_and_keeps_the_rest(monkeypatch, tmp_path):
     path = tmp_path / "config.yaml"
     path.write_text(_SAMPLE, encoding="utf-8")
     monkeypatch.setenv("HERMES_AGENT_CONFIG_PATH", str(path))
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    _isolate_hermes_home(monkeypatch, tmp_path)
 
     saved = save_hermes_model(provider="openai", model="gpt-test", base_url="")
     text = path.read_text(encoding="utf-8")
@@ -68,6 +132,7 @@ def test_save_rejects_empty_and_bad_url(monkeypatch, tmp_path):
     path = tmp_path / "config.yaml"
     path.write_text(_SAMPLE, encoding="utf-8")
     monkeypatch.setenv("HERMES_AGENT_CONFIG_PATH", str(path))
+    _isolate_hermes_home(monkeypatch, tmp_path)
 
     for kwargs in (
         {"provider": "", "model": "gpt-test"},
@@ -86,6 +151,7 @@ def test_hermes_model_route(monkeypatch, tmp_path):
     path.write_text(_SAMPLE, encoding="utf-8")
     monkeypatch.setenv("HERMES_AGENT_CONFIG_PATH", str(path))
     monkeypatch.setenv("MINIMAX_CN_API_KEY", "sk-env-secret")
+    _isolate_hermes_home(monkeypatch, tmp_path)
 
     with TestClient(app) as client:
         got = client.get("/api/v1/system/hermes-model")

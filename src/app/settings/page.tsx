@@ -29,7 +29,7 @@ const SETTINGS_TABS: { id: SettingsTab; label: string; description: string }[] =
     id: "runtime",
     label: "运行配置",
     description:
-      "查看当前进程的对话上游与调用名。Hermes 实际使用的厂商、模型和地址在此修改，写入 deploy/hermes-agent/config.yaml，对新会话生效。密钥不展示。",
+      "查看当前进程的对话上游与调用名。Harness 实际使用的厂商、模型和地址在此修改，写入 Harness 的 config.yaml，对新会话生效。密钥不展示。",
   },
   {
     id: "cli",
@@ -41,7 +41,7 @@ const SETTINGS_TABS: { id: SettingsTab; label: string; description: string }[] =
     id: "mcp",
     label: "MCP 管理",
     description:
-      "管理 Hermes-agent 的 MCP 服务。GeelyWiki 与 Autocar Wiki 在同一块里切换；地址单独保存，不写入 mcp_servers。Hermes MCP 修改写入 deploy/hermes-agent/config.yaml，需重启 hermes-agent。",
+      "管理 Harness 的 MCP 服务。GeelyWiki 与 Autocar Wiki 在同一块里切换；地址单独保存，不写入 mcp_servers。Harness 的 MCP 修改写入 Harness 的 config.yaml，需重启 Harness。",
   },
   {
     id: "pteam",

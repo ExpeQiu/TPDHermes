@@ -9,6 +9,7 @@ from __future__ import annotations
 import logging
 import os
 import re
+from pathlib import Path
 from typing import Any
 
 import yaml
@@ -53,10 +54,42 @@ def _public_model_name(model: dict[str, Any]) -> str:
     return ""
 
 
+def _hermes_dotenv_paths() -> list[Path]:
+    """Hermes 读密钥的 .env。HERMES_HOME 已写出时只看该目录。"""
+    raw = os.getenv("HERMES_HOME", "").strip()
+    if raw:
+        return [Path(raw).expanduser() / ".env"]
+    return [Path.home() / ".hermes" / ".env"]
+
+
+def _dotenv_has(name: str) -> bool:
+    for path in _hermes_dotenv_paths():
+        if not path.is_file():
+            continue
+        try:
+            lines = path.read_text(encoding="utf-8", errors="ignore").splitlines()
+        except OSError as exc:
+            logger.warning("hermes dotenv unreadable path=%s err=%s", path, exc)
+            continue
+        for raw in lines:
+            line = raw.strip()
+            if not line or line.startswith("#"):
+                continue
+            if line.startswith("export "):
+                line = line[len("export ") :]
+            if not line.startswith(f"{name}="):
+                continue
+            value = line.split("=", 1)[1].strip().strip('"').strip("'")
+            if value:
+                return True
+    return False
+
+
 def _key_status(provider: str, model: dict[str, Any]) -> tuple[str | None, bool]:
     env_name = _PROVIDER_KEY_ENV.get(provider)
     if env_name:
-        return env_name, bool(os.getenv(env_name, "").strip())
+        configured = bool(os.getenv(env_name, "").strip()) or _dotenv_has(env_name)
+        return env_name, configured
     for key in _SECRET_KEYS:
         if _clean(model.get(key)):
             return None, True
@@ -97,13 +130,14 @@ def read_hermes_model() -> dict[str, Any]:
     return payload
 
 
-def _validate(provider: str, model_name: str, base_url: str) -> None:
+def _validate(provider: str, model_name: str, base_url: str, api_key: str = "") -> None:
     if not provider or not model_name:
         raise ValueError("厂商和模型不能为空")
     for label, value, limit in (
         ("厂商", provider, 128),
         ("模型", model_name, 256),
         ("Base URL", base_url, 512),
+        ("密钥", api_key, 512),
     ):
         if len(value) > limit or re.search(r"[\r\n\x00]", value):
             raise ValueError(f"{label}无效")
@@ -160,11 +194,53 @@ def _replace_model_block(text: str, block: str) -> str:
     return "".join(lines[:start] + [block] + lines[end:])
 
 
-def save_hermes_model(*, provider: str, model: str, base_url: str = "") -> dict[str, Any]:
+def _dotenv_path() -> Path:
+    raw = os.getenv("HERMES_HOME", "").strip()
+    home = Path(raw).expanduser() if raw else Path.home() / ".hermes"
+    return home / ".env"
+
+
+def _quote_env_value(value: str) -> str:
+    if re.search(r"""[\s#"']""", value):
+        return '"' + value.replace("\\", "\\\\").replace('"', '\\"') + '"'
+    return value
+
+
+def _upsert_provider_key(env_name: str, value: str) -> None:
+    path = _dotenv_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    lines = path.read_text(encoding="utf-8").splitlines(keepends=True) if path.is_file() else []
+    matcher = re.compile(rf"^(?:export\s+)?{re.escape(env_name)}=")
+    written = f"{env_name}={_quote_env_value(value)}\n"
+    replaced = False
+    kept: list[str] = []
+    for line in lines:
+        if matcher.match(line.strip()) and not line.strip().startswith("#"):
+            if not replaced:
+                kept.append(written)
+                replaced = True
+            continue
+        kept.append(line if line.endswith("\n") else line + "\n")
+    if not replaced:
+        if kept and not kept[-1].endswith("\n"):
+            kept[-1] += "\n"
+        kept.append(written)
+    mode = path.stat().st_mode if path.is_file() else 0o600
+    tmp = path.parent / f"{path.name}.tmp"
+    tmp.write_text("".join(kept), encoding="utf-8")
+    tmp.chmod(mode)
+    tmp.replace(path)
+    logger.info("hermes provider key updated env=%s path=%s", env_name, path)
+
+
+def save_hermes_model(*, provider: str, model: str, base_url: str = "", api_key: str = "") -> dict[str, Any]:
     provider_text = _clean(provider)
     model_name = _clean(model)
     base = _clean(base_url)
-    _validate(provider_text, model_name, base)
+    secret = _clean(api_key)
+    _validate(provider_text, model_name, base, secret)
+    if secret and provider_text not in _PROVIDER_KEY_ENV:
+        raise ValueError("该厂商的密钥不在本页写入，留空则只改模型")
 
     path = get_config_path()
     existing = _model_mapping(load_config().get("model"))
@@ -180,10 +256,13 @@ def save_hermes_model(*, provider: str, model: str, base_url: str = "") -> dict[
     tmp.write_text(updated, encoding="utf-8")
     tmp.replace(path)
     logger.info(
-        "hermes model saved provider=%s model=%s base_url_set=%s path=%s",
+        "hermes model saved provider=%s model=%s base_url_set=%s key_updated=%s path=%s",
         provider_text,
         model_name,
         bool(base),
+        bool(secret),
         path,
     )
+    if secret:
+        _upsert_provider_key(_PROVIDER_KEY_ENV[provider_text], secret)
     return read_hermes_model()

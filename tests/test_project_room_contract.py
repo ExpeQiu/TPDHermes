@@ -646,7 +646,7 @@ def test_t12_writer_reads_attachment_and_revises(room_roles, tmp_path: Path, mon
         {"id": "writer", "system": "主笔"},
         {"materials": [], "human_text": "", "allow_write": True, "run_id": "run-1"},
     )
-    assert "tphermes_run_id=run-1" in prompt[0]["content"]
+    assert "TPCharness_run_id=run-1" in prompt[0]["content"]
     assert prompt[0]["role"] == "system"
 
 

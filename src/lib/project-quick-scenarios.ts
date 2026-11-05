@@ -11,7 +11,7 @@ export function quickScenariosScopeId(): string {
 }
 
 export function quickScenariosStorageKey(scopeUserId: string, projectId: string): string {
-  return `tphermes-project-quick-scenarios:${scopeUserId}:${projectId}`;
+  return `TPCharness-project-quick-scenarios:${scopeUserId}:${projectId}`;
 }
 
 export function loadProjectQuickScenarios(

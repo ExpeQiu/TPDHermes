@@ -174,7 +174,7 @@ export default function CliCapabilitiesPanel() {
           <input
             className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
             value={userId}
-            placeholder={config.user_id || "留空则使用 HERMES_USER_ID"}
+            placeholder={config.user_id || "留空则使用环境变量中的 User ID"}
             onChange={(event) => {
               setSaved(false);
               setUserId(event.target.value);

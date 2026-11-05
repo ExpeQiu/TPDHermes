@@ -229,13 +229,13 @@ export default function McpManagementPanel() {
           <div className="flex items-start justify-between gap-4 rounded-xl border border-slate-200 bg-white/80 p-4 text-sm text-slate-600 dark:border-slate-800 dark:bg-slate-900/40 dark:text-slate-400">
             <div className="min-w-0">
               <p>
-                配置文件：<span className="break-all text-slate-800 dark:text-slate-200">{data.config_path}</span>
+                配置文件：<span className="break-all text-slate-800 dark:text-slate-200">{data.config_path.replace(/tpdhermes/gi, "TPCharness").replace(/tphermes/gi, "TPCharness").replace(/hermes-agent/gi, "harness").replace(/hermes/gi, "harness")}</span>
                 {!data.config_exists && "（未找到）"}
               </p>
               <p className="mt-1">
                 Tavily 代理：
                 {data.tavily_mounted ? (
-                  <span className="text-emerald-600 dark:text-emerald-400">已配置 API Key，经 tphermes-mcp 挂载</span>
+                  <span className="text-emerald-600 dark:text-emerald-400">已配置 API Key，经 TPCharness 挂载</span>
                 ) : (
                   <span className="text-amber-600 dark:text-amber-400">未配置 TAVILY_API_KEY，联网工具不可用</span>
                 )}
@@ -255,7 +255,7 @@ export default function McpManagementPanel() {
 
           {data.servers.length === 0 && (
             <p className="rounded-xl border border-dashed border-slate-300 p-6 text-sm text-slate-500 dark:border-slate-800">
-              未配置 mcp_servers。请在 Hermes config.yaml 中添加 MCP 服务。
+              未配置 mcp_servers。请在 Harness config.yaml 中添加 MCP 服务。
             </p>
           )}
 
@@ -272,7 +272,7 @@ export default function McpManagementPanel() {
                 <div className="flex flex-wrap items-start justify-between gap-4">
                   <div>
                     <div className="flex flex-wrap items-center gap-3">
-                      <h3 className="text-lg font-medium text-slate-900 dark:text-white">{server.name}</h3>
+                      <h3 className="text-lg font-medium text-slate-900 dark:text-white">{server.name.replace(/tpdhermes/gi, "TPCharness").replace(/tphermes/gi, "TPCharness").replace(/hermes-agent/gi, "harness").replace(/hermes/gi, "harness")}</h3>
                       <span
                         className={`rounded-full px-2 py-0.5 text-xs ${
                           server.enabled
@@ -314,7 +314,7 @@ export default function McpManagementPanel() {
                   </div>
                 </div>
 
-                {server.name === "tphermes" && server.tools.catalog.length > 0 && (
+                {(server.name === "tphermes" || server.name === "TPCharness") && server.tools.catalog.length > 0 && (
                   <div className="mt-6 border-t border-slate-200 pt-6 dark:border-slate-800">
                     <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
                       <div>
@@ -345,7 +345,7 @@ export default function McpManagementPanel() {
                   </div>
                 )}
 
-                {server.name !== "tphermes" && server.tools.enabled.length > 0 && (
+                {server.name !== "tphermes" && server.name !== "TPCharness" && server.tools.enabled.length > 0 && (
                   <div className="mt-6 border-t border-slate-200 pt-6 dark:border-slate-800">
                     <p className="text-sm font-medium text-slate-800 dark:text-slate-200">已启用工具</p>
                     <div className="mt-3 flex flex-wrap gap-2">

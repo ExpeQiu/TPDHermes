@@ -90,18 +90,18 @@ def _file_proposal_guidance(project_id: str, run_id: str) -> list[str]:
     scratch = hermes_project_scratch_dir(project_id, run_id)
     return [
         "交付真源是数据库 outputs 表。不要先 write_file/patch 再同步，也不要覆盖正式文件。",
-        "需要新建或修改项目文件时，在回复末尾输出 tphermes_file_actions 提案；"
+        "需要新建或修改项目文件时，在回复末尾输出 TPCharness_file_actions 提案；"
         "是否落库由服务端按审阅或自动应用决定。",
-        "该代码块格式为：```tphermes_file_actions {\"actions\":[...]} ```；"
+        "该代码块格式为：```TPCharness_file_actions {\"actions\":[...]} ```；"
         "create 动作至少包含 type、fileName、path、content。",
-        "tphermes_file_actions 中 path 使用项目虚拟路径 `/输出/{fileName}`。",
-        "长文稿正文应写在回复正文中；tphermes_file_actions 内 content 须与正文一致且为合法 JSON。",
+        "TPCharness_file_actions 中 path 使用项目虚拟路径 `/输出/{fileName}`。",
+        "长文稿正文应写在回复正文中；TPCharness_file_actions 内 content 须与正文一致且为合法 JSON。",
         "patch 动作支持三种 editMode：full（整篇 after）、search_replace（oldString+newString，须唯一匹配）、"
         "line_range（startLine/endLine+newText，用于选段改写）。",
         "当用户消息含文件选段引用时，必须使用 search_replace 或 line_range，禁止无关全文重写。",
         f"若工具必须产生临时文件，只能写在 `{scratch}/` 下；"
         "禁止写入共享目录 `/opt/data/输出/`、`/输出/` 根路径、`/opt/hermes/output` 或 `/Users/…`。",
-        "若本轮只是分析或问答，没有文件提案，则不要输出 `tphermes_file_actions`。",
+        "若本轮只是分析或问答，没有文件提案，则不要输出 `TPCharness_file_actions`。",
     ]
 
 
@@ -160,15 +160,15 @@ def _build_orchestration_guidance(
                 f"② 公共真源集合（{auth}）及 orchestration 中其余 public./internal. 集合；"
                 "③ 若仍不足以回答，必须调用 tavily_search 联网补充。",
                 "禁止在未完成公共库检索与联网尝试前声称「资料不足」；事实须标注 [^N]。",
-                "【Ask 只读】禁止调用 write_file、patch，禁止输出 tphermes_file_actions。",
+                "【Ask 只读】禁止调用 write_file、patch，禁止输出 TPCharness_file_actions。",
             ]
         )
     elif plan_mode and payload.entrypoint == "chat" and payload.project.id != "none":
         lines.extend(
             [
                 "【Plan 模式】若用户尚未确认执行计划：只规划并输出 "
-                "```tphermes_plan {\"title\":\"...\",\"steps\":[...]} ```，"
-                "禁止 write_file、patch、tphermes_file_actions。",
+                "```TPCharness_plan {\"title\":\"...\",\"steps\":[...]} ```，"
+                "禁止 write_file、patch、TPCharness_file_actions。",
                 "若用户已明确确认计划并要求执行：按已确认步骤推进，可调用工具与落库协议。",
             ]
         )
@@ -252,7 +252,7 @@ def _build_orchestration_guidance(
         elif mode == "plan":
             lines.extend(
                 [
-                    "Plan 未确认执行前不要写文件，也不要输出 tphermes_file_actions。",
+                    "Plan 未确认执行前不要写文件，也不要输出 TPCharness_file_actions。",
                     "用户确认计划并进入执行后，按提案协议提交变更，不要先写正式文件：",
                 ]
             )
@@ -268,8 +268,8 @@ def _build_orchestration_guidance(
     if run_id:
         lines.extend(
             [
-                f"当前编排 run_id={run_id}。调用 kb_query 或 kb_get_entry 时必须传入 tphermes_run_id={run_id}。",
-                f"调用 tavily_search 或 tavily_extract 联网检索时也必须传入 tphermes_run_id={run_id}；"
+                f"当前编排 run_id={run_id}。调用 kb_query 或 kb_get_entry 时必须传入 TPCharness_run_id={run_id}。",
+                f"调用 tavily_search 或 tavily_extract 联网检索时也必须传入 TPCharness_run_id={run_id}；"
                 "互联网来源在引用表中统一标识为「互联网」。",
                 "引用知识库或互联网事实时，必须在对应句末添加 [^N] 标记（N 为工具返回结果中的 ref 字段，从 1 开始）；"
                 "涉及多条事实时每个要点都须标注。",
@@ -302,7 +302,7 @@ def _build_workshop_agent_guidance(
     lines = [
         "【结果工坊强制流程】你必须通过 MCP 工具完成生成，禁止跳过工具直接输出最终正文。",
         f"固定 skill_name={skill_name}，不得改用其他技能。",
-        f"调用 workshop_generate 或 workshop_generate_from_kb 时，必须传入 tphermes_run_id={run_id}（工具顶层参数或 context 字段），"
+        f"调用 workshop_generate 或 workshop_generate_from_kb 时，必须传入 TPCharness_run_id={run_id}（工具顶层参数或 context 字段），"
         f"并包含 project_id={project_id}、scenario_id={payload.scenario.id}。",
     ]
     grant = (execution_token or "").strip()

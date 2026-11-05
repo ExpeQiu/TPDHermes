@@ -26,7 +26,7 @@ describe("co-create-auto-patch", () => {
 
   it("buildRewriteSyncInstructions 有引用文件时注入", () => {
     const text = buildRewriteSyncInstructions("润色并扩展文稿", true);
-    expect(text).toContain("tphermes_file_actions");
+    expect(text).toContain("TPCharness_file_actions");
     expect(text).toContain("patch");
     expect(buildRewriteSyncInstructions("润色", false)).toBe("");
   });

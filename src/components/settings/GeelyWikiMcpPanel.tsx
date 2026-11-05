@@ -87,7 +87,7 @@ export default function GeelyWikiMcpPanel() {
         <div>
           <h2 className="text-lg font-medium text-slate-900 dark:text-white">GeelyWiki MCP</h2>
           <p className="mt-1 text-sm text-slate-500">
-            通过 MCP 拉取页面更新。这一块不写入 Hermes 的 MCP 服务列表。探测会调用 pages_list。
+            通过 MCP 拉取页面更新。这一块不写入 Harness 的 MCP 服务列表。探测会调用 pages_list。
           </p>
         </div>
         <button

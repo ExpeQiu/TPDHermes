@@ -692,7 +692,7 @@ def test_chat_stream_normalizes_file_tool_events(monkeypatch):
             parsed = json.loads(payload)
         except json.JSONDecodeError:
             continue
-        task = parsed.get("tphermes_task") if isinstance(parsed, dict) else None
+        task = parsed.get("TPCharness_task") if isinstance(parsed, dict) else None
         if isinstance(task, dict) and isinstance(task.get("tool_events"), list):
             tool_event_batches.append(task["tool_events"])
 

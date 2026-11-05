@@ -422,7 +422,7 @@ async def trial_skill(
     collection = (data.collection_name or "").strip()
     if collection:
         context["collection_name"] = collection
-    context["tphermes_run_id"] = run_id
+    context["TPCharness_run_id"] = run_id
     policy = {
         "mode": "allowed_list",
         "allowed": [name],

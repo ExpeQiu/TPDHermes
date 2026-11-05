@@ -7,7 +7,7 @@ import {
   useCoCreateColumnWidths,
 } from "./use-co-create-column-widths";
 
-const STORAGE_KEY = "tphermes-co-create-column-widths-v2";
+const STORAGE_KEY = "TPCharness-co-create-column-widths-v2";
 
 describe("fitWidthsToContainer", () => {
   it("scales columns to fill the container width", () => {

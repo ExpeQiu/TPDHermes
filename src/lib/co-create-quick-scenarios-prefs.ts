@@ -3,14 +3,14 @@ import { getEffectiveUserIdSync } from "@/lib/user-id";
 /** 共创空态快捷入口上限：2 列 × 4 行 */
 export const CO_CREATE_QUICK_ENTRY_LIMIT = 8;
 
-export const CO_CREATE_QUICK_SCENARIOS_CHANGED = "tphermes:co-create-quick-scenarios-changed";
+export const CO_CREATE_QUICK_SCENARIOS_CHANGED = "TPCharness:co-create-quick-scenarios-changed";
 
 export type CoCreateQuickScenariosPrefs = {
   scenarioIds: string[];
 };
 
 export function coCreateQuickScenariosStorageKey(scopeUserId: string): string {
-  return `tphermes-co-create-quick-scenarios:${scopeUserId}`;
+  return `TPCharness-co-create-quick-scenarios:${scopeUserId}`;
 }
 
 export function loadCoCreateQuickScenariosPrefs(

@@ -31,7 +31,7 @@ _CREATE_RE = re.compile(
     r"|归档(?:以上|这段|这份)?(?:文稿|文档)?"
     r"|保存到项目文件|存到项目文件|落入项目文件"
 )
-_DISK_NOTICE_RE = re.compile(r"未落库|被标记为禁止|/opt/data/输出|tphermes_file_actions")
+_DISK_NOTICE_RE = re.compile(r"未落库|被标记为禁止|/opt/data/输出|TPCharness_file_actions")
 _STRONG_CREATE_RE = re.compile(r"整理成|转成|转为|写成|写一版|写一稿|出一版|起草|落成|成稿")
 _REVISE_RE = re.compile(r"修订|改写|删除原句|补一节|更新文稿|更新文档|改一版|再写一版|重写|改一下|润色|参与修改")
 _QUESTION_RE = re.compile(r"[?？]|什么|怎么|为什么|哪些|是否|吗")
@@ -94,7 +94,7 @@ def manuscript_for_file(reply: str) -> str:
 
 def _yaml_file_action(reply: str) -> dict[str, Any] | None:
     """Hermes 常把动作写成缩进文本，而不是 JSON。"""
-    match = re.search(r"```tphermes_file_actions\s*\n(.*?)```", reply or "", re.S)
+    match = re.search(r"```TPCharness_file_actions\s*\n(.*?)```", reply or "", re.S)
     if not match:
         return None
     action_type = "create"

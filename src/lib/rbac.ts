@@ -24,9 +24,9 @@ export interface UserAccessState {
   project_roles: { id: ProjectRole; label: string }[];
 }
 
-export const USER_ROLE_STORAGE_KEY = "tpdhermes_user_role";
+export const USER_ROLE_STORAGE_KEY = "TPCharness_user_role";
 
-const ACCESS_CACHE_KEY = "tpdhermes_user_access_cache";
+const ACCESS_CACHE_KEY = "TPCharness_user_access_cache";
 
 export async function fetchUserAccess(): Promise<UserAccessState> {
   const data = await apiGet<UserAccessState>("/me/access");

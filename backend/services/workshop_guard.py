@@ -38,10 +38,10 @@ class WorkshopInvocation:
     collection_name: str | None = None
 
 
-def require_tphermes_run_id(run_id: str | None) -> str:
+def require_TPCharness_run_id(run_id: str | None) -> str:
     rid = str(run_id or "").strip()
     if not rid:
-        raise WorkshopGuardError("workshop 调用必须提供 tphermes_run_id", status_code=400)
+        raise WorkshopGuardError("workshop 调用必须提供 TPCharness_run_id", status_code=400)
     return rid
 
 
@@ -215,14 +215,14 @@ async def _record_skill_rejection(
 async def require_workshop_invocation(
     db: AsyncSession,
     *,
-    tphermes_run_id: str,
+    TPCharness_run_id: str,
     skill_name: str,
     viewer_user_id: str | None = None,
     project_id: str | None = None,
     collection_name: str | None = None,
     execution_token: str | None = None,
 ) -> WorkshopInvocation:
-    run_id = require_tphermes_run_id(tphermes_run_id)
+    run_id = require_TPCharness_run_id(TPCharness_run_id)
     run = await require_workshop_run_for_user(
         db,
         run_id=run_id,
@@ -236,7 +236,7 @@ async def require_workshop_invocation(
     run_project_id = _normalize_project_id(run.project_id)
     if requested_project_id and run_project_id and requested_project_id != run_project_id:
         raise WorkshopGuardError(
-            "project_id 与 tphermes_run_id 对应运行不一致",
+            "project_id 与 TPCharness_run_id 对应运行不一致",
             status_code=400,
         )
 

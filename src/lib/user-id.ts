@@ -1,11 +1,11 @@
 /** localStorage：用户隔离 ID（与设置页、API 头共享） */
 import { apiV1, readJson } from "./api";
 
-export const USER_ID_STORAGE_KEY = "tpdhermes_user_id";
+export const USER_ID_STORAGE_KEY = "TPCharness_user_id";
 
-export const FEISHU_SESSION_STORAGE_KEY = "tpdhermes_feishu_session";
+export const FEISHU_SESSION_STORAGE_KEY = "TPCharness_feishu_session";
 
-export const LOCAL_SESSION_STORAGE_KEY = "tpdhermes_local_session";
+export const LOCAL_SESSION_STORAGE_KEY = "TPCharness_local_session";
 
 let derivedUserIdCache: string | null = null;
 let derivedUserIdPromise: Promise<string> | null = null;

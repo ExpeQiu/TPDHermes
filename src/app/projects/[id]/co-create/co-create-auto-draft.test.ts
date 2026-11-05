@@ -22,7 +22,7 @@ describe("co-create-auto-draft", () => {
 这里是正文。
 \`\`\`
 
-\`\`\`tphermes_file_actions
+\`\`\`TPCharness_file_actions
 {"actions":[{"type":"create","fileName":"忽略.md"}]}
 \`\`\`
 `;
@@ -76,7 +76,7 @@ describe("co-create-auto-draft", () => {
       isDocumentGenerationPrompt("请基于当前项目上下文，输出一版可用于外部沟通的技术方案说明。"),
     ).toBe(true);
     const text = buildDocumentSyncInstructions("撰写一篇演讲稿");
-    expect(text).toContain("tphermes_file_actions");
+    expect(text).toContain("TPCharness_file_actions");
     expect(buildDocumentSyncInstructions("今天天气怎么样")).toBe("");
   });
 

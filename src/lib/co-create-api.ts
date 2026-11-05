@@ -228,7 +228,7 @@ export async function exportProjectFileToLocal(
 }
 
 export function parseFileActionsFromContent(content: string): FileActionProposal[] {
-  const match = content.match(/```tphermes_file_actions\s*\n([\s\S]*?)```/);
+  const match = content.match(/```TPCharness_file_actions\s*\n([\s\S]*?)```/);
   if (!match?.[1]) return [];
   try {
     const parsed = JSON.parse(match[1].trim()) as { actions?: FileActionProposal[] };

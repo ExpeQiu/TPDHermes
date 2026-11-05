@@ -26,7 +26,7 @@ def _run_id_from_upstream_body(body: dict) -> str | None:
     content = messages[0].get("content") if isinstance(messages[0], dict) else None
     if not isinstance(content, str):
         return None
-    m = re.search(r"tphermes_run_id=([0-9a-f-]{36})", content)
+    m = re.search(r"TPCharness_run_id=([0-9a-f-]{36})", content)
     if m:
         return m.group(1)
     begin = content.find(ORCHESTRATION_MARKER_BEGIN)
@@ -104,7 +104,7 @@ async def test_tool_capture_requires_explicit_run_id_and_does_not_cross_runs():
         skill_name="hello_skill",
     )
     await save_workshop_tool_capture_for_context(
-        {"tphermes_run_id": run_id_a, "project_id": project_id},
+        {"TPCharness_run_id": run_id_a, "project_id": project_id},
         "workshop_generate",
         {"success": True, "content": "capture-a", "skill": "hello_skill"},
         skill_name="hello_skill",
@@ -174,7 +174,7 @@ def test_workshop_agent_mode_forwards_to_upstream(monkeypatch):
     body = calls[0]["json"]
     assert body is not None
     sys_msg = body["messages"][0]["content"]
-    assert "tphermes_run_id=" in sys_msg or "结果工坊强制流程" in sys_msg
+    assert "TPCharness_run_id=" in sys_msg or "结果工坊强制流程" in sys_msg
 
 
 def test_workshop_agent_mode_strict_returns_424_without_capture(monkeypatch):

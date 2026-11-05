@@ -35,7 +35,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
             TH
           </div>
           <div>
-            <p className="text-white text-sm font-semibold leading-tight">TPDHermes</p>
+            <p className="text-white text-sm font-semibold leading-tight">TPCharness</p>
             <p className="text-slate-500 text-xs leading-tight">技术推广平台</p>
           </div>
         </div>
@@ -100,7 +100,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
             TH
           </div>
           <div>
-            <p className="text-white text-sm font-semibold leading-tight">TPDHermes</p>
+            <p className="text-white text-sm font-semibold leading-tight">TPCharness</p>
             <p className="text-slate-500 text-xs leading-tight">技术推广平台</p>
           </div>
         </div>
@@ -149,7 +149,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
             <div className="w-7 h-7 bg-blue-600 rounded-lg flex items-center justify-center text-white font-bold text-xs">
               TH
             </div>
-            <span className="text-sm font-semibold">TPDHermes</span>
+            <span className="text-sm font-semibold">TPCharness</span>
           </div>
 
           {/* Spacer */}

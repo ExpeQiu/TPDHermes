@@ -429,7 +429,7 @@ def test_document_intent_separates_chat_create_and_revise():
     )
     assert archived.startswith("# 千里浩瀚")
     parsed = authorized_hermes_action(
-        "说明\n```tphermes_file_actions\n- action: create\n- path: /输出/新文档 版本.md\n- content: |\n    # 千里浩瀚\n    正文\n```"
+        "说明\n```TPCharness_file_actions\n- action: create\n- path: /输出/新文档 版本.md\n- content: |\n    # 千里浩瀚\n    正文\n```"
     )
     assert parsed is not None
     assert parsed["file_name"] == "新文档 版本.md"
@@ -445,7 +445,7 @@ def test_hermes_file_action_is_executed(room_roles):
         del role, ctx
         return (
             "已按授权准备落库。\n\n"
-            "```tphermes_file_actions\n"
+            "```TPCharness_file_actions\n"
             '{"actions":[{"type":"create","fileName":"竞品洞察.md","path":"/输出/竞品洞察.md",'
             '"content":"# 竞品洞察\\n\\n正式正文"}]}\n'
             "```"
@@ -464,7 +464,7 @@ def test_hermes_file_action_is_executed(room_roles):
         assert done["doc_version"] >= 1
         assert done["output_id"]
         assert "正式正文" in done["content"]
-        assert "tphermes_file_actions" not in done["content"]
+        assert "TPCharness_file_actions" not in done["content"]
 
 
 def test_arrange_into_manuscript_creates_project_file(room_roles):

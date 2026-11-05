@@ -48,9 +48,10 @@ function Row({ label, value }: { label: string; value: string }) {
 
 function keyStatus(model: HermesModel): string {
   if (model.key_configured) {
-    return model.key_env ? `已配置（${model.key_env}）` : "已配置";
+    const name = model.key_env ? `（${model.key_env}）` : "";
+    return `已配置${name}。下方留空则不修改`;
   }
-  if (model.key_env) return `未配置（${model.key_env}）`;
+  if (model.key_env) return `未配置（${model.key_env}）。留空则不写入`;
   return "此厂商的密钥不在本页管理";
 }
 
@@ -60,6 +61,7 @@ export default function RuntimeConfigPanel() {
   const [provider, setProvider] = useState("");
   const [modelName, setModelName] = useState("");
   const [baseUrl, setBaseUrl] = useState("");
+  const [apiKey, setApiKey] = useState("");
   const [error, setError] = useState("");
   const [saveError, setSaveError] = useState("");
   const [savedMsg, setSavedMsg] = useState("");
@@ -86,7 +88,7 @@ export default function RuntimeConfigPanel() {
         if (alive) applyHermes(payload);
       })
       .catch((err: unknown) => {
-        if (alive) setSaveError(err instanceof Error ? err.message : "加载 Hermes 模型失败");
+        if (alive) setSaveError(err instanceof Error ? err.message : "加载 Harness 模型失败");
       });
     return () => {
       alive = false;
@@ -103,11 +105,13 @@ export default function RuntimeConfigPanel() {
           provider,
           model: modelName,
           base_url: baseUrl,
+          api_key: apiKey,
         }),
       );
-      setSavedMsg("已写入 config.yaml。新会话使用该模型，进行中的对话不变。");
+      setApiKey("");
+      setSavedMsg("已保存。新会话会用这份配置，不必重启 Harness。进行中的对话不变。");
     } catch (err: unknown) {
-      setSaveError(err instanceof Error ? err.message : "保存 Hermes 模型失败");
+      setSaveError(err instanceof Error ? err.message : "保存 Harness 模型失败");
     } finally {
       setSaving(false);
     }
@@ -126,24 +130,24 @@ export default function RuntimeConfigPanel() {
         <Row label="数据来源" value={config.data_source === "env" ? "环境变量（尚无页面保存值）" : config.data_source} />
         <Row label="Mock" value={config.mock_mode ? "开启" : "关闭"} />
         <Row label="对话上游" value={config.chat.available ? config.chat.target || "已配置" : "未配置"} />
-        <Row label="调用名" value={config.chat.model} />
+        <Row label="调用名" value={config.chat.model.replace(/tpdhermes/gi, "TPCharness").replace(/tphermes/gi, "TPCharness").replace(/hermes-agent/gi, "harness").replace(/hermes/gi, "harness")} />
         <Row label="Wiki MCP" value={`${config.wiki.url}（${sourceLabel(config.wiki.url_source)}）`} />
       </dl>
       {config.warnings.length > 0 && (
         <ul className="mt-4 space-y-1 text-sm text-amber-700 dark:text-amber-300">
           {config.warnings.map((item) => (
-            <li key={item}>{item}</li>
+            <li key={item}>{item.replace(/tpdhermes/gi, "TPCharness").replace(/tphermes/gi, "TPCharness").replace(/hermes-agent/gi, "harness").replace(/hermes/gi, "harness")}</li>
           ))}
         </ul>
       )}
       <p className="mt-4 text-xs text-slate-500">
-        调用名是发给 Hermes 的请求标识，保持 hermes-agent。下面的厂商和模型写入 deploy/hermes-agent/config.yaml，启动不会用环境变量盖回。
+        调用名是发给 Harness 的请求标识。下面的厂商和模型写入 Harness 的 config.yaml，启动不会用环境变量盖回。
       </p>
 
       <div className="mt-6 border-t border-slate-200 pt-6 dark:border-slate-800">
-        <h2 className="text-sm font-medium text-slate-900 dark:text-slate-100">Hermes 模型</h2>
+        <h2 className="text-sm font-medium text-slate-900 dark:text-slate-100">Harness 模型</h2>
         <p className="mt-1 text-xs text-slate-500">
-          默认值来自 config.yaml。保存后对新会话生效。
+          默认值来自 config.yaml。厂商、模型和密钥保存后对新会话生效，不必重启 Harness。
           {hermes ? ` 密钥：${keyStatus(hermes)}` : ""}
         </p>
         {saveError && <p className="mt-3 text-sm text-red-500 dark:text-red-400">{saveError}</p>}
@@ -169,6 +173,17 @@ export default function RuntimeConfigPanel() {
               />
             </label>
             <label className="block text-sm">
+              <span className="text-slate-700 dark:text-slate-200">密钥</span>
+              <input
+                type="password"
+                autoComplete="new-password"
+                value={apiKey}
+                onChange={(event) => setApiKey(event.target.value)}
+                className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 font-mono text-sm text-slate-900 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
+                placeholder="留空则不修改现有密钥"
+              />
+            </label>
+            <label className="block text-sm">
               <span className="text-slate-700 dark:text-slate-200">Base URL</span>
               <input
                 value={baseUrl}
@@ -183,7 +198,7 @@ export default function RuntimeConfigPanel() {
               onClick={() => void saveModel()}
               className="rounded-lg bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-500 disabled:opacity-50"
             >
-              {saving ? "保存中…" : "保存 Hermes 模型"}
+              {saving ? "保存中…" : "保存 Harness 模型"}
             </button>
           </div>
         )}

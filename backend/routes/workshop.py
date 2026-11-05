@@ -49,13 +49,13 @@ def _loader_dep() -> SkillLoader:
 
 class GenerateRequest(BaseModel):
     skill_name: str
-    tphermes_run_id: str
+    TPCharness_run_id: str
     context: Dict[str, Any]
 
 
 class GenerateFromKBRequest(BaseModel):
     skill_name: str
-    tphermes_run_id: str
+    TPCharness_run_id: str
     query: str
     collection_name: str
     limit: int = 3
@@ -65,7 +65,7 @@ class GenerateFromKBRequest(BaseModel):
 
 async def _generate_stream(
     skill_name: str,
-    tphermes_run_id: str,
+    TPCharness_run_id: str,
     context: Dict[str, Any],
     loader: SkillLoader,
 ) -> AsyncGenerator[str, None]:
@@ -116,8 +116,8 @@ async def _generate_stream(
         delivery_status = "degraded"
     yield sse_meta_event(
         {
-            "tphermes_task": {
-                "run_id": tphermes_run_id,
+            "TPCharness_task": {
+                "run_id": TPCharness_run_id,
                 "skill": skill_name,
                 "status": delivery_status,
                 "execution_type": result.get("execution_type") if isinstance(result, dict) else None,
@@ -162,7 +162,7 @@ async def generate_stream(
     try:
         invocation = await require_workshop_invocation(
             db,
-            tphermes_run_id=request.tphermes_run_id,
+            TPCharness_run_id=request.TPCharness_run_id,
             skill_name=request.skill_name,
             viewer_user_id=effective_uid,
             project_id=request.context.get("project_id"),
@@ -172,7 +172,7 @@ async def generate_stream(
         raise HTTPException(status_code=500, detail="unexpected workshop guard state")
 
     context = dict(request.context)
-    context["tphermes_run_id"] = invocation.run_id
+    context["TPCharness_run_id"] = invocation.run_id
     if invocation.project_id:
         context.setdefault("project_id", invocation.project_id)
     return StreamingResponse(
@@ -243,7 +243,7 @@ async def generate_from_kb(
     try:
         invocation = await require_workshop_invocation(
             db,
-            tphermes_run_id=request.tphermes_run_id,
+            TPCharness_run_id=request.TPCharness_run_id,
             skill_name=request.skill_name,
             viewer_user_id=effective_uid,
             project_id=request.project_id or (request.context or {}).get("project_id"),
@@ -256,7 +256,7 @@ async def generate_from_kb(
     from backend.tools.workshop_tools import workshop_generate_from_kb
 
     context = dict(request.context or {})
-    context["tphermes_run_id"] = invocation.run_id
+    context["TPCharness_run_id"] = invocation.run_id
     if invocation.project_id:
         context["project_id"] = invocation.project_id
     return await workshop_generate_from_kb(

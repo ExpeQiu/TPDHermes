@@ -12,7 +12,7 @@ from typing import Any
 
 from backend.db import async_session_maker
 from backend.services.workshop_context_adapter import build_workshop_context_from_kb
-from backend.services.workshop_guard import WorkshopGuardError, require_tphermes_run_id, require_workshop_invocation
+from backend.services.workshop_guard import WorkshopGuardError, require_TPCharness_run_id, require_workshop_invocation
 from backend.services.skill_loader import get_loader, SkillNotFoundError, SkillLoadError
 from backend.services.workshop_skill_access import (
     visible_workshop_skill_names,
@@ -143,11 +143,11 @@ async def workshop_generate(skill_name: str, context: dict) -> dict:
     """
     loader = get_loader()
     try:
-        require_tphermes_run_id((context or {}).get("tphermes_run_id"))
+        require_TPCharness_run_id((context or {}).get("TPCharness_run_id"))
         async with async_session_maker() as db:
             await require_workshop_invocation(
                 db,
-                tphermes_run_id=str((context or {}).get("tphermes_run_id") or ""),
+                TPCharness_run_id=str((context or {}).get("TPCharness_run_id") or ""),
                 skill_name=skill_name,
                 project_id=(context or {}).get("project_id"),
                 execution_token=(context or {}).get("execution_token"),
@@ -226,7 +226,7 @@ async def workshop_generate_from_kb(
         async with async_session_maker() as db:
             invocation = await require_workshop_invocation(
                 db,
-                tphermes_run_id=str(ctx.get("tphermes_run_id") or ""),
+                TPCharness_run_id=str(ctx.get("TPCharness_run_id") or ""),
                 skill_name=skill_name,
                 project_id=project_id or ctx.get("project_id"),
                 collection_name=collection_name,
@@ -247,7 +247,7 @@ async def workshop_generate_from_kb(
     run_id = invocation.run_id
     effective_project_id = invocation.project_id
     effective_collection_name = invocation.collection_name or collection_name
-    ctx["tphermes_run_id"] = run_id
+    ctx["TPCharness_run_id"] = run_id
     if effective_project_id:
         ctx["project_id"] = effective_project_id
     kb_result = await kb_query(
@@ -255,7 +255,7 @@ async def workshop_generate_from_kb(
         effective_collection_name,
         limit,
         effective_project_id,
-        tphermes_run_id=run_id,
+        TPCharness_run_id=run_id,
     )
     built_context = build_workshop_context_from_kb(
         skill_name=skill_name,

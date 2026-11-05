@@ -97,20 +97,20 @@ async def test_workshop_generate_blocks_foreign_uploaded_skill_by_run_user():
             foreign_token = pop_issued_execution_token(foreign_run_id)
             assert owner_token and foreign_token and owner_token != foreign_token
 
-            missing = await workshop_generate(skill_name, {"tphermes_run_id": owner_run_id})
+            missing = await workshop_generate(skill_name, {"TPCharness_run_id": owner_run_id})
             ok = await workshop_generate(
                 skill_name,
-                {"tphermes_run_id": owner_run_id, "execution_token": owner_token},
+                {"TPCharness_run_id": owner_run_id, "execution_token": owner_token},
             )
             crossed = await workshop_generate(
                 skill_name,
-                {"tphermes_run_id": owner_run_id, "execution_token": foreign_token},
+                {"TPCharness_run_id": owner_run_id, "execution_token": foreign_token},
             )
-            denied = await workshop_generate(skill_name, {"tphermes_run_id": foreign_run_id})
+            denied = await workshop_generate(skill_name, {"TPCharness_run_id": foreign_run_id})
             async with async_session_maker() as db:
                 http_owner = await require_workshop_invocation(
                     db,
-                    tphermes_run_id=owner_run_id,
+                    TPCharness_run_id=owner_run_id,
                     skill_name=skill_name,
                     viewer_user_id=owner_id,
                 )
@@ -205,7 +205,7 @@ def test_ws_generate_rejects_hidden_uploaded_skill():
                 headers={"X-User-ID": foreign_id},
                 json={
                     "skill_name": skill_name,
-                    "tphermes_run_id": foreign_run_id,
+                    "TPCharness_run_id": foreign_run_id,
                     "context": {},
                 },
             )
@@ -217,7 +217,7 @@ def test_ws_generate_rejects_hidden_uploaded_skill():
         _cleanup_skill(skill_name)
 
 
-def test_ws_generate_requires_tphermes_run_id():
+def test_ws_generate_requires_TPCharness_run_id():
     with TestClient(app) as client:
         resp = client.post(
             "/api/v1/ws/generate",

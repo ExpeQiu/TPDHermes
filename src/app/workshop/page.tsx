@@ -801,7 +801,7 @@ function WorkshopPageInner() {
             const msg = c0?.message as Record<string, unknown> | undefined;
             const mc = msg?.content;
             if (typeof mc === "string") return mc;
-            if (parsed.tphermes_task) return "";
+            if (parsed.TPCharness_task) return "";
           } catch {
             return "";
           }
@@ -854,7 +854,7 @@ function WorkshopPageInner() {
                     setGenStatus("error");
                     return;
                   }
-                  const tt = event.tphermes_task;
+                  const tt = event.TPCharness_task;
                   if (tt && typeof tt === "object") {
                     const m = tt as Record<string, unknown>;
                     setLastRunMeta((prev) => ({

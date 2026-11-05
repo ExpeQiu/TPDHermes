@@ -310,7 +310,7 @@ async def _resolve_run_id_from_context(
 
     pid = (project_id or "").strip()
     if not pid:
-        logger.warning("kb source capture skipped: missing tphermes_run_id and project_id")
+        logger.warning("kb source capture skipped: missing TPCharness_run_id and project_id")
         return None
 
     cutoff = (datetime.now() - timedelta(minutes=30)).isoformat()
@@ -401,7 +401,7 @@ async def prefetch_kb_sources_for_run(
                     col,
                     limit=5,
                     project_id=project_id,
-                    tphermes_run_id=run_id,
+                    TPCharness_run_id=run_id,
                 ),
                 timeout=_KB_PREFETCH_COLLECTION_TIMEOUT_SEC,
             )

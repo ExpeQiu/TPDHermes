@@ -40,11 +40,11 @@ type UseChatSessionStoreOptions = {
 };
 
 function chatSessionsStorageKey(scopeUserId: string, namespace = "chat"): string {
-  return `tphermes-${namespace}-sessions:${scopeUserId}`;
+  return `TPCharness-${namespace}-sessions:${scopeUserId}`;
 }
 
 function chatActiveStorageKey(scopeUserId: string, namespace = "chat"): string {
-  return `tphermes-${namespace}-active:${scopeUserId}`;
+  return `TPCharness-${namespace}-active:${scopeUserId}`;
 }
 
 function loadSessions(scopeUserId: string, namespace = "chat"): ChatSession[] {

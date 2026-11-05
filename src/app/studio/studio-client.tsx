@@ -85,8 +85,8 @@ function FieldButton({
 
 function driverLabel(driver: string, fallback: string | null): string {
   if (driver === "tpcstore") return "TPCstore · 会话预览";
-  if (driver === "hermes") return "Hermes 内核";
-  if (fallback) return "Mock 内核 · Hermes 未就绪";
+  if (driver === "hermes") return "Harness 内核";
+  if (fallback) return "Mock 内核 · Harness 未就绪";
   return "Mock 内核";
 }
 

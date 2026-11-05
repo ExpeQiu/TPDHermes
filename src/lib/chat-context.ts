@@ -184,7 +184,7 @@ function formatConstraints(value: Record<string, unknown> | null | undefined): s
 
 function formatProjectBlock(project: ProjectRecord): ContextBlock {
   return {
-    tool: "mcp_tphermes_project_get",
+    tool: "mcp_TPCharness_project_get",
     title: `项目上下文：${project.name}`,
     content: compactLines([
       `项目 ID: ${project.id}`,
@@ -219,7 +219,7 @@ function formatKbBlock(
   });
 
   return {
-    tool: "mcp_tphermes_kb_query",
+    tool: "mcp_TPCharness_kb_query",
     title: `知识库检索：${collectionName}`,
     content: compactLines([
       `集合: ${collectionName}`,
@@ -244,7 +244,7 @@ function formatSkillsBlock(
     return tip ? `- ${name}（${label}）：${tip}` : `- ${name}`;
   });
   return {
-    tool: "mcp_tphermes_workshop_list_skills",
+    tool: "mcp_TPCharness_workshop_list_skills",
     title: "工坊技能快照",
     content: compactLines([
       `技能数: ${skills.length}`,
@@ -258,8 +258,8 @@ function formatSkillsBlock(
 function renderToolsContext(blocks: ContextBlock[]): string {
   if (blocks.length === 0) return "";
   return [
-    "[TPDHermes 显式上下文注入]",
-    "以下内容来自发送前显式调用的 TPDHermes 能力，请作为回答时的参考上下文。",
+    "[TPCharness 显式上下文注入]",
+    "以下内容来自发送前显式调用的 TPCharness 能力，请作为回答时的参考上下文。",
     ...blocks.flatMap((block) => [
       "",
       `### ${block.tool}`,

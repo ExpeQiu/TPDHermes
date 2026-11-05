@@ -208,7 +208,7 @@ export function buildQuickStartOutputSyncInstructions(
   const quickHint = [
     "【快捷创作标准输出】本轮为场景快捷创作，须产出可沉淀至项目文件库的标准输出物。",
     `优先保存为 /输出/${fileName}（与场景「${title}」对应）。`,
-    "正文须完整写在回复中；末尾附加 ```tphermes_file_actions``` create 动作，",
+    "正文须完整写在回复中；末尾附加 ```TPCharness_file_actions``` create 动作，",
     "create 的 path 必须为 `/输出/{fileName}`，禁止使用本机绝对路径。",
   ].join(" ");
   const docSync = buildDocumentSyncInstructions(prompt, existingTitles);
@@ -223,7 +223,7 @@ export function buildDocumentSyncInstructions(
   const namingHint = buildExistingOutputNamesHint(existingTitles);
   return [
     "【文稿同步】用户本轮要求生成完整文稿（演讲稿、发布会稿、新闻稿、方案、报告等）。",
-    "正文须先完整写在回复正文中；末尾附加 ```tphermes_file_actions``` 的 create 动作。",
+    "正文须先完整写在回复正文中；末尾附加 ```TPCharness_file_actions``` 的 create 动作。",
     "create 的 path 必须为 `/输出/{fileName}`（项目虚拟路径，落库 outputs 表并在右侧「输出物」展示），禁止使用 /Users、/home 或本机绝对路径。",
     CO_CREATE_OUTPUT_WRITE_POLICY,
     "若 JSON 的 content 字段过长易截断，可仅写 fileName+path，content 与正文一致且须为合法 JSON 字符串；",

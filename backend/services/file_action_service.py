@@ -77,7 +77,7 @@ async def _claim_output_version(
         raise FileActionConflict(current)
 
 FILE_ACTIONS_BLOCK_RE = re.compile(
-    r"```tphermes_file_actions\s*\n([\s\S]*?)```",
+    r"```TPCharness_file_actions\s*\n([\s\S]*?)```",
     re.MULTILINE,
 )
 

@@ -921,7 +921,7 @@ async def execute_task(req: Request, task_req: TaskExecuteRequest, db: AsyncSess
                     logger.exception("mark_run_failed_if_running also failed run_id=%s", run_id)
 
             meta = {
-                "tphermes_task": {
+                "TPCharness_task": {
                     "run_id": run_id,
                     "output_id": output_id,
                     "validation": validation,
@@ -1083,7 +1083,7 @@ async def execute_task(req: Request, task_req: TaskExecuteRequest, db: AsyncSess
                     logger.exception("mark_run_failed_if_running also failed run_id=%s", run_id)
 
             meta = {
-                "tphermes_task": {
+                "TPCharness_task": {
                     "run_id": run_id,
                     "output_id": output_id,
                     "validation": validation,
@@ -1296,7 +1296,7 @@ async def execute_task(req: Request, task_req: TaskExecuteRequest, db: AsyncSess
         kb_prefetch_block = ""
         kb_prefetch_count = 0
         if skip_kb_prefetch and user_text.strip():
-            yield sse_meta_event({"tphermes_task": {"phase": "co_create_draft", "run_id": run_id}})
+            yield sse_meta_event({"TPCharness_task": {"phase": "co_create_draft", "run_id": run_id}})
         should_kb_prefetch = (
             payload.entrypoint == "chat"
             and not chat_lightweight
@@ -1314,7 +1314,7 @@ async def execute_task(req: Request, task_req: TaskExecuteRequest, db: AsyncSess
             prefetch_task = asyncio.create_task(
                 _prefetch_kb_for_chat(progress_cb=emit_prefetch_progress)
             )
-            yield sse_meta_event({"tphermes_task": {"phase": "kb_prefetch", "run_id": run_id}})
+            yield sse_meta_event({"TPCharness_task": {"phase": "kb_prefetch", "run_id": run_id}})
             try:
                 while True:
                     if prefetch_task.done() and progress_queue.empty():
@@ -1329,14 +1329,14 @@ async def execute_task(req: Request, task_req: TaskExecuteRequest, db: AsyncSess
                             break
                         yield sse_meta_event(
                             {
-                                "tphermes_task": {
+                                "TPCharness_task": {
                                     "phase": "kb_prefetch_heartbeat",
                                     "run_id": run_id,
                                 }
                             }
                         )
                         continue
-                    yield sse_meta_event({"tphermes_task": meta})
+                    yield sse_meta_event({"TPCharness_task": meta})
                 kb_prefetch_block, kb_prefetch_count = await prefetch_task
             except TimeoutError:
                 logger.warning(
@@ -1347,7 +1347,7 @@ async def execute_task(req: Request, task_req: TaskExecuteRequest, db: AsyncSess
                 prefetch_task.cancel()
                 yield sse_meta_event(
                     {
-                        "tphermes_task": {
+                        "TPCharness_task": {
                             "phase": "kb_prefetch_timeout",
                             "run_id": run_id,
                             "timeout_sec": kb_prefetch_timeout_sec,
@@ -1361,7 +1361,7 @@ async def execute_task(req: Request, task_req: TaskExecuteRequest, db: AsyncSess
                         meta = progress_queue.get_nowait()
                     except asyncio.QueueEmpty:
                         break
-                    yield sse_meta_event({"tphermes_task": meta})
+                    yield sse_meta_event({"TPCharness_task": meta})
 
         upstream_body = build_chat_completion_body(
             payload,
@@ -1381,7 +1381,7 @@ async def execute_task(req: Request, task_req: TaskExecuteRequest, db: AsyncSess
 
         yield sse_meta_event(
             {
-                "tphermes_task": {
+                "TPCharness_task": {
                     "phase": "agent_generating",
                     "run_id": run_id,
                     "kb_prefetch_count": kb_prefetch_count,
@@ -1433,7 +1433,7 @@ async def execute_task(req: Request, task_req: TaskExecuteRequest, db: AsyncSess
                                 phase = "agent_streaming"
                             yield sse_meta_event(
                                 {
-                                    "tphermes_task": {
+                                    "TPCharness_task": {
                                         "phase": phase,
                                         "run_id": run_id,
                                         "waiting_ms": waiting_ms,
@@ -1459,7 +1459,7 @@ async def execute_task(req: Request, task_req: TaskExecuteRequest, db: AsyncSess
                                     tool_events = _merge_tool_event_rows(tool_events, tool_event)
                                     yield sse_meta_event(
                                         {
-                                            "tphermes_task": {
+                                            "TPCharness_task": {
                                                 "run_id": run_id,
                                                 "tool_events": [tool_event],
                                             }
@@ -1481,7 +1481,7 @@ async def execute_task(req: Request, task_req: TaskExecuteRequest, db: AsyncSess
                                     tool_events = _merge_tool_event_rows(tool_events, tool_event)
                                     yield sse_meta_event(
                                         {
-                                            "tphermes_task": {
+                                            "TPCharness_task": {
                                                 "run_id": run_id,
                                                 "tool_events": [tool_event],
                                             }
@@ -1633,7 +1633,7 @@ async def execute_task(req: Request, task_req: TaskExecuteRequest, db: AsyncSess
                 logger.exception("mark_run_failed_if_running also failed run_id=%s", run_id)
 
         meta: dict[str, Any] = {
-            "tphermes_task": {
+            "TPCharness_task": {
                 "run_id": run_id,
                 "output_id": output_id,
                 "validation": validation,
@@ -1641,28 +1641,28 @@ async def execute_task(req: Request, task_req: TaskExecuteRequest, db: AsyncSess
                 "delivery_status": delivery.get("delivery_status"),
                 "fallback_reason": delivery.get("fallback_reason"),
             },
-            "tphermes_sources": sources_payload,
+            "TPCharness_sources": sources_payload,
         }
         if stream_error:
-            meta["tphermes_task"]["empty_content"] = True
-            meta["tphermes_task"]["stream_error"] = stream_error
+            meta["TPCharness_task"]["empty_content"] = True
+            meta["TPCharness_task"]["stream_error"] = stream_error
         from backend.services.file_action_service import parse_file_actions_from_content
 
         parsed_actions = parse_file_actions_from_content(finalize_text)
         if parsed_actions:
-            meta["tphermes_task"]["file_actions"] = parsed_actions
+            meta["TPCharness_task"]["file_actions"] = parsed_actions
             logger.info("[co-create] stream file_actions count=%s run_id=%s", len(parsed_actions), run_id)
         if tool_events:
-            meta["tphermes_task"]["tool_events"] = tool_events
+            meta["TPCharness_task"]["tool_events"] = tool_events
         if is_workshop:
-            meta["tphermes_task"]["execution_mode"] = exec_mode
-            meta["tphermes_task"]["tool_capture_hit"] = capture_hit
+            meta["TPCharness_task"]["execution_mode"] = exec_mode
+            meta["TPCharness_task"]["tool_capture_hit"] = capture_hit
             if used_skills:
-                meta["tphermes_task"]["used_skills"] = used_skills
+                meta["TPCharness_task"]["used_skills"] = used_skills
         elif used_skills or capture_hit:
-            meta["tphermes_task"]["execution_mode"] = exec_mode
-            meta["tphermes_task"]["tool_capture_hit"] = capture_hit
-            meta["tphermes_task"]["used_skills"] = used_skills or []
+            meta["TPCharness_task"]["execution_mode"] = exec_mode
+            meta["TPCharness_task"]["tool_capture_hit"] = capture_hit
+            meta["TPCharness_task"]["used_skills"] = used_skills or []
         yield "data: " + json.dumps(meta, ensure_ascii=False) + "\n\n"
 
     async def guarded_event_stream() -> AsyncGenerator[str, None]:

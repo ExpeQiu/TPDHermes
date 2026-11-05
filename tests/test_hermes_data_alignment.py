@@ -66,14 +66,14 @@ def test_plan_mode_guidance_present():
     payload = _sample_payload(co_create_agent_mode="plan")
     text = _build_orchestration_guidance(payload)
     assert "Plan" in text
-    assert "tphermes_plan" in text
+    assert "TPCharness_plan" in text
     assert "未确认" in text
 
 
 def test_agent_mode_proposes_into_project_scratch_dir():
     payload = _sample_payload(co_create_agent_mode="agent")
     text = _build_orchestration_guidance(payload)
-    assert "tphermes_file_actions" in text
+    assert "TPCharness_file_actions" in text
     assert "/opt/data/projects/p1/runs/run1/" in text
     assert "优先调用 `write_file`" not in text
     assert "禁止写入共享目录 `/opt/data/输出/`" in text

@@ -33,7 +33,7 @@ mcp = FastMCP(
     description=(
         "Query the knowledge base for documents matching a text query. "
         "Searches the specified ChromaDB collection by semantic similarity. "
-        "When invoked from TPDHermes chat/workshop agent, tphermes_run_id is required "
+        "When invoked from TPDHermes chat/workshop agent, TPCharness_run_id is required "
         "(from orchestration execution.run_id) for citation tracking."
     ),
 )
@@ -42,11 +42,11 @@ async def kb_query(
     collection_name: str,
     limit: int = 10,
     project_id: str | None = None,
-    tphermes_run_id: str | None = None,
+    TPCharness_run_id: str | None = None,
 ) -> dict:
     """Query the knowledge base."""
     from backend.tools.kb_tools import kb_query as _kb_query
-    return await _kb_query(query, collection_name, limit, project_id, tphermes_run_id)
+    return await _kb_query(query, collection_name, limit, project_id, TPCharness_run_id)
 
 
 @mcp.tool(
@@ -67,11 +67,11 @@ async def kb_get_entry(
     collection_name: str,
     entry_id: str,
     project_id: str,
-    tphermes_run_id: str | None = None,
+    TPCharness_run_id: str | None = None,
 ) -> dict:
     """Get a specific KB entry."""
     from backend.tools.kb_tools import kb_get_entry as _kb_get
-    return await _kb_get(collection_name, entry_id, project_id, tphermes_run_id)
+    return await _kb_get(collection_name, entry_id, project_id, TPCharness_run_id)
 
 
 @mcp.tool(
@@ -145,21 +145,21 @@ async def workshop_get_skill_info(skill_name: str, user_id: str | None = None) -
     title="Workshop Generate",
     description=(
         "Execute a Skill's generate() method with the given context and return the result. "
-        "When invoked from TPDHermes workshop agent flow, tphermes_run_id and the "
+        "When invoked from TPDHermes workshop agent flow, TPCharness_run_id and the "
         "server-issued execution_token are required. Copy the token exactly; do not invent one."
     ),
 )
 async def workshop_generate(
     skill_name: str,
     context: dict[str, Any] | str | None = None,
-    tphermes_run_id: str = "",
+    TPCharness_run_id: str = "",
     execution_token: str = "",
 ) -> dict:
     """Execute a Skill."""
     from backend.tools.workshop_tools import workshop_generate as _gen
 
     ctx = coerce_tool_context(context)
-    ctx["tphermes_run_id"] = tphermes_run_id or ctx.get("tphermes_run_id") or ""
+    ctx["TPCharness_run_id"] = TPCharness_run_id or ctx.get("TPCharness_run_id") or ""
     if str(execution_token or "").strip():
         ctx["execution_token"] = str(execution_token).strip()
     return await _gen(skill_name, ctx)
@@ -179,14 +179,14 @@ async def workshop_generate_from_kb(
     limit: int = 3,
     project_id: str | None = None,
     context: dict[str, Any] | str | None = None,
-    tphermes_run_id: str = "",
+    TPCharness_run_id: str = "",
     execution_token: str = "",
 ) -> dict:
     """Execute a Skill with KB-augmented context."""
     from backend.tools.workshop_tools import workshop_generate_from_kb as _gen_from_kb
 
     ctx = coerce_tool_context(context)
-    ctx["tphermes_run_id"] = tphermes_run_id or ctx.get("tphermes_run_id") or ""
+    ctx["TPCharness_run_id"] = TPCharness_run_id or ctx.get("TPCharness_run_id") or ""
     if str(execution_token or "").strip():
         ctx["execution_token"] = str(execution_token).strip()
     return await _gen_from_kb(
@@ -267,14 +267,14 @@ if os.getenv("TAVILY_API_KEY", "").strip():
         title="Tavily Search",
         description=(
             "Search the web via Tavily. When invoked from TPDHermes chat/workshop agent, "
-            "tphermes_run_id is required (from orchestration execution.run_id) for citation tracking. "
+            "TPCharness_run_id is required (from orchestration execution.run_id) for citation tracking. "
             "Cite web facts with [^N] using ref from results."
         ),
     )
     async def tavily_search(
         query: str,
         max_results: int = 5,
-        tphermes_run_id: str | None = None,
+        TPCharness_run_id: str | None = None,
         project_id: str | None = None,
     ) -> dict:
         from backend.tools.tavily_tools import tavily_search as _search
@@ -282,27 +282,27 @@ if os.getenv("TAVILY_API_KEY", "").strip():
         return await _search(
             query,
             max_results=max_results,
-            tphermes_run_id=tphermes_run_id,
+            TPCharness_run_id=TPCharness_run_id,
             project_id=project_id,
         )
 
     @mcp.tool(
         title="Tavily Extract",
         description=(
-            "Extract web page content via Tavily. Pass tphermes_run_id when called from "
+            "Extract web page content via Tavily. Pass TPCharness_run_id when called from "
             "TPDHermes agent for citation tracking; cite with [^N] from results."
         ),
     )
     async def tavily_extract(
         urls: list[str],
-        tphermes_run_id: str | None = None,
+        TPCharness_run_id: str | None = None,
         project_id: str | None = None,
     ) -> dict:
         from backend.tools.tavily_tools import tavily_extract as _extract
 
         return await _extract(
             urls,
-            tphermes_run_id=tphermes_run_id,
+            TPCharness_run_id=TPCharness_run_id,
             project_id=project_id,
         )
 else:

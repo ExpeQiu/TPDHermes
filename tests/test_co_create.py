@@ -13,7 +13,7 @@ TEST_USER = f"co_create_test_{uuid.uuid4().hex[:8]}"
 def test_parse_file_actions_from_content():
     content = """一些正文
 
-```tphermes_file_actions
+```TPCharness_file_actions
 {"actions": [{"type": "create", "proposalId": "p1", "fileName": "a.md", "path": "/", "content": "# hi"}]}
 ```
 """

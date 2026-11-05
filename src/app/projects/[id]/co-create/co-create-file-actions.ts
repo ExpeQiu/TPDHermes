@@ -9,18 +9,18 @@ import { decodeProjectFileSelectValue } from "@/lib/chat-context";
 
 export const CREATE_APPLY_MIN_CONTENT_LEN = 80;
 
-export const FILE_ACTIONS_FENCE_RE = /```tphermes_file_actions\s*\n[\s\S]*?```/gi;
+export const FILE_ACTIONS_FENCE_RE = /```TPCharness_file_actions\s*\n[\s\S]*?```/gi;
 const LOOSE_ACTIONS_JSON_FENCE_RE =
-  /```(?:json|tphermes_file_actions)?\s*\n\s*\{\s*"actions"\s*:\s*\[[\s\S]*?```/gi;
-const TRAILING_ACTIONS_FENCE_RE = /```tphermes_file_actions\s*\n[\s\S]*$/i;
+  /```(?:json|TPCharness_file_actions)?\s*\n\s*\{\s*"actions"\s*:\s*\[[\s\S]*?```/gi;
+const TRAILING_ACTIONS_FENCE_RE = /```TPCharness_file_actions\s*\n[\s\S]*$/i;
 const TRAILING_LOOSE_ACTIONS_RE = /```json\s*\n\s*\{\s*"actions"\s*:\s*\[[\s\S]*$/i;
 /** 未闭合的 actions 代码块（流式截断） */
 const UNCLOSED_ACTIONS_FENCE_RE =
-  /```(?:tphermes_file_actions|json)?\s*\n\s*\{\s*"actions"\s*:\s*\[[\s\S]*$/i;
+  /```(?:TPCharness_file_actions|json)?\s*\n\s*\{\s*"actions"\s*:\s*\[[\s\S]*$/i;
 /** 裸露的 actions JSON（无 fence，常见于 Agent 误输出） */
 const BARE_ACTIONS_JSON_RE = /\n?\{\s*"actions"\s*:\s*\[[\s\S]*$/;
 
-/** 从对话展示正文中移除 tphermes_file_actions / 裸露 actions JSON */
+/** 从对话展示正文中移除 TPCharness_file_actions / 裸露 actions JSON */
 export function stripFileActionsBlock(content: string): string {
   let next = (content || "").replace(FILE_ACTIONS_FENCE_RE, "").trim();
   next = next.replace(LOOSE_ACTIONS_JSON_FENCE_RE, "").trim();

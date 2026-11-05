@@ -9,7 +9,7 @@ export type CoCreateColumnWidths = {
   files: number;
 };
 
-const STORAGE_KEY = "tphermes-co-create-column-widths-v2";
+const STORAGE_KEY = "TPCharness-co-create-column-widths-v2";
 
 export const CO_CREATE_COLUMN_MIN: CoCreateColumnWidths = {
   session: 160,
