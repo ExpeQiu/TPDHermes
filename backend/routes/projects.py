@@ -23,6 +23,7 @@ from pydantic import BaseModel, Field
 from backend.schemas.orchestration import TaskExecuteRequest, TaskExecuteOverrides
 from backend.services.orchestration_service import assemble_payload
 from backend.services.project_access import list_visible_project_filter, project_owner_id, require_project_for_user
+from backend.services.project_activity_service import ProjectActivityResponse, load_project_activity
 from backend.services.rbac import require_system_admin
 from backend.services.project_member_service import (
     ensure_owner_membership,
@@ -299,6 +300,16 @@ async def get_project(
     project = await require_project_for_user(db, project_id, effective_uid)
     role = await get_project_role(db, project_id=project_id, user_id=effective_uid, project=project)
     return _project_to_response(project, my_role=role)
+
+
+@router.get("/{project_id}/activity", response_model=ProjectActivityResponse)
+async def get_project_activity(
+    project_id: str,
+    db: AsyncSession = Depends(get_db),
+    effective_uid: str = Depends(get_effective_user_id),
+):
+    await require_project_for_user(db, project_id, effective_uid)
+    return await load_project_activity(db, project_id)
 
 
 @router.put("/{project_id}", response_model=ProjectResponse)

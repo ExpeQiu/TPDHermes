@@ -23,6 +23,7 @@ import { trackUsage } from "@/lib/usage-tracker";
 import { useUserAccess } from "@/lib/admin-access";
 import { isSystemAdminRole } from "@/lib/user-admin";
 import ProjectMembersPanel from "@/components/projects/ProjectMembersPanel";
+import ProjectActivityHeatmap from "@/components/projects/ProjectActivityHeatmap";
 import {
   AttachmentPreviewModal,
   type AttachmentPreviewItem,
@@ -1137,37 +1138,6 @@ export default function ProjectDetailPage() {
                   </div>
 
                   <div className="rounded-3xl border border-slate-300 dark:border-slate-700 bg-slate-200 dark:bg-slate-800/50 p-5 sm:p-6">
-                    <p className="text-xs uppercase tracking-[0.2em] text-slate-500">
-                      快捷操作
-                    </p>
-                    <h2 className="mt-2 text-xl font-semibold text-slate-900 dark:text-white">工作流入口</h2>
-                    <div className="mt-5 space-y-3">
-                      <ActionLink
-                        href={`/projects/${id}/co-create`}
-                        title="进入项目共创"
-                        desc="围绕项目文件与 Agent 协作创作、修改与沉淀"
-                      />
-                      <ActionLink
-                        href={`/projects/${id}/brainstorm`}
-                        title="进入头脑风暴"
-                        desc="多角色圆桌辩论，收敛为 Master Plan"
-                      />
-                      <ActionLink
-                        href={`/chat?project_id=${id}&new_chat=1`}
-                        title="进入对话创作"
-                        desc=""
-                      />
-                      <Link
-                        href={workshopEntryHref}
-                        className="block rounded-2xl border border-slate-300 dark:border-slate-700 bg-white/90 dark:bg-slate-900/60 p-4 transition hover:border-slate-300 dark:border-slate-600 hover:bg-slate-200 dark:hover:bg-slate-900"
-                      >
-                        <p className="text-sm font-medium text-slate-900 dark:text-white">进入场景输出</p>
-                      </Link>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="rounded-3xl border border-slate-300 dark:border-slate-700 bg-slate-200 dark:bg-slate-800/50 p-5 sm:p-6">
                     <div className="flex flex-wrap items-start justify-between gap-2">
                       <div>
                         <p className="text-xs uppercase tracking-[0.2em] text-slate-500">最新输出</p>
@@ -1202,7 +1172,18 @@ export default function ProjectDetailPage() {
                         ))}
                       </div>
                     )}
+                  </div>
                 </div>
+
+                <ProjectActivityHeatmap
+                  projectId={String(id)}
+                  links={[
+                    { href: `/projects/${id}/co-create`, label: "项目共创" },
+                    { href: `/projects/${id}/brainstorm`, label: "头脑风暴" },
+                    { href: `/chat?project_id=${id}&new_chat=1`, label: "对话创作" },
+                    { href: workshopEntryHref, label: "场景输出" },
+                  ]}
+                />
               </div>
             )}
 
@@ -1713,26 +1694,6 @@ function MetricCard({
       <p className="mt-3 text-2xl font-semibold text-slate-900 dark:text-white">{value}</p>
       <p className="mt-1 text-xs text-slate-500">{hint}</p>
     </div>
-  );
-}
-
-function ActionLink({
-  href,
-  title,
-  desc,
-}: {
-  href: string;
-  title: string;
-  desc: string;
-}) {
-  return (
-    <Link
-      href={href}
-      className="block rounded-2xl border border-slate-300 dark:border-slate-700 bg-white/90 dark:bg-slate-900/60 p-4 transition hover:border-slate-300 dark:border-slate-600 hover:bg-slate-200 dark:hover:bg-slate-900"
-    >
-      <p className="text-sm font-medium text-slate-900 dark:text-white">{title}</p>
-      {desc ? <p className="mt-2 text-sm leading-relaxed text-slate-400">{desc}</p> : null}
-    </Link>
   );
 }
 
