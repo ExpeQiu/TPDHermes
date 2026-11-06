@@ -61,7 +61,7 @@ describe("CoCreateRoomApp", () => {
     expect(modes?.textContent).toContain("Ask");
     expect(modes?.textContent).toContain("Agent");
     expect(modes?.textContent).toContain("Plan");
-    const link = container.querySelector('a[href="/settings?tab=roles"]');
+    const link = container.querySelector('a[href="/ops/roles"]');
     expect(link).not.toBeNull();
     const create = Array.from(container.querySelectorAll("button")).find((button) =>
       button.textContent?.includes("新建对话"),

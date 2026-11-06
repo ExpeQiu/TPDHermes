@@ -1,10 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import Link from "next/link";
 import { apiGet } from "@/lib/api";
-import { FeaturePageGuard } from "@/components/admin-only-page-guard";
-import { CONTENT_MAX_CLASS } from "@/lib/content-shell";
 import { trackUsage } from "@/lib/usage-tracker";
 
 type FeatureUsageRow = {
@@ -142,16 +139,10 @@ export default function FeatureUsagePage() {
   const topSkill = useMemo(() => data?.skill_usage[0] ?? null, [data]);
 
   return (
-    <FeaturePageGuard feature="ops" pageTitle="ops/usage">
-    <main className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-slate-100 p-4 text-slate-900 sm:p-6 md:p-8 dark:from-slate-950 dark:via-slate-900 dark:to-slate-950 dark:text-white">
-      <div className={CONTENT_MAX_CLASS}>
+    <section aria-label="功能使用统计">
         <div className="mb-6 flex items-center justify-between gap-3">
           <div>
-            <Link href="/" className="text-sm text-slate-400 transition hover:text-slate-900 dark:hover:text-white">
-              ← 返回首页
-            </Link>
-            <h1 className="mt-2 text-3xl font-bold">功能使用统计</h1>
-            <p className="mt-1 text-sm text-slate-500">
+            <p className="text-sm text-slate-500">
               用于查看功能使用率、用户分布和使用频率。
               {lastUpdated ? ` 最近更新 ${lastUpdated.toLocaleTimeString()}，点击「刷新」获取最新数据。` : " 点击「刷新」加载数据。"}
             </p>
@@ -459,8 +450,6 @@ export default function FeatureUsagePage() {
             </section>
           </div>
         ) : null}
-      </div>
-    </main>
-    </FeaturePageGuard>
+    </section>
   );
 }

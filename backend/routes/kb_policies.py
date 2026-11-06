@@ -44,6 +44,48 @@ class KnowledgePolicyUpdate(BaseModel):
 
 class AutoGovernBody(BaseModel):
     dry_run: bool = True
+    consult_agent: bool = False
+
+
+class GovernScheduleSave(BaseModel):
+    enabled: bool = False
+    cadence: str = "daily"
+    run_time: str = "02:00"
+    weekday: int = 0
+    month_day: int = 1
+    agent_batch: int = 20
+    policy_ids: list[str] = []
+
+
+@router.get("/govern-schedule")
+async def kb_govern_schedule_get(db: AsyncSession = Depends(get_db)):
+    from backend.services.kb_govern_settings import get_or_create_schedule, schedule_view
+
+    row = await get_or_create_schedule(db)
+    await db.commit()
+    return schedule_view(row)
+
+
+@router.put("/govern-schedule")
+async def kb_govern_schedule_save(body: GovernScheduleSave, db: AsyncSession = Depends(get_db)):
+    from backend.services.kb_govern_settings import save_schedule, schedule_view
+
+    if body.cadence not in {"daily", "weekly", "monthly"}:
+        raise HTTPException(status_code=400, detail="周期只能是每日、每周或每月")
+    if body.agent_batch < 1 or body.agent_batch > 50:
+        raise HTTPException(status_code=400, detail="每批文档数需在 1 到 50 之间")
+    row = await save_schedule(
+        db,
+        enabled=body.enabled,
+        cadence=body.cadence,
+        run_time=body.run_time,
+        weekday=body.weekday,
+        month_day=body.month_day,
+        agent_batch=body.agent_batch,
+        policy_ids=body.policy_ids,
+    )
+    await db.commit()
+    return schedule_view(row)
 
 
 @router.get("/")
@@ -198,7 +240,11 @@ async def kb_policy_approve(
 async def kb_policy_auto_govern(policy_id: str, body: AutoGovernBody):
     from backend.services.kb_auto_govern import run_auto_govern
 
-    result = await run_auto_govern(policy_id, dry_run=body.dry_run)
+    result = await run_auto_govern(
+        policy_id,
+        dry_run=body.dry_run,
+        consult_agent=body.consult_agent,
+    )
     if not result.get("ok"):
         message = str(result.get("message") or "auto_govern_failed")
         status = 404 if message == "policy_not_found" else 400

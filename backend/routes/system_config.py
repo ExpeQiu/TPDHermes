@@ -13,7 +13,9 @@ from backend.services.cli_token import accept_agent_token, verify_access_token
 from backend.services.external_mcp import probe_external_mcp, resolve_external_mcp, save_external_mcp
 from backend.services.geelywiki_cli_config import probe_wiki_mcp, resolve_wiki_mcp, save_wiki_mcp
 from backend.services.hermes_model_config import read_hermes_model, save_hermes_model
+from backend.services.kernel_binding import bind_kernel, list_kernels, save_bound_model, unbind_kernel
 from backend.services.runtime_config import build_runtime_config
+from backend.services.studio_skill_release import public_release, save_release
 from tpdhermes.capabilities import public_config, resolve_token, save_document
 
 router = APIRouter(prefix="/system", tags=["system"])
@@ -56,9 +58,60 @@ class HermesModelSave(BaseModel):
     api_key: str = ""
 
 
+class StudioSkillReleaseSave(BaseModel):
+    released: dict[str, bool]
+
+
+class KernelBind(BaseModel):
+    kernel_id: str
+    root: str
+
+
 @router.get("/config")
 def system_config() -> dict:
     return build_runtime_config()
+
+
+@router.get("/kernels")
+def system_kernels() -> dict:
+    return list_kernels()
+
+
+@router.put("/kernels/binding")
+def update_kernel_binding(body: KernelBind) -> dict:
+    try:
+        saved = bind_kernel(body.kernel_id, body.root)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except OSError as exc:
+        logger.error("kernel binding write failed err=%s", exc)
+        raise HTTPException(status_code=500, detail=f"无法写入内核绑定: {exc}") from exc
+    return saved
+
+
+@router.put("/kernels/model")
+def update_kernel_model(body: HermesModelSave) -> dict:
+    try:
+        return save_bound_model(
+            provider=body.provider,
+            model=body.model,
+            base_url=body.base_url,
+            api_key=body.api_key,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except OSError as exc:
+        logger.error("kernel model write failed err=%s", exc)
+        raise HTTPException(status_code=500, detail=f"无法写入内核模型: {exc}") from exc
+
+
+@router.delete("/kernels/binding")
+def delete_kernel_binding() -> dict:
+    try:
+        return unbind_kernel()
+    except OSError as exc:
+        logger.error("kernel binding delete failed err=%s", exc)
+        raise HTTPException(status_code=500, detail=f"无法解除内核绑定: {exc}") from exc
 
 
 @router.get("/hermes-model")
@@ -81,6 +134,23 @@ def update_hermes_model(body: HermesModelSave) -> dict:
         logger.error("hermes model write failed err=%s", exc)
         raise HTTPException(status_code=500, detail=f"无法写入配置文件: {exc}") from exc
     logger.info("hermes model updated provider=%s model=%s", saved["provider"], saved["model"])
+    return saved
+
+
+@router.get("/studio-skills")
+def studio_skill_release() -> dict:
+    return public_release()
+
+
+@router.put("/studio-skills")
+def update_studio_skill_release(body: StudioSkillReleaseSave) -> dict:
+    try:
+        saved = save_release(body.released)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except OSError as exc:
+        logger.error("studio skill release write failed err=%s", exc)
+        raise HTTPException(status_code=500, detail=f"无法写入配置文件: {exc}") from exc
     return saved
 
 

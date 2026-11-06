@@ -19,9 +19,9 @@ type FileTabCache = {
 
 const EMPTY_TAB: FileTabCache = { detail: null, versions: [], loading: false };
 
-export function useFileWorkspace(projectId: string) {
+export function useFileWorkspace(projectId: string, enabled = true) {
   const [files, setFiles] = useState<ProjectFileItem[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(enabled);
   const [openTabKeys, setOpenTabKeys] = useState<string[]>([]);
   const [activeFileKey, setActiveFileKey] = useState<string | null>(null);
   const [tabCache, setTabCache] = useState<Record<string, FileTabCache>>({});
@@ -53,8 +53,9 @@ export function useFileWorkspace(projectId: string) {
   }, [projectId]);
 
   useEffect(() => {
+    if (!enabled) return;
     void refreshFiles();
-  }, [refreshFiles]);
+  }, [enabled, refreshFiles]);
 
   const ensureTabLoaded = useCallback(
     async (fileKey: string) => {
@@ -184,7 +185,11 @@ export function useFileWorkspace(projectId: string) {
       loadingKeysRef.current.delete(fileKey);
       setTabCache((prev) => ({
         ...prev,
-        [fileKey]: { ...EMPTY_TAB, loading: true },
+        [fileKey]: {
+          detail: prev[fileKey]?.detail ?? null,
+          versions: prev[fileKey]?.versions ?? [],
+          loading: true,
+        },
       }));
 
       try {

@@ -75,9 +75,31 @@ def ensure_kb_runtime_columns(connection: Connection) -> None:
         )
 
 
+def ensure_kb_govern_schedule_columns(connection: Connection) -> None:
+    tables = {
+        str(row[0])
+        for row in connection.execute(text("SELECT name FROM sqlite_master WHERE type='table'")).fetchall()
+    }
+    if "kb_govern_schedule" not in tables:
+        return
+    _add_columns(
+        connection,
+        "kb_govern_schedule",
+        [
+            ("cadence", "TEXT NOT NULL DEFAULT 'daily'"),
+            ("run_time", "TEXT NOT NULL DEFAULT '02:00'"),
+            ("weekday", "INTEGER NOT NULL DEFAULT 0"),
+            ("month_day", "INTEGER NOT NULL DEFAULT 1"),
+            ("policy_ids_json", "TEXT NOT NULL DEFAULT '[]'"),
+            ("last_run_at", "TEXT"),
+        ],
+    )
+
+
 def run_sqlite_migrations(connection: Connection) -> None:
     """同步函数，供 async_engine.begin() 内 run_sync 调用。"""
     ensure_kb_runtime_columns(connection)
+    ensure_kb_govern_schedule_columns(connection)
     tables = connection.execute(
         text("SELECT name FROM sqlite_master WHERE type='table'")
     ).fetchall()

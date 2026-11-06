@@ -206,8 +206,8 @@ def _quote_env_value(value: str) -> str:
     return value
 
 
-def _upsert_provider_key(env_name: str, value: str) -> None:
-    path = _dotenv_path()
+def _upsert_provider_key(env_name: str, value: str, path: Path | None = None) -> None:
+    path = path or _dotenv_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     lines = path.read_text(encoding="utf-8").splitlines(keepends=True) if path.is_file() else []
     matcher = re.compile(rf"^(?:export\s+)?{re.escape(env_name)}=")
@@ -233,7 +233,26 @@ def _upsert_provider_key(env_name: str, value: str) -> None:
     logger.info("hermes provider key updated env=%s path=%s", env_name, path)
 
 
-def save_hermes_model(*, provider: str, model: str, base_url: str = "", api_key: str = "") -> dict[str, Any]:
+def _load_yaml(path: Path) -> dict[str, Any]:
+    if not path.is_file():
+        return {}
+    try:
+        loaded = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    except (OSError, yaml.YAMLError) as exc:
+        logger.warning("hermes model unreadable path=%s err=%s", path, exc)
+        return {}
+    return loaded if isinstance(loaded, dict) else {}
+
+
+def save_hermes_model(
+    *,
+    provider: str,
+    model: str,
+    base_url: str = "",
+    api_key: str = "",
+    config_path: Path | None = None,
+    dotenv_path: Path | None = None,
+) -> dict[str, Any]:
     provider_text = _clean(provider)
     model_name = _clean(model)
     base = _clean(base_url)
@@ -242,8 +261,8 @@ def save_hermes_model(*, provider: str, model: str, base_url: str = "", api_key:
     if secret and provider_text not in _PROVIDER_KEY_ENV:
         raise ValueError("该厂商的密钥不在本页写入，留空则只改模型")
 
-    path = get_config_path()
-    existing = _model_mapping(load_config().get("model"))
+    path = config_path or get_config_path()
+    existing = _model_mapping(_load_yaml(path).get("model"))
     written = _ordered_model(existing, provider=provider_text, model_name=model_name, base_url=base)
     block = _dump_model_block(written)
     original = path.read_text(encoding="utf-8") if path.is_file() else ""
@@ -264,5 +283,12 @@ def save_hermes_model(*, provider: str, model: str, base_url: str = "", api_key:
         path,
     )
     if secret:
-        _upsert_provider_key(_PROVIDER_KEY_ENV[provider_text], secret)
-    return read_hermes_model()
+        _upsert_provider_key(_PROVIDER_KEY_ENV[provider_text], secret, dotenv_path)
+    if config_path is None and dotenv_path is None:
+        return read_hermes_model()
+    return {
+        "provider": provider_text,
+        "model": model_name,
+        "base_url": base,
+        "config_path": str(path),
+    }

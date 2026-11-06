@@ -32,6 +32,8 @@ MESSAGE_META_KEYS = (
     "fileRecommendations",
     "userPrompt",
     "regionExcerpts",
+    "elapsedMs",
+    "turnOutcome",
 )
 
 SESSION_KIND_CO_CREATE = "project_co_create"

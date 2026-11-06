@@ -15,6 +15,7 @@ from fastapi import BackgroundTasks, HTTPException
 from sqlalchemy import func, select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import load_only
 
 from backend.db import async_session_maker
 from backend.models.output_asset import OutputAsset
@@ -45,6 +46,7 @@ MENTION_RE = re.compile(r"@([^\s@]+)")
 HERMES_DIRECT_ROLE_ID = "hermes-agent"
 _AGENT_MODES = {"ask", "agent", "plan"}
 _TERMINAL_TURN_STATES = {"succeeded", "failed", "cancelled", "done"}
+_WATCHED_TURN_STATES = ("queued", "running", "failed", "cancelled")
 _LEASE_SECONDS = int(os.getenv("ROOM_TURN_LEASE_SECONDS", "120"))
 _MAX_TURN_RETRY = int(os.getenv("ROOM_TURN_MAX_RETRY", "3"))
 _CONFLICT_REQUEUE = int(os.getenv("ROOM_CONFLICT_REQUEUE", "2"))
@@ -622,6 +624,8 @@ async def list_messages(
     after_seq: int = 0,
     after_event: int | None = None,
     known_doc_version: int | None = None,
+    limit: int | None = None,
+    before_seq: int | None = None,
 ) -> dict[str, Any]:
     await _project_role(db, project_id, user_id)
     room = await _require_room(db, project_id, room_id)
@@ -630,34 +634,65 @@ async def list_messages(
         filters.append(ProjectRoomMessage.event_seq > after_event)
     elif after_seq:
         filters.append(ProjectRoomMessage.seq > after_seq)
-    rows = (
-        await db.execute(
-            select(ProjectRoomMessage).where(*filters).order_by(ProjectRoomMessage.seq.asc())
-        )
-    ).scalars().all()
+    if before_seq:
+        filters.append(ProjectRoomMessage.seq < before_seq)
+    has_more = False
+    window = limit if limit and after_event is None else None
+    if window:
+        fetched = (
+            await db.execute(
+                select(ProjectRoomMessage)
+                .where(*filters)
+                .order_by(ProjectRoomMessage.seq.desc())
+                .limit(window + 1)
+            )
+        ).scalars().all()
+        has_more = len(fetched) > window
+        rows = list(reversed(fetched[:window]))
+    else:
+        rows = (
+            await db.execute(
+                select(ProjectRoomMessage).where(*filters).order_by(ProjectRoomMessage.seq.asc())
+            )
+        ).scalars().all()
     version = int(room.doc_version or 0)
     include_content = known_doc_version is None or int(known_doc_version) != version
     content = await _output_content(db, room.output_id) if include_content else ""
     logger.info(
-        "[co-create-room] list messages room_id=%s project_id=%s user_id=%s after_seq=%s after_event=%s count=%s content=%s",
+        "[co-create-room] list messages room_id=%s project_id=%s user_id=%s after_seq=%s after_event=%s before_seq=%s limit=%s count=%s has_more=%s content=%s",
         room_id,
         project_id,
         user_id,
         after_seq,
         after_event,
+        before_seq,
+        limit,
         len(rows),
+        has_more,
         include_content,
     )
     state_rows = (
         await db.execute(
-            select(ProjectRoomMessage).where(
+            select(ProjectRoomMessage)
+            .options(
+                load_only(
+                    ProjectRoomMessage.id,
+                    ProjectRoomMessage.turn_id,
+                    ProjectRoomMessage.turn_state,
+                    ProjectRoomMessage.error_summary,
+                )
+            )
+            .where(
                 ProjectRoomMessage.room_id == room_id,
                 ProjectRoomMessage.author_type == "human",
+                ProjectRoomMessage.turn_state.in_(_WATCHED_TURN_STATES),
             )
         )
     ).scalars().all()
     payload = room_to_dict(room, content=content)
     payload["content_omitted"] = not include_content
+    payload["has_more"] = has_more
+    payload["oldest_seq"] = rows[0].seq if rows else None
     payload["messages"] = [message_to_dict(row) for row in rows]
     payload["turn_states"] = [
         {

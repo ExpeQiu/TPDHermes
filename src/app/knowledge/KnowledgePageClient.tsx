@@ -1179,12 +1179,6 @@ function KnowledgePageLinks({ current }: { current?: "ingest" | "govern" }) {
       >
         知识库治理
       </Link>
-      <Link
-        href="/learning"
-        className="rounded-xl border border-violet-400/70 bg-violet-50 px-4 py-2.5 text-sm font-medium text-violet-950 transition hover:bg-violet-100 dark:border-violet-500/40 dark:bg-violet-500/10 dark:text-violet-100 dark:hover:bg-violet-500/20"
-      >
-        学习中心
-      </Link>
     </div>
   );
 }
@@ -3293,7 +3287,7 @@ export default function KnowledgePageClient({
             来自对话 👍/「采纳」的结构化经验，集合{" "}
             <code className="text-violet-700 dark:text-violet-300">{TPD_EXPERIENCE_COLLECTION}</code>
             。可在{" "}
-            <Link href="/learning" className="text-blue-600 hover:underline dark:text-blue-400">
+            <Link href="/ops/learning" className="text-blue-600 hover:underline dark:text-blue-400">
               学习中心
             </Link>{" "}
             查看索引与溯源。

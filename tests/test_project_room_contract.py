@@ -686,6 +686,20 @@ def test_event_cursor_sees_interleaved_agent_message(room_roles):
                     turn_state="succeeded",
                 )
             )
+            db.add(
+                ProjectRoomMessage(
+                    id=str(uuid.uuid4()),
+                    room_id=room_id,
+                    seq=500,
+                    event_seq=0,
+                    turn_id="open-turn",
+                    author_type="human",
+                    author_id=owner,
+                    author_name=owner,
+                    content="仍在排队",
+                    turn_state="queued",
+                )
+            )
             await db.commit()
 
     asyncio.run(seed())
@@ -700,4 +714,52 @@ def test_event_cursor_sees_interleaved_agent_message(room_roles):
         contents = [item["content"] for item in body["messages"]]
         assert contents == ["后插入的前轮回复"]
         states = {item["turn_id"]: item["turn_state"] for item in body["turn_states"]}
-        assert states["late-human"] == "succeeded"
+        assert "late-human" not in states
+        assert states["open-turn"] == "queued"
+
+
+def test_message_window_returns_latest_page(room_roles):
+    owner = f"room_owner_{uuid.uuid4().hex[:8]}"
+    with TestClient(app) as client:
+        project_id = _create_project(client, owner)
+        room_id = _create_room(client, owner, project_id)["id"]
+
+    async def seed() -> None:
+        async with async_session_maker() as db:
+            for seq in range(1, 4):
+                db.add(
+                    ProjectRoomMessage(
+                        id=str(uuid.uuid4()),
+                        room_id=room_id,
+                        seq=seq,
+                        event_seq=seq,
+                        turn_id=f"turn-{seq}",
+                        author_type="human",
+                        author_id=owner,
+                        author_name=owner,
+                        content=f"第{seq}句",
+                        turn_state="succeeded",
+                    )
+                )
+            await db.commit()
+
+    asyncio.run(seed())
+    with TestClient(app) as client:
+        page = client.get(
+            f"/api/v1/projects/{project_id}/rooms/{room_id}/messages",
+            headers=_headers(owner),
+            params={"limit": 2, "known_doc_version": 0},
+        )
+        assert page.status_code == 200, page.text
+        body = page.json()
+        assert [item["content"] for item in body["messages"]] == ["第2句", "第3句"]
+        assert body["has_more"] is True
+        assert body["content_omitted"] is True
+        older = client.get(
+            f"/api/v1/projects/{project_id}/rooms/{room_id}/messages",
+            headers=_headers(owner),
+            params={"before_seq": body["oldest_seq"], "limit": 2},
+        )
+        assert older.status_code == 200, older.text
+        assert [item["content"] for item in older.json()["messages"]] == ["第1句"]
+        assert older.json()["has_more"] is False

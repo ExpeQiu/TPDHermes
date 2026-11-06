@@ -20,7 +20,7 @@ describe("accessibleWorkflowPages", () => {
     expect(labels).not.toContain("场景输出");
     expect(labels).not.toContain("场景编排");
     expect(labels).not.toContain("知识库");
-    expect(labels).not.toContain("运维用量");
+    expect(labels).not.toContain("成长");
   });
 
   it("hides workshop, create, knowledge and settings from project admins", () => {
@@ -35,7 +35,7 @@ describe("accessibleWorkflowPages", () => {
     expect(labels).not.toContain("场景编排");
     expect(labels).not.toContain("知识库");
     expect(labels).not.toContain("配置");
-    expect(labels).not.toContain("运维用量");
+    expect(labels).not.toContain("成长");
   });
 
   it("shows those entries to system admins", () => {
@@ -44,7 +44,7 @@ describe("accessibleWorkflowPages", () => {
       platformRole: "tenant_admin",
     }).map((page) => page.label);
     expect(labels).toEqual(
-      expect.arrayContaining(["场景输出", "场景编排", "知识库", "配置", "运维用量"]),
+      expect.arrayContaining(["场景输出", "场景编排", "知识库", "配置", "成长"]),
     );
   });
 

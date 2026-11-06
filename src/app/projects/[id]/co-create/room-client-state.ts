@@ -50,10 +50,14 @@ export function questionClock(
   message: RoomClockMessage,
   siblings: readonly RoomClockMessage[],
   now: number,
+  knownReply?: RoomClockMessage | null,
 ): { pending: boolean; status: string; elapsedMs: number | null } {
-  const reply = siblings.find(
-    (item) => item !== message && item.turn_id === message.turn_id && item.author_type === "agent",
-  );
+  const reply =
+    knownReply === undefined
+      ? siblings.find(
+          (item) => item !== message && item.turn_id === message.turn_id && item.author_type === "agent",
+        )
+      : knownReply;
   const terminal = message.turn_state === "failed" || message.turn_state === "cancelled";
   const answered =
     message.turn_state === "succeeded" || message.turn_state === "done" || Boolean(reply);

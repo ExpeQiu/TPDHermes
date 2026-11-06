@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import {
   coCreateAgentModeMeta,
@@ -67,7 +67,12 @@ type RoomTurnState = {
 };
 
 const POLL_MS = 2000;
+const HISTORY_PAGE = 80;
 const ROOM_AGENT_MODES: CoCreateAgentMode[] = ["ask", "agent", "plan"];
+
+const AgentMessageBody = memo(function AgentMessageBody({ content }: { content: string }) {
+  return <ChatMarkdownWithCitations content={content} />;
+});
 
 function hashRoleId(value: string): number {
   let hash = 2166136261;
@@ -215,10 +220,14 @@ export default function CoCreateRoomApp() {
   const [filesRevealed, setFilesRevealed] = useState(false);
   const filesHideTimer = useRef<number | null>(null);
   const filesOpen = filesPinned || filesRevealed;
-  const fileWorkspace = useFileWorkspace(fileProjectId);
+  const [fileListEnabled, setFileListEnabled] = useState(false);
+  const fileWorkspace = useFileWorkspace(fileProjectId, filesOpen || fileListEnabled);
   const [rooms, setRooms] = useState<RoomSummary[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [messages, setMessages] = useState<RoomMessage[]>([]);
+  const [historyReady, setHistoryReady] = useState(false);
+  const [hasMore, setHasMore] = useState(false);
+  const [loadingOlder, setLoadingOlder] = useState(false);
   const [docVersion, setDocVersion] = useState(0);
   const [outputId, setOutputId] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
@@ -258,17 +267,44 @@ export default function CoCreateRoomApp() {
   }, []);
   const activeIdRef = useRef<string | null>(null);
   activeIdRef.current = activeId;
+  const messagesRef = useRef<RoomMessage[]>([]);
+  messagesRef.current = messages;
   const roomsRef = useRef<RoomSummary[]>([]);
   roomsRef.current = rooms;
   const epochRef = useRef(0);
+  const messageCacheRef = useRef<Record<string, RoomMessage[]>>({});
+  const docVersionRef = useRef<Record<string, number>>({});
+  const hasMoreRef = useRef<Record<string, boolean>>({});
+  const syncedRef = useRef<Record<string, boolean>>({});
+  const skipScrollRef = useRef(false);
   const draftsRef = useRef<Record<string, string>>({});
   const errorsRef = useRef<Record<string, string>>({});
   const eventCursorRef = useRef<Record<string, number>>({});
   const roundFileRef = useRef<RoomFileRef | null>(null);
   const [writerDriver, setWriterDriver] = useState("");
   const activeRoom = rooms.find((room) => room.id === activeId) ?? null;
+  const agentReplyByTurn = useMemo(() => {
+    const replies = new Map<string, RoomMessage>();
+    for (const message of messages) {
+      if (message.author_type === "agent" && !replies.has(message.turn_id)) {
+        replies.set(message.turn_id, message);
+      }
+    }
+    return replies;
+  }, [messages]);
   const clockNow = useNow(
-    messages.some((message) => questionClock(message, messages, Date.now()).pending),
+    messages.some((message) => {
+      if (message.author_type !== "human") return false;
+      if (
+        message.turn_state === "failed" ||
+        message.turn_state === "cancelled" ||
+        message.turn_state === "succeeded" ||
+        message.turn_state === "done"
+      ) {
+        return false;
+      }
+      return !agentReplyByTurn.has(message.turn_id);
+    }),
   );
 
   const loadRooms = useCallback(async () => {
@@ -283,7 +319,7 @@ export default function CoCreateRoomApp() {
   }, [projectId]);
 
   useEffect(() => {
-    if (!projectId) return;
+    if (!projectId || !filesOpen || bindableProjects.length > 0) return;
     let cancelled = false;
     apiGet<ProjectRecord[]>("/projects/")
       .then((rows) => {
@@ -301,7 +337,7 @@ export default function CoCreateRoomApp() {
     return () => {
       cancelled = true;
     };
-  }, [projectId]);
+  }, [bindableProjects.length, filesOpen, projectId]);
 
   useEffect(() => {
     if (!projectId) return;
@@ -332,41 +368,84 @@ export default function CoCreateRoomApp() {
     if (activeIdRef.current) {
       draftsRef.current[activeIdRef.current] = draft;
       errorsRef.current[activeIdRef.current] = error;
+      messageCacheRef.current[activeIdRef.current] = messagesRef.current;
     }
     epochRef.current += 1;
+    const summary = roomId ? roomsRef.current.find((room) => room.id === roomId) : null;
+    if (roomId && docVersionRef.current[roomId] == null) {
+      docVersionRef.current[roomId] = summary?.doc_version ?? 0;
+    }
+    const cached = roomId ? messageCacheRef.current[roomId] ?? [] : [];
     setActiveId(roomId);
-    setMessages([]);
+    setMessages(cached);
+    setHistoryReady(cached.length > 0 || !roomId);
+    setHasMore(roomId ? Boolean(hasMoreRef.current[roomId]) : false);
+    setOutputId(summary?.output_id ?? null);
+    setDocVersion(roomId ? docVersionRef.current[roomId] ?? 0 : 0);
     setDraft(roomId ? draftsRef.current[roomId] ?? "" : "");
     setError(roomId ? errorsRef.current[roomId] ?? "" : "");
     roundFileRef.current = null;
+    console.info("[co-create-room] 切换对话", {
+      projectId,
+      roomId,
+      cached: cached.length,
+    });
   };
 
   const refreshRoom = useCallback(
-    async (roomId: string, epoch: number) => {
+    async (roomId: string, epoch: number, mode: "sync" | "older" = "sync") => {
+      const cached = messageCacheRef.current[roomId] ?? [];
       const cursor = eventCursorRef.current[roomId] ?? 0;
+      const incremental = mode === "sync" && Boolean(syncedRef.current[roomId]);
       const params = new URLSearchParams();
-      if (cursor > 0) {
+      if (mode === "older") {
+        const oldest = cached[0]?.seq;
+        if (!oldest) return null;
+        params.set("before_seq", String(oldest));
+        params.set("limit", String(HISTORY_PAGE));
+      } else if (incremental) {
         params.set("after_event", String(cursor));
-        params.set("known_doc_version", String(docVersion));
+      } else {
+        params.set("limit", String(HISTORY_PAGE));
       }
+      const known = docVersionRef.current[roomId];
+      if (known != null) params.set("known_doc_version", String(known));
       const query = params.toString();
       const data = await apiGet<
         RoomSummary & {
           messages: RoomMessage[];
           turn_states?: RoomTurnState[];
           content_omitted?: boolean;
+          has_more?: boolean;
+          latest_event?: number;
           writer_driver?: string;
         }
       >(`/projects/${projectId}/rooms/${roomId}/messages${query ? `?${query}` : ""}`);
       const incoming = data.messages ?? [];
-      const maxEvent = incoming.reduce((max, item) => Math.max(max, item.event_seq ?? 0), cursor);
-      eventCursorRef.current[roomId] = maxEvent;
-      if (!acceptRoomPayload(roomId, activeIdRef.current, epoch, epochRef.current)) return data;
-      setMessages((prev) => applyTurnStates(mergeMessages(cursor > 0 ? prev : [], incoming), data.turn_states));
-      if (!data.content_omitted) {
-        setDocVersion(data.doc_version ?? 0);
-        setOutputId(data.output_id ?? null);
+      const fresh = messageCacheRef.current[roomId] ?? [];
+      const base = mode === "older" || incremental || fresh.length > 0 ? fresh : [];
+      const merged = applyTurnStates(mergeMessages(base, incoming), data.turn_states);
+      messageCacheRef.current[roomId] = merged;
+      if (mode !== "older") {
+        const maxEvent = incoming.reduce((max, item) => Math.max(max, item.event_seq ?? 0), cursor);
+        eventCursorRef.current[roomId] = Math.max(
+          eventCursorRef.current[roomId] ?? 0,
+          maxEvent,
+          data.latest_event ?? 0,
+        );
       }
+      if (mode === "sync") syncedRef.current[roomId] = true;
+      if (mode === "older" || !incremental) {
+        hasMoreRef.current[roomId] = Boolean(data.has_more);
+      }
+      if (data.doc_version != null) docVersionRef.current[roomId] = data.doc_version;
+      if (!acceptRoomPayload(roomId, activeIdRef.current, epoch, epochRef.current)) return data;
+      if (mode === "older") skipScrollRef.current = true;
+      setMessages(merged);
+      setHistoryReady(true);
+      setHasMore(Boolean(hasMoreRef.current[roomId]));
+      setDocVersion(data.doc_version ?? docVersionRef.current[roomId] ?? 0);
+      setOutputId(data.output_id ?? null);
       setWriterDriver(data.writer_driver || "");
       setRooms((prev) =>
         prev.map((room) =>
@@ -380,9 +459,17 @@ export default function CoCreateRoomApp() {
             : room,
         ),
       );
+      console.info("[co-create-room] 对话已同步", {
+        projectId,
+        roomId,
+        mode,
+        incoming: incoming.length,
+        total: merged.length,
+        hasMore: Boolean(hasMoreRef.current[roomId]),
+      });
       return data;
     },
-    [docVersion, projectId],
+    [projectId],
   );
 
   useEffect(() => {
@@ -402,6 +489,7 @@ export default function CoCreateRoomApp() {
         if (!cancelled && acceptRoomPayload(activeId, activeIdRef.current, epoch, epochRef.current)) {
           errorsRef.current[activeId] = err.message;
           setError(err.message);
+          setHistoryReady(true);
         }
       });
     const timer = window.setInterval(() => {
@@ -417,6 +505,10 @@ export default function CoCreateRoomApp() {
   }, [projectId, activeId, refreshRoom]);
 
   useEffect(() => {
+    if (skipScrollRef.current) {
+      skipScrollRef.current = false;
+      return;
+    }
     const node = listRef.current;
     if (node && typeof node.scrollTo === "function") {
       node.scrollTo({ top: node.scrollHeight });
@@ -437,13 +529,11 @@ export default function CoCreateRoomApp() {
     openedDocRef.current = token;
     fileWorkspace.openFileTab(fileKey);
     void fileWorkspace.reloadFileTab(fileKey);
-    void fileWorkspace.refreshFiles();
     console.info("[co-create-room] 打开结果文档", { projectId, roomId: activeId, fileKey, docVersion });
   }, [
     activeId,
     docVersion,
     fileWorkspace.openFileTab,
-    fileWorkspace.refreshFiles,
     fileProjectId,
     fileWorkspace.reloadFileTab,
     outputId,
@@ -622,7 +712,7 @@ export default function CoCreateRoomApp() {
     return () => {
       cancelled = true;
     };
-  }, [projectId, messages.length]);
+  }, [projectId]);
 
   useEffect(() => {
     setMentionIndex(0);
@@ -630,6 +720,7 @@ export default function CoCreateRoomApp() {
 
   const onDraftChange = (value: string) => {
     setDraft(value);
+    if (value.includes("#")) setFileListEnabled(true);
     setMention(readRoomComposerMention(value));
   };
 
@@ -712,8 +803,11 @@ export default function CoCreateRoomApp() {
       );
       draftsRef.current[roomId] = "";
       roundFileRef.current = null;
+      const cached = mergeMessages(messageCacheRef.current[roomId] ?? messagesRef.current, [message]);
+      messageCacheRef.current[roomId] = cached;
+      eventCursorRef.current[roomId] = Math.max(eventCursorRef.current[roomId] ?? 0, message.event_seq ?? 0);
       if (!acceptRoomPayload(roomId, activeIdRef.current, epoch, epochRef.current)) return;
-      setMessages((prev) => mergeMessages(prev, [message]));
+      setMessages(cached);
       setDraft("");
       setMention(null);
       console.info("[co-create-room] 发送", { projectId, roomId, seq: message.seq, agentMode: modeToSend });
@@ -746,11 +840,15 @@ export default function CoCreateRoomApp() {
       if (seating?.draft !== undefined) draftsRef.current[room.id] = seating.draft;
       await loadRooms();
       setRooms((prev) => (prev.some((item) => item.id === room.id) ? prev : [room, ...prev]));
-      setMessages([]);
-      setOutputId(null);
-      setDocVersion(0);
       openedDocRef.current = "";
       eventCursorRef.current[room.id] = 0;
+      messageCacheRef.current[room.id] = [];
+      syncedRef.current[room.id] = false;
+      docVersionRef.current[room.id] = 0;
+      hasMoreRef.current[room.id] = false;
+      roomsRef.current = roomsRef.current.some((item) => item.id === room.id)
+        ? roomsRef.current
+        : [room, ...roomsRef.current];
       selectRoom(room.id);
       return room.id;
     } catch (err) {
@@ -813,12 +911,28 @@ export default function CoCreateRoomApp() {
   };
 
   const openRoom = (room: RoomSummary) => {
-    setMessages([]);
-    setOutputId(room.output_id);
-    setDocVersion(room.doc_version ?? 0);
-    openedDocRef.current = "";
-    eventCursorRef.current[room.id] = 0;
+    if (!messageCacheRef.current[room.id]?.length) {
+      eventCursorRef.current[room.id] = 0;
+    }
+    docVersionRef.current[room.id] = docVersionRef.current[room.id] ?? room.doc_version ?? 0;
     selectRoom(room.id);
+  };
+
+  const loadOlder = () => {
+    if (!activeId || loadingOlder || !hasMore) return;
+    const roomId = activeId;
+    const epoch = epochRef.current;
+    setLoadingOlder(true);
+    refreshRoom(roomId, epoch, "older")
+      .catch((err: Error) => {
+        console.warn("[co-create-room] 更早消息加载失败", { projectId, roomId, err });
+        if (acceptRoomPayload(roomId, activeIdRef.current, epoch, epochRef.current)) {
+          setError(err.message);
+        }
+      })
+      .finally(() => {
+        if (activeIdRef.current === roomId) setLoadingOlder(false);
+      });
   };
 
   const saveRoomTitle = async (roomId: string) => {
@@ -1004,7 +1118,7 @@ export default function CoCreateRoomApp() {
           {roles.length === 0 ? (
             <p className="text-xs leading-relaxed text-slate-500">
               可以先建对话。角色稍后在配置
-              <Link href="/settings?tab=roles" className="mx-1 text-blue-600 hover:underline">
+              <Link href="/ops/roles" className="mx-1 text-blue-600 hover:underline">
                 Roles
               </Link>
               里添加，再点选入座。
@@ -1139,13 +1253,26 @@ export default function CoCreateRoomApp() {
         <div ref={listRef} className="min-h-0 flex-1 space-y-3 overflow-y-auto px-4 py-4">
           {!activeRoom ? (
             <p className="pt-16 text-center text-sm text-slate-500">与你的团队成员+AIbot进行共创项目</p>
+          ) : !historyReady ? (
+            <p className="pt-16 text-center text-sm text-slate-500">加载对话…</p>
           ) : messages.length === 0 ? (
             <p className="pt-16 text-center text-sm text-slate-500">
               不 @ 任何人时，直接和 Harness 对话。@ 已入座的 Bot 并说明如何改，会按顺序修订当前文稿。用 # 引用文档。
             </p>
           ) : (
-            messages.map((message) => {
-              const clock = questionClock(message, messages, clockNow);
+            <>
+            {hasMore ? (
+              <button
+                type="button"
+                disabled={loadingOlder}
+                onClick={loadOlder}
+                className="mx-auto block text-xs text-slate-500 underline disabled:opacity-40"
+              >
+                {loadingOlder ? "加载更早的消息…" : "加载更早的消息"}
+              </button>
+            ) : null}
+            {messages.map((message) => {
+              const clock = questionClock(message, messages, clockNow, agentReplyByTurn.get(message.turn_id) ?? null);
               const elapsed = clock.elapsedMs == null ? "" : formatElapsedSeconds(clock.elapsedMs);
               const statusClass =
                 clock.status === "失败"
@@ -1225,14 +1352,15 @@ export default function CoCreateRoomApp() {
                   }`}
                 >
                   {message.author_type === "agent" ? (
-                    <ChatMarkdownWithCitations content={message.content} />
+                    <AgentMessageBody content={message.content} />
                   ) : (
                     message.content
                   )}
                 </div>
               </article>
               );
-            })
+            })}
+            </>
           )}
         </div>
         {error ? <p className="px-4 text-xs text-red-600">{error}</p> : null}
@@ -1242,7 +1370,7 @@ export default function CoCreateRoomApp() {
               {roles.length === 0 && members.length === 0 ? (
                 <>
                   还没有角色，去配置
-                  <Link href="/settings?tab=roles" className="mx-1 text-blue-600 hover:underline">
+                  <Link href="/ops/roles" className="mx-1 text-blue-600 hover:underline">
                     Roles
                   </Link>
                   添加后再入座。

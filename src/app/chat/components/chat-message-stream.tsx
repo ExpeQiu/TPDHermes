@@ -1,6 +1,6 @@
 "use client";
 
-import React from "react";
+import React, { useEffect, useState } from "react";
 
 import { ChatMarkdownWithCitations } from "@/components/chat-markdown-with-citations";
 import { ChatMessageQuickActions } from "@/components/chat-message-quick-actions";
@@ -13,6 +13,11 @@ import {
 } from "@/lib/streaming-wait-hint";
 import type { ChatSession, Message } from "@/app/chat/chat-types";
 import { formatMessageTimestamp } from "@/lib/datetime";
+import {
+  formatTurnDuration,
+  shortConversationId,
+  turnStartedAtMs,
+} from "@/lib/turn-duration";
 
 type ChatMessageStreamProps = {
   activeSession?: ChatSession;
@@ -43,6 +48,58 @@ function visibleContextBlocks(message: Message): ContextBlock[] {
 function isFirstAssistantTurnForSession(session: ChatSession, message: Message): boolean {
   if (message.role !== "assistant") return false;
   return isFirstAssistantTurn(session.messages);
+}
+
+function TurnStatusLine({
+  startedAt,
+  elapsedMs,
+  inProgress,
+  outcome,
+  conversationId,
+  messageId,
+}: {
+  startedAt: number;
+  elapsedMs?: number;
+  inProgress: boolean;
+  outcome?: Message["turnOutcome"];
+  conversationId: string;
+  messageId: string;
+}) {
+  const [liveSeconds, setLiveSeconds] = useState(() =>
+    Math.max(0, Math.floor((Date.now() - startedAt) / 1000)),
+  );
+
+  useEffect(() => {
+    if (!inProgress) return;
+    const origin = Number.isFinite(startedAt) ? startedAt : Date.now();
+    const tick = () => setLiveSeconds(Math.max(0, Math.floor((Date.now() - origin) / 1000)));
+    tick();
+    const timer = window.setInterval(tick, 1000);
+    console.info("[chat] wait elapsed start", { message_id: messageId, started_at: origin });
+    return () => {
+      window.clearInterval(timer);
+      console.info("[chat] wait elapsed stop", {
+        message_id: messageId,
+        started_at: origin,
+        elapsed_sec: Math.max(0, Math.floor((Date.now() - origin) / 1000)),
+      });
+    };
+  }, [inProgress, messageId, startedAt]);
+
+  const seconds = inProgress
+    ? liveSeconds
+    : Math.max(0, Math.round((elapsedMs ?? 0) / 1000));
+  const label = inProgress ? "进行中" : outcome === "interrupted" ? "已中断" : "已结束";
+  const duration = formatTurnDuration(seconds);
+
+  return (
+    <span className="inline-flex items-center gap-3 tabular-nums" role="status" aria-live="polite">
+      <span>
+        {label} · {duration}
+      </span>
+      {conversationId ? <span>对话 {conversationId}</span> : null}
+    </span>
+  );
 }
 
 export function ChatMessageStream({
@@ -82,6 +139,16 @@ export function ChatMessageStream({
         const displayContent =
           msg.role === "assistant" ? stripFileActionsBlock(msg.content) : msg.content;
         const messageTime = formatMessageTimestamp(msg.createdAt);
+        const isTurnInProgress =
+          streaming &&
+          msg.role === "assistant" &&
+          msg.id === activeSession.messages[activeSession.messages.length - 1]?.id;
+        const showTurnStatus =
+          msg.role === "assistant" && (isTurnInProgress || typeof msg.elapsedMs === "number");
+        const elapsedStartedAt = showTurnStatus
+          ? (turnStartedAtMs(activeSession.messages, msg.id) ?? msg.createdAt ?? Date.now())
+          : null;
+        const conversationId = shortConversationId(activeSession.id);
 
         return (
           <div
@@ -97,7 +164,7 @@ export function ChatMessageStream({
                     : "bg-slate-600"
               }`}
             >
-              {msg.role === "user" ? "我" : msg.role === "system" ? "⚙" : "AI"}
+              {msg.role === "user" ? "我" : msg.role === "system" ? "⚙" : "TA"}
             </div>
 
             <div className="max-w-[78%]">
@@ -164,13 +231,23 @@ export function ChatMessageStream({
                 )}
               </div>
 
-              {messageTime ? (
+              {messageTime || elapsedStartedAt != null ? (
                 <div
-                  className={`mt-1 text-[11px] leading-none text-slate-400 dark:text-slate-500 ${
-                    msg.role === "user" ? "text-right" : "text-left"
+                  className={`mt-1 flex items-center gap-2 text-[11px] leading-none text-slate-400 dark:text-slate-500 ${
+                    msg.role === "user" ? "justify-end text-right" : "justify-start text-left"
                   }`}
                 >
-                  {messageTime}
+                  {messageTime ? <span>{messageTime}</span> : null}
+                  {elapsedStartedAt != null ? (
+                    <TurnStatusLine
+                      startedAt={elapsedStartedAt}
+                      elapsedMs={msg.elapsedMs}
+                      inProgress={isTurnInProgress}
+                      outcome={msg.turnOutcome}
+                      conversationId={conversationId}
+                      messageId={msg.id}
+                    />
+                  ) : null}
                 </div>
               ) : null}
 

@@ -12,12 +12,11 @@ import GeelyWikiMcpPanel from "@/components/settings/GeelyWikiMcpPanel";
 import McpManagementPanel from "@/components/settings/McpManagementPanel";
 import RuntimeConfigPanel from "@/components/settings/RuntimeConfigPanel";
 import CliCapabilitiesPanel from "@/components/settings/CliCapabilitiesPanel";
-import PackManagementPanel from "@/components/settings/PackManagementPanel";
-import RoleManagementPanel from "@/components/settings/RoleManagementPanel";
 import UserGroupManagementPanel from "@/components/settings/UserGroupManagementPanel";
+import StudioSkillReleasePanel from "@/components/settings/StudioSkillReleasePanel";
 import { useThemeStore } from "@/lib/store";
 
-type SettingsTab = "runtime" | "cli" | "theme" | "identity" | "mcp" | "pteam" | "roles";
+type SettingsTab = "runtime" | "cli" | "theme" | "identity" | "mcp" | "studio-skills";
 
 const SETTINGS_TABS: { id: SettingsTab; label: string; description: string }[] = [
   {
@@ -29,7 +28,7 @@ const SETTINGS_TABS: { id: SettingsTab; label: string; description: string }[] =
     id: "runtime",
     label: "运行配置",
     description:
-      "查看当前进程的对话上游与调用名。Harness 实际使用的厂商、模型和地址在此修改，写入 Harness 的 config.yaml，对新会话生效。密钥不展示。",
+      "查看当前进程的对话上游与调用名。绑定本机内核后，模型区读写该安装自己的配置文件。密钥不展示。",
   },
   {
     id: "cli",
@@ -44,16 +43,10 @@ const SETTINGS_TABS: { id: SettingsTab; label: string; description: string }[] =
       "管理 Harness 的 MCP 服务。GeelyWiki 与 Autocar Wiki 在同一块里切换；地址单独保存，不写入 mcp_servers。Harness 的 MCP 修改写入 Harness 的 config.yaml，需重启 Harness。",
   },
   {
-    id: "pteam",
-    label: "P-team",
+    id: "studio-skills",
+    label: "技能卡",
     description:
-      "组装 multi-agent 领域协作包：圆桌席位与 Consult 专家；配置写入 multi_agent/skill_packs/*/pack.yml。",
-  },
-  {
-    id: "roles",
-    label: "Roles",
-    description:
-      "配置可复用角色 Agent（圆桌 / Consult）；Pack 按 id 引用并合并；写入 multi_agent/roles/*.yml。",
+      "管理场景创作里对用户开放的技能卡。仍在开发或验证中的卡片默认关闭，打开后才会出现在场景创作侧栏。",
   },
   { id: "theme", label: "风格", description: "切换界面配色，偏好保存在本机浏览器。" },
 ];
@@ -111,8 +104,7 @@ function parseTab(raw: string | null): SettingsTab {
     raw === "cli" ||
     raw === "identity" ||
     raw === "mcp" ||
-    raw === "pteam" ||
-    raw === "roles" ||
+    raw === "studio-skills" ||
     raw === "theme"
   ) {
     return raw;
@@ -148,6 +140,13 @@ function SettingsPageContent() {
   const theme = useThemeStore((s) => s.theme);
   const setTheme = useThemeStore((s) => s.setTheme);
 
+  const movedTab = searchParams.get("tab");
+
+  useEffect(() => {
+    if (movedTab === "pteam") router.replace("/ops/pteam");
+    if (movedTab === "roles") router.replace("/ops/roles");
+  }, [movedTab, router]);
+
   const setActiveTab = (tab: SettingsTab) => {
     router.replace(`/settings?tab=${tab}`, { scroll: false });
   };
@@ -157,6 +156,16 @@ function SettingsPageContent() {
       .then(setAccess)
       .catch(() => setAccess(null));
   }, []);
+
+  if (movedTab === "pteam" || movedTab === "roles") {
+    return (
+      <main className="min-h-screen p-4 sm:p-8">
+        <div className={CONTENT_MAX_CLASS}>
+          <p className="text-sm text-slate-500">正在打开成长…</p>
+        </div>
+      </main>
+    );
+  }
 
   const canManageUserGroups = Boolean(access && isSystemAdminRole(access.platform_role));
 
@@ -294,17 +303,7 @@ function SettingsPageContent() {
             </div>
           )}
 
-          {activeTab === "pteam" && (
-            <div className="mt-4">
-              <PackManagementPanel />
-            </div>
-          )}
-
-          {activeTab === "roles" && (
-            <div className="mt-4">
-              <RoleManagementPanel />
-            </div>
-          )}
+          {activeTab === "studio-skills" && <StudioSkillReleasePanel />}
         </section>
       </div>
     </main>

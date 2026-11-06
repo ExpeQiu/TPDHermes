@@ -1,7 +1,8 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
-import { apiGet, apiPut } from "@/lib/api";
+import { useEffect, useState } from "react";
+import { apiGet } from "@/lib/api";
+import KernelBindingPanel from "@/components/settings/KernelBindingPanel";
 
 type RuntimeConfig = {
   module: string;
@@ -19,18 +20,6 @@ type RuntimeConfig = {
   warnings: string[];
 };
 
-type HermesModel = {
-  provider: string;
-  model: string;
-  base_url: string;
-  config_path: string;
-  config_exists: boolean;
-  writable: boolean;
-  key_env: string | null;
-  key_configured: boolean;
-  applies: string;
-};
-
 function sourceLabel(source: string | undefined): string {
   if (source === "saved") return "页面保存";
   if (source === "env") return "环境变量";
@@ -46,33 +35,9 @@ function Row({ label, value }: { label: string; value: string }) {
   );
 }
 
-function keyStatus(model: HermesModel): string {
-  if (model.key_configured) {
-    const name = model.key_env ? `（${model.key_env}）` : "";
-    return `已配置${name}。下方留空则不修改`;
-  }
-  if (model.key_env) return `未配置（${model.key_env}）。留空则不写入`;
-  return "此厂商的密钥不在本页管理";
-}
-
 export default function RuntimeConfigPanel() {
   const [config, setConfig] = useState<RuntimeConfig | null>(null);
-  const [hermes, setHermes] = useState<HermesModel | null>(null);
-  const [provider, setProvider] = useState("");
-  const [modelName, setModelName] = useState("");
-  const [baseUrl, setBaseUrl] = useState("");
-  const [apiKey, setApiKey] = useState("");
   const [error, setError] = useState("");
-  const [saveError, setSaveError] = useState("");
-  const [savedMsg, setSavedMsg] = useState("");
-  const [saving, setSaving] = useState(false);
-
-  const applyHermes = useCallback((payload: HermesModel) => {
-    setHermes(payload);
-    setProvider(payload.provider);
-    setModelName(payload.model);
-    setBaseUrl(payload.base_url);
-  }, []);
 
   useEffect(() => {
     let alive = true;
@@ -83,39 +48,10 @@ export default function RuntimeConfigPanel() {
       .catch((err: unknown) => {
         if (alive) setError(err instanceof Error ? err.message : "加载运行配置失败");
       });
-    apiGet<HermesModel>("/system/hermes-model")
-      .then((payload) => {
-        if (alive) applyHermes(payload);
-      })
-      .catch((err: unknown) => {
-        if (alive) setSaveError(err instanceof Error ? err.message : "加载 Harness 模型失败");
-      });
     return () => {
       alive = false;
     };
-  }, [applyHermes]);
-
-  const saveModel = async () => {
-    setSaving(true);
-    setSaveError("");
-    setSavedMsg("");
-    try {
-      applyHermes(
-        await apiPut<HermesModel>("/system/hermes-model", {
-          provider,
-          model: modelName,
-          base_url: baseUrl,
-          api_key: apiKey,
-        }),
-      );
-      setApiKey("");
-      setSavedMsg("已保存。新会话会用这份配置，不必重启 Harness。进行中的对话不变。");
-    } catch (err: unknown) {
-      setSaveError(err instanceof Error ? err.message : "保存 Harness 模型失败");
-    } finally {
-      setSaving(false);
-    }
-  };
+  }, []);
 
   if (error) {
     return <p className="mt-4 text-sm text-red-500 dark:text-red-400">{error}</p>;
@@ -141,68 +77,10 @@ export default function RuntimeConfigPanel() {
         </ul>
       )}
       <p className="mt-4 text-xs text-slate-500">
-        调用名是发给 Harness 的请求标识。下面的厂商和模型写入 Harness 的 config.yaml，启动不会用环境变量盖回。
+        调用名是发给当前对话上游的请求标识。下面的模型来自已绑定内核自己的配置文件。
       </p>
 
-      <div className="mt-6 border-t border-slate-200 pt-6 dark:border-slate-800">
-        <h2 className="text-sm font-medium text-slate-900 dark:text-slate-100">Harness 模型</h2>
-        <p className="mt-1 text-xs text-slate-500">
-          默认值来自 config.yaml。厂商、模型和密钥保存后对新会话生效，不必重启 Harness。
-          {hermes ? ` 密钥：${keyStatus(hermes)}` : ""}
-        </p>
-        {saveError && <p className="mt-3 text-sm text-red-500 dark:text-red-400">{saveError}</p>}
-        {savedMsg && <p className="mt-3 text-sm text-emerald-600 dark:text-emerald-400">{savedMsg}</p>}
-        {hermes && (
-          <div className="mt-4 space-y-3">
-            <label className="block text-sm">
-              <span className="text-slate-700 dark:text-slate-200">厂商</span>
-              <input
-                value={provider}
-                onChange={(event) => setProvider(event.target.value)}
-                className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 font-mono text-sm text-slate-900 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
-                placeholder="minimax-cn"
-              />
-            </label>
-            <label className="block text-sm">
-              <span className="text-slate-700 dark:text-slate-200">模型</span>
-              <input
-                value={modelName}
-                onChange={(event) => setModelName(event.target.value)}
-                className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 font-mono text-sm text-slate-900 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
-                placeholder="MiniMax-M2.7-highspeed"
-              />
-            </label>
-            <label className="block text-sm">
-              <span className="text-slate-700 dark:text-slate-200">密钥</span>
-              <input
-                type="password"
-                autoComplete="new-password"
-                value={apiKey}
-                onChange={(event) => setApiKey(event.target.value)}
-                className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 font-mono text-sm text-slate-900 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
-                placeholder="留空则不修改现有密钥"
-              />
-            </label>
-            <label className="block text-sm">
-              <span className="text-slate-700 dark:text-slate-200">Base URL</span>
-              <input
-                value={baseUrl}
-                onChange={(event) => setBaseUrl(event.target.value)}
-                className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 font-mono text-sm text-slate-900 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
-                placeholder="https://api.minimaxi.com/anthropic"
-              />
-            </label>
-            <button
-              type="button"
-              disabled={!hermes.writable || saving}
-              onClick={() => void saveModel()}
-              className="rounded-lg bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-500 disabled:opacity-50"
-            >
-              {saving ? "保存中…" : "保存 Harness 模型"}
-            </button>
-          </div>
-        )}
-      </div>
+      <KernelBindingPanel />
     </div>
   );
 }

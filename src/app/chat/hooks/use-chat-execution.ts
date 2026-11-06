@@ -19,6 +19,7 @@ import {
 import { ensureDerivedUserId, getEffectiveUserIdSync } from "@/lib/user-id";
 import { formatApiError } from "@/lib/api";
 import { fetchRunKbSources, mergeStreamContent, parseTPCharnessStreamMeta } from "@/lib/chat-citations";
+import { measureTurnElapsedMs } from "@/lib/turn-duration";
 
 import type {
   AssistantFileToolEvent,
@@ -355,6 +356,7 @@ export function useChatExecution(options: UseChatExecutionOptions) {
       }
 
       let fullContent = "";
+      let turnOutcome: "done" | "interrupted" = "done";
       const streamStartedAt = performance.now();
       let firstTokenCaptured = false;
       const markFirstToken = () => {
@@ -844,6 +846,7 @@ export function useChatExecution(options: UseChatExecutionOptions) {
           }
         }
       } catch (sendError) {
+        turnOutcome = "interrupted";
         if ((sendError as Error).name === "AbortError") {
           updateSession(sessionId, (session) => ({
             ...session,
@@ -870,6 +873,22 @@ export function useChatExecution(options: UseChatExecutionOptions) {
           if (failedAssistant) queueMessageSync(sessionId, [failedAssistant], [], 0);
         }
       } finally {
+        const finishedAt = Date.now();
+        updateSession(sessionId, (session) => ({
+          ...session,
+          messages: session.messages.map((message) => {
+            if (message.id !== assistantId || typeof message.elapsedMs === "number") return message;
+            const elapsedMs = measureTurnElapsedMs(session.messages, assistantId, finishedAt);
+            if (elapsedMs == null) return message;
+            console.info("[chat] turn elapsed stamped", {
+              session_id: sessionId,
+              message_id: assistantId,
+              elapsed_ms: elapsedMs,
+              turn_outcome: turnOutcome,
+            });
+            return { ...message, elapsedMs, turnOutcome };
+          }),
+        }));
         void flushSessionToServer(sessionId, "stream_complete").catch((err) => {
           const msg = err instanceof Error ? err.message : String(err);
           setSessionsSyncError(msg);

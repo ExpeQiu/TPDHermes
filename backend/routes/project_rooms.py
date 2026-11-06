@@ -130,6 +130,8 @@ async def api_list_messages(
     after: int = Query(default=0, ge=0),
     after_event: int | None = Query(default=None, ge=0),
     known_doc_version: int | None = Query(default=None, ge=0),
+    limit: int | None = Query(default=None, ge=1, le=200),
+    before_seq: int | None = Query(default=None, ge=1),
     db: AsyncSession = Depends(get_db),
     user_id: str = Depends(get_effective_user_id),
 ):
@@ -141,6 +143,8 @@ async def api_list_messages(
         after_seq=after,
         after_event=after_event,
         known_doc_version=known_doc_version,
+        limit=limit,
+        before_seq=before_seq,
     )
 
 

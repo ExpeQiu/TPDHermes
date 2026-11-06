@@ -34,6 +34,10 @@ export interface Message {
   content: string;
   /** 消息创建时间（毫秒时间戳），用于气泡下方时间展示 */
   createdAt?: number;
+  /** 从用户发出到本条助手回复结束的耗时 */
+  elapsedMs?: number;
+  /** 本轮结束态；进行中不写 */
+  turnOutcome?: "done" | "interrupted";
   /** 用户输入部分（不含选段引用），用于 UI 分开展示 */
   userPrompt?: string;
   /** 选段引用块，用于 UI 分开展示 */

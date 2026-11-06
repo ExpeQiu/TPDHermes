@@ -14,6 +14,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, ConfigDict
 
 from backend.env_policy import allow_missing_chat_upstream
+from backend.services.kernel_binding import resolve_chat_upstream
 
 router = APIRouter(prefix="/chat", tags=["chat"])
 
@@ -74,8 +75,9 @@ def _resolve_chat_target() -> tuple[str, str] | None:
     - 与启动策略一致允许缺省时返回 None（供 /config 与合规 503）
     - 否则抛错（生产等应配置）
     """
-    url = os.getenv("HERMES_CHAT_API_URL", "").strip()
-    api_key = os.getenv("HERMES_CHAT_API_KEY", "").strip()
+    upstream = resolve_chat_upstream()
+    url = upstream["url"]
+    api_key = upstream["api_key"]
     if url:
         return url, api_key
     if allow_missing_chat_upstream():

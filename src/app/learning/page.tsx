@@ -1,8 +1,5 @@
-import type { Metadata } from "next";
+import { redirect } from "next/navigation";
 
-export const metadata: Metadata = {
-  title: "学习中心",
-  description: "查看学习信号、技能变化与周报摘要",
-};
-
-export { default } from "./LearningPageClient";
+export default function LearningRedirectPage() {
+  redirect("/ops/learning");
+}

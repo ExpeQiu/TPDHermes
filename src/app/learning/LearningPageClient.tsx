@@ -3,7 +3,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { apiGet, apiPatch, apiPost } from "@/lib/api";
-import { CONTENT_MAX_CLASS } from "@/lib/content-shell";
 
 type LearningSignal = {
   id: string;
@@ -237,12 +236,10 @@ export default function LearningPageClient() {
   const openSignals = useMemo(() => signals.filter((s) => s.status === "open"), [signals]);
 
   return (
-    <main className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-slate-100 p-4 text-slate-900 sm:p-6 md:p-8 dark:from-slate-950 dark:via-slate-900 dark:to-slate-950 dark:text-white">
-      <div className={CONTENT_MAX_CLASS}>
+    <section aria-label="学习中心">
         <header className="mb-8 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
           <div>
             <p className="text-xs uppercase tracking-[0.2em] text-slate-500">系统成长性</p>
-            <h1 className="mt-2 text-3xl font-bold">学习中心</h1>
             <p className="mt-2 max-w-2xl text-sm text-slate-500">
               汇总反馈信号、周报，以及静默复盘写进技能的改写、新建和回滚。经验正文请在{" "}
               <Link href="/knowledge?mode=experience" className="text-blue-600 hover:underline dark:text-blue-400">
@@ -455,7 +452,6 @@ export default function LearningPageClient() {
             </div>
           </>
         )}
-      </div>
-    </main>
+    </section>
   );
 }

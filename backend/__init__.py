@@ -105,16 +105,19 @@ async def lifespan(app: FastAPI):
     asyncio.create_task(schedule_hermes_warmup())
     from backend.services.growth_scheduler import growth_scheduler
     from backend.services.kb_ingest_worker import kb_ingest_worker
+    from backend.services.kb_govern_scheduler import kb_govern_scheduler
     from backend.services.kb_reconcile_scheduler import kb_reconcile_scheduler
 
     await growth_scheduler.start()
     await kb_ingest_worker.start()
     await kb_reconcile_scheduler.start()
+    await kb_govern_scheduler.start()
     from backend.services.project_room_service import recover_incomplete_turns
 
     recovered = await recover_incomplete_turns()
     logger.info("co-create rooms recovered count=%s", len(recovered))
     yield
+    await kb_govern_scheduler.stop()
     await kb_reconcile_scheduler.stop()
     await kb_ingest_worker.stop()
     await growth_scheduler.stop()

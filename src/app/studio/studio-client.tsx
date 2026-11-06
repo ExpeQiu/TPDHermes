@@ -9,6 +9,7 @@ import { fetchProjectFileDetail, fetchProjectFilesUnified, type ProjectFileDetai
 import {
   STUDIO_SCENES,
   STUDIO_SKILLS,
+  isStudioSkillReleased,
   studioSkillById,
   studioSkillStatusLabel,
 } from "@/lib/studio-skills";
@@ -103,6 +104,7 @@ export default function StudioClient({ initialProjectId = "" }: { initialProject
   ]);
   const [draft, setDraft] = useState("");
   const [skillId, setSkillId] = useState("V04");
+  const [released, setReleased] = useState<Record<string, boolean> | null>(null);
   const [projects, setProjects] = useState<ProjectRecord[]>([]);
   const [projectId, setProjectId] = useState(initialProjectId);
   const [includeProject, setIncludeProject] = useState(Boolean(initialProjectId));
@@ -114,7 +116,11 @@ export default function StudioClient({ initialProjectId = "" }: { initialProject
   const [projectFilesLoading, setProjectFilesLoading] = useState(false);
   const [projectFilesRefreshKey, setProjectFilesRefreshKey] = useState(0);
   const [linkedFile, setLinkedFile] = useState<ProjectFileDetail | null>(null);
-  const activeSkill = studioSkillById(skillId);
+  const visibleSkills = useMemo(
+    () => STUDIO_SKILLS.filter((skill) => isStudioSkillReleased(skill, released)),
+    [released],
+  );
+  const activeSkill = visibleSkills.find((skill) => skill.id === skillId) ?? visibleSkills[0] ?? studioSkillById(skillId);
   const boundProjectId = includeProject ? projectId : "";
   const boundProject = projects.find((project) => project.id === boundProjectId) ?? null;
   const skillReady = activeSkill.status === "ready";
@@ -187,6 +193,30 @@ export default function StudioClient({ initialProjectId = "" }: { initialProject
       cancelled = true;
     };
   }, [boundProjectId, fileKey, projectFilesRefreshKey]);
+
+  useEffect(() => {
+    let cancelled = false;
+    apiGet<{ skills?: { id: string; released: boolean }[] }>("/system/studio-skills")
+      .then((payload) => {
+        if (cancelled || !Array.isArray(payload.skills)) return;
+        const next: Record<string, boolean> = {};
+        for (const row of payload.skills) next[row.id] = Boolean(row.released);
+        setReleased(next);
+      })
+      .catch((error) => {
+        console.warn("[studio] 技能卡释放配置读取失败，仅显示可验证卡片", error);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (visibleSkills.length === 0) return;
+    if (!visibleSkills.some((skill) => skill.id === skillId)) {
+      setSkillId(visibleSkills[0].id);
+    }
+  }, [skillId, visibleSkills]);
 
   useEffect(() => {
     let cancelled = false;
@@ -296,15 +326,21 @@ export default function StudioClient({ initialProjectId = "" }: { initialProject
     <div className="flex h-full min-h-0 flex-col lg:flex-row">
       <aside className="flex max-h-52 min-h-0 w-full shrink-0 flex-col border-b border-slate-200 dark:border-slate-800 lg:max-h-none lg:h-full lg:w-60 lg:border-b-0 lg:border-r">
         <header className="border-b border-slate-200 px-3 py-3 dark:border-slate-800">
-          <p className="text-xs text-slate-500">技能卡 · {STUDIO_SKILLS.length}</p>
-          <h2 className="text-sm font-semibold">规划技能</h2>
+          <p className="text-xs text-slate-500">技能卡 · {visibleSkills.length}</p>
+          <h2 className="text-sm font-semibold">已开放</h2>
         </header>
         <div className="min-h-0 flex-1 space-y-3 overflow-y-auto px-2 py-2">
-          {STUDIO_SCENES.map((scene) => (
+          {visibleSkills.length === 0 ? (
+            <p className="px-1 text-xs leading-5 text-slate-500">当前没有对用户开放的技能卡。请在配置里打开后再使用。</p>
+          ) : null}
+          {STUDIO_SCENES.map((scene) => {
+            const sceneSkills = visibleSkills.filter((skill) => skill.scene === scene);
+            if (sceneSkills.length === 0) return null;
+            return (
             <div key={scene}>
               <p className="px-1 pb-1 text-[10px] font-medium tracking-wide text-slate-500">{scene}</p>
               <div className="space-y-1">
-                {STUDIO_SKILLS.filter((skill) => skill.scene === scene).map((skill) => {
+                {sceneSkills.map((skill) => {
                   const active = skill.id === activeSkill.id;
                   return (
                     <button
@@ -327,7 +363,8 @@ export default function StudioClient({ initialProjectId = "" }: { initialProject
                 })}
               </div>
             </div>
-          ))}
+            );
+          })}
         </div>
       </aside>
       <details className="group shrink-0 border-b border-slate-200 bg-slate-50 dark:border-slate-800 dark:bg-slate-900/40 lg:hidden">

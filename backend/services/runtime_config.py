@@ -8,6 +8,7 @@ from typing import Any
 from urllib.parse import urlparse
 
 from backend.services.geelywiki_cli_config import resolve_wiki_mcp
+from backend.services.kernel_binding import read_binding, resolve_chat_upstream
 
 logger = logging.getLogger("tpdx.hermes.runtime_config")
 
@@ -29,7 +30,8 @@ def _public_url(url: str) -> str | None:
 
 def build_runtime_config() -> dict[str, Any]:
     """当前进程读到的有效配置。尚未有页面保存行时 data_source 为 env。"""
-    chat_url = _public_url(os.getenv("HERMES_CHAT_API_URL", ""))
+    upstream = resolve_chat_upstream()
+    chat_url = _public_url(upstream["url"])
     model = os.getenv("HERMES_CHAT_MODEL", "").strip() or "hermes-agent"
     wiki = resolve_wiki_mcp()
     wiki_url = str(wiki["url"])
@@ -47,6 +49,7 @@ def build_runtime_config() -> dict[str, Any]:
             "url": wiki_url,
             "url_source": wiki["url_source"],
         },
+        "kernel": read_binding(),
         "warnings": [],
     }
     if not chat_url:
