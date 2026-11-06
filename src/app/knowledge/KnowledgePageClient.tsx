@@ -29,6 +29,7 @@ import KnowledgePolicyDomain from "@/app/knowledge/components/KnowledgePolicyDom
 import { getKnowledgeQueryCache } from "@/app/knowledge/knowledge-query-cache";
 import {
   fieldLabel,
+  collectionConfirmMatches,
   isKbCollectionHidden,
   isPublicKbCollection,
   kbCollectionScope,
@@ -1326,6 +1327,7 @@ export default function KnowledgePageClient({
 
   const browseEntriesRef = useRef(browseEntries);
   browseEntriesRef.current = browseEntries;
+  const collectionCountsRef = useRef<Map<string, number>>(new Map());
 
   const detailFetchAbortRef = useRef<AbortController | null>(null);
   const knowledgeQueryCacheRef = useRef(getKnowledgeQueryCache());
@@ -1344,17 +1346,18 @@ export default function KnowledgePageClient({
         ),
       { force },
     );
-    const cols: Collection[] = colRes.collections.map((name) => ({
-      name,
-      description: name,
-      entry_count: 0,
-    }));
-    setCollections((prev) => {
-      const counts = new Map(prev.map((c) => [c.name, c.entry_count]));
-      return cols.map((c) => ({
-        ...c,
-        entry_count: counts.get(c.name) ?? 0,
+    const names = colRes.collections;
+    setCollections(() => {
+      const cols = names.map((name) => ({
+        name,
+        description: name,
+        entry_count: collectionCountsRef.current.get(name) ?? 0,
       }));
+      console.info("[kb-browse] 合集列表", {
+        count: cols.length,
+        withEntries: cols.filter((col) => col.entry_count > 0).length,
+      });
+      return cols;
     });
   }, []);
 
@@ -1380,6 +1383,7 @@ export default function KnowledgePageClient({
       for (const e of entries) {
         counts.set(e.collection, (counts.get(e.collection) ?? 0) + 1);
       }
+      collectionCountsRef.current = counts;
       setBrowseEntries(entries);
       setCollections((prev) =>
         prev.map((c) => ({
@@ -1387,6 +1391,10 @@ export default function KnowledgePageClient({
           entry_count: counts.get(c.name) ?? 0,
         })),
       );
+      console.info("[kb-browse] 合集条数", {
+        scanned: entries.length,
+        collections: counts.size,
+      });
     } catch (e) {
       if (USE_MOCK_KB) {
         setBrowseEntries(MOCK_ENTRIES);
@@ -2220,13 +2228,22 @@ export default function KnowledgePageClient({
     );
   };
 
-  const confirmCollectionName = (collectionName: string, notice: string) => {
+  const confirmCollectionName = (collectionName: string, label: string, notice: string) => {
     if (!window.confirm(notice)) return "cancel" as const;
+    const shown = label.trim() || collectionName;
     const typed = window.prompt(
-      `二次确认：请原样输入内部合集名 “${collectionName}”`,
+      shown !== collectionName
+        ? `二次确认：请原样输入合集名「${shown}」\n内部名 ${collectionName} 也可以`
+        : `二次确认：请原样输入合集名「${shown}」`,
     );
     if (typed == null) return "cancel" as const;
-    if (typed.trim() !== collectionName) return "mismatch" as const;
+    if (!collectionConfirmMatches(typed, [collectionName, shown])) {
+      console.info("[kb-govern] 合集名确认未通过", {
+        collection: collectionName,
+        label: shown,
+      });
+      return "mismatch" as const;
+    }
     return "ok" as const;
   };
 
@@ -2234,11 +2251,12 @@ export default function KnowledgePageClient({
     if (USE_MOCK_KB || entryManageBusy) return;
     const gate = confirmCollectionName(
       collectionName,
+      label,
       `确定清空合集「${label}」下的全部内容？\n约 ${count} 条缓存 / 全部 Chroma chunk，合集本身会保留，内容不可恢复。`,
     );
     if (gate === "cancel") return;
     if (gate === "mismatch") {
-      setEntryManageMessage("合集名不匹配，已取消删除。");
+      setEntryManageMessage(`合集名不匹配，已取消。请输入「${label || collectionName}」。`);
       return;
     }
     setEntryManageBusy(true);
@@ -2270,11 +2288,12 @@ export default function KnowledgePageClient({
     if (USE_MOCK_KB || entryManageBusy) return;
     const gate = confirmCollectionName(
       collectionName,
+      label,
       `确定删除合集「${label}」？\n会先清空其中约 ${count} 条知识，再删除合集本身，不可恢复。`,
     );
     if (gate === "cancel") return;
     if (gate === "mismatch") {
-      setEntryManageMessage("合集名不匹配，已取消删除。");
+      setEntryManageMessage(`合集名不匹配，已取消删除。请输入「${label || collectionName}」。合集未删除。`);
       return;
     }
     setEntryManageBusy(true);

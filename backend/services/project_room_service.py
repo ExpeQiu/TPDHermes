@@ -12,7 +12,7 @@ from datetime import datetime, timedelta
 from typing import Any, Awaitable, Callable
 
 from fastapi import BackgroundTasks, HTTPException
-from sqlalchemy import func, select, text
+from sqlalchemy import delete, func, select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import load_only
@@ -483,6 +483,16 @@ async def update_room(
 ) -> dict[str, Any]:
     role = await _project_role(db, project_id, user_id)
     if not project_perm_allowed(role, "write"):
+        if archived is not None:
+            logger.info(
+                "[co-create-room] archive denied read-only project_id=%s room_id=%s user_id=%s role=%s archived=%s",
+                project_id,
+                room_id,
+                user_id,
+                role,
+                archived,
+            )
+            raise HTTPException(status_code=403, detail="只读权限无法归档")
         raise HTTPException(status_code=404, detail="Project not found")
     room = await _require_room(db, project_id, room_id)
     changed: list[str] = []
@@ -536,6 +546,39 @@ async def update_room(
             room.writer_role_id,
         )
     return room_to_dict(room, content=await _output_content(db, room.output_id))
+
+
+async def delete_room(
+    db: AsyncSession,
+    *,
+    project_id: str,
+    room_id: str,
+    user_id: str,
+) -> dict[str, Any]:
+    role = await _project_role(db, project_id, user_id)
+    if not project_perm_allowed(role, "write"):
+        logger.info(
+            "[co-create-room] delete denied project_id=%s room_id=%s user_id=%s role=%s",
+            project_id,
+            room_id,
+            user_id,
+            role,
+        )
+        raise HTTPException(status_code=403, detail="只读权限无法删除")
+    async with _lock_for(room_id):
+        room = await _require_room(db, project_id, room_id)
+        title = room.title
+        await db.execute(delete(ProjectRoomMessage).where(ProjectRoomMessage.room_id == room.id))
+        await db.delete(room)
+        await db.commit()
+        logger.info(
+            "[co-create-room] room deleted room_id=%s project_id=%s user_id=%s title=%s",
+            room_id,
+            project_id,
+            user_id,
+            title,
+        )
+    return {"ok": True, "id": room_id}
 
 
 async def list_rooms(db: AsyncSession, *, project_id: str, user_id: str) -> list[dict[str, Any]]:

@@ -20,7 +20,7 @@ import {
   questionClock,
   type RoomFileRef,
 } from "@/app/projects/[id]/co-create/room-client-state";
-import { apiGet, apiPatch, apiPost } from "@/lib/api";
+import { apiDelete, apiGet, apiPatch, apiPost } from "@/lib/api";
 import { randomUUID } from "@/lib/random-id";
 import {
   encodeProjectFileSelectValue,
@@ -238,6 +238,8 @@ export default function CoCreateRoomApp() {
   const [editingRoomId, setEditingRoomId] = useState<string | null>(null);
   const [titleDraft, setTitleDraft] = useState("");
   const [roomActingId, setRoomActingId] = useState<string | null>(null);
+  const [roomMenuId, setRoomMenuId] = useState<string | null>(null);
+  const roomMenuRef = useRef<HTMLDivElement>(null);
   const [selectedRoles, setSelectedRoles] = useState<string[]>([]);
   const [writerRoleId, setWriterRoleId] = useState("");
   const [error, setError] = useState("");
@@ -245,6 +247,17 @@ export default function CoCreateRoomApp() {
   const [mentionIndex, setMentionIndex] = useState(0);
   const listRef = useRef<HTMLDivElement>(null);
   const skipTitleBlurRef = useRef(false);
+
+  useEffect(() => {
+    if (!roomMenuId) return;
+    const close = (event: MouseEvent) => {
+      const node = roomMenuRef.current;
+      if (node && event.target instanceof Node && node.contains(event.target)) return;
+      setRoomMenuId(null);
+    };
+    document.addEventListener("mousedown", close);
+    return () => document.removeEventListener("mousedown", close);
+  }, [roomMenuId]);
 
   const revealFiles = () => {
     if (filesHideTimer.current) window.clearTimeout(filesHideTimer.current);
@@ -478,7 +491,7 @@ export default function CoCreateRoomApp() {
     const epoch = epochRef.current;
     refreshRoom(activeId, epoch)
       .then((data) => {
-        if (cancelled || !acceptRoomPayload(activeId, activeIdRef.current, epoch, epochRef.current)) return;
+        if (cancelled || !data || !acceptRoomPayload(activeId, activeIdRef.current, epoch, epochRef.current)) return;
         console.info("[co-create-room] 打开对话", {
           projectId,
           roomId: activeId,
@@ -985,6 +998,33 @@ export default function CoCreateRoomApp() {
     }
   };
 
+  const deleteRoom = async (room: RoomSummary) => {
+    setRoomMenuId(null);
+    const confirmed = window.confirm(
+      `确定删除「${room.title}」？\n对话记录将被永久删除，已保存的项目文件不受影响。`,
+    );
+    if (!confirmed) return;
+    setRoomActingId(room.id);
+    setError("");
+    try {
+      await apiDelete(`/projects/${projectId}/rooms/${room.id}`);
+      setRooms((prev) => prev.filter((item) => item.id !== room.id));
+      if (editingRoomId === room.id) setEditingRoomId(null);
+      if (activeId === room.id) {
+        selectRoom(null);
+        setMessages([]);
+        setOutputId(null);
+        setDocVersion(0);
+        openedDocRef.current = "";
+      }
+      console.info("[co-create-room] 对话删除", { projectId, roomId: room.id });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "删除失败");
+    } finally {
+      setRoomActingId(null);
+    }
+  };
+
   if (!projectId) {
     return <div className="p-8 text-sm text-slate-500">缺少项目 ID</div>;
   }
@@ -1012,73 +1052,105 @@ export default function CoCreateRoomApp() {
             return (
               <div
                 key={room.id}
+                ref={roomMenuId === room.id ? roomMenuRef : undefined}
                 className={`rounded-lg px-2 py-1.5 text-sm ${
                   selected
                     ? "bg-blue-500/15 text-blue-700 dark:text-blue-200"
                     : "hover:bg-slate-100 dark:hover:bg-slate-800"
                 }`}
               >
-                {editing ? (
-                  <input
-                    aria-label="对话名称"
-                    value={titleDraft}
-                    disabled={roomActingId === room.id}
-                    autoFocus
-                    onChange={(event) => setTitleDraft(event.target.value)}
-                    onKeyDown={(event) => {
-                      if (event.key === "Enter") {
-                        event.preventDefault();
+                <div className="flex items-center gap-1">
+                  {editing ? (
+                    <input
+                      aria-label="对话名称"
+                      value={titleDraft}
+                      disabled={roomActingId === room.id}
+                      autoFocus
+                      onChange={(event) => setTitleDraft(event.target.value)}
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter") {
+                          event.preventDefault();
+                          void saveRoomTitle(room.id);
+                        }
+                        if (event.key === "Escape") {
+                          skipTitleBlurRef.current = true;
+                          setEditingRoomId(null);
+                        }
+                      }}
+                      onBlur={() => {
+                        if (skipTitleBlurRef.current) {
+                          skipTitleBlurRef.current = false;
+                          return;
+                        }
                         void saveRoomTitle(room.id);
-                      }
-                      if (event.key === "Escape") {
-                        skipTitleBlurRef.current = true;
-                        setEditingRoomId(null);
-                      }
-                    }}
-                    onBlur={() => {
-                      if (skipTitleBlurRef.current) {
-                        skipTitleBlurRef.current = false;
-                        return;
-                      }
-                      void saveRoomTitle(room.id);
-                    }}
-                    className="w-full rounded border border-slate-300 bg-white px-1 py-0.5 text-sm text-slate-900 outline-none dark:border-slate-600 dark:bg-slate-950 dark:text-slate-100"
-                  />
-                ) : (
-                  <button type="button" onClick={() => openRoom(room)} className="block w-full truncate px-1 text-left font-medium">
-                    {room.title}
+                      }}
+                      className="min-w-0 flex-1 rounded border border-slate-300 bg-white px-1 py-0.5 text-sm text-slate-900 outline-none dark:border-slate-600 dark:bg-slate-950 dark:text-slate-100"
+                    />
+                  ) : (
+                    <button type="button" onClick={() => openRoom(room)} className="min-w-0 flex-1 truncate px-1 text-left font-medium">
+                      {room.title}
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    aria-label={`对话操作：${room.title}`}
+                    aria-expanded={roomMenuId === room.id}
+                    aria-haspopup="menu"
+                    disabled={roomActingId === room.id}
+                    onMouseDown={(event) => event.preventDefault()}
+                    onClick={() => setRoomMenuId((current) => (current === room.id ? null : room.id))}
+                    className="shrink-0 rounded px-1 text-xs tracking-widest text-slate-400 hover:bg-white hover:text-slate-800 disabled:opacity-40 dark:hover:bg-slate-800 dark:hover:text-slate-100"
+                  >
+                    ···
                   </button>
-                )}
-                <div className="mt-0.5 flex items-center justify-between gap-1 px-1">
-                  <span className="truncate text-[11px] text-slate-500">
-                    {room.doc_version > 0 ? `文档 v${room.doc_version}` : ""}
-                  </span>
-                  <span className="flex shrink-0 gap-1">
+                </div>
+                {room.doc_version > 0 ? (
+                  <div className="mt-0.5 truncate px-1 text-[11px] text-slate-500">文档 v{room.doc_version}</div>
+                ) : null}
+                {roomMenuId === room.id ? (
+                  <div role="menu" className="mt-1 overflow-hidden rounded-md border border-slate-200 bg-white py-1 dark:border-slate-700 dark:bg-slate-950">
                     <button
                       type="button"
+                      role="menuitem"
                       disabled={roomActingId === room.id}
                       onMouseDown={(event) => event.preventDefault()}
                       onClick={() => {
+                        setRoomMenuId(null);
                         setEditingRoomId(room.id);
                         setTitleDraft(room.title);
                       }}
-                      className="rounded px-1 text-[10px] text-slate-500 hover:bg-white hover:text-slate-800 disabled:opacity-40 dark:hover:bg-slate-800 dark:hover:text-slate-100"
+                      className="block w-full px-2 py-1 text-left text-[11px] text-slate-700 hover:bg-slate-100 disabled:opacity-40 dark:text-slate-200 dark:hover:bg-slate-800"
                     >
                       改名
                     </button>
                     <button
                       type="button"
+                      role="menuitem"
                       disabled={roomActingId === room.id}
-                      onMouseDown={() => {
+                      onMouseDown={(event) => {
+                        event.preventDefault();
                         skipTitleBlurRef.current = true;
                       }}
-                      onClick={() => void setRoomArchived(room, true)}
-                      className="rounded px-1 text-[10px] text-slate-500 hover:bg-white hover:text-slate-800 disabled:opacity-40 dark:hover:bg-slate-800 dark:hover:text-slate-100"
+                      onClick={() => {
+                        setRoomMenuId(null);
+                        void setRoomArchived(room, true);
+                      }}
+                      className="block w-full px-2 py-1 text-left text-[11px] text-slate-700 hover:bg-slate-100 disabled:opacity-40 dark:text-slate-200 dark:hover:bg-slate-800"
                     >
                       归档
                     </button>
-                  </span>
-                </div>
+                    <button
+                      type="button"
+                      role="menuitem"
+                      disabled={roomActingId === room.id}
+                      onMouseDown={(event) => event.preventDefault()}
+                      onClick={() => void deleteRoom(room)}
+                      className="block w-full px-2 py-1 text-left text-[11px] text-red-600 hover:bg-slate-100 disabled:opacity-40 dark:hover:bg-slate-800"
+                    >
+                      删除
+                    </button>
+                  </div>
+                ) : null}
               </div>
             );
           })}
@@ -1098,18 +1170,51 @@ export default function CoCreateRoomApp() {
             ? rooms
                 .filter((room) => room.archived_at)
                 .map((room) => (
-                  <div key={room.id} className="rounded-lg px-2 py-1.5 text-sm text-slate-500">
-                    <span className="block truncate px-1">{room.title}</span>
-                    <div className="mt-0.5 flex justify-end px-1">
+                  <div
+                    key={room.id}
+                    ref={roomMenuId === room.id ? roomMenuRef : undefined}
+                    className="rounded-lg px-2 py-1.5 text-sm text-slate-500"
+                  >
+                    <div className="flex items-center gap-1">
+                      <span className="min-w-0 flex-1 truncate px-1">{room.title}</span>
                       <button
                         type="button"
+                        aria-label={`对话操作：${room.title}`}
+                        aria-expanded={roomMenuId === room.id}
+                        aria-haspopup="menu"
                         disabled={roomActingId === room.id}
-                        onClick={() => void setRoomArchived(room, false)}
-                        className="rounded px-1 text-[10px] hover:bg-slate-100 hover:text-slate-800 disabled:opacity-40 dark:hover:bg-slate-800 dark:hover:text-slate-100"
+                        onMouseDown={(event) => event.preventDefault()}
+                        onClick={() => setRoomMenuId((current) => (current === room.id ? null : room.id))}
+                        className="shrink-0 rounded px-1 text-xs tracking-widest text-slate-400 hover:bg-slate-100 hover:text-slate-800 disabled:opacity-40 dark:hover:bg-slate-800 dark:hover:text-slate-100"
                       >
-                        恢复
+                        ···
                       </button>
                     </div>
+                    {roomMenuId === room.id ? (
+                      <div role="menu" className="mt-1 overflow-hidden rounded-md border border-slate-200 bg-white py-1 dark:border-slate-700 dark:bg-slate-950">
+                        <button
+                          type="button"
+                          role="menuitem"
+                          disabled={roomActingId === room.id}
+                          onClick={() => {
+                            setRoomMenuId(null);
+                            void setRoomArchived(room, false);
+                          }}
+                          className="block w-full px-2 py-1 text-left text-[11px] text-slate-700 hover:bg-slate-100 disabled:opacity-40 dark:text-slate-200 dark:hover:bg-slate-800"
+                        >
+                          恢复
+                        </button>
+                        <button
+                          type="button"
+                          role="menuitem"
+                          disabled={roomActingId === room.id}
+                          onClick={() => void deleteRoom(room)}
+                          className="block w-full px-2 py-1 text-left text-[11px] text-red-600 hover:bg-slate-100 disabled:opacity-40 dark:hover:bg-slate-800"
+                        >
+                          删除
+                        </button>
+                      </div>
+                    ) : null}
                   </div>
                 ))
             : null}

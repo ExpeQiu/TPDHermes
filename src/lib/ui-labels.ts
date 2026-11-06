@@ -15,6 +15,7 @@ export {
   isKbCollectionHidden,
   KB_COLLECTION_SCOPE_ORDER,
   kbCollectionDescription,
+  collectionConfirmMatches,
   kbCollectionScope,
   kbCollectionScopeLabel,
   kbCollectionSecondaryId,

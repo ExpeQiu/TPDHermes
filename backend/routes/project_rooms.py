@@ -11,6 +11,7 @@ from backend.services.project_room_service import (
     cancel_room_turn,
     create_room,
     enqueue_human_message,
+    delete_room,
     get_room,
     list_messages,
     list_project_voices,
@@ -110,6 +111,21 @@ async def api_update_room(
         archived=body.archived,
         role_ids=body.role_ids,
         writer_role_id=body.writer_role_id,
+    )
+
+
+@router.delete("/{project_id}/rooms/{room_id}")
+async def api_delete_room(
+    project_id: str,
+    room_id: str,
+    db: AsyncSession = Depends(get_db),
+    user_id: str = Depends(get_effective_user_id),
+):
+    return await delete_room(
+        db,
+        project_id=project_id,
+        room_id=room_id,
+        user_id=user_id,
     )
 
 

@@ -127,3 +127,30 @@ export function isBindableKbCollection(name: string): boolean {
 export function filterBindableKbCollections(collections: string[]): string[] {
   return collections.filter(isBindableKbCollection);
 }
+
+const CONFIRM_QUOTE_PAIRS: Array<[string, string]> = [
+  ['"', '"'],
+  ["'", "'"],
+  ["“", "”"],
+  ["「", "」"],
+  ["『", "』"],
+];
+
+/** 去掉确认框里多打的引号、全角空格，以及下拉文案末尾的「（N 条）」。 */
+export function normalizeCollectionConfirmInput(raw: string): string {
+  let value = raw.replace(/^[\s\u3000]+|[\s\u3000]+$/g, "");
+  for (const [left, right] of CONFIRM_QUOTE_PAIRS) {
+    if (value.startsWith(left) && value.endsWith(right) && value.length > left.length + right.length) {
+      value = value.slice(left.length, value.length - right.length).replace(/^[\s\u3000]+|[\s\u3000]+$/g, "");
+      break;
+    }
+  }
+  return value.replace(/[（(]\s*\d+\s*条\s*[）)]$/u, "").replace(/^[\s\u3000]+|[\s\u3000]+$/g, "");
+}
+
+/** 二次确认认展示名或内部合集名。 */
+export function collectionConfirmMatches(typed: string, accepted: string[]): boolean {
+  const value = normalizeCollectionConfirmInput(typed);
+  if (!value) return false;
+  return accepted.some((name) => name.trim() === value);
+}

@@ -120,6 +120,14 @@ def test_rename_and_archive_room(room_roles):
         )
         assert denied.status_code == 404
 
+        denied_archive = client.patch(
+            f"/api/v1/projects/{project_id}/rooms/{room_id}",
+            headers=_headers(viewer),
+            json={"archived": True},
+        )
+        assert denied_archive.status_code == 403
+        assert denied_archive.json()["detail"] == "只读权限无法归档"
+
         archived = client.patch(
             f"/api/v1/projects/{project_id}/rooms/{room_id}",
             headers=_headers(owner),
@@ -139,6 +147,27 @@ def test_rename_and_archive_room(room_roles):
         )
         assert restored.status_code == 200, restored.text
         assert not restored.json()["archived_at"]
+
+        denied_delete = client.delete(
+            f"/api/v1/projects/{project_id}/rooms/{room_id}",
+            headers=_headers(viewer),
+        )
+        assert denied_delete.status_code == 403
+        assert denied_delete.json()["detail"] == "只读权限无法删除"
+
+        deleted = client.delete(
+            f"/api/v1/projects/{project_id}/rooms/{room_id}",
+            headers=_headers(owner),
+        )
+        assert deleted.status_code == 200, deleted.text
+        assert deleted.json()["id"] == room_id
+        missing = client.get(
+            f"/api/v1/projects/{project_id}/rooms/{room_id}",
+            headers=_headers(owner),
+        )
+        assert missing.status_code == 404
+        listed_after = client.get(f"/api/v1/projects/{project_id}/rooms", headers=_headers(owner))
+        assert all(item["id"] != room_id for item in listed_after.json()["items"])
 
 
 def test_create_room_without_agents(room_roles):

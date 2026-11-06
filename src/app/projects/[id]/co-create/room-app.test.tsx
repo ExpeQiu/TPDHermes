@@ -8,6 +8,7 @@ import CoCreateRoomApp, { readRoomComposerMention } from "./room-app";
 const apiGet = vi.fn();
 const apiPost = vi.fn();
 const apiPatch = vi.fn();
+const apiDelete = vi.fn();
 
 vi.mock("next/navigation", () => ({
   useParams: () => ({ id: "project-1" }),
@@ -23,6 +24,7 @@ vi.mock("@/lib/api", () => ({
   apiGet: (...args: unknown[]) => apiGet(...args),
   apiPost: (...args: unknown[]) => apiPost(...args),
   apiPatch: (...args: unknown[]) => apiPatch(...args),
+  apiDelete: (...args: unknown[]) => apiDelete(...args),
 }));
 
 describe("readRoomComposerMention", () => {
@@ -40,6 +42,7 @@ describe("CoCreateRoomApp", () => {
     apiGet.mockReset();
     apiPost.mockReset();
     apiPatch.mockReset();
+    apiDelete.mockReset();
   });
 
   it("没有配置角色时指向 Roles", async () => {
@@ -334,8 +337,18 @@ describe("CoCreateRoomApp", () => {
     });
     const { container } = renderComponent(<CoCreateRoomApp />);
     await waitFor(() => {
+      expect(container.querySelector('button[aria-label="对话操作：方案讨论"]')).not.toBeNull();
+    });
+    expect(container.textContent).not.toContain("改名");
+    const openMenu = () => {
+      const more = container.querySelector('button[aria-label="对话操作：方案讨论"]') as HTMLButtonElement;
+      clickElement(more);
+    };
+    openMenu();
+    await waitFor(() => {
       expect(container.textContent).toContain("改名");
       expect(container.textContent).toContain("归档");
+      expect(container.textContent).toContain("删除");
     });
     const rename = Array.from(container.querySelectorAll("button")).find((button) => button.textContent === "改名");
     expect(rename).toBeTruthy();
@@ -351,6 +364,8 @@ describe("CoCreateRoomApp", () => {
     await waitFor(() => {
       expect(apiPatch).toHaveBeenCalledWith("/projects/project-1/rooms/room-1", { title: "发布会讨论" });
     });
+    const moreAfterRename = container.querySelector('button[aria-label="对话操作：发布会讨论"]') as HTMLButtonElement;
+    clickElement(moreAfterRename);
     const archive = Array.from(container.querySelectorAll("button")).find((button) => button.textContent === "归档");
     clickElement(archive as HTMLButtonElement);
     await waitFor(() => {
