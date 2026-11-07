@@ -214,12 +214,6 @@ export default function SkillMarketPage() {
               >
                 查看技能策略
               </Link>
-              <Link
-                href="/create"
-                className="rounded-xl border border-blue-500/40 bg-blue-500/10 px-4 py-2.5 text-sm font-medium text-blue-200 transition hover:border-blue-400 hover:bg-blue-500/20"
-              >
-                去场景编排
-              </Link>
             </div>
           </div>
 

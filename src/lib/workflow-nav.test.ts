@@ -29,7 +29,7 @@ describe("accessibleWorkflowPages", () => {
       platformRole: "tenant_editor",
     }).map((page) => page.label);
     expect(labels).toEqual(
-      expect.arrayContaining(["工作台首页", "项目中心", "对话创作", "场景创作", "技能工坊"]),
+      expect.arrayContaining(["工作台首页", "项目中心", "头脑风暴", "对话创作", "场景创作", "技能工坊"]),
     );
     expect(labels).not.toContain("场景输出");
     expect(labels).not.toContain("场景编排");
@@ -43,9 +43,9 @@ describe("accessibleWorkflowPages", () => {
       features: [...editorFeatures, "ops"],
       platformRole: "tenant_admin",
     }).map((page) => page.label);
-    expect(labels).toEqual(
-      expect.arrayContaining(["场景输出", "场景编排", "知识库", "配置", "成长"]),
-    );
+    expect(labels).toEqual(expect.arrayContaining(["知识库", "配置", "成长"]));
+    expect(labels).not.toContain("场景输出");
+    expect(labels).not.toContain("场景编排");
   });
 
   it("keeps partner pages to the public set", () => {
@@ -57,6 +57,7 @@ describe("accessibleWorkflowPages", () => {
       "工作台首页",
       "项目中心",
       "项目共创",
+      "头脑风暴",
       "对话创作",
       "场景创作",
       "技能工坊",

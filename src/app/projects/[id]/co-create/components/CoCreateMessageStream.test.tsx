@@ -74,7 +74,7 @@ describe("CoCreateMessageStream quick entries", () => {
     expect(findByText(container, "快捷创作入口")).not.toBeNull();
     expect(findByText(container, "五看三定挖掘技术亮点")).not.toBeNull();
     expect(findByText(container, "竞品对标")).not.toBeNull();
-    expect(container.querySelector('a[href="/create?return_project_id=p-1"]')).not.toBeNull();
+    expect(container.querySelector('a[href="/create?return_project_id=p-1"]')).toBeNull();
   });
 
   it("点击快捷入口触发 onQuickStart 并传递完整 entry", () => {
@@ -118,7 +118,7 @@ describe("CoCreateMessageStream quick entries", () => {
       }),
     );
     expect(empty.container.textContent).toContain("暂无可用场景");
-    expect(empty.container.textContent).toContain("场景编排");
+    expect(empty.container.textContent).not.toContain("场景编排");
   });
 
   it("有消息时不展示快捷入口", () => {

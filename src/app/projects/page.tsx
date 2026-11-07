@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { apiGet, apiPut } from "@/lib/api";
 import { CONTENT_MAX_CLASS } from "@/lib/content-shell";
 import { projectRoleBadgeClass, projectRoleLabel } from "@/lib/rbac";
@@ -34,6 +35,7 @@ const statusLabels: Record<Project["status"], string> = {
 };
 
 export default function ProjectsPage() {
+  const router = useRouter();
   const scopeUserId = useEffectiveUserScopeId();
   const coCreateHref = useMemo(
     () => resolveCoCreateNavHref(scopeUserId),
@@ -61,6 +63,14 @@ export default function ProjectsPage() {
         setLoading(false);
       });
   }, []);
+
+  useEffect(() => {
+    if (loading || error) return;
+    const entry = new URLSearchParams(window.location.search).get("entry");
+    if (entry !== "brainstorm") return;
+    const first = projects.find((project) => project.status !== "archived");
+    if (first) router.replace(`/projects/${first.id}/brainstorm`);
+  }, [loading, error, projects, router]);
 
   return (
     <main className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-slate-100 p-4 text-slate-900 sm:p-6 md:p-8 dark:from-slate-950 dark:via-slate-900 dark:to-slate-950 dark:text-white">
@@ -152,7 +162,7 @@ export default function ProjectsPage() {
               <p className="mb-3 text-4xl">📁</p>
               <p>暂无项目</p>
               <p className="mt-2 text-sm text-slate-600">
-                先新建项目，再从项目页进入对话创作或场景输出。
+                先新建项目，再从项目页进入对话创作或项目共创。
               </p>
             </div>
           )}

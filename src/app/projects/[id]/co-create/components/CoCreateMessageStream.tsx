@@ -18,6 +18,7 @@ import { unwrapSkillAssistantMarkdown } from "@/lib/skill-output";
 import { AgentActivityTimeline } from "@/app/projects/[id]/co-create/components/AgentActivityTimeline";
 import { AgentPlanCard } from "@/app/projects/[id]/co-create/components/AgentPlanCard";
 import type { CoCreateQuickEntry } from "@/lib/co-create-quick-entries";
+import { isRetiredWorkflowHref } from "@/lib/retired-workflows";
 import type { ReactNode } from "react";
 
 type Props = {
@@ -49,27 +50,36 @@ export function CoCreateMessageStream({
   onConfirmPlan,
   planConfirmDisabled,
 }: Props) {
+  const moreLinkVisible = !isRetiredWorkflowHref(moreHref);
   if (messages.length === 0 && !streaming) {
     return (
       <div className="rounded-2xl border border-dashed border-slate-300 p-5 dark:border-slate-700 sm:p-6">
         <div className="flex items-center justify-between gap-3">
           <p className="text-xs uppercase tracking-[0.2em] text-slate-500">快捷创作入口</p>
-          <Link
-            href={moreHref}
-            className="shrink-0 rounded-md border border-slate-300 px-2.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-slate-600 transition hover:border-slate-400 hover:bg-slate-50 dark:border-slate-600 dark:text-slate-300 dark:hover:border-slate-500 dark:hover:bg-slate-800"
-          >
-            more
-          </Link>
+          {moreLinkVisible ? (
+            <Link
+              href={moreHref}
+              className="shrink-0 rounded-md border border-slate-300 px-2.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-slate-600 transition hover:border-slate-400 hover:bg-slate-50 dark:border-slate-600 dark:text-slate-300 dark:hover:border-slate-500 dark:hover:bg-slate-800"
+            >
+              more
+            </Link>
+          ) : null}
         </div>
         {quickEntriesLoading ? (
           <p className="mt-4 text-sm text-slate-500">加载场景列表…</p>
         ) : quickEntries.length === 0 ? (
           <p className="mt-4 text-sm text-slate-500">
-            暂无可用场景，请前往
-            <Link href={moreHref} className="mx-1 text-blue-600 hover:underline dark:text-blue-400">
-              场景编排
-            </Link>
-            配置并发布。
+            {moreLinkVisible ? (
+              <>
+                暂无可用场景，请前往
+                <Link href={moreHref} className="mx-1 text-blue-600 hover:underline dark:text-blue-400">
+                  场景编排
+                </Link>
+                配置并发布。
+              </>
+            ) : (
+              "暂无可用场景。"
+            )}
           </p>
         ) : (
           <div className="mt-4 grid grid-cols-2 gap-3 lg:grid-cols-4">

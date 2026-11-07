@@ -7,7 +7,7 @@ import type { ProjectFileItem } from "@/lib/co-create-api";
 import type { ProjectRecord } from "@/lib/chat-context";
 
 type Props = {
-  scope: "chat" | "studio";
+  scope: "chat" | "studio" | "brainstorm";
   projects: ProjectRecord[];
   projectId: string;
   fileKey: string | null;

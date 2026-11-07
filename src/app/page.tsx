@@ -2,17 +2,18 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import HomeEntrySection from "@/components/home-entry-section";
 import { CONTENT_MAX_CLASS } from "@/lib/content-shell";
+import { isRetiredWorkflowHref } from "@/lib/retired-workflows";
 
 export const metadata: Metadata = {
   title: "首页",
-  description: "以项目为主入口，对话创作与场景输出为生产路径，场景编排与知识、技能为支撑层。",
+  description: "以项目为主入口，对话创作与项目共创为生产路径，知识与技能为支撑层。",
 };
 
 const entries = [
   {
     href: "/projects",
     title: "项目管理",
-    desc: "主入口：进入项目后发起对话创作或场景输出",
+    desc: "主入口：进入项目后发起对话创作或项目共创",
     accent: "from-blue-600 to-indigo-600",
     eyebrow: "项目",
   },
@@ -90,7 +91,7 @@ export default function Home() {
             技术推广内容共创平台
           </h1>
           <p className="mx-auto mt-4 max-w-2xl text-pretty text-sm text-slate-400 sm:text-base">
-            从项目进入对话创作与场景输出；场景编排、知识与技能用于配置与支撑。
+            从项目进入对话创作与项目共创；知识与技能用于配置与支撑。
           </p>
           <div className="mt-8 flex flex-col items-center justify-center gap-3 sm:flex-row">
             <Link
@@ -114,7 +115,7 @@ export default function Home() {
           </div>
         </header>
 
-        <HomeEntrySection entries={entries} />
+        <HomeEntrySection entries={entries.filter((item) => !isRetiredWorkflowHref(item.href))} />
 
         <footer className="home-animate-in mt-12 pt-8 text-center text-xs text-slate-600" style={{ animationDelay: "120ms" }}>
           <p>2026@TPCM</p>

@@ -1,3 +1,4 @@
+import { isRetiredWorkflowHref } from "./retired-workflows";
 import { isSystemAdminRole } from "./user-admin";
 
 export type WorkflowNavItem = {
@@ -18,6 +19,28 @@ export type WorkflowNavItem = {
 
 export function isCoCreateNavPath(pathname: string): boolean {
   return /\/projects\/[^/]+\/co-create(?:\/|$)/.test(pathname);
+}
+
+export function isBrainstormNavPath(pathname: string): boolean {
+  return /\/projects\/[^/]+\/brainstorm(?:\/|$)/.test(pathname);
+}
+
+export function brainstormProjectStorageKey(scopeUserId: string): string {
+  return `TPCharness-brainstorm-project:${scopeUserId}`;
+}
+
+export function resolveBrainstormNavHref(scopeUserId: string): string {
+  if (typeof window === "undefined") return "/projects?entry=brainstorm";
+  try {
+    const saved = window.localStorage.getItem(brainstormProjectStorageKey(scopeUserId))?.trim();
+    if (saved) return `/projects/${saved}/brainstorm`;
+  } catch {
+    // 读取失败时回退到项目列表
+  }
+  const coCreateHref = resolveCoCreateNavHref(scopeUserId);
+  const projectId = coCreateHref.match(/^\/projects\/([^/]+)\/co-create$/)?.[1];
+  if (projectId) return `/projects/${projectId}/brainstorm`;
+  return "/projects?entry=brainstorm";
 }
 
 export function resolveCoCreateNavHref(scopeUserId: string): string {
@@ -54,7 +77,9 @@ export const WORKFLOW_NAV_ITEMS: WorkflowNavItem[] = [
     shortLabel: "项目中心",
     description: "管理长期边界，并进入项目级任务入口。",
     matchActive: (pathname) =>
-      pathname.startsWith("/projects") && !isCoCreateNavPath(pathname),
+      pathname.startsWith("/projects") &&
+      !isCoCreateNavPath(pathname) &&
+      !isBrainstormNavPath(pathname),
   },
   {
     href: "/projects?entry=co-create",
@@ -63,6 +88,14 @@ export const WORKFLOW_NAV_ITEMS: WorkflowNavItem[] = [
     description: "项目成员与角色 Agent 一起讨论，不自动新建文档。",
     matchActive: isCoCreateNavPath,
     resolveHref: resolveCoCreateNavHref,
+  },
+  {
+    href: "/projects?entry=brainstorm",
+    label: "头脑风暴",
+    shortLabel: "头脑风暴",
+    description: "在项目内发起多角色圆桌讨论。",
+    matchActive: isBrainstormNavPath,
+    resolveHref: resolveBrainstormNavHref,
   },
   {
     href: "/chat",
@@ -151,6 +184,7 @@ export function isWorkflowPageAccessible(
   item: WorkflowNavItem,
   access: WorkflowPageAccess | null | undefined,
 ): boolean {
+  if (isRetiredWorkflowHref(item.href)) return false;
   if (item.systemAdminOnly && !isSystemAdminRole(access?.platformRole)) return false;
   const features = access?.features;
   const restricted = Boolean(item.requiredFeature || item.adminOnly);

@@ -1,9 +1,12 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import { apiGet } from "@/lib/api";
+import { ProjectFilesRail } from "@/components/project-files-rail";
+import { fetchProjectFilesUnified, type ProjectFileItem } from "@/lib/co-create-api";
+import { decodeProjectFileSelectValue, type ProjectRecord } from "@/lib/chat-context";
 import {
   depositBrainstormOutput,
   fetchBrainstormHealth,
@@ -13,10 +16,11 @@ import {
   type BrainstormRunResult,
 } from "@/lib/brainstorm-api";
 import { CONTENT_MAX_CLASS } from "@/lib/content-shell";
+import { useEffectiveUserScopeId } from "@/lib/use-effective-user-scope-id";
+import { brainstormProjectStorageKey } from "@/lib/workflow-nav";
 import {
   BrainstormSetupPanel,
   buildBrainstormTopic,
-  type BrainstormAttachment,
   type BrainstormSetupValues,
 } from "./components/BrainstormSetupPanel";
 import { BrainstormResultPanel } from "./components/BrainstormResultPanel";
@@ -32,18 +36,18 @@ type ProjectBrief = {
   background?: string | null;
 };
 
-type AttachmentRow = BrainstormAttachment & {
-  project_id?: string;
-  created_at?: string | null;
-};
-
 export default function ProjectBrainstormPage() {
   const params = useParams();
+  const router = useRouter();
   const projectId = String(params?.id || "");
+  const scopeUserId = useEffectiveUserScopeId();
 
   const [project, setProject] = useState<ProjectBrief | null>(null);
-  const [attachments, setAttachments] = useState<AttachmentRow[]>([]);
-  const [attachmentsLoading, setAttachmentsLoading] = useState(false);
+  const [projects, setProjects] = useState<ProjectRecord[]>([]);
+  const [projectFiles, setProjectFiles] = useState<ProjectFileItem[]>([]);
+  const [projectFilesLoading, setProjectFilesLoading] = useState(false);
+  const [projectFilesRefreshKey, setProjectFilesRefreshKey] = useState(0);
+  const [fileKey, setFileKey] = useState<string | null>(null);
   const [health, setHealth] = useState<BrainstormHealth | null>(null);
   const [setup, setSetup] = useState<BrainstormSetupValues>({
     topic: "",
@@ -79,23 +83,71 @@ export default function ProjectBrainstormPage() {
   }, []);
 
   useEffect(() => {
+    if (!projectId || !scopeUserId) return;
+    try {
+      window.localStorage.setItem(brainstormProjectStorageKey(scopeUserId), projectId);
+    } catch {
+      // 记不住最近项目时，页眉仍回退到项目列表
+    }
+  }, [projectId, scopeUserId]);
+
+  useEffect(() => {
+    setFileKey(null);
+    setSetup((prev) => ({ ...prev, selectedAttachmentIds: [] }));
+  }, [projectId]);
+
+  useEffect(() => {
+    let cancelled = false;
+    apiGet<ProjectRecord[]>("/projects/")
+      .then((rows) => {
+        if (!cancelled) setProjects(Array.isArray(rows) ? rows : []);
+      })
+      .catch((err) => {
+        console.warn("[brainstorm] 项目列表加载失败", err);
+        if (!cancelled) setProjects([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!projectId) {
+      setProjectFiles([]);
+      setProjectFilesLoading(false);
+      return;
+    }
+    let cancelled = false;
+    setProjectFilesLoading(true);
+    fetchProjectFilesUnified(projectId)
+      .then((files) => {
+        if (!cancelled) setProjectFiles(files);
+      })
+      .catch((err) => {
+        console.warn("[brainstorm] 项目文件加载失败", { projectId, err });
+        if (!cancelled) setProjectFiles([]);
+      })
+      .finally(() => {
+        if (!cancelled) setProjectFilesLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [projectId, projectFilesRefreshKey]);
+
+  useEffect(() => {
     if (!projectId) return;
     let cancelled = false;
     setLoading(true);
-    setAttachmentsLoading(true);
 
     Promise.all([
       apiGet<ProjectBrief>(`/projects/${projectId}`),
       fetchBrainstormHealth().catch(() => null),
-      apiGet<AttachmentRow[]>(`/projects/${projectId}/attachments`).catch(
-        () => [] as AttachmentRow[],
-      ),
     ])
-      .then(([proj, h, atts]) => {
+      .then(([proj, h]) => {
         if (cancelled) return;
         setProject(proj);
         setHealth(h);
-        setAttachments(Array.isArray(atts) ? atts : []);
         const bg = (proj.background || "").trim();
         setSetup((prev) => ({
           ...prev,
@@ -111,7 +163,6 @@ export default function ProjectBrainstormPage() {
           projectId,
           ready: h?.ready,
           mockDefault: h?.mock_default,
-          attachmentCount: Array.isArray(atts) ? atts.length : 0,
         });
       })
       .catch((err: unknown) => {
@@ -121,10 +172,7 @@ export default function ProjectBrainstormPage() {
         console.warn("[brainstorm] 项目加载失败", { projectId, err });
       })
       .finally(() => {
-        if (!cancelled) {
-          setLoading(false);
-          setAttachmentsLoading(false);
-        }
+        if (!cancelled) setLoading(false);
       });
 
     return () => {
@@ -132,11 +180,16 @@ export default function ProjectBrainstormPage() {
     };
   }, [projectId]);
 
+  const linkedFile = useMemo(() => {
+    if (!fileKey) return null;
+    const decoded = decodeProjectFileSelectValue(fileKey);
+    if (!decoded) return null;
+    return projectFiles.find((file) => file.kind === decoded.kind && file.id === decoded.id) ?? null;
+  }, [fileKey, projectFiles]);
+
   const onRun = useCallback(async () => {
     if (!projectId) return;
-    const selectedNames = attachments
-      .filter((a) => setup.selectedAttachmentIds.includes(a.id))
-      .map((a) => a.original_filename);
+    const selectedNames = linkedFile ? [linkedFile.title] : [];
     const fullTopic = buildBrainstormTopic(setup, selectedNames);
     if (!fullTopic.trim()) return;
 
@@ -214,7 +267,7 @@ export default function ProjectBrainstormPage() {
     } finally {
       setRunning(false);
     }
-  }, [attachments, projectId, setup]);
+  }, [linkedFile, projectId, setup]);
 
   const onReconfigure = useCallback(() => {
     setPhase("setup");
@@ -248,11 +301,47 @@ export default function ProjectBrainstormPage() {
     }
   }, [projectId, result, setup.discussionMode, setup.pack, setup.topic]);
 
+  const projectBindingLocked = running || phase === "session";
+
+  const renderProjectFilesRail = (autoHide = false) => (
+    <ProjectFilesRail
+      scope="brainstorm"
+      autoHide={autoHide}
+      projects={projects}
+      projectId={projectId}
+      fileKey={fileKey}
+      files={projectFiles}
+      loading={projectFilesLoading}
+      locked={projectBindingLocked}
+      onProjectChange={(next) => {
+        if (!next || next === projectId) return;
+        console.info("[brainstorm] 切换关联项目", { from: projectId, to: next });
+        router.push(`/projects/${next}/brainstorm`);
+      }}
+      onFileChange={(next) => {
+        setFileKey(next);
+        const decoded = next ? decodeProjectFileSelectValue(next) : null;
+        const attachmentIds = decoded?.kind === "attachment" ? [decoded.id] : [];
+        setSetup((prev) => ({ ...prev, selectedAttachmentIds: attachmentIds }));
+        console.info("[brainstorm] 关联文件", {
+          projectId,
+          file: next,
+          kind: decoded?.kind ?? null,
+          attachmentIds,
+        });
+      }}
+      onRefresh={() => setProjectFilesRefreshKey((value) => value + 1)}
+    />
+  );
+
   if (loading) {
     return (
-      <main className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-slate-100 p-6 dark:from-slate-950 dark:via-slate-900 dark:to-slate-950">
-        <p className="text-center text-slate-500">加载头脑风暴…</p>
-      </main>
+      <div className="flex h-full min-h-0">
+        <main className="flex min-h-0 min-w-0 flex-1 items-center justify-center bg-gradient-to-br from-slate-50 via-white to-slate-100 dark:from-slate-950 dark:via-slate-900 dark:to-slate-950">
+          <p className="text-center text-slate-500">加载头脑风暴…</p>
+        </main>
+        <div className="hidden h-full min-h-0 lg:flex">{renderProjectFilesRail(true)}</div>
+      </div>
     );
   }
 
@@ -263,7 +352,19 @@ export default function ProjectBrainstormPage() {
     : null;
 
   return (
-    <main className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-amber-50/40 p-4 text-slate-900 sm:p-6 md:p-8 dark:from-slate-950 dark:via-slate-900 dark:to-slate-950 dark:text-white">
+    <div className="flex h-full min-h-0 flex-col bg-gradient-to-br from-slate-50 via-white to-amber-50/40 text-slate-900 lg:flex-row dark:from-slate-950 dark:via-slate-900 dark:to-slate-950 dark:text-white">
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+      <details className="group shrink-0 border-b border-slate-200 bg-slate-50 dark:border-slate-800 dark:bg-slate-900/40 lg:hidden">
+        <summary className="flex cursor-pointer list-none items-center justify-between px-4 py-2.5 text-sm font-medium [&::-webkit-details-marker]:hidden">
+          <span>项目文件</span>
+          <span className="text-xs text-slate-500 group-open:hidden">展开</span>
+          <span className="hidden text-xs text-slate-500 group-open:inline">收起</span>
+        </summary>
+        <div className="h-[42vh] min-h-0 border-t border-slate-200 dark:border-slate-800">
+          {renderProjectFilesRail()}
+        </div>
+      </details>
+    <main className="min-h-0 flex-1 overflow-y-auto p-4 sm:p-6 md:p-8">
       <div className={`mx-auto w-full ${CONTENT_MAX_CLASS}`}>
         <div className="flex flex-wrap items-center gap-3 text-sm text-slate-500">
           <Link href="/projects" className="hover:text-slate-800 dark:hover:text-slate-200">
@@ -319,8 +420,7 @@ export default function ProjectBrainstormPage() {
             <BrainstormSetupPanel
               projectName={project?.name || "未命名项目"}
               projectBackground={project?.background}
-              attachments={attachments}
-              attachmentsLoading={attachmentsLoading}
+              linkedFileLabel={linkedFile?.title ?? null}
               values={setup}
               onChange={patchSetup}
               running={running}
@@ -376,5 +476,8 @@ export default function ProjectBrainstormPage() {
         ) : null}
       </div>
     </main>
+    </div>
+    <div className="hidden h-full min-h-0 lg:flex">{renderProjectFilesRail(true)}</div>
+    </div>
   );
 }

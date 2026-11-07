@@ -91,10 +91,7 @@ function signalTypeLabel(t: string): string {
 
 function signalEditHref(sig: LearningSignal): { href: string; label: string } | null {
   if (sig.entity_kind === "scenario" && sig.entity_id) {
-    return {
-      href: `/create?scenario=${encodeURIComponent(sig.entity_id)}`,
-      label: "去改场景",
-    };
+    return null;
   }
   if (sig.entity_kind === "project" && sig.entity_id) {
     return {

@@ -1,6 +1,8 @@
 "use client";
 
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { RetiredFeatureNotice } from "@/components/RetiredFeatureNotice";
+import { isRetiredWorkflowHref } from "@/lib/retired-workflows";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { apiGet, apiFetch, readJson } from "@/lib/api";
@@ -122,6 +124,9 @@ type WorkshopScenarioOption = {
 };
 
 export default function WorkshopPage() {
+  if (isRetiredWorkflowHref("/workshop")) {
+    return <RetiredFeatureNotice title="场景输出" />;
+  }
   return (
     <Suspense
       fallback={

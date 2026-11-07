@@ -1,6 +1,8 @@
 "use client";
 
 import { Suspense, useEffect, useMemo, useState } from "react";
+import { RetiredFeatureNotice } from "@/components/RetiredFeatureNotice";
+import { isRetiredWorkflowHref } from "@/lib/retired-workflows";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import AdminOnlyPageGuard from "@/components/admin-only-page-guard";
@@ -119,6 +121,9 @@ function decodeSkillTemplate(value: string): { skillName: string; templatePath: 
 const DEFAULT_SCENARIO_ID = SCENARIOS[0]?.id ?? "general";
 
 export default function CreatePage() {
+  if (isRetiredWorkflowHref("/create")) {
+    return <RetiredFeatureNotice title="场景编排" />;
+  }
   return (
     <AdminOnlyPageGuard pageTitle="create" feature="create">
       <Suspense

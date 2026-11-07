@@ -206,8 +206,7 @@ const PACK_OPTIONS = [
 type Props = {
   projectName: string;
   projectBackground?: string | null;
-  attachments: BrainstormAttachment[];
-  attachmentsLoading?: boolean;
+  linkedFileLabel?: string | null;
   values: BrainstormSetupValues;
   onChange: (patch: Partial<BrainstormSetupValues>) => void;
   running: boolean;
@@ -216,18 +215,10 @@ type Props = {
   onSubmit: () => void;
 };
 
-function formatFileSize(bytes?: number) {
-  if (bytes == null || Number.isNaN(bytes)) return "";
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-}
-
 export function BrainstormSetupPanel({
   projectName,
   projectBackground,
-  attachments,
-  attachmentsLoading,
+  linkedFileLabel,
   values,
   onChange,
   running,
@@ -235,7 +226,6 @@ export function BrainstormSetupPanel({
   engineHint,
   onSubmit,
 }: Props) {
-  const selectedCount = values.selectedAttachmentIds.length;
   const canSubmit = Boolean(values.topic.trim()) && !running;
   const selectedPack = PACK_OPTIONS.find((p) => p.id === values.pack) ?? PACK_OPTIONS[0];
   const [roles, setRoles] = useState<RoundtableRole[]>(() => rolesForPack(values.pack));
@@ -270,19 +260,6 @@ export function BrainstormSetupPanel({
     onChange({ pack: packId, ...debateDefaultsFromExperts(experts) });
   };
 
-  const selectedAttachmentNames = useMemo(() => {
-    const set = new Set(values.selectedAttachmentIds);
-    return attachments.filter((a) => set.has(a.id)).map((a) => a.original_filename);
-  }, [attachments, values.selectedAttachmentIds]);
-
-  const toggleAttachment = (id: string) => {
-    if (running) return;
-    const set = new Set(values.selectedAttachmentIds);
-    if (set.has(id)) set.delete(id);
-    else set.add(id);
-    onChange({ selectedAttachmentIds: Array.from(set) });
-  };
-
   return (
     <div className="overflow-hidden rounded-3xl border border-slate-200 bg-white/90 shadow-sm dark:border-slate-800 dark:bg-slate-900/60">
       {/* 顶栏：会话创建感 */}
@@ -292,7 +269,7 @@ export function BrainstormSetupPanel({
             创建头脑风暴会话
           </h2>
           <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
-            项目「{projectName}」· 配置议题、参考材料与辩论参数后启动圆桌
+            项目「{projectName}」· 在右侧关联项目或文件，再配置议题与辩论参数
           </p>
         </div>
         {engineReady != null ? (
@@ -315,66 +292,8 @@ export function BrainstormSetupPanel({
       </div>
 
       <div className="flex min-h-[28rem] flex-col lg:flex-row">
-        {/* 左侧：来源 + 专家（对齐 todify4 Setup） */}
         <aside className="flex w-full flex-col border-b border-slate-200 bg-slate-50/80 lg:w-80 lg:shrink-0 lg:border-b-0 lg:border-r dark:border-slate-800 dark:bg-slate-950/40">
           <div className="border-b border-slate-200 px-4 py-3 dark:border-slate-800">
-            <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">
-              来源信息
-            </h3>
-            <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
-              当前项目附件 {attachments.length} 条，已勾选 {selectedCount} 条
-            </p>
-          </div>
-          <div className="max-h-48 space-y-2 overflow-y-auto p-3 lg:max-h-56">
-            {attachmentsLoading ? (
-              <p className="py-8 text-center text-xs text-slate-500">加载附件中…</p>
-            ) : attachments.length === 0 ? (
-              <div className="rounded-xl border border-dashed border-slate-300 px-3 py-8 text-center text-xs leading-relaxed text-slate-500 dark:border-slate-700">
-                暂无项目附件。
-                <br />
-                在项目控制台上传后，可勾选并抽取正文注入 multi-agent，供专家团研讨引用。
-              </div>
-            ) : (
-              attachments.slice(0, 30).map((a) => {
-                const checked = values.selectedAttachmentIds.includes(a.id);
-                return (
-                  <label
-                    key={a.id}
-                    className={`flex cursor-pointer items-start gap-2 rounded-xl border p-2.5 transition ${
-                      checked
-                        ? "border-amber-400 bg-amber-50/80 dark:border-amber-600/60 dark:bg-amber-950/30"
-                        : "border-slate-200 bg-white hover:border-slate-300 dark:border-slate-700 dark:bg-slate-900 dark:hover:border-slate-600"
-                    } ${running ? "pointer-events-none opacity-60" : ""}`}
-                  >
-                    <input
-                      type="checkbox"
-                      checked={checked}
-                      onChange={() => toggleAttachment(a.id)}
-                      disabled={running}
-                      className="mt-0.5 rounded border-slate-400"
-                    />
-                    <span className="min-w-0 flex-1">
-                      <span className="line-clamp-2 text-xs font-medium text-slate-900 dark:text-slate-100">
-                        {a.original_filename}
-                      </span>
-                      <span className="mt-1 flex flex-wrap items-center gap-1.5 text-[11px] text-slate-500">
-                        {formatFileSize(a.size_bytes) ? (
-                          <span>{formatFileSize(a.size_bytes)}</span>
-                        ) : null}
-                        {a.ingest_status ? (
-                          <span className="rounded bg-slate-100 px-1.5 py-0.5 dark:bg-slate-800">
-                            {a.ingest_status}
-                          </span>
-                        ) : null}
-                      </span>
-                    </span>
-                  </label>
-                );
-              })
-            )}
-          </div>
-
-          <div className="border-t border-slate-200 px-4 py-3 dark:border-slate-800">
             <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">
               专家团
             </h3>
@@ -500,12 +419,15 @@ export function BrainstormSetupPanel({
                 placeholder="补充讨论背景、目标约束、期望产出…"
                 className="w-full rounded-2xl border border-slate-300 bg-white px-4 py-3 text-sm leading-relaxed text-slate-900 outline-none ring-amber-400/40 focus:ring-2 disabled:opacity-60 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
               />
-              {selectedAttachmentNames.length > 0 ? (
+              {linkedFileLabel ? (
                 <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">
-                  启动时将抽取已选附件正文并注入专家团研讨上下文：
-                  {selectedAttachmentNames.join("、")}
+                  已在右侧关联「{linkedFileLabel}」。启动时会作为参考材料写入研讨上下文。
                 </p>
-              ) : null}
+              ) : (
+                <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">
+                  需要参考材料时，在右侧项目文件栏选择项目或文件。
+                </p>
+              )}
             </div>
 
             <div className="border-t border-slate-200 pt-5 dark:border-slate-800">

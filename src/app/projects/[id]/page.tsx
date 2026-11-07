@@ -11,6 +11,7 @@ import {
   resolveWorkshopScenarioId,
   type ProjectQuickScenarios,
 } from "@/lib/project-quick-scenarios";
+import { isRetiredWorkflowHref } from "@/lib/retired-workflows";
 import { useEffectiveUserScopeId } from "@/lib/use-effective-user-scope-id";
 import {
   entrypointLabel,
@@ -202,7 +203,7 @@ const OUTPUT_DEPOSIT_GROUPS: {
   {
     key: "file",
     title: "文件类",
-    description: "来自场景输出与工坊的正式交付物",
+    description: "项目中沉淀的文件类交付物",
     icon: "📄",
   },
 ];
@@ -1182,7 +1183,7 @@ export default function ProjectDetailPage() {
                     { href: `/projects/${id}/brainstorm`, label: "头脑风暴" },
                     { href: `/chat?project_id=${id}&new_chat=1`, label: "对话创作" },
                     { href: workshopEntryHref, label: "场景输出" },
-                  ]}
+                  ].filter((link) => !isRetiredWorkflowHref(link.href))}
                 />
               </div>
             )}
@@ -1317,7 +1318,7 @@ export default function ProjectDetailPage() {
                   <MetricCard
                     label="文件类"
                     value={String(outputsByDepositGroup.file.length)}
-                    hint="场景输出交付物"
+                    hint="文件类交付物"
                   />
                 </div>
 
@@ -1333,15 +1334,9 @@ export default function ProjectDetailPage() {
                     <p className="mb-3 text-4xl">📝</p>
                     <p>暂无输出记录</p>
                     <p className="mx-auto mt-3 max-w-md text-xs leading-relaxed text-slate-600 dark:text-slate-400">
-                      对话创作不会自动写入此处，需在助手消息上点击「存入项目」；场景输出 / 工坊执行成功后会自动沉淀为文件类输出；项目共创中 Agent
+                      对话创作不会自动写入此处，需在助手消息上点击「存入项目」；项目共创中 Agent
                       创建的文件也会出现在此。已归档的输出不在列表中显示。
                     </p>
-                    <Link
-                      href={`/workshop?project_id=${id}`}
-                      className="mt-4 inline-block text-sm text-blue-400 hover:text-blue-300"
-                    >
-                      前往输出工坊生成 →
-                    </Link>
                   </div>
                 ) : (
                   <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,2fr)]">

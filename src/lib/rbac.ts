@@ -81,12 +81,12 @@ export const PLATFORM_ROLE_OPTIONS: { value: PlatformRole; label: string; hint: 
   {
     value: "tenant_admin",
     label: "系统管理员",
-    hint: "首页、项目中心，对话创作，场景输出，场景编排、知识库、技能工坊，成长，配置",
+    hint: "首页、项目中心，对话创作，知识库、技能工坊，成长，配置",
   },
   {
     value: "tenant_editor",
     label: "项目管理员",
-    hint: "首页，项目中心，对话创作，场景输出，场景编排，知识库，技能工坊，配置",
+    hint: "首页，项目中心，对话创作，知识库，技能工坊，配置",
   },
   {
     value: "tenant_partner",

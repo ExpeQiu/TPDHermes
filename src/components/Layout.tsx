@@ -4,6 +4,7 @@ import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { useState } from 'react'
 import { useIsDefaultAdmin } from '@/lib/admin-access'
+import { isRetiredWorkflowHref } from '@/lib/retired-workflows'
 import { useThemeStore, useUserStore } from '@/lib/store'
 
 const navLinks = [
@@ -23,7 +24,9 @@ export function Layout({ children }: { children: React.ReactNode }) {
   const user = useUserStore((s) => ({ username: s.username, isLoggedIn: s.isLoggedIn }))
   const { isAdmin } = useIsDefaultAdmin()
   const [mobileOpen, setMobileOpen] = useState(false)
-  const visibleNavLinks = navLinks.filter((link) => !link.adminOnly || isAdmin)
+  const visibleNavLinks = navLinks.filter(
+    (link) => !isRetiredWorkflowHref(link.href) && (!link.adminOnly || isAdmin),
+  )
 
   return (
     <div className="min-h-screen bg-white dark:bg-slate-950 text-slate-900 dark:text-slate-100 flex">
