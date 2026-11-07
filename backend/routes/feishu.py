@@ -27,9 +27,12 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from typing import Optional
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from backend.db import get_db
 
 from backend.services.feishu import (
     notify,
@@ -503,4 +506,59 @@ async def api_upload_and_send(
         file_name=file_name,
         message_id=message_id,
     )
+
+
+class FeishuEmployeeInbound(BaseModel):
+    event_id: str
+    employee_id: str
+    user_id: str = ""
+    message: str = ""
+    app_id: str = ""
+
+
+@router.post("/inbound")
+async def feishu_employee_inbound(body: FeishuEmployeeInbound, db: AsyncSession = Depends(get_db)):
+    """飞书入站挂到数字员工。重复 event_id 不产生第二次运行。"""
+    from backend.services.digital_employee_service import EmployeeAccessError, accept_feishu_inbound
+
+    try:
+        return await accept_feishu_inbound(
+            db,
+            event_id=body.event_id,
+            employee_id=body.employee_id,
+            user_id=body.user_id,
+            message=body.message,
+        )
+    except EmployeeAccessError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+
+
+class FeishuBindUser(BaseModel):
+    channel_user_id: str
+    local_user_id: str
+
+
+class FeishuRetry(BaseModel):
+    event_id: str
+    error: str = ""
+
+
+@router.post("/bind-user")
+async def feishu_bind_user(body: FeishuBindUser, db: AsyncSession = Depends(get_db)):
+    from backend.services.digital_employee_service import EmployeeAccessError, link_feishu_user
+
+    try:
+        return await link_feishu_user(db, channel_user_id=body.channel_user_id, local_user_id=body.local_user_id)
+    except EmployeeAccessError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+
+
+@router.post("/outbound-retry")
+async def feishu_outbound_retry(body: FeishuRetry, db: AsyncSession = Depends(get_db)):
+    from backend.services.digital_employee_service import EmployeeAccessError, retry_feishu_outbound
+
+    try:
+        return await retry_feishu_outbound(db, body.event_id, error=body.error)
+    except EmployeeAccessError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
 

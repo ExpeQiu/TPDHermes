@@ -321,6 +321,23 @@ async def assemble_payload(
     """
     request_id = f"req_{uuid.uuid4().hex[:12]}"
     entrypoint = request.entrypoint
+    employee_freeze: dict[str, Any] | None = None
+    employee_id = (getattr(request, "employee_id", None) or "").strip()
+    if employee_id:
+        from backend.services.digital_employee_service import EmployeeAccessError, freeze_for_run
+
+        try:
+            employee_freeze = await freeze_for_run(
+                db,
+                employee_id,
+                effective_user_id,
+                is_admin=actor_role in {"platform_admin", "tenant_admin"},
+            )
+        except EmployeeAccessError as exc:
+            raise WorkshopBindingError(exc.detail) from exc
+        pinned_scenario = str(employee_freeze.get("scenario_id") or "").strip()
+        if pinned_scenario and (request.scenario_id or "general") in {"", "general"}:
+            request = request.model_copy(update={"scenario_id": pinned_scenario})
     scenario_id = (request.scenario_id or "general").strip() or "general"
 
     effective_message = _merge_task_into_workshop_message(request)
@@ -542,6 +559,13 @@ async def assemble_payload(
             merged_domain = {**domain.model_dump(), **overrides.domain}
             domain = OrchestrationDomain.model_validate(merged_domain)
 
+    if employee_freeze:
+        from backend.services.digital_employee_service import apply_freeze_to_contract
+
+        skills, knowledge, output = apply_freeze_to_contract(employee_freeze, skills, knowledge, output)
+        if employee_freeze.get("scenario_version"):
+            scenario_profile_version = employee_freeze["scenario_version"]
+
     if entrypoint == "workshop":
         skills = skills.model_copy(update={"mode": "manual_only", "allow_agent_free_choice": False})
 
@@ -614,6 +638,9 @@ async def assemble_payload(
         "entrypoint": entrypoint,
         "user_id": effective_user_id[:24],
         "session_id": (request.session_id or "").strip() or None,
+        "employee_id": employee_id or None,
+        "employee": employee_freeze,
+        "interaction_mode": getattr(request, "interaction_mode", None),
     }
     logger.info(
         "orchestration assembled request_id=%s entrypoint=%s project=%s scenario=%s ver=%s user_id=%s",

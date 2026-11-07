@@ -68,6 +68,8 @@ type UseChatExecutionOptions = {
   rewriteSourceExcerpt: string;
   rewriteTargetSection: string;
   scenarioFromUrl: string;
+  employeeId?: string;
+  interactionMode?: "chat" | "generate" | "refine";
   skills: string[];
   showAdvancedOrchestration: boolean;
   useOrchestration: boolean;
@@ -296,6 +298,8 @@ export function useChatExecution(options: UseChatExecutionOptions) {
     rewriteSourceExcerpt,
     rewriteTargetSection,
     scenarioFromUrl,
+    employeeId = "",
+    interactionMode = "chat",
     skills,
     showAdvancedOrchestration,
     useOrchestration,
@@ -478,6 +482,8 @@ export function useChatExecution(options: UseChatExecutionOptions) {
             entrypoint: "chat",
             project_id: includeProjectContext && selectedProjectId ? selectedProjectId : null,
             scenario_id: scenarioIdOverride || scenarioFromUrl || "general",
+            employee_id: employeeId || undefined,
+            interaction_mode: interactionMode,
             chat_mode: chatMode,
             user_message: text,
             stream: true,
@@ -916,6 +922,8 @@ export function useChatExecution(options: UseChatExecutionOptions) {
       rewriteSourceExcerpt,
       rewriteTargetSection,
       scenarioFromUrl,
+      employeeId,
+      interactionMode,
       scopeUserId,
       selectedCollection,
       selectedFileId,

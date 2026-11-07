@@ -4,6 +4,7 @@ import {
   buildAgentModeInstructions,
   inferFileRecommendations,
   isPlanConfirmPrompt,
+  roomPlanReady,
   parseAgentPlanFromContent,
   planContractFromPlan,
   resolveExecutionFromAgentMode,
@@ -11,6 +12,13 @@ import {
 } from "./co-create-agent-utils";
 
 describe("co-create-agent-utils", () => {
+  it("没有计划版本时不能确认执行", () => {
+    expect(roomPlanReady(0)).toBe(false);
+    expect(roomPlanReady(undefined)).toBe(false);
+    expect(roomPlanReady(1)).toBe(true);
+    expect(isPlanConfirmPrompt("开始执行")).toBe(true);
+  });
+
   it("buildAgentModeInstructions 为 ask 模式禁止写文件", () => {
     expect(buildAgentModeInstructions("ask")).toContain("禁止调用 write_file");
     expect(buildAgentModeInstructions("ask")).toContain("tavily_search");

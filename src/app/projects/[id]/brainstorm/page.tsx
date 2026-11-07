@@ -15,6 +15,7 @@ import {
   type BrainstormJobStatus,
   type BrainstormRunResult,
 } from "@/lib/brainstorm-api";
+import { brainstormStopReason } from "./stop-reason";
 import { CONTENT_MAX_CLASS } from "@/lib/content-shell";
 import { useEffectiveUserScopeId } from "@/lib/use-effective-user-scope-id";
 import { brainstormProjectStorageKey } from "@/lib/workflow-nav";
@@ -290,6 +291,9 @@ export default function ProjectBrainstormPage() {
         pack: setup.pack,
         mock: result.mock,
         trajectory_markdown: result.trajectory_markdown || null,
+        consensus_reached: result.consensus_reached,
+        stopped_at_round: result.stopped_at_round,
+        stop_reason: brainstormStopReason(result),
       });
       setSavedOutputId(saved.id);
     } catch (err: unknown) {

@@ -1,10 +1,11 @@
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import Link from "next/link";
 import { ChatMarkdownBody } from "@/components/chat-markdown-body";
 import type { BrainstormRunResult } from "@/lib/brainstorm-api";
 import { parseBrainstormDelivery } from "../parse-brainstorm-delivery";
+import { brainstormStopReason } from "../stop-reason";
 import { BrainstormTurnList, normalizeLiveTurns } from "./BrainstormTurnList";
 
 type Props = {
@@ -39,6 +40,8 @@ export function BrainstormResultPanel({
 
   const topic =
     parseBrainstormDelivery(result.delivery_markdown || "").topic || undefined;
+  const stopReason = brainstormStopReason(result);
+  const [confirming, setConfirming] = useState(false);
 
   return (
     <section className="mt-6 space-y-4">
@@ -76,15 +79,11 @@ export function BrainstormResultPanel({
             </button>
             <button
               type="button"
-              onClick={onDeposit}
+              onClick={() => setConfirming(true)}
               disabled={saving || !result.delivery_markdown?.trim()}
               className="rounded-xl border border-amber-400 bg-amber-500 px-3 py-2 text-sm font-medium text-white transition hover:bg-amber-600 disabled:cursor-not-allowed disabled:opacity-50"
             >
-              {saving
-                ? "保存中…"
-                : savedOutputId
-                  ? "已保存（再次保存将更新）"
-                  : "保存为项目输出"}
+              {saving ? "写入中…" : savedOutputId ? "再次确认并更新" : "确认写入项目"}
             </button>
             <button
               type="button"
@@ -95,6 +94,36 @@ export function BrainstormResultPanel({
             </button>
           </div>
         </div>
+
+        <p className="mt-3 text-sm text-slate-600 dark:text-slate-300">
+          {savedOutputId
+            ? "上一份已经写入项目。再次确认会按同一次圆桌更新那份输出。"
+            : "这是圆桌草稿，确认后才会写入项目输出。"}
+          <span className="mt-1 block text-xs text-slate-500">结束原因：{stopReason}</span>
+        </p>
+        {confirming ? (
+          <div className="mt-3 flex flex-wrap items-center gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm dark:border-amber-900 dark:bg-amber-950/40">
+            <span>确认把这次圆桌写入项目？结束原因会一并记下。</span>
+            <button
+              type="button"
+              disabled={saving}
+              onClick={() => {
+                setConfirming(false);
+                onDeposit();
+              }}
+              className="rounded-lg bg-amber-600 px-3 py-1.5 text-white"
+            >
+              确认写入
+            </button>
+            <button
+              type="button"
+              onClick={() => setConfirming(false)}
+              className="rounded-lg border border-slate-300 px-3 py-1.5"
+            >
+              取消
+            </button>
+          </div>
+        ) : null}
 
         {savedOutputId ? (
           <p className="mt-3 text-xs text-emerald-700 dark:text-emerald-300">

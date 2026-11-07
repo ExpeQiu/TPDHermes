@@ -105,6 +105,15 @@ def run_sqlite_migrations(connection: Connection) -> None:
     ).fetchall()
     names = {str(r[0]) for r in tables}
 
+    if "orchestration_runs" in names:
+        _add_columns(connection, "orchestration_runs", [("employee_id", "TEXT")])
+    if "feishu_inbound_events" in names:
+        _add_columns(
+            connection,
+            "feishu_inbound_events",
+            [("attempts", "INTEGER NOT NULL DEFAULT 0"), ("last_error", "TEXT")],
+        )
+
     if "project_rooms" in names:
         _add_columns(
             connection,

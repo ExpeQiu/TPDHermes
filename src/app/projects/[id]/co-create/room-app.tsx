@@ -7,6 +7,7 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   coCreateAgentModeMeta,
   isPlanConfirmPrompt,
+  roomPlanReady,
   type CoCreateAgentMode,
 } from "@/app/projects/[id]/co-create/co-create-agent-utils";
 import { FilePreviewPanel } from "@/app/projects/[id]/co-create/components/FilePreviewPanel";
@@ -43,6 +44,8 @@ type RoomSummary = {
   output_id: string | null;
   doc_version: number;
   archived_at?: string | null;
+  plan_id?: string;
+  plan_version?: number;
   content?: string;
 };
 type RoomMessage = {
@@ -797,11 +800,20 @@ export default function CoCreateRoomApp() {
         if (acceptRoomPayload(roomId, activeIdRef.current, epoch, epochRef.current)) setError(message);
         return;
       }
-      const modeToSend: CoCreateAgentMode =
-        agentMode === "plan" && isPlanConfirmPrompt(text) ? "agent" : agentMode;
+      const confirmingPlan = agentMode === "plan" && isPlanConfirmPrompt(text);
+      const roomRecord = rooms.find((item) => item.id === roomId) ?? activeRoom;
+      const planReady = roomPlanReady(roomRecord?.plan_version);
+      if (confirmingPlan && !planReady) {
+        const message = "还没有可执行的计划。先完成计划，再确认执行。";
+        errorsRef.current[roomId] = message;
+        if (acceptRoomPayload(roomId, activeIdRef.current, epoch, epochRef.current)) setError(message);
+        console.info("[co-create-room] 拒绝空计划确认", { projectId, roomId, planVersion: roomRecord?.plan_version ?? 0 });
+        return;
+      }
+      const modeToSend: CoCreateAgentMode = confirmingPlan ? "agent" : agentMode;
       if (modeToSend !== agentMode) {
         setAgentMode("agent");
-        console.info("[co-create-room] 计划已确认，切换 Agent 执行", { projectId, roomId });
+        console.info("[co-create-room] 计划已确认，切换 Agent 执行", { projectId, roomId, planVersion: roomRecord?.plan_version });
       }
       const message = await apiPost<RoomMessage>(
         `/projects/${projectId}/rooms/${roomId}/messages`,

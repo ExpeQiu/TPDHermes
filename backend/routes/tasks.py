@@ -15,7 +15,7 @@ from typing import Any, AsyncGenerator
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse, StreamingResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -768,6 +768,7 @@ async def execute_task(req: Request, task_req: TaskExecuteRequest, db: AsyncSess
         request_json=eff_request.model_dump_json(),
         snapshot_json=json.dumps(snapshot, ensure_ascii=False),
         skills_policy_json=json.dumps(payload.skills.model_dump(), ensure_ascii=False),
+        employee_id=(snapshot.get("employee_id") or None),
     )
     exec_token = pop_issued_execution_token(run_id)
 
@@ -1707,6 +1708,7 @@ class RunDetailResponse(BaseModel):
     duration_ms: int | None
     created_at: str | None
     kb_sources: dict[str, Any] | None = None
+    trace: list[dict[str, str]] = Field(default_factory=list)
 
 
 @runs_router.get("/{run_id}", response_model=RunDetailResponse)
@@ -1726,6 +1728,9 @@ async def get_run(run_id: str, db: AsyncSession = Depends(get_db)):
 
     capture = await load_kb_sources(db, run_id)
     kb_sources = build_sources_payload_from_capture(capture, row.assistant_content or "")
+    snapshot = _loads(row.snapshot_json)
+    metadata = _loads(row.response_metadata_json)
+    from backend.services.digital_employee_service import build_trace_lines
 
     return RunDetailResponse(
         id=row.id,
@@ -1733,8 +1738,9 @@ async def get_run(run_id: str, db: AsyncSession = Depends(get_db)):
         scenario_id=getattr(row, "scenario_id", None),
         entrypoint=row.entrypoint,
         status=row.status,
-        snapshot=_loads(row.snapshot_json),
-        response_metadata=_loads(row.response_metadata_json),
+        snapshot=snapshot,
+        response_metadata=metadata,
+        trace=build_trace_lines(snapshot, metadata, row.status or "", row.assistant_content),
         validation=_loads(row.validation_json),
         assistant_content=row.assistant_content,
         error_message=row.error_message,

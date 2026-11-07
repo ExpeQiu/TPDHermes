@@ -38,12 +38,14 @@ async def create_run(
     request_json: str,
     snapshot_json: str,
     skills_policy_json: str | None = None,
+    employee_id: str | None = None,
 ) -> OrchestrationRun:
     token, digest, expires = issue_execution_grant()
     row = OrchestrationRun(
         id=run_id,
         project_id=project_id,
         scenario_id=scenario_id,
+        employee_id=employee_id,
         entrypoint=entrypoint,
         user_id=(user_id or "default"),
         status="running",
@@ -83,6 +85,7 @@ async def create_run(
                 id=run_id,
                 project_id=project_id,
                 scenario_id=scenario_id,
+                employee_id=employee_id,
                 entrypoint=entrypoint,
                 user_id=(user_id or "default"),
                 status="running",
@@ -165,6 +168,23 @@ async def finalize_run(
     res.error_message = error_message
     res.duration_ms = duration_ms
     res.updated_at = datetime.now().isoformat()
+    try:
+        snap = json.loads(res.snapshot_json or "{}")
+    except json.JSONDecodeError:
+        snap = {}
+    if isinstance(snap, dict):
+        employee_id = str(snap.get("employee_id") or res.employee_id or "")
+        bound = (snap.get("employee") or {}).get("skills") if isinstance(snap.get("employee"), dict) else None
+        if isinstance(bound, list) and bound:
+            names = [str(item.get("name")) for item in bound if isinstance(item, dict) and item.get("name")]
+            current = meta.get("used_skills") if isinstance(meta.get("used_skills"), list) else []
+            if names and len(current) < len(names):
+                meta["used_skills"] = names
+            meta["skill_versions"] = bound
+        if employee_id:
+            meta["employee_id"] = employee_id
+            res.employee_id = employee_id
+    res.response_metadata_json = json.dumps(meta, ensure_ascii=False)
 
     output_id: str | None = None
     validation_ok = bool((validation or {}).get("ok", True))
@@ -204,6 +224,10 @@ async def finalize_run(
 
     await db.commit()
     await db.refresh(res)
+    if (res.status or "") == "completed" and res.employee_id and res.user_id:
+        from backend.services.digital_employee_service import mark_employee_used
+
+        await mark_employee_used(db, res.employee_id, res.user_id)
     logger.info(
         "run finalized run_id=%s status=%s duration_ms=%s output_id=%s validation_ok=%s",
         run_id,

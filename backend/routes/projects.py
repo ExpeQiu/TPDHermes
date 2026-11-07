@@ -1460,6 +1460,9 @@ class BrainstormOutputDepositRequest(BaseModel):
     pack: str | None = None
     mock: bool | None = None
     trajectory_markdown: str | None = None
+    consensus_reached: bool | None = None
+    stopped_at_round: int | None = None
+    stop_reason: str | None = None
 
 
 def _entrypoint_from_citations(citations_json: str | None) -> str | None:
@@ -1614,6 +1617,7 @@ async def deposit_brainstorm_output(
         title = f"头脑风暴 · {(topic or 'Master Plan')[:40]}"
     ma_run_id = (body.ma_run_id or "").strip() or None
 
+    stop_reason = (body.stop_reason or "").strip() or None
     citations = {
         "source": "brainstorm",
         "ma_run_id": ma_run_id,
@@ -1622,7 +1626,13 @@ async def deposit_brainstorm_output(
         "pack": (body.pack or "").strip() or None,
         "mock": body.mock,
         "has_trajectory": bool((body.trajectory_markdown or "").strip()),
+        "consensus_reached": body.consensus_reached,
+        "stopped_at_round": body.stopped_at_round,
+        "stop_reason": stop_reason,
     }
+    summary = (topic or content)[:280]
+    if stop_reason:
+        summary = f"{stop_reason} · {summary}"[:280]
     now = datetime.now().isoformat()
 
     existing: OutputAsset | None = None
@@ -1645,7 +1655,7 @@ async def deposit_brainstorm_output(
 
     if existing:
         existing.title = title
-        existing.summary = (topic or content)[:280]
+        existing.summary = summary
         existing.content = content
         existing.citations_json = json.dumps(citations, ensure_ascii=False)
         existing.updated_at = now
@@ -1654,10 +1664,11 @@ async def deposit_brainstorm_output(
         await db.refresh(existing)
         schedule_ingest_output(existing.id)
         logger.info(
-            "[brainstorm-output-deposit] updated output_id=%s project_id=%s ma_run_id=%s",
+            "[brainstorm-output-deposit] updated output_id=%s project_id=%s ma_run_id=%s stop_reason=%s",
             existing.id,
             project_id,
             ma_run_id,
+            stop_reason,
         )
         return OutputDetailResponse(
             id=existing.id,
@@ -1682,7 +1693,7 @@ async def deposit_brainstorm_output(
         scenario_id=None,
         run_id=None,
         title=title,
-        summary=(topic or content)[:280],
+        summary=summary,
         content=content,
         content_format="markdown",
         status="draft",
@@ -1696,11 +1707,12 @@ async def deposit_brainstorm_output(
     await db.refresh(row)
     schedule_ingest_output(row.id)
     logger.info(
-        "[brainstorm-output-deposit] created output_id=%s project_id=%s ma_run_id=%s chars=%s",
+        "[brainstorm-output-deposit] created output_id=%s project_id=%s ma_run_id=%s chars=%s stop_reason=%s",
         row.id,
         project_id,
         ma_run_id,
         len(content),
+        stop_reason,
     )
     return OutputDetailResponse(
         id=row.id,

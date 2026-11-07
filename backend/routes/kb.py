@@ -42,6 +42,8 @@ class KBQueriesRequest(BaseModel):
     query_text: str
     n_results: int = 10
     project_id: Optional[str] = None
+    employee_id: Optional[str] = None
+    purpose: str = "answer"
 
 
 class KBQueriesResponse(BaseModel):
@@ -226,6 +228,17 @@ async def kb_query(
 
     优先透传到外部 ChromaDB；外部服务不可用时按词法降级到本地缓存。
     """
+    if data.employee_id:
+        from backend.services.digital_employee_service import employee_knowledge_ids
+
+        allowed = await employee_knowledge_ids(db, data.employee_id)
+        if allowed and data.collection_name not in allowed:
+            return KBQueriesResponse(
+                results=[],
+                source="employee_scope",
+                count=0,
+                warning="超出该数字员工钉住的知识范围",
+            )
     await authorize_kb_operation(
         db,
         user_id,
@@ -239,10 +252,25 @@ async def kb_query(
         limit=data.n_results,
         project_id=data.project_id,
     )
+    raw_results = [item for item in (result.get("results") or []) if isinstance(item, dict)]
+    if data.employee_id:
+        from backend.services.digital_employee_service import model_facing_excerpts
+
+        raw_results = model_facing_excerpts(
+            [
+                {
+                    "title": str(item.get("title") or ""),
+                    "source": data.collection_name,
+                    "content": str(item.get("document") or item.get("content") or item.get("text") or ""),
+                    "version": data.purpose,
+                }
+                for item in raw_results
+            ]
+        )
     return KBQueriesResponse(
-        results=result.get("results", []),
+        results=raw_results,
         source=result.get("source", "cache"),
-        count=int(result.get("count", 0)),
+        count=len(raw_results),
         warning=result.get("warning"),
     )
 

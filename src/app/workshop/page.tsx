@@ -146,9 +146,9 @@ function WorkshopPageInner() {
   const projectFromUrl =
     searchParams?.get("project_id") ?? searchParams?.get("project") ?? "";
   const scenarioFromUrl = searchParams?.get("scenario_id") ?? "";
+  const employeeFromUrl = searchParams?.get("employee_id") ?? "";
   const outputFromUrl = searchParams?.get("output_id")?.trim() ?? "";
   const modeFromUrl = searchParams?.get("mode") ?? "";
-
   const [projects, setProjects] = useState<ProjectRecord[]>([]);
   const [remoteScenarios, setRemoteScenarios] = useState<ScenarioApiRow[]>([]);
   const [dismissedPresetIds] = useState(loadDismissedPresetIds);
@@ -767,6 +767,8 @@ function WorkshopPageInner() {
       task_input: taskInput,
       stream: true,
       user_id: resolvedUserId || undefined,
+      employee_id: employeeFromUrl || undefined,
+      interaction_mode: mode === "refine" ? "refine" : "generate",
       source_output_id: mode === "refine" && sourceOutputId ? sourceOutputId : null,
       overrides: {
         skills: {
@@ -913,8 +915,9 @@ function WorkshopPageInner() {
     scenarioDetail,
     selectedProjectId,
     selectedScenarioId,
-    selectedSkill,
+    employeeFromUrl,
     mode,
+    selectedSkill,
     sourceMaterialPreview,
     sourceOutputId,
     taskBackground,

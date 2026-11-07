@@ -547,6 +547,8 @@ export interface TaskExecuteBody {
   entrypoint: "chat" | "create" | "workshop" | "quick_create" | "project";
   project_id?: string | null;
   scenario_id?: string | null;
+  employee_id?: string | null;
+  interaction_mode?: "chat" | "generate" | "refine" | null;
   /** /chat 场景：co_create 自由共创，doc_optimize 文稿优化 */
   chat_mode?: ChatMode | null;
   user_message: string;

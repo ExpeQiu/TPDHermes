@@ -204,6 +204,9 @@ export async function depositBrainstormOutput(params: {
   pack?: string | null;
   mock?: boolean | null;
   trajectory_markdown?: string | null;
+  consensus_reached?: boolean | null;
+  stopped_at_round?: number | null;
+  stop_reason?: string | null;
 }): Promise<BrainstormDepositResult> {
   console.info("[brainstorm] 沉淀为项目输出", {
     projectId: params.project_id,
@@ -221,6 +224,9 @@ export async function depositBrainstormOutput(params: {
       pack: params.pack ?? null,
       mock: params.mock ?? null,
       trajectory_markdown: params.trajectory_markdown ?? null,
+      consensus_reached: params.consensus_reached ?? null,
+      stopped_at_round: params.stopped_at_round ?? null,
+      stop_reason: params.stop_reason ?? null,
     },
   );
   console.info("[brainstorm] 沉淀完成", { outputId: result.id, status: result.status });

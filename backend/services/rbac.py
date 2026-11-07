@@ -30,18 +30,18 @@ PROJECT_ROLES: frozenset[str] = frozenset({"owner", "editor", "viewer"})
 PROJECT_ROLE_RANK: dict[str, int] = {"viewer": 1, "editor": 2, "owner": 3}
 
 FEATURE_KEYS: frozenset[str] = frozenset(
-    {"create", "knowledge", "skills", "projects", "chat", "workshop", "ops", "settings"}
+    {"create", "knowledge", "skills", "projects", "chat", "workshop", "ops", "settings", "employees"}
 )
 
 FEATURES_BY_PLATFORM_ROLE: dict[str, frozenset[str]] = {
     "platform_admin": frozenset(FEATURE_KEYS),
     "tenant_admin": frozenset(
-        {"create", "knowledge", "skills", "projects", "chat", "workshop", "ops", "settings"}
+        {"create", "knowledge", "skills", "projects", "chat", "workshop", "ops", "settings", "employees"}
     ),
     "tenant_editor": frozenset(
-        {"create", "knowledge", "skills", "projects", "chat", "workshop", "settings"}
+        {"create", "knowledge", "skills", "projects", "chat", "workshop", "settings", "employees"}
     ),
-    "tenant_partner": frozenset({"projects", "chat", "workshop", "skills", "settings"}),
+    "tenant_partner": frozenset({"projects", "chat", "workshop", "skills", "settings", "employees"}),
 }
 
 PROJECT_PERMS_BY_ROLE: dict[str, frozenset[str]] = {

@@ -109,3 +109,12 @@ from backend.models.skill import Skill as _Skill  # noqa: E402, F401
 from backend.models.project_member import ProjectMember as _ProjectMember  # noqa: E402, F401
 from backend.models.project_room import ProjectRoom as _ProjectRoom  # noqa: E402, F401
 from backend.models.project_room import ProjectRoomMessage as _ProjectRoomMessage  # noqa: E402, F401
+from backend.models.digital_employee import DigitalEmployee as _DigitalEmployee  # noqa: E402, F401
+from backend.models.digital_employee import EmployeeResourceBinding as _EmployeeResourceBinding  # noqa: E402, F401
+from backend.models.digital_employee import EmployeeUsage as _EmployeeUsage  # noqa: E402, F401
+from backend.models.digital_employee import ProjectEmployee as _ProjectEmployee  # noqa: E402, F401
+from backend.models.digital_employee import EmployeeCredential as _EmployeeCredential  # noqa: E402, F401
+from backend.models.digital_employee import FeishuEmployeeBinding as _FeishuEmployeeBinding  # noqa: E402, F401
+from backend.models.digital_employee import FeishuInboundEvent as _FeishuInboundEvent  # noqa: E402, F401
+from backend.models.digital_employee import FeishuUserLink as _FeishuUserLink  # noqa: E402, F401
+from backend.models.digital_employee import ConfirmationStep as _ConfirmationStep  # noqa: E402, F401

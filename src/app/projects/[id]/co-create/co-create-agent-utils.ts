@@ -102,6 +102,12 @@ export function isPlanConfirmPrompt(text: string): boolean {
   return PLAN_CONFIRM_RE.test(text.trim());
 }
 
+/** 房间已有计划版本时，确认句才能离开 Plan 去写文件。 */
+export function roomPlanReady(planVersion: number | null | undefined): boolean {
+  const version = Number(planVersion);
+  return Number.isFinite(version) && version > 0;
+}
+
 function formatSkillsHint(skills: string[]): string {
   const list = skills.map((s) => s.trim()).filter(Boolean).slice(0, 24);
   if (list.length === 0) {

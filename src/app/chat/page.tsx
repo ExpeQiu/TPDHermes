@@ -179,6 +179,7 @@ function ChatPageInner() {
   const searchParams = useSearchParams();
   const router = useRouter();
   const scenarioFromUrl = searchParams?.get("scenario") ?? "";
+  const employeeFromUrl = searchParams?.get("employee_id") ?? "";
   const projectFromUrl = searchParams?.get("project_id") ?? searchParams?.get("project") ?? "";
   const newChatFromUrl = searchParams?.get("new_chat") === "1";
   const sessionIdFromUrl = searchParams?.get("session_id") ?? "";
@@ -654,6 +655,8 @@ function ChatPageInner() {
     rewriteSourceExcerpt,
     rewriteTargetSection,
     scenarioFromUrl,
+    employeeId: employeeFromUrl,
+    interactionMode: "chat",
     skills,
     showAdvancedOrchestration,
     useOrchestration,
@@ -835,6 +838,22 @@ function ChatPageInner() {
             <h1 className="flex-1 truncate text-sm font-semibold text-slate-900 dark:text-white">
               {titleFromSession(workspaceSession)}
             </h1>
+            {employeeFromUrl ? (
+              <button
+                type="button"
+                onClick={() => {
+                  const params = new URLSearchParams(searchParams?.toString() || "");
+                  params.delete("employee_id");
+                  params.delete("run_id");
+                  const query = params.toString();
+                  console.info("[chat] 取消钉住员工", { employeeId: employeeFromUrl });
+                  router.replace(query ? `/chat?${query}` : "/chat");
+                }}
+                className="shrink-0 text-xs text-slate-500 hover:text-slate-900 dark:hover:text-white"
+              >
+                已钉住员工 · 取消
+              </button>
+            ) : null}
             {(preparingContext || streaming) && (
               <span className="flex items-center gap-1.5 text-xs text-blue-400">
                 <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-blue-400" />
@@ -842,7 +861,6 @@ function ChatPageInner() {
               </span>
             )}
           </header>
-
           <details className="group shrink-0 border-b border-slate-300 bg-slate-100 dark:border-slate-700 dark:bg-slate-900/40 lg:hidden">
             <summary className="flex cursor-pointer list-none items-center justify-between px-4 py-2.5 text-sm font-medium text-slate-800 dark:text-slate-200 [&::-webkit-details-marker]:hidden">
               <span>项目文件</span>
