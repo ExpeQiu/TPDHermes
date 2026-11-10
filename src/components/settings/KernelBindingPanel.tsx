@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { apiDelete, apiGetWithTimeout, apiPut } from "@/lib/api";
+import { apiDelete, apiGetWithTimeout, apiPost, apiPut } from "@/lib/api";
 
 type KernelModel = {
   config_path: string | null;
@@ -34,6 +34,13 @@ type KernelPlatform = {
 type KernelSnapshot = {
   bound: { kernel_id: string; root: string; present: boolean; label: string } | null;
   platforms: KernelPlatform[];
+};
+
+type ProbeResult = {
+  ok: boolean;
+  reachable?: boolean;
+  latency_ms?: number;
+  message: string;
 };
 
 const EVIDENCE_LABEL: Record<string, string> = {
@@ -74,6 +81,8 @@ export default function KernelBindingPanel() {
   const [saveError, setSaveError] = useState("");
   const [savedMsg, setSavedMsg] = useState("");
   const [saving, setSaving] = useState(false);
+  const [probing, setProbing] = useState(false);
+  const [probe, setProbe] = useState<ProbeResult | null>(null);
 
   const load = useCallback(async () => {
     setError("");
@@ -99,6 +108,7 @@ export default function KernelBindingPanel() {
     setApiKey("");
     setSavedMsg("");
     setSaveError("");
+    setProbe(null);
   }, [boundInstall]);
 
   const bind = async (kernelId: string, root: string) => {
@@ -110,6 +120,26 @@ export default function KernelBindingPanel() {
       setError(err instanceof Error ? err.message : "绑定内核失败");
     } finally {
       setPending("");
+    }
+  };
+
+  const runProbe = async () => {
+    setProbing(true);
+    setProbe(null);
+    setSaveError("");
+    try {
+      setProbe(
+        await apiPost<ProbeResult>("/system/kernels/model/probe", {
+          provider,
+          model: modelName,
+          base_url: baseUrl,
+          api_key: apiKey,
+        }),
+      );
+    } catch (err: unknown) {
+      setProbe({ ok: false, message: err instanceof Error ? err.message : "探测失败" });
+    } finally {
+      setProbing(false);
     }
   };
 
@@ -282,14 +312,30 @@ export default function KernelBindingPanel() {
                     />
                   </label>
                 )}
-                <button
-                  type="button"
-                  disabled={!boundInstall.model.writable || saving}
-                  onClick={() => void saveModel()}
-                  className="rounded-lg bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-500 disabled:opacity-50"
-                >
-                  {saving ? "保存中…" : "保存到当前内核"}
-                </button>
+                {probe && (
+                  <p className={`text-sm ${probe.ok ? "text-emerald-600 dark:text-emerald-400" : "text-amber-600 dark:text-amber-400"}`}>
+                    探测：{probe.message}
+                    {typeof probe.latency_ms === "number" ? ` · ${probe.latency_ms}ms` : ""}
+                  </p>
+                )}
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    disabled={probing || saving || !modelName.trim()}
+                    onClick={() => void runProbe()}
+                    className="rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-700 hover:border-slate-400 disabled:opacity-50 dark:border-slate-700 dark:text-slate-200 dark:hover:border-slate-500"
+                  >
+                    {probing ? "测试中…" : "测试连通性"}
+                  </button>
+                  <button
+                    type="button"
+                    disabled={!boundInstall.model.writable || saving || probing}
+                    onClick={() => void saveModel()}
+                    className="rounded-lg bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-500 disabled:opacity-50"
+                  >
+                    {saving ? "保存中…" : "保存到当前内核"}
+                  </button>
+                </div>
               </div>
             )}
           </>

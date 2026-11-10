@@ -14,6 +14,7 @@ from backend.services.external_mcp import probe_external_mcp, resolve_external_m
 from backend.services.geelywiki_cli_config import probe_wiki_mcp, resolve_wiki_mcp, save_wiki_mcp
 from backend.services.hermes_model_config import read_hermes_model, save_hermes_model
 from backend.services.kernel_binding import bind_kernel, list_kernels, save_bound_model, unbind_kernel
+from backend.services.kernel_model_probe import probe_bound_model
 from backend.services.runtime_config import build_runtime_config
 from backend.services.studio_skill_release import public_release, save_release
 from tpdhermes.capabilities import public_config, resolve_token, save_document
@@ -104,6 +105,19 @@ def update_kernel_model(body: HermesModelSave) -> dict:
     except OSError as exc:
         logger.error("kernel model write failed err=%s", exc)
         raise HTTPException(status_code=500, detail=f"无法写入内核模型: {exc}") from exc
+
+
+@router.post("/kernels/model/probe")
+def probe_kernel_model(body: HermesModelSave) -> dict:
+    try:
+        return probe_bound_model(
+            provider=body.provider,
+            model=body.model,
+            base_url=body.base_url,
+            api_key=body.api_key,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.delete("/kernels/binding")

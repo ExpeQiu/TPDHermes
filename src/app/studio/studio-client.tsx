@@ -331,7 +331,7 @@ export default function StudioClient({ initialProjectId = "" }: { initialProject
         </header>
         <div className="min-h-0 flex-1 space-y-3 overflow-y-auto px-2 py-2">
           {visibleSkills.length === 0 ? (
-            <p className="px-1 text-xs leading-5 text-slate-500">当前没有对用户开放的技能卡。请在配置里打开后再使用。</p>
+            <p className="px-1 text-xs leading-5 text-slate-500">当前没有对用户开放的技能卡。请在成长的技能卡里打开后再使用。</p>
           ) : null}
           {STUDIO_SCENES.map((scene) => {
             const sceneSkills = visibleSkills.filter((skill) => skill.scene === scene);

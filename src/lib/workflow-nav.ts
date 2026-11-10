@@ -145,7 +145,7 @@ export const WORKFLOW_NAV_ITEMS: WorkflowNavItem[] = [
     href: "/ops/usage",
     label: "成长",
     shortLabel: "成长",
-    description: "功能使用统计、学习中心、P-team 与 Roles。",
+    description: "功能使用统计、学习中心、P-team、Roles 与技能卡。",
     requiredFeature: "ops",
     matchActive: (pathname) => pathname.startsWith("/ops"),
   },
@@ -153,7 +153,7 @@ export const WORKFLOW_NAV_ITEMS: WorkflowNavItem[] = [
     href: "/settings",
     label: "配置",
     shortLabel: "配置",
-    description: "运行配置、工作台 CLI、用户身份、MCP 与技能卡释放。",
+    description: "运行配置、工作台 CLI、用户身份与 MCP。",
     systemAdminOnly: true,
   },
 ];

@@ -13,6 +13,7 @@ const OPS_TABS = [
   { href: "/ops/learning", label: "学习中心" },
   { href: "/ops/pteam", label: "P-team" },
   { href: "/ops/roles", label: "Roles" },
+  { href: "/ops/studio-skills", label: "技能卡" },
 ] as const;
 
 export function OpsFrame({ children }: { children: ReactNode }) {

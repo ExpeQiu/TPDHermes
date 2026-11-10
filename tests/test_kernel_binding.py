@@ -188,3 +188,71 @@ def test_kernel_routes(monkeypatch, tmp_path: Path):
     assert cleared.status_code == 200
     assert cleared.json()["bound"] is None
     assert client.get("/api/v1/system/config").json()["kernel"] is None
+
+
+class _Response:
+    def __init__(self, status_code: int, text: str = ""):
+        self.status_code = status_code
+        self.text = text
+
+
+def test_probe_uses_saved_key_and_does_not_echo_it(monkeypatch, tmp_path: Path):
+    _isolate(monkeypatch, tmp_path)
+    home = tmp_path / "hermes-home"
+    home.mkdir()
+    (home / "config.yaml").write_text(
+        "model:\n  default: MiniMax-M3\n  provider: minimax-cn\n  base_url: https://api.minimaxi.com/anthropic\n",
+        encoding="utf-8",
+    )
+    (home / ".env").write_text("MINIMAX_CN_API_KEY=sk-probe-secret\n", encoding="utf-8")
+    monkeypatch.setenv("HERMES_HOME", str(home))
+    monkeypatch.delenv("MINIMAX_CN_API_KEY", raising=False)
+    bind_kernel("hermes-agent", str(home))
+    seen: dict[str, str] = {}
+
+    def fake_request(url: str, headers: dict, payload: dict):
+        seen["url"] = url
+        seen["key"] = headers.get("x-api-key", "")
+        seen["model"] = payload["model"]
+        return _Response(200, '{"ok":true}')
+
+    monkeypatch.setattr("backend.services.kernel_model_probe._request", fake_request)
+    from backend.services.kernel_model_probe import probe_bound_model
+
+    result = probe_bound_model(provider="minimax-cn", model="MiniMax-M3", base_url="", api_key="  ")
+
+    assert result["ok"] is True
+    assert result["reachable"] is True
+    assert "已响应" in result["message"]
+    assert seen["url"] == "https://api.minimaxi.com/anthropic/v1/messages"
+    assert seen["key"] == "sk-probe-secret"
+    assert seen["model"] == "MiniMax-M3"
+    assert "sk-probe-secret" not in result["message"]
+
+
+def test_probe_reports_unreachable_without_writing_config(monkeypatch, tmp_path: Path):
+    _isolate(monkeypatch, tmp_path)
+    home = tmp_path / "hermes-home"
+    home.mkdir()
+    original = "model:\n  default: MiniMax-M3\n  provider: minimax-cn\n"
+    (home / "config.yaml").write_text(original, encoding="utf-8")
+    monkeypatch.setenv("HERMES_HOME", str(home))
+    monkeypatch.setenv("MINIMAX_CN_API_KEY", "sk-env")
+    bind_kernel("hermes-agent", str(home))
+
+    def fake_request(url: str, headers: dict, payload: dict):
+        raise __import__("httpx").ConnectError("refused")
+
+    monkeypatch.setattr("backend.services.kernel_model_probe._request", fake_request)
+    client = TestClient(app)
+    response = client.post(
+        "/api/v1/system/kernels/model/probe",
+        json={"provider": "minimax-cn", "model": "MiniMax-Next", "base_url": "https://api.minimaxi.com/anthropic", "api_key": ""},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["ok"] is False
+    assert body["reachable"] is False
+    assert "连不上" in body["message"]
+    assert (home / "config.yaml").read_text(encoding="utf-8") == original

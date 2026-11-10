@@ -7,16 +7,13 @@ import { featuresForPlatformRole, fetchUserAccess, type PlatformRole, type UserA
 import { accessibleWorkflowPages } from "@/lib/workflow-nav";
 import { isSystemAdminRole } from "@/lib/user-admin";
 import { CONTENT_MAX_CLASS } from "@/lib/content-shell";
-import ExternalMcpPanel from "@/components/settings/ExternalMcpPanel";
-import GeelyWikiMcpPanel from "@/components/settings/GeelyWikiMcpPanel";
 import McpManagementPanel from "@/components/settings/McpManagementPanel";
 import RuntimeConfigPanel from "@/components/settings/RuntimeConfigPanel";
 import CliCapabilitiesPanel from "@/components/settings/CliCapabilitiesPanel";
 import UserGroupManagementPanel from "@/components/settings/UserGroupManagementPanel";
-import StudioSkillReleasePanel from "@/components/settings/StudioSkillReleasePanel";
 import { useThemeStore } from "@/lib/store";
 
-type SettingsTab = "runtime" | "cli" | "theme" | "identity" | "mcp" | "studio-skills";
+type SettingsTab = "runtime" | "cli" | "theme" | "identity" | "mcp";
 
 const SETTINGS_TABS: { id: SettingsTab; label: string; description: string }[] = [
   {
@@ -39,14 +36,7 @@ const SETTINGS_TABS: { id: SettingsTab; label: string; description: string }[] =
   {
     id: "mcp",
     label: "MCP 管理",
-    description:
-      "管理 Harness 的 MCP 服务。GeelyWiki 与 Autocar Wiki 在同一块里切换；地址单独保存，不写入 mcp_servers。Harness 的 MCP 修改写入 Harness 的 config.yaml，需重启 Harness。",
-  },
-  {
-    id: "studio-skills",
-    label: "技能卡",
-    description:
-      "管理场景创作里对用户开放的技能卡。仍在开发或验证中的卡片默认关闭，打开后才会出现在场景创作侧栏。",
+    description: "管理 Harness 的 MCP 服务。修改写入 Harness 的 config.yaml，需重启 Harness。",
   },
   { id: "theme", label: "风格", description: "切换界面配色，偏好保存在本机浏览器。" },
 ];
@@ -104,7 +94,6 @@ function parseTab(raw: string | null): SettingsTab {
     raw === "cli" ||
     raw === "identity" ||
     raw === "mcp" ||
-    raw === "studio-skills" ||
     raw === "theme"
   ) {
     return raw;
@@ -132,9 +121,6 @@ function SettingsPageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const activeTab = parseTab(searchParams.get("tab"));
-  const [wikiPane, setWikiPane] = useState<"geely" | "autocar">(
-    searchParams.get("tab") === "external" ? "autocar" : "geely",
-  );
 
   const [access, setAccess] = useState<UserAccessState | null>(null);
   const theme = useThemeStore((s) => s.theme);
@@ -145,6 +131,7 @@ function SettingsPageContent() {
   useEffect(() => {
     if (movedTab === "pteam") router.replace("/ops/pteam");
     if (movedTab === "roles") router.replace("/ops/roles");
+    if (movedTab === "studio-skills") router.replace("/ops/studio-skills");
   }, [movedTab, router]);
 
   const setActiveTab = (tab: SettingsTab) => {
@@ -157,7 +144,7 @@ function SettingsPageContent() {
       .catch(() => setAccess(null));
   }, []);
 
-  if (movedTab === "pteam" || movedTab === "roles") {
+  if (movedTab === "pteam" || movedTab === "roles" || movedTab === "studio-skills") {
     return (
       <main className="min-h-screen p-4 sm:p-8">
         <div className={CONTENT_MAX_CLASS}>
@@ -267,43 +254,10 @@ function SettingsPageContent() {
             ))}
 
           {activeTab === "mcp" && (
-            <div className="mt-4 space-y-8">
-              <div>
-                <div role="tablist" aria-label="知识 MCP" className="flex flex-wrap gap-2">
-                  {(
-                    [
-                      ["geely", "GeelyWiki"],
-                      ["autocar", "Autocar Wiki"],
-                    ] as const
-                  ).map(([id, label]) => {
-                    const selected = wikiPane === id;
-                    return (
-                      <button
-                        key={id}
-                        type="button"
-                        role="tab"
-                        aria-selected={selected}
-                        onClick={() => setWikiPane(id)}
-                        className={`rounded-lg px-3 py-1.5 text-sm font-medium transition ${
-                          selected
-                            ? "bg-slate-900 text-white dark:bg-white dark:text-slate-900"
-                            : "text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-200"
-                        }`}
-                      >
-                        {label}
-                      </button>
-                    );
-                  })}
-                </div>
-                <div className="mt-4">
-                  {wikiPane === "geely" ? <GeelyWikiMcpPanel /> : <ExternalMcpPanel />}
-                </div>
-              </div>
+            <div className="mt-4">
               <McpManagementPanel />
             </div>
           )}
-
-          {activeTab === "studio-skills" && <StudioSkillReleasePanel />}
         </section>
       </div>
     </main>
