@@ -1833,6 +1833,62 @@ async def approve_output(
     )
 
 
+class OutputKbSaveResponse(BaseModel):
+    ok: bool
+    output_id: str
+    collection: str
+    doc_id: str | None = None
+    kb_ingest_status: str | None = None
+    chunk_count: int | None = None
+    message: str | None = None
+
+
+@router.post("/{project_id}/outputs/{output_id}/save-to-kb", response_model=OutputKbSaveResponse)
+async def save_output_to_project_kb(
+    project_id: str,
+    output_id: str,
+    db: AsyncSession = Depends(get_db),
+    effective_uid: str = Depends(get_effective_user_id),
+):
+    """手动把一条项目输出写入该项目知识库。"""
+    await require_project_for_user(db, project_id, effective_uid, min_perm="write")
+    q = await db.execute(
+        select(OutputAsset).where(
+            OutputAsset.id == output_id,
+            OutputAsset.project_id == project_id,
+        )
+    )
+    row = q.scalar_one_or_none()
+    if not row:
+        raise HTTPException(status_code=404, detail="Output not found")
+    if (row.status or "").strip().lower() == "archived":
+        raise HTTPException(status_code=400, detail="已归档的输出不能存入知识库")
+
+    from backend.services.project_kb_ingest import ingest_project_output
+
+    result = await ingest_project_output(output_id)
+    logger.info(
+        "[project-output-kb] save project_id=%s output_id=%s ok=%s doc_id=%s chunks=%s message=%s",
+        project_id,
+        output_id,
+        result.ok,
+        result.doc_id,
+        result.chunk_count,
+        result.message,
+    )
+    if not result.ok:
+        raise HTTPException(status_code=400, detail=result.message or "存入知识库失败")
+    return OutputKbSaveResponse(
+        ok=True,
+        output_id=output_id,
+        collection=result.collection or project_kb_collection(project_id),
+        doc_id=result.doc_id,
+        kb_ingest_status="ingested",
+        chunk_count=result.chunk_count,
+        message=result.message or "已存入项目知识库",
+    )
+
+
 @router.post("/{project_id}/outputs/{output_id}/archive", response_model=OutputDetailResponse)
 async def archive_output(
     project_id: str,

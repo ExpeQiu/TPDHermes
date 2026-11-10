@@ -19,6 +19,7 @@ KB_DOMAIN_ENUM: frozenset[str] = frozenset(
 )
 
 GEELYWIKI_PAGES_COLLECTION = "internal.geelywiki.pages"
+GEELYWIKI_PAGES_PUBLIC_COLLECTION = "public.geelywiki.pages"
 PUBLIC_INTEL_STRATEGY_COLLECTION = "public.public_intel.auto_company_strategy"
 PUBLIC_INTEL_VEHICLE_COLLECTION = "public.public_intel.vehicle_model_library"
 PUBLIC_INTEL_TECH_COLLECTION = "public.structured_tech.geely_tech"
@@ -55,6 +56,9 @@ SOURCE_EXPERIENCE = "tpd_experience"
 KB_COLLECTION_DESCRIPTIONS: dict[str, str] = {
     GEELYWIKI_PAGES_COLLECTION: (
         "GeelyWiki 内部 LLMwiki 归档（全文 + claims），真源信息，冲突时优先遵守和采纳。"
+    ),
+    GEELYWIKI_PAGES_PUBLIC_COLLECTION: (
+        "经 MCP 导入的外部 Wiki 页面，供参考，冲突时以内部知识库为准。"
     ),
     PUBLIC_INTEL_TECH_COLLECTION: (
         "来自互联网检索的结构化技术点信息，供参考与补充，冲突时以真源集合为准。"
@@ -124,6 +128,16 @@ def is_public_intel_collection(name: str) -> bool:
 
 def is_geelywiki_collection(name: str) -> bool:
     return str(name or "").strip() == GEELYWIKI_PAGES_COLLECTION
+
+
+def geelywiki_import_target(scope: str) -> tuple[str, str]:
+    """导入范围决定集合与权威。未识别的值拒绝，避免写错库。"""
+    key = str(scope or "").strip()
+    if key == "internal":
+        return GEELYWIKI_PAGES_COLLECTION, AUTHORITY_CANONICAL
+    if key == "external":
+        return GEELYWIKI_PAGES_PUBLIC_COLLECTION, AUTHORITY_SUPPLEMENT
+    raise ValueError("导入范围只能是内部或外部")
 
 
 # 经验/收割文档进入项目库：复制还是移动尚未拍板。

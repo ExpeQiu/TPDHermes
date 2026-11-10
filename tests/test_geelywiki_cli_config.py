@@ -88,6 +88,18 @@ def test_fetch_export_then_stop(monkeypatch):
     assert payload["pages"][0]["slug"] == "a"
 
 
+def test_saved_import_scope_survives_url_only_save(monkeypatch, tmp_path):
+    _isolate(monkeypatch, tmp_path)
+    save_wiki_mcp(url="http://127.0.0.1:8787/mcp", import_scope="external")
+    save_wiki_mcp(url="http://127.0.0.1:8788/mcp")
+
+    payload = resolve_wiki_mcp()
+
+    assert payload["url"] == "http://127.0.0.1:8788/mcp"
+    assert payload["import_scope"] == "external"
+    assert payload["import_scope_source"] == "saved"
+
+
 def test_wiki_mcp_route_roundtrip(monkeypatch, tmp_path):
     _isolate(monkeypatch, tmp_path)
     with TestClient(app) as client:
@@ -99,3 +111,5 @@ def test_wiki_mcp_route_roundtrip(monkeypatch, tmp_path):
     body = again.json()
     assert body["url"] == "http://127.0.0.1:8787/mcp"
     assert body["url_source"] == "saved"
+    assert body["import_scope"] == "internal"
+    assert body["import_scope_source"] == "default"

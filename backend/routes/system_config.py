@@ -40,7 +40,8 @@ class CliTokenVerifyIn(BaseModel):
 
 
 class WikiMcpSave(BaseModel):
-    url: str = ""
+    url: str | None = None
+    import_scope: str | None = None
 
 
 class WikiMcpProbe(BaseModel):
@@ -193,7 +194,9 @@ def get_wiki_mcp() -> dict:
 @router.put("/wiki-mcp")
 def update_wiki_mcp(body: WikiMcpSave) -> dict:
     try:
-        saved = save_wiki_mcp(url=body.url)
+        saved = save_wiki_mcp(url=body.url, import_scope=body.import_scope)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     except OSError as exc:
         logger.error("geelywiki mcp config write failed err=%s", exc)
         raise HTTPException(status_code=500, detail=f"无法写入配置文件: {exc}") from exc

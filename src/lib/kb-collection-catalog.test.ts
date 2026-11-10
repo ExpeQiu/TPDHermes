@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { collectionConfirmMatches } from "@/lib/kb-collection-catalog";
+import { collectionConfirmMatches, isProjectKbListed } from "@/lib/kb-collection-catalog";
 
 describe("collectionConfirmMatches", () => {
   const internal = "project.dd3c13a9.kb";
@@ -14,6 +14,12 @@ describe("collectionConfirmMatches", () => {
     expect(collectionConfirmMatches(internal, [internal, label])).toBe(true);
     expect(collectionConfirmMatches(`「${label}」`, [internal, label])).toBe(true);
     expect(collectionConfirmMatches(`${label}（3 条）`, [internal, label])).toBe(true);
+  });
+
+  it("空的项目知识库不进浏览列表", () => {
+    expect(isProjectKbListed("project.abc.kb", 0)).toBe(false);
+    expect(isProjectKbListed("project.abc.kb", 2)).toBe(true);
+    expect(isProjectKbListed("internal.geelywiki.pages", 0)).toBe(true);
   });
 
   it("不接受别的合集名", () => {

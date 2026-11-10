@@ -13,6 +13,7 @@ export {
   isInternalKbCollection,
   isInternalSectionCollection,
   isKbCollectionHidden,
+  isProjectKbListed,
   KB_COLLECTION_SCOPE_ORDER,
   kbCollectionDescription,
   collectionConfirmMatches,

@@ -494,3 +494,71 @@ async def kb_reembed_collection(body: KbReembedRequest):
         log.exception("kb_reembed failed collection=%s", body.collection)
         raise HTTPException(status_code=500, detail=str(e)) from e
     return report
+
+
+class GeelyWikiSyncRequest(BaseModel):
+    demo: bool = False
+    import_scope: str | None = None
+
+
+def _public_geelywiki_report(report: dict[str, Any]) -> dict[str, Any]:
+    bundle = report.get("kg_bundle")
+    public = {key: value for key, value in report.items() if key != "kg_bundle"}
+    if isinstance(bundle, dict):
+        public["kg_counts"] = {
+            key: len(value) if isinstance(value, list) else value for key, value in bundle.items()
+        }
+    return public
+
+
+@router.post("/geelywiki/sync")
+async def sync_geelywiki_manual(body: GeelyWikiSyncRequest):
+    """经已保存的 GeelyWiki MCP 地址手动拉取页面，按导入范围写入内部或外部知识库。"""
+    from backend.services.geelywiki_cli_config import resolve_wiki_mcp, save_wiki_mcp
+    from backend.services.geelywiki_ingest import apply_geelywiki_graph, ingest_geelywiki
+    from backend.services.kb_contract import geelywiki_import_target
+
+    resolved = resolve_wiki_mcp()
+    scope = (body.import_scope or str(resolved.get("import_scope") or "internal")).strip()
+    try:
+        geelywiki_import_target(scope)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if body.import_scope and resolved.get("writable"):
+        try:
+            save_wiki_mcp(import_scope=scope)
+        except OSError as exc:
+            log.exception("geelywiki import scope save failed err=%s", exc)
+    log.info("geelywiki manual sync start demo=%s source=mcp import_scope=%s", body.demo, scope)
+    try:
+        report = await asyncio.to_thread(
+            ingest_geelywiki,
+            from_cli=True,
+            demo=body.demo,
+            apply=True,
+            import_scope=scope,
+        )
+    except Exception as exc:
+        log.exception("geelywiki manual sync failed")
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    if scope == "internal" and report.get("ok") and isinstance(report.get("kg_bundle"), dict):
+        try:
+            report["kg"] = await apply_geelywiki_graph(report["kg_bundle"])
+        except Exception as exc:
+            log.exception("geelywiki manual sync graph failed")
+            report["graph_error"] = str(exc)
+    elif scope == "external":
+        report["graph_skipped"] = True
+        log.info("geelywiki manual sync graph skipped import_scope=external")
+    public = _public_geelywiki_report(report)
+    log.info(
+        "geelywiki manual sync done ok=%s pages=%s docs=%s source=%s build_id=%s import_scope=%s collection=%s",
+        public.get("ok"),
+        public.get("page_count"),
+        public.get("doc_count"),
+        public.get("source"),
+        public.get("build_id"),
+        public.get("import_scope"),
+        public.get("collection"),
+    )
+    return public

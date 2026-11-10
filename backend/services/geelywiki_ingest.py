@@ -16,6 +16,7 @@ from backend.services.kb_contract import (
     AUTHORITY_CANONICAL,
     GEELYWIKI_PAGES_COLLECTION,
     SOURCE_GEELYWIKI,
+    geelywiki_import_target,
 )
 from backend.services.kb_graph_pipeline import (
     RELATED_TO,
@@ -70,7 +71,12 @@ def _claim_markdown(claim: dict[str, Any]) -> str:
     return "\n".join(lines) + "\n"
 
 
-def pages_to_documents(pages: list[dict[str, Any]], staging: Path) -> list[dict[str, Any]]:
+def pages_to_documents(
+    pages: list[dict[str, Any]],
+    staging: Path,
+    *,
+    authority: str = AUTHORITY_CANONICAL,
+) -> list[dict[str, Any]]:
     """把 pages 写成 staging markdown，返回 ingestion documents（含 claims 独立文档）。"""
     staging.mkdir(parents=True, exist_ok=True)
     documents: list[dict[str, Any]] = []
@@ -100,7 +106,7 @@ def pages_to_documents(pages: list[dict[str, Any]], staging: Path) -> list[dict[
             "wiki_domain": wiki_domain,
             "layer": page.get("layer") or "",
             "publish_scope": page.get("publish_scope") or page.get("audience") or "",
-            "authority": AUTHORITY_CANONICAL,
+            "authority": authority,
             "knowledge_status": page.get("knowledge_status") or "",
             "language": "zh",
         }
@@ -340,15 +346,18 @@ def snapshot_geelywiki_export(
 def build_geelywiki_manifest(
     pages_json: Path,
     staging: Path,
+    *,
+    collection: str = GEELYWIKI_PAGES_COLLECTION,
+    authority: str = AUTHORITY_CANONICAL,
 ) -> tuple[dict[str, Any], dict[str, Any], list[dict[str, Any]]]:
     payload = load_pages_json(pages_json)
     pages = [p for p in payload.get("pages") or [] if isinstance(p, dict)]
-    documents = pages_to_documents(pages, staging)
+    documents = pages_to_documents(pages, staging, authority=authority)
     kg_bundle = pages_to_kg_bundle(pages)
     batch_id = new_ingest_job_id()
     manifest = {
         "batch_id": batch_id,
-        "collection": GEELYWIKI_PAGES_COLLECTION,
+        "collection": collection,
         "defaults": {
             "source": SOURCE_GEELYWIKI,
             "source_type": "geelywiki",
@@ -356,7 +365,7 @@ def build_geelywiki_manifest(
             "language": "zh",
             "domain": "structured_tech",
             "folder_path": "geelywiki",
-            "authority": AUTHORITY_CANONICAL,
+            "authority": authority,
         },
         "documents": documents,
     }
@@ -372,7 +381,9 @@ def ingest_geelywiki(
     staging: Path | None = None,
     from_cli: bool = False,
     demo: bool = False,
+    import_scope: str = "internal",
 ) -> dict[str, Any]:
+    collection, authority = geelywiki_import_target(import_scope)
     build_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     arch = geelywiki_archive_root(str(archive_root) if archive_root else None)
     source_label = "cli"
@@ -403,11 +414,23 @@ def ingest_geelywiki(
         logger.warning("geelywiki xingyao page missing body; ingest still proceeds for other pages")
 
     stage = staging or (snap / "staging")
-    manifest, kg_bundle, pages = build_geelywiki_manifest(src, stage)
+    manifest, kg_bundle, pages = build_geelywiki_manifest(
+        src,
+        stage,
+        collection=collection,
+        authority=authority,
+    )
     chroma = (chroma_url or os.getenv("CHROMA_HOST") or CHROMA_HOST).strip()
+    logger.info(
+        "geelywiki ingest scope=%s collection=%s authority=%s apply=%s",
+        import_scope,
+        collection,
+        authority,
+        apply,
+    )
     ingest_report = run_kb_ingestion(
         manifest=manifest,
-        collection=GEELYWIKI_PAGES_COLLECTION,
+        collection=collection,
         chroma_url=chroma,
         job_id=build_id,
         dry_run=not apply,
@@ -423,6 +446,8 @@ def ingest_geelywiki(
         "kg_bundle": kg_bundle,
         "publish_scope": payload.get("publish_scope"),
         "apply": apply,
+        "import_scope": import_scope,
+        "collection": collection,
         "source": source_label,
         "data_source": payload.get("data_source"),
     }

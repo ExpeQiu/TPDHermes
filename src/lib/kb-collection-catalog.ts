@@ -1,6 +1,7 @@
 /** 知识库 collection 业务展示名（覆盖默认 domain·topic 拼接） */
 export const KB_COLLECTION_DISPLAY: Record<string, string> = {
   "internal.geelywiki.pages": "内部知识库·GeelyWiki",
+  "public.geelywiki.pages": "外部知识库·GeelyWiki",
   "public.structured_tech.geely_tech": "公开情报·技术库",
   "public.public_intel.auto_company_strategy": "公开情报·车企战略",
   "public.public_intel.vehicle_model_library": "公开情报·车型库",
@@ -13,6 +14,8 @@ export const KB_COLLECTION_DISPLAY: Record<string, string> = {
 export const KB_COLLECTION_DESCRIPTIONS: Record<string, string> = {
   "internal.geelywiki.pages":
     "GeelyWiki 内部 LLMwiki 归档（全文 + claims），真源信息，冲突时优先遵守和采纳。",
+  "public.geelywiki.pages":
+    "经 MCP 导入的外部 Wiki 页面，供参考，冲突时以内部知识库为准。",
   "public.structured_tech.geely_tech":
     "来自互联网检索的结构化技术点信息，供参考与补充，冲突时以真源集合为准。",
   "public.public_intel.auto_company_strategy":
@@ -59,6 +62,12 @@ export function isInternalKbCollection(name: string): boolean {
 
 export function isKbCollectionHidden(name: string): boolean {
   return KB_HIDDEN_COLLECTIONS.has(name.trim());
+}
+
+/** 空的项目知识库不进浏览列表，等有文档写入后再出现。 */
+export function isProjectKbListed(name: string, entryCount: number): boolean {
+  if (kbCollectionScope(name) !== "project") return true;
+  return entryCount > 0;
 }
 
 export const KB_COLLECTION_SCOPE_ORDER = ["internal", "public", "project"] as const;

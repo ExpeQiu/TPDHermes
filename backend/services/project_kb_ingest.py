@@ -409,20 +409,11 @@ def schedule_ingest_attachment(attachment_id: str) -> None:
 
 
 def schedule_ingest_output(output_id: str) -> None:
-    if not project_kb_ingest_enabled():
-        return
-
-    async def _run() -> None:
-        try:
-            await ingest_project_output(output_id)
-        except Exception:
-            log.exception("schedule ingest output failed id=%s", output_id)
-
-    try:
-        loop = asyncio.get_running_loop()
-        loop.create_task(_run())
-    except RuntimeError:
-        asyncio.run(_run())
+    """输出默认不进项目知识库，须在项目控制台手动「存入知识库」。"""
+    log.info(
+        "skip auto project kb ingest output_id=%s reason=manual_only",
+        output_id,
+    )
 
 
 def schedule_output_kb_visibility(output_id: str, *, published: bool) -> None:

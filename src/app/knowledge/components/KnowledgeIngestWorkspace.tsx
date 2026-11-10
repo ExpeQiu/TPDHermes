@@ -3,7 +3,13 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { apiFetch, apiGet, apiPost } from "@/lib/api";
-import { runStatusLabel } from "@/lib/ui-labels";
+import {
+  KB_COLLECTION_DISPLAY,
+  isBindableKbCollection,
+  isKbCollectionHidden,
+  kbCollectionScope,
+} from "@/lib/kb-collection-catalog";
+import { KB_DOMAIN_LABELS, kbCollectionLabel, kbDomainLabel, kbFolderPathLabel, runStatusLabel } from "@/lib/ui-labels";
 
 export interface KnowledgeIngestPrefill {
   collection?: string;
@@ -35,6 +41,49 @@ const STATUS_LABEL: Record<QueueStatus, string> = {
   error: "失败",
 };
 
+type ImportScope = "internal" | "external";
+
+function importScopeOf(name: string): ImportScope | null {
+  const scope = kbCollectionScope(name);
+  if (scope === "internal") return "internal";
+  if (scope === "public") return "external";
+  return null;
+}
+
+function collectionOptions(live: string[], selected: string): { scope: ImportScope; name: string }[] {
+  const names = new Set<string>([
+    ...Object.keys(KB_COLLECTION_DISPLAY),
+    ...live.filter((name) => isBindableKbCollection(name)),
+  ]);
+  if (selected && !isKbCollectionHidden(selected)) names.add(selected);
+  const rank: Record<ImportScope, number> = { internal: 0, external: 1 };
+  return [...names]
+    .map((name) => ({ name, scope: importScopeOf(name) }))
+    .filter((row): row is { scope: ImportScope; name: string } => row.scope != null)
+    .sort((a, b) => rank[a.scope] - rank[b.scope] || kbCollectionLabel(a.name).localeCompare(kbCollectionLabel(b.name), "zh"));
+}
+
+const BASE_FOLDERS = ["02-知识库/导入", "02-知识库/待分类", "02-知识库/对话收割", "02-知识库/手动录入"];
+
+function domainChoices(selected: string): { value: string; label: string }[] {
+  const rows = Object.entries(KB_DOMAIN_LABELS)
+    .filter(([key]) => key !== "_uncategorized")
+    .map(([value, label]) => ({ value, label }));
+  if (selected && !rows.some((row) => row.value === selected)) {
+    rows.unshift({ value: selected, label: kbDomainLabel(selected) });
+  }
+  return rows;
+}
+
+function folderChoices(selected: string): string[] {
+  const domainFolders = Object.entries(KB_DOMAIN_LABELS)
+    .filter(([key]) => key !== "_uncategorized")
+    .map(([, label]) => `02-知识库/${label}`);
+  const names = [...BASE_FOLDERS, ...domainFolders];
+  if (selected && !names.includes(selected)) names.unshift(selected);
+  return names;
+}
+
 function uploadErrorMessage(data: { detail?: unknown }, status: number): string {
   if (typeof data.detail === "string" && data.detail.trim()) return data.detail;
   return `上传失败 HTTP ${status}`;
@@ -52,6 +101,7 @@ export default function KnowledgeIngestWorkspace({
   onCompleted?: () => void;
 }) {
   const [collection, setCollection] = useState(prefill.collection || "");
+  const [liveCollections, setLiveCollections] = useState<string[]>([]);
   const [domain, setDomain] = useState(prefill.domain || "structured_tech");
   const [folderPath, setFolderPath] = useState(prefill.folder_path || "02-知识库/导入");
   const [projectId, setProjectId] = useState(prefill.project_id || "__all__");
@@ -70,11 +120,32 @@ export default function KnowledgeIngestWorkspace({
   const notifiedJobRef = useRef<string | null>(null);
 
   useEffect(() => {
+    let cancelled = false;
+    void apiGet<{ collections?: string[] }>("/kb/collections?prefer_cache=1")
+      .then((payload) => {
+        if (!cancelled) setLiveCollections(payload.collections ?? []);
+      })
+      .catch((err: unknown) => {
+        console.warn("[kb-ingest] 合集列表加载失败", err instanceof Error ? err.message : err);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
     setCollection(prefill.collection || "");
     setDomain(prefill.domain || "structured_tech");
     setFolderPath(prefill.folder_path || "02-知识库/导入");
     setProjectId(prefill.project_id || "__all__");
   }, [prefill, prefillNonce]);
+
+  const options = useMemo(
+    () => collectionOptions(liveCollections, collection),
+    [liveCollections, collection],
+  );
+  const internalOptions = options.filter((row) => row.scope === "internal");
+  const externalOptions = options.filter((row) => row.scope === "external");
 
   const readyIds = useMemo(
     () => queue.filter((item) => item.status === "ready" && item.uploadId).map((item) => item.uploadId as string),
@@ -159,7 +230,7 @@ export default function KnowledgeIngestWorkspace({
   const runIngest = async (explicitIds?: string[]) => {
     const target = explicitIds?.length ? explicitIds : readyIds;
     if (!collection.trim()) {
-      setMessage("请填写知识集合");
+      setMessage("请选择知识集合");
       return;
     }
     if (!target.length) {
@@ -186,6 +257,12 @@ export default function KnowledgeIngestWorkspace({
         }
       }
 
+      console.info("[kb-ingest] 开始导入", {
+        collection: collection.trim(),
+        domain: domain.trim(),
+        folder_path: folderPath.trim(),
+        files: target.length,
+      });
       const body: Record<string, unknown> = {
         source_type: "upload",
         collection: collection.trim(),
@@ -310,28 +387,58 @@ export default function KnowledgeIngestWorkspace({
         <div className="grid gap-4 sm:grid-cols-2">
           <label className="block text-sm">
             <span className="text-slate-400">知识集合</span>
-            <input
+            <select
               value={collection}
               onChange={(e) => setCollection(e.target.value)}
-              placeholder="如：public.structured_tech.topic"
               className="mt-1 w-full rounded-lg border border-slate-300 dark:border-slate-700 bg-slate-100 dark:bg-slate-900 px-3 py-2 text-sm"
-            />
+            >
+              <option value="">请选择知识集合</option>
+              {collection && !options.some((row) => row.name === collection) ? (
+                <option value={collection}>{kbCollectionLabel(collection)}</option>
+              ) : null}
+              <optgroup label="内部知识库">
+                {internalOptions.map((row) => (
+                  <option key={row.name} value={row.name}>
+                    {kbCollectionLabel(row.name)}
+                  </option>
+                ))}
+              </optgroup>
+              <optgroup label="外部知识库">
+                {externalOptions.map((row) => (
+                  <option key={row.name} value={row.name}>
+                    {kbCollectionLabel(row.name)}
+                  </option>
+                ))}
+              </optgroup>
+            </select>
           </label>
           <label className="block text-sm">
             <span className="text-slate-400">业务域</span>
-            <input
+            <select
               value={domain}
               onChange={(e) => setDomain(e.target.value)}
               className="mt-1 w-full rounded-lg border border-slate-300 dark:border-slate-700 bg-slate-100 dark:bg-slate-900 px-3 py-2 text-sm"
-            />
+            >
+              {domainChoices(domain).map((row) => (
+                <option key={row.value} value={row.value}>
+                  {row.label}
+                </option>
+              ))}
+            </select>
           </label>
           <label className="block text-sm sm:col-span-2">
             <span className="text-slate-400">目录路径</span>
-            <input
+            <select
               value={folderPath}
               onChange={(e) => setFolderPath(e.target.value)}
               className="mt-1 w-full rounded-lg border border-slate-300 dark:border-slate-700 bg-slate-100 dark:bg-slate-900 px-3 py-2 text-sm"
-            />
+            >
+              {folderChoices(folderPath).map((path) => (
+                <option key={path} value={path}>
+                  {kbFolderPathLabel(path)}
+                </option>
+              ))}
+            </select>
           </label>
           <label className="block text-sm sm:col-span-2">
             <span className="text-slate-400">缓存同步项目 ID</span>

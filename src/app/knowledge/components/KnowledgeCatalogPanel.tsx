@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { apiDelete, apiGet, apiPatch, apiPost } from "@/lib/api";
-import { kbCollectionScope, kbCollectionScopeLabel } from "@/lib/kb-collection-catalog";
+import { isProjectKbListed, kbCollectionScope, kbCollectionScopeLabel } from "@/lib/kb-collection-catalog";
 import { kbCollectionLabel } from "@/lib/ui-labels";
 
 type CatalogDomain = {
@@ -118,7 +118,9 @@ export default function KnowledgeCatalogPanel({
   const grouped = useMemo(() => {
     return SCOPE_OPTIONS.map((item) => ({
       ...item,
-      collections: collections.filter((col) => kbCollectionScope(col.name) === item.key),
+      collections: collections.filter(
+        (col) => kbCollectionScope(col.name) === item.key && isProjectKbListed(col.name, col.entry_count),
+      ),
     }));
   }, [collections]);
 

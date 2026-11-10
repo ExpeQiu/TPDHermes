@@ -25,6 +25,7 @@ import KnowledgeIngestWorkspace, {
 } from "@/app/knowledge/components/KnowledgeIngestWorkspace";
 import KnowledgeAutoGovern from "@/app/knowledge/components/KnowledgeAutoGovern";
 import KnowledgeCatalogPanel from "@/app/knowledge/components/KnowledgeCatalogPanel";
+import KnowledgeMcpAccess from "@/app/knowledge/components/KnowledgeMcpAccess";
 import KnowledgePolicyDomain from "@/app/knowledge/components/KnowledgePolicyDomain";
 import { getKnowledgeQueryCache } from "@/app/knowledge/knowledge-query-cache";
 import {
@@ -32,6 +33,7 @@ import {
   collectionConfirmMatches,
   isKbCollectionHidden,
   isPublicKbCollection,
+  isProjectKbListed,
   kbCollectionScope,
   kbCollectionScopeLabel,
   kbCollectionSecondaryId,
@@ -1153,13 +1155,23 @@ function CollectionGovernPanel({
   );
 }
 
-function KnowledgePageLinks({ current }: { current?: "ingest" | "govern" }) {
+function KnowledgePageLinks({ current }: { current?: "mcp" | "ingest" | "govern" }) {
   const linkClass = (active: boolean, tone: string) =>
     `rounded-xl px-4 py-2.5 text-sm font-medium shadow-sm transition ${tone} ${
       active ? "ring-2 ring-offset-2 ring-offset-slate-50 dark:ring-offset-slate-950" : ""
     }`;
   return (
     <div className="flex flex-wrap gap-2">
+      <Link
+        href="/knowledge/mcp"
+        aria-current={current === "mcp" ? "page" : undefined}
+        className={linkClass(
+          current === "mcp",
+          "bg-emerald-600 text-white hover:bg-emerald-500 ring-emerald-300 dark:ring-emerald-400/80",
+        )}
+      >
+        MCP接入
+      </Link>
       <Link
         href="/knowledge/ingest"
         aria-current={current === "ingest" ? "page" : undefined}
@@ -1187,7 +1199,7 @@ function KnowledgePageLinks({ current }: { current?: "ingest" | "govern" }) {
 export default function KnowledgePageClient({
   surface = "hub",
 }: {
-  surface?: "hub" | "ingest" | "govern";
+  surface?: "hub" | "mcp" | "ingest" | "govern";
 }) {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -3371,7 +3383,9 @@ export default function KnowledgePageClient({
     );
     const domainOrder = Object.keys(KB_DOMAIN_LABELS);
     const groupedCols = KB_COLLECTION_SCOPE_ORDER.map((scope) => {
-      const inScope = cols.filter((c) => kbCollectionScope(c.name) === scope);
+      const inScope = cols.filter(
+        (c) => kbCollectionScope(c.name) === scope && isProjectKbListed(c.name, c.entry_count),
+      );
       const bySecondary = new Map<string, Collection[]>();
       for (const col of inScope) {
         const secondary = kbCollectionSecondaryId(col.name);
@@ -5015,6 +5029,38 @@ export default function KnowledgePageClient({
       )}
     </div>
   );
+
+  if (surface === "mcp") {
+    return (
+      <main className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-slate-100 p-4 text-slate-900 sm:p-6 md:p-8 dark:from-slate-950 dark:via-slate-900 dark:to-slate-950 dark:text-white">
+        <div className={CONTENT_MAX_CLASS}>
+          <header className="mb-8">
+            <Link href="/knowledge" className="text-sm text-slate-500 hover:text-slate-800 dark:hover:text-slate-200">
+              返回知识库
+            </Link>
+            <div className="mt-4 flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+              <div>
+                <h1 className="text-3xl font-bold sm:text-4xl">MCP接入</h1>
+                <p className="mt-2 max-w-2xl text-sm text-slate-500 sm:text-base">
+                  接入 GeelyWiki，手动同步页面到知识库。
+                </p>
+              </div>
+              <KnowledgePageLinks current="mcp" />
+            </div>
+          </header>
+          <KBDegradedBanner />
+          <section className="rounded-3xl border border-slate-200 bg-white/80 p-6 dark:border-slate-800 dark:bg-slate-900/50">
+            <KnowledgeMcpAccess
+              onSynced={() => {
+                knowledgeQueryCacheRef.current.invalidatePrefix("browse:");
+                knowledgeQueryCacheRef.current.invalidatePrefix("tree:");
+              }}
+            />
+          </section>
+        </div>
+      </main>
+    );
+  }
 
   if (surface === "ingest") {
     return (

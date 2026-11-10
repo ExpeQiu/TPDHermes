@@ -268,9 +268,11 @@ function ProjectOutputDetailPanel({
   copied,
   outputActionLinks,
   outputGovernBusy,
+  outputKbBusy,
   onCopy,
   onClose,
   onArchive,
+  onSaveToKb,
 }: {
   output: ProjectOutput;
   outputFullContent: string | null;
@@ -278,11 +280,14 @@ function ProjectOutputDetailPanel({
   copied: boolean;
   outputActionLinks: { chat: string; coCreate: string } | null;
   outputGovernBusy: boolean;
+  outputKbBusy: boolean;
   onCopy: () => void;
   onClose: () => void;
   onArchive: () => void;
+  onSaveToKb: () => void;
 }) {
   const displayContent = outputFullContent ?? output.content;
+  const savedToKb = (output.kb_ingest_status || "").toLowerCase() === "ingested";
   return (
     <div className="flex min-h-[320px] flex-col overflow-hidden rounded-2xl border border-slate-300 bg-slate-200/80 dark:border-slate-700 dark:bg-slate-800/80 lg:max-h-[calc(100vh-8rem)]">
       <div className="flex items-start justify-between gap-3 border-b border-slate-300 p-4 dark:border-slate-700">
@@ -353,10 +358,18 @@ function ProjectOutputDetailPanel({
           <button
             type="button"
             onClick={onArchive}
-            disabled={outputGovernBusy || output.status === "archived"}
+            disabled={outputGovernBusy || outputKbBusy || output.status === "archived"}
             className="rounded-lg border border-amber-300 bg-amber-50 px-4 py-2 text-sm font-medium text-amber-900 transition hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-40 dark:border-amber-600/50 dark:bg-amber-500/15 dark:text-amber-100 dark:hover:bg-amber-500/25"
           >
             归档
+          </button>
+          <button
+            type="button"
+            onClick={onSaveToKb}
+            disabled={outputKbBusy || outputGovernBusy || output.status === "archived"}
+            className="rounded-lg border border-emerald-300 bg-emerald-50 px-4 py-2 text-sm font-medium text-emerald-900 transition hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-40 dark:border-emerald-600/50 dark:bg-emerald-500/15 dark:text-emerald-100 dark:hover:bg-emerald-500/25"
+          >
+            {outputKbBusy ? "存入中…" : savedToKb ? "更新知识库" : "存入知识库"}
           </button>
         </div>
       </div>
@@ -365,16 +378,17 @@ function ProjectOutputDetailPanel({
 }
 
 function kbIngestStatusLabel(status: string | null | undefined): string {
-  const s = (status || "pending").toLowerCase();
+  const s = (status || "").toLowerCase();
+  if (!s) return "未入库";
   if (s === "ingested") return "已入库";
   if (s === "extracting" || s === "pending") return "入库中";
   if (s === "failed") return "入库失败";
   if (s === "removed") return "已移出";
-  return status || "待处理";
+  return status || "未入库";
 }
 
 function kbIngestBadgeClass(status: string | null | undefined): string {
-  const s = (status || "pending").toLowerCase();
+  const s = (status || "").toLowerCase();
   if (s === "ingested") {
     return "rounded border border-emerald-300 bg-emerald-50 px-2 py-0.5 text-xs text-emerald-800 dark:border-emerald-600/40 dark:bg-emerald-500/10 dark:text-emerald-300";
   }
@@ -508,6 +522,7 @@ export default function ProjectDetailPage() {
   const [pasteTextContent, setPasteTextContent] = useState("");
   const [pasteTextSaving, setPasteTextSaving] = useState(false);
   const [outputGovernBusy, setOutputGovernBusy] = useState(false);
+  const [outputKbBusy, setOutputKbBusy] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const imageOcrInputRef = useRef<HTMLInputElement>(null);
   const [editOpen, setEditOpen] = useState(false);
@@ -739,6 +754,50 @@ export default function ProjectDetailPage() {
       alert(e instanceof Error ? e.message : "归档失败");
     } finally {
       setOutputGovernBusy(false);
+    }
+  };
+
+  const handleSaveOutputToKb = async () => {
+    if (!id || !selectedOutput) return;
+    trackUsage({
+      eventName: "project_output_save_kb_click",
+      feature: "projects_outputs",
+      action: "save_kb_click",
+      projectId: String(id),
+      properties: { output_id: selectedOutput.id },
+    });
+    setOutputKbBusy(true);
+    try {
+      const res = await apiFetch(`/projects/${String(id)}/outputs/${selectedOutput.id}/save-to-kb`, {
+        method: "POST",
+      });
+      const saved = await readJson<{
+        ok: boolean;
+        kb_ingest_status?: string | null;
+        doc_id?: string | null;
+        chunk_count?: number | null;
+      }>(res);
+      setSelectedOutput((prev) =>
+        prev && prev.id === selectedOutput.id
+          ? { ...prev, kb_ingest_status: saved.kb_ingest_status || "ingested" }
+          : prev,
+      );
+      await refreshOutputs();
+      console.info("[project] 输出已存入项目知识库", {
+        project_id: id,
+        output_id: selectedOutput.id,
+        doc_id: saved.doc_id,
+        chunk_count: saved.chunk_count,
+      });
+    } catch (e) {
+      console.warn("[project] 存入知识库失败", {
+        project_id: id,
+        output_id: selectedOutput.id,
+        error: e instanceof Error ? e.message : String(e),
+      });
+      alert(e instanceof Error ? e.message : "存入知识库失败");
+    } finally {
+      setOutputKbBusy(false);
     }
   };
 
@@ -1335,7 +1394,7 @@ export default function ProjectDetailPage() {
                     <p>暂无输出记录</p>
                     <p className="mx-auto mt-3 max-w-md text-xs leading-relaxed text-slate-600 dark:text-slate-400">
                       对话创作不会自动写入此处，需在助手消息上点击「存入项目」；项目共创中 Agent
-                      创建的文件也会出现在此。已归档的输出不在列表中显示。
+                      创建的文件也会出现在此。已归档的输出不在列表中显示。输出不会自动进入项目知识库，需要在详情里点「存入知识库」。
                     </p>
                   </div>
                 ) : (
@@ -1396,9 +1455,11 @@ export default function ProjectDetailPage() {
                           copied={copied}
                           outputActionLinks={outputActionLinks}
                           outputGovernBusy={outputGovernBusy}
+                          outputKbBusy={outputKbBusy}
                           onCopy={() => handleCopy(outputFullContent ?? selectedOutput.content)}
                           onClose={() => setSelectedOutput(null)}
                           onArchive={() => void handleArchiveProjectOutput()}
+                          onSaveToKb={() => void handleSaveOutputToKb()}
                         />
                       ) : (
                         <div className="flex min-h-[320px] flex-col items-center justify-center rounded-2xl border border-dashed border-slate-300 bg-slate-100/50 p-6 text-center dark:border-slate-700 dark:bg-slate-900/30">

@@ -38,7 +38,6 @@ from backend.services.orchestration_service import (
     merge_chat_messages,
 )
 from backend.services.project_kb import merge_project_kb_collections, output_doc_id, project_kb_collection
-from backend.services.project_kb_ingest import schedule_ingest_output
 from backend.services.project_access import require_project_for_user
 from backend.services.run_log_service import (
     create_run,
@@ -660,13 +659,23 @@ async def execute_task(req: Request, task_req: TaskExecuteRequest, db: AsyncSess
                     update={"task_input": ti.model_copy(update={"source_material": material})},
                 )
         else:
-            schedule_ingest_output(oid)
             kb_col = project_kb_collection(pid)
             doc_id = output_doc_id(oid)
-            hint = (
-                f"来源输出已入项目知识库 collection={kb_col}，doc_id={doc_id}；"
-                f"请用 kb_query 或 kb_get_entry 按需检索片段，勿臆造未检索内容。"
-            )
+            already = (getattr(src_row, "kb_ingest_status", None) or "").strip().lower() == "ingested"
+            if already:
+                hint = (
+                    f"来源输出已在项目知识库 collection={kb_col}，doc_id={doc_id}；"
+                    f"请用 kb_query 或 kb_get_entry 按需检索片段，勿臆造未检索内容。"
+                )
+            else:
+                hint = (
+                    f"来源输出尚未存入项目知识库 collection={kb_col}，doc_id={doc_id}；"
+                    "不要假设可以检索到全文，请基于当前任务材料作答。"
+                )
+                logger.info(
+                    "[chat-output-context] 来源输出未入库，跳过自动写入 source_output_id=%s",
+                    oid,
+                )
             ti = eff_request.task_input
             if ti is None:
                 eff_request = eff_request.model_copy(update={"task_input": TaskInputPayload(extra=hint)})

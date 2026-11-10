@@ -16,6 +16,8 @@ from typing import Any
 logger = logging.getLogger("tpdx.hermes.geelywiki_mcp_config")
 
 DEFAULT_MCP_URL = "http://127.0.0.1:8787/mcp"
+IMPORT_SCOPES = frozenset({"internal", "external"})
+DEFAULT_IMPORT_SCOPE = "internal"
 
 
 def config_path() -> Path:
@@ -41,9 +43,16 @@ def _read_file() -> dict[str, Any] | None:
 
 def load_written() -> dict[str, str]:
     raw = _read_file()
-    if raw is None or "url" not in raw or raw["url"] is None:
+    if raw is None:
         return {}
-    return {"url": str(raw["url"]).strip()}
+    written: dict[str, str] = {}
+    if "url" in raw and raw["url"] is not None:
+        written["url"] = str(raw["url"]).strip()
+    if "import_scope" in raw and raw["import_scope"] is not None:
+        scope = str(raw["import_scope"]).strip()
+        if scope in IMPORT_SCOPES:
+            written["import_scope"] = scope
+    return written
 
 
 def resolve_wiki_mcp() -> dict[str, Any]:
@@ -59,29 +68,50 @@ def resolve_wiki_mcp() -> dict[str, Any]:
     path = config_path()
     parent = path.parent
     writable = os.access(parent, os.W_OK) if parent.exists() else True
+    if "import_scope" in written:
+        import_scope, scope_source = written["import_scope"], "saved"
+    else:
+        import_scope, scope_source = DEFAULT_IMPORT_SCOPE, "default"
     payload = {
         "config_path": str(path),
         "config_exists": path.is_file() and "url" in written,
         "writable": writable,
         "url": url,
         "url_source": source,
+        "import_scope": import_scope,
+        "import_scope_source": scope_source,
     }
     logger.info(
-        "geelywiki mcp config resolved url_source=%s config_exists=%s",
+        "geelywiki mcp config resolved url_source=%s import_scope=%s scope_source=%s config_exists=%s",
         source,
+        import_scope,
+        scope_source,
         payload["config_exists"],
     )
     return payload
 
 
-def save_wiki_mcp(*, url: str) -> dict[str, Any]:
+def save_wiki_mcp(*, url: str | None = None, import_scope: str | None = None) -> dict[str, Any]:
+    if url is None and import_scope is None:
+        raise ValueError("没有要保存的字段")
+    if import_scope is not None and import_scope not in IMPORT_SCOPES:
+        raise ValueError("导入范围只能是内部或外部")
     path = config_path()
     path.parent.mkdir(parents=True, exist_ok=True)
-    document = {"url": url.strip()}
+    document = _read_file() or {}
+    if url is not None:
+        document["url"] = url.strip()
+    if import_scope is not None:
+        document["import_scope"] = import_scope
     tmp = path.with_suffix(".json.tmp")
     tmp.write_text(json.dumps(document, ensure_ascii=False, indent=2), encoding="utf-8")
     tmp.replace(path)
-    logger.info("geelywiki mcp config saved path=%s url_set=%s", path, bool(document["url"]))
+    logger.info(
+        "geelywiki mcp config saved path=%s url_set=%s import_scope=%s",
+        path,
+        "url" in document and bool(str(document.get("url") or "").strip()),
+        document.get("import_scope") or "",
+    )
     return resolve_wiki_mcp()
 
 
