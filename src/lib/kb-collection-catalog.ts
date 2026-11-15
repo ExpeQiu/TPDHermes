@@ -2,6 +2,8 @@
 export const KB_COLLECTION_DISPLAY: Record<string, string> = {
   "internal.geelywiki.pages": "内部知识库·GeelyWiki",
   "public.geelywiki.pages": "外部知识库·GeelyWiki",
+  "internal.autocar.pages": "内部知识库·Autocar Wiki",
+  "public.autocar.pages": "外部知识库·Autocar Wiki",
   "public.structured_tech.geely_tech": "公开情报·技术库",
   "public.public_intel.auto_company_strategy": "公开情报·车企战略",
   "public.public_intel.vehicle_model_library": "公开情报·车型库",
@@ -16,6 +18,10 @@ export const KB_COLLECTION_DESCRIPTIONS: Record<string, string> = {
     "GeelyWiki 内部 LLMwiki 归档（全文 + claims），真源信息，冲突时优先遵守和采纳。",
   "public.geelywiki.pages":
     "经 MCP 导入的外部 Wiki 页面，供参考，冲突时以内部知识库为准。",
+  "internal.autocar.pages":
+    "Autocar Wiki 页面归档。公开技术发布，冲突时以内部 GeelyWiki 为准。",
+  "public.autocar.pages":
+    "Autocar Wiki 对外技术页，供参考，冲突时以内部知识库为准。",
   "public.structured_tech.geely_tech":
     "来自互联网检索的结构化技术点信息，供参考与补充，冲突时以真源集合为准。",
   "public.public_intel.auto_company_strategy":

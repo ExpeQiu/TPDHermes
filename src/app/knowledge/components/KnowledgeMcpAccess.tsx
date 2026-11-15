@@ -5,9 +5,13 @@ import { apiGet, apiPost, apiPut } from "@/lib/api";
 
 type ImportScope = "internal" | "external";
 
+type WikiSourceId = "geelywiki" | "autocar";
+
 type WikiMcpConfig = {
   url: string;
   url_source: string;
+  root?: string;
+  root_source?: string;
   writable: boolean;
   config_exists: boolean;
   import_scope?: ImportScope;
@@ -36,10 +40,42 @@ type SyncReport = {
   graph_skipped?: boolean;
 };
 
-const SCOPE_TARGET: Record<ImportScope, { label: string; collection: string }> = {
-  internal: { label: "内部知识库", collection: "internal.geelywiki.pages" },
-  external: { label: "外部知识库", collection: "public.geelywiki.pages" },
+type WikiSourceSpec = {
+  id: WikiSourceId;
+  title: string;
+  summary: string;
+  configPath: string;
+  syncPath: string;
+  defaultScope: ImportScope;
+  collections: Record<ImportScope, { label: string; collection: string }>;
 };
+
+const SOURCES: WikiSourceSpec[] = [
+  {
+    id: "geelywiki",
+    title: "GeelyWiki",
+    summary: "内部技术 Wiki。默认写入内部知识库，冲突时优先采纳。",
+    configPath: "/system/wiki-mcp",
+    syncPath: "/kb/geelywiki/sync",
+    defaultScope: "internal",
+    collections: {
+      internal: { label: "内部知识库", collection: "internal.geelywiki.pages" },
+      external: { label: "外部知识库", collection: "public.geelywiki.pages" },
+    },
+  },
+  {
+    id: "autocar",
+    title: "Autocar Wiki",
+    summary: "对外技术发布 Wiki。默认写入外部知识库，不并入内部图谱。",
+    configPath: "/system/autocar-mcp",
+    syncPath: "/kb/autocar/sync",
+    defaultScope: "external",
+    collections: {
+      internal: { label: "内部知识库", collection: "internal.autocar.pages" },
+      external: { label: "外部知识库", collection: "public.autocar.pages" },
+    },
+  },
+];
 
 function sourceLabel(source: string): string {
   if (source === "saved") return "页面保存";
@@ -47,10 +83,11 @@ function sourceLabel(source: string): string {
   return "默认";
 }
 
-export default function KnowledgeMcpAccess({ onSynced }: { onSynced?: () => void }) {
+function WikiSourceCard({ spec, onSynced }: { spec: WikiSourceSpec; onSynced?: () => void }) {
   const [config, setConfig] = useState<WikiMcpConfig | null>(null);
   const [url, setUrl] = useState("");
-  const [importScope, setImportScope] = useState<ImportScope>("internal");
+  const [root, setRoot] = useState("");
+  const [importScope, setImportScope] = useState<ImportScope>(spec.defaultScope);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [probing, setProbing] = useState(false);
@@ -64,16 +101,19 @@ export default function KnowledgeMcpAccess({ onSynced }: { onSynced?: () => void
     setLoading(true);
     setError("");
     try {
-      const payload = await apiGet<WikiMcpConfig>("/system/wiki-mcp");
+      const payload = await apiGet<WikiMcpConfig>(spec.configPath);
       setConfig(payload);
       setUrl(payload.url);
-      setImportScope(payload.import_scope === "external" ? "external" : "internal");
+      setRoot(payload.root || "");
+      setImportScope(payload.import_scope === "external" || payload.import_scope === "internal"
+        ? payload.import_scope
+        : spec.defaultScope);
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "加载 MCP 配置失败");
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [spec.configPath, spec.defaultScope]);
 
   useEffect(() => {
     void load();
@@ -84,11 +124,16 @@ export default function KnowledgeMcpAccess({ onSynced }: { onSynced?: () => void
     setError("");
     setNotice("");
     try {
-      const payload = await apiPut<WikiMcpConfig>("/system/wiki-mcp", { url, import_scope: importScope });
+      const payload = await apiPut<WikiMcpConfig>(spec.configPath, {
+        url,
+        root,
+        import_scope: importScope,
+      });
       setConfig(payload);
       setUrl(payload.url);
-      setImportScope(payload.import_scope === "external" ? "external" : "internal");
-      setNotice("地址和导入范围已保存。之后以这里的记录为准。");
+      setRoot(payload.root || "");
+      setImportScope(payload.import_scope === "external" ? "external" : payload.import_scope === "internal" ? "internal" : spec.defaultScope);
+      setNotice("地址、目录和导入范围已保存。之后以这里的记录为准。");
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "保存失败");
     } finally {
@@ -101,7 +146,7 @@ export default function KnowledgeMcpAccess({ onSynced }: { onSynced?: () => void
     setProbe(null);
     setError("");
     try {
-      setProbe(await apiPost<ProbeResult>("/system/wiki-mcp/probe", { url }));
+      setProbe(await apiPost<ProbeResult>(`${spec.configPath}/probe`, { url }));
     } catch (err: unknown) {
       setProbe({ ok: false, message: err instanceof Error ? err.message : "探测失败" });
     } finally {
@@ -115,14 +160,14 @@ export default function KnowledgeMcpAccess({ onSynced }: { onSynced?: () => void
     setNotice("");
     setReport(null);
     try {
-      const payload = await apiPost<SyncReport>("/kb/geelywiki/sync", {
+      const payload = await apiPost<SyncReport>(spec.syncPath, {
         demo: false,
         import_scope: importScope,
       });
       setReport(payload);
       if (payload.ok) {
-        const target = SCOPE_TARGET[payload.import_scope === "external" ? "external" : importScope];
-        setNotice(`已从 GeelyWiki 同步到${target.label}。`);
+        const target = spec.collections[payload.import_scope === "internal" ? "internal" : importScope];
+        setNotice(`已从 ${spec.title} 同步到${target.label}。`);
         onSynced?.();
       } else {
         setError(payload.error || "同步未完成");
@@ -134,29 +179,36 @@ export default function KnowledgeMcpAccess({ onSynced }: { onSynced?: () => void
     }
   };
 
-  return (
-    <div className="space-y-6">
-      <div>
-        <h2 className="text-lg font-semibold text-slate-900 dark:text-white">GeelyWiki</h2>
-        <p className="mt-1 max-w-2xl text-sm leading-6 text-slate-500">
-          通过 MCP 读取 GeelyWiki 页面。不会自动轮询，点「立即同步」才拉取。导入范围决定写入内部还是外部知识库，后续 Autocar Wiki 也按这个字段落库。
-        </p>
-      </div>
+  const scope = importScope === "internal" ? "internal" : "external";
 
+  return (
+    <section className="space-y-4 rounded-2xl border border-slate-200 p-5 dark:border-slate-800">
+      <div>
+        <h2 className="text-lg font-semibold text-slate-900 dark:text-white">{spec.title}</h2>
+        <p className="mt-1 text-sm leading-6 text-slate-500">{spec.summary}</p>
+      </div>
       {loading ? <p className="text-sm text-slate-500">加载中…</p> : null}
       {error ? <p className="text-sm text-red-600 dark:text-red-400">{error}</p> : null}
       {notice ? <p className="text-sm text-emerald-700 dark:text-emerald-400">{notice}</p> : null}
-
       {config ? (
         <div className="space-y-4">
+          <label className="block text-sm">
+            <span className="text-slate-700 dark:text-slate-200">仓库目录</span>
+            <span className="ml-2 text-xs text-slate-500">{sourceLabel(config.root_source || "default")}</span>
+            <input
+              value={root}
+              onChange={(event) => setRoot(event.target.value)}
+              className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 font-mono text-sm text-slate-900 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
+            />
+          </label>
           <label className="block text-sm">
             <span className="text-slate-700 dark:text-slate-200">导入到</span>
             <span className="ml-2 text-xs text-slate-500">
               {sourceLabel(config.import_scope_source || "default")}
-              {` · ${SCOPE_TARGET[importScope].collection}`}
+              {` · ${spec.collections[scope].collection}`}
             </span>
             <select
-              value={importScope}
+              value={scope}
               onChange={(event) => setImportScope(event.target.value === "external" ? "external" : "internal")}
               className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
             >
@@ -173,7 +225,6 @@ export default function KnowledgeMcpAccess({ onSynced }: { onSynced?: () => void
             <input
               value={url}
               onChange={(event) => setUrl(event.target.value)}
-              placeholder="http://127.0.0.1:8787/mcp"
               className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 font-mono text-sm text-slate-900 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
             />
           </label>
@@ -192,7 +243,7 @@ export default function KnowledgeMcpAccess({ onSynced }: { onSynced?: () => void
               本次写入 {report.page_count ?? 0} 页、{report.doc_count ?? 0} 篇文档
               {typeof report.claim_docs === "number" ? `（含 ${report.claim_docs} 条主张）` : ""}
               {report.collection ? ` · ${report.collection}` : ""}
-              {report.graph_skipped ? " · 外部知识库不并入内部图谱" : ""}
+              {report.graph_skipped ? " · 不并入内部图谱" : ""}
               {report.data_source ? ` · 来源 ${report.data_source}` : ""}
               {report.build_id ? ` · ${report.build_id}` : ""}
               {report.graph_error ? ` · 图谱未更新：${report.graph_error}` : ""}
@@ -226,6 +277,19 @@ export default function KnowledgeMcpAccess({ onSynced }: { onSynced?: () => void
           </div>
         </div>
       ) : null}
+    </section>
+  );
+}
+
+export default function KnowledgeMcpAccess({ onSynced }: { onSynced?: () => void }) {
+  return (
+    <div className="space-y-6">
+      <p className="max-w-2xl text-sm leading-6 text-slate-500">
+        通过 MCP 读取 Wiki 页面。不会自动轮询，点「立即同步」才拉取。仓库目录标明页面来源，同步仍走已保存的 MCP 地址。
+      </p>
+      {SOURCES.map((spec) => (
+        <WikiSourceCard key={spec.id} spec={spec} onSynced={onSynced} />
+      ))}
     </div>
   );
 }

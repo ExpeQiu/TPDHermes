@@ -11,6 +11,7 @@ logger = logging.getLogger("tpdx.hermes.system_config")
 
 from backend.services.cli_token import accept_agent_token, verify_access_token
 from backend.services.external_mcp import probe_external_mcp, resolve_external_mcp, save_external_mcp
+from backend.services.autocar_cli_config import probe_autocar_mcp, resolve_autocar_mcp, save_autocar_mcp
 from backend.services.geelywiki_cli_config import probe_wiki_mcp, resolve_wiki_mcp, save_wiki_mcp
 from backend.services.hermes_model_config import read_hermes_model, save_hermes_model
 from backend.services.kernel_binding import bind_kernel, list_kernels, save_bound_model, unbind_kernel
@@ -43,6 +44,7 @@ class CliTokenVerifyIn(BaseModel):
 class WikiMcpSave(BaseModel):
     url: str | None = None
     import_scope: str | None = None
+    root: str | None = None
 
 
 class WikiMcpProbe(BaseModel):
@@ -208,7 +210,7 @@ def get_wiki_mcp() -> dict:
 @router.put("/wiki-mcp")
 def update_wiki_mcp(body: WikiMcpSave) -> dict:
     try:
-        saved = save_wiki_mcp(url=body.url, import_scope=body.import_scope)
+        saved = save_wiki_mcp(url=body.url, import_scope=body.import_scope, root=body.root)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except OSError as exc:
@@ -221,6 +223,29 @@ def update_wiki_mcp(body: WikiMcpSave) -> dict:
 @router.post("/wiki-mcp/probe")
 def probe_wiki_mcp_route(body: WikiMcpProbe) -> dict:
     return probe_wiki_mcp(url=body.url)
+
+
+@router.get("/autocar-mcp")
+def get_autocar_mcp() -> dict:
+    return resolve_autocar_mcp()
+
+
+@router.put("/autocar-mcp")
+def update_autocar_mcp(body: WikiMcpSave) -> dict:
+    try:
+        saved = save_autocar_mcp(url=body.url, import_scope=body.import_scope, root=body.root)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except OSError as exc:
+        logger.error("autocar mcp config write failed err=%s", exc)
+        raise HTTPException(status_code=500, detail=f"无法写入配置文件: {exc}") from exc
+    logger.info("autocar mcp config updated url_source=%s", saved["url_source"])
+    return saved
+
+
+@router.post("/autocar-mcp/probe")
+def probe_autocar_mcp_route(body: WikiMcpProbe) -> dict:
+    return probe_autocar_mcp(url=body.url)
 
 
 @router.get("/external-mcp")

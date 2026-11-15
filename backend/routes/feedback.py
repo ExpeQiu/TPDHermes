@@ -203,19 +203,29 @@ async def run_skill_evolution(
     days: int = Query(default=14, ge=1, le=60),
     db: AsyncSession = Depends(get_db),
 ):
-    """按近期对话与反馈改写或新建技能，并留下版本快照。"""
-    from backend.services.skill_evolution import evolve_recent
+    """把近期对话与反馈收成学习计划，留到 0:00–5:00 执行。"""
+    from backend.services.learning_plan_service import enqueue_learning_plan
 
     await analyze_feedbacks(db, days=days)
-    result = await evolve_recent(db, days=days)
+    result = await enqueue_learning_plan(db, days=days)
     logger.info(
-        "learning evolve days=%s patched=%s created=%s skipped=%s",
-        result.get("days"),
-        len(result.get("patched") or []),
-        len(result.get("created") or []),
-        len(result.get("skipped") or []),
+        "learning evolve enqueued days=%s enqueued=%s enabled=%s",
+        days,
+        result.get("enqueued"),
+        result.get("enabled"),
     )
     return result
+
+
+@learning_router.get("/plan")
+async def get_learning_plan(
+    limit: int = Query(default=50, ge=1, le=100),
+    db: AsyncSession = Depends(get_db),
+):
+    from backend.services.learning_plan_service import list_plan
+
+    items = await list_plan(db, limit=limit)
+    return {"items": items, "count": len(items)}
 
 
 @learning_router.get("/changes")

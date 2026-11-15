@@ -1,5 +1,5 @@
 """
-成长性后台调度：24h 反馈追问队列、每周学习报告。
+成长性后台调度：白天入队学习计划，每天 0:00–5:00 逐条执行。
 """
 
 from __future__ import annotations
@@ -61,30 +61,35 @@ class GrowthScheduler:
             await enqueue_feedback_prompts(db, hours=24)
             await analyze_feedbacks(db, days=14)
             await export_learning_hints(db)
-            try:
-                from backend.services.skill_evolution import evolve_recent
-                from backend.services.system_quiet import system_is_quiet
+            from backend.services.learning_plan_service import claim_one, enqueue_learning_plan, in_night_window
 
-                quiet, reason = await system_is_quiet(db)
-                if not quiet:
-                    logger.info("growth_scheduler evolve deferred reason=%s", reason)
-                else:
-                    evolved = await evolve_recent(db, days=14)
-                    logger.info(
-                        "growth_scheduler evolve enabled=%s patched=%s created=%s skipped=%s",
-                        evolved.get("enabled"),
-                        len(evolved.get("patched") or []),
-                        len(evolved.get("created") or []),
-                        len(evolved.get("skipped") or []),
-                    )
+            try:
+                enqueued = await enqueue_learning_plan(db, days=14)
+                logger.info(
+                    "growth_scheduler plan enqueued=%s enabled=%s",
+                    enqueued.get("enqueued"),
+                    enqueued.get("enabled"),
+                )
             except Exception:
-                logger.exception("growth_scheduler evolve failed")
+                logger.exception("growth_scheduler enqueue failed")
 
             now = datetime.now()
             week_key = now.strftime("%Y-W%W")
-            if now.weekday() == 0 and now.hour >= 8 and self._last_weekly_key != week_key:
+            if now.weekday() == 0 and in_night_window(now) and self._last_weekly_key != week_key:
                 await generate_weekly_report(db)
                 self._last_weekly_key = week_key
                 logger.info("growth_scheduler weekly report generated week=%s", week_key)
+
+            if in_night_window(now):
+                try:
+                    claimed = await claim_one(db)
+                    logger.info(
+                        "growth_scheduler claim status=%s kind=%s task_id=%s",
+                        claimed.get("status"),
+                        claimed.get("kind"),
+                        claimed.get("task_id"),
+                    )
+                except Exception:
+                    logger.exception("growth_scheduler claim failed")
 
 growth_scheduler = GrowthScheduler()

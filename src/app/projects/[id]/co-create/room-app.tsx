@@ -12,11 +12,13 @@ import {
 } from "@/app/projects/[id]/co-create/co-create-agent-utils";
 import { FilePreviewPanel } from "@/app/projects/[id]/co-create/components/FilePreviewPanel";
 import { ChatMarkdownWithCitations } from "@/components/chat-markdown-with-citations";
+import { ChatMessageQuickActions } from "@/components/chat-message-quick-actions";
 import { ProjectFilesPanel } from "@/app/projects/[id]/co-create/components/ProjectFilesPanel";
 import { useFileWorkspace } from "@/app/projects/[id]/co-create/hooks/use-file-workspace";
 import {
   acceptRoomPayload,
   buildRoomFileRef,
+  expandRoomFileActions,
   formatElapsedSeconds,
   questionClock,
   type RoomFileRef,
@@ -60,6 +62,8 @@ type RoomMessage = {
   event_seq?: number;
   error_summary?: string;
   created_at?: string | null;
+  run_id?: string;
+  agent_mode?: CoCreateAgentMode;
 };
 
 type RoomTurnState = {
@@ -74,7 +78,7 @@ const HISTORY_PAGE = 80;
 const ROOM_AGENT_MODES: CoCreateAgentMode[] = ["ask", "agent", "plan"];
 
 const AgentMessageBody = memo(function AgentMessageBody({ content }: { content: string }) {
-  return <ChatMarkdownWithCitations content={content} />;
+  return <ChatMarkdownWithCitations content={expandRoomFileActions(content)} />;
 });
 
 function hashRoleId(value: string): number {
@@ -1474,6 +1478,60 @@ export default function CoCreateRoomApp() {
                     message.content
                   )}
                 </div>
+                {message.author_type === "agent" && message.content.trim() ? (
+                  <ChatMessageQuickActions
+                    content={expandRoomFileActions(message.content)}
+                    role="assistant"
+                    messageId={message.id}
+                    exportTitle={activeRoom?.title || "共创回复"}
+                    collectionName={projectId ? `project.${projectId}.kb` : ""}
+                    projectId={projectId}
+                    sessionId={activeId}
+                    runId={message.run_id}
+                    scenarioId="co_create"
+                    actionsDisabled={sending || clock.pending}
+                    onRegenerate={async () => {
+                      if (!activeId) return;
+                      const question = messages.find(
+                        (item) => item.turn_id === message.turn_id && item.author_type === "human",
+                      );
+                      const text = question?.content.trim();
+                      if (!text) {
+                        setError("找不到对应的提问，无法重写");
+                        return;
+                      }
+                      const created = await apiPost<RoomMessage>(
+                        `/projects/${projectId}/rooms/${activeId}/messages`,
+                        {
+                          content: text,
+                          client_message_id: randomUUID(),
+                          agent_mode: question?.agent_mode || "agent",
+                        },
+                      );
+                      const cached = mergeMessages(messageCacheRef.current[activeId] ?? messagesRef.current, [created]);
+                      messageCacheRef.current[activeId] = cached;
+                      eventCursorRef.current[activeId] = Math.max(
+                        eventCursorRef.current[activeId] ?? 0,
+                        created.event_seq ?? 0,
+                      );
+                      setMessages(cached);
+                      console.info("[co-create-room] 重写回复", {
+                        projectId,
+                        roomId: activeId,
+                        turnId: message.turn_id,
+                        messageId: message.id,
+                      });
+                      void refreshRoom(activeId, epochRef.current);
+                    }}
+                    onDocumentCreated={(outputId) => {
+                      setFileListEnabled(true);
+                      setFilesRevealed(true);
+                      void fileWorkspace.refreshFiles();
+                      fileWorkspace.openFileTab(encodeProjectFileSelectValue("output", outputId));
+                      console.info("[co-create-room] 回复已创建文档", { projectId, outputId, messageId: message.id });
+                    }}
+                  />
+                ) : null}
               </article>
               );
             })}

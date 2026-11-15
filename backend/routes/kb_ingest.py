@@ -562,3 +562,46 @@ async def sync_geelywiki_manual(body: GeelyWikiSyncRequest):
         public.get("collection"),
     )
     return public
+
+
+class AutocarSyncRequest(BaseModel):
+    demo: bool = False
+    import_scope: str | None = None
+
+
+@router.post("/autocar/sync")
+async def sync_autocar_manual(body: AutocarSyncRequest):
+    """经已保存的 Autocar Wiki MCP 地址手动拉取页面，写入独立集合。"""
+    from backend.services.autocar_cli_config import resolve_autocar_mcp, save_autocar_mcp
+    from backend.services.autocar_ingest import ingest_autocar
+    from backend.services.kb_contract import autocar_import_target
+
+    resolved = resolve_autocar_mcp()
+    scope = (body.import_scope or str(resolved.get("import_scope") or "external")).strip()
+    try:
+        autocar_import_target(scope)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if body.import_scope and resolved.get("writable"):
+        try:
+            save_autocar_mcp(import_scope=scope)
+        except OSError as exc:
+            log.exception("autocar import scope save failed err=%s", exc)
+    log.info("autocar manual sync start demo=%s source=mcp import_scope=%s", body.demo, scope)
+    try:
+        report = await asyncio.to_thread(ingest_autocar, demo=body.demo, apply=True, import_scope=scope)
+    except Exception as exc:
+        log.exception("autocar manual sync failed")
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    public = _public_geelywiki_report(report)
+    log.info(
+        "autocar manual sync done ok=%s pages=%s docs=%s source=%s build_id=%s import_scope=%s collection=%s",
+        public.get("ok"),
+        public.get("page_count"),
+        public.get("doc_count"),
+        public.get("source"),
+        public.get("build_id"),
+        public.get("import_scope"),
+        public.get("collection"),
+    )
+    return public

@@ -97,6 +97,47 @@ def _messages(client: TestClient, user_id: str, project_id: str, room_id: str, a
     return response.json()
 
 
+def test_human_author_shows_account_display_name(room_roles):
+    suffix = uuid.uuid4().hex[:8]
+    shown = f"名{suffix}"
+    with TestClient(app) as client:
+        registered = client.post(
+            "/api/v1/auth/register",
+            json={
+                "username": f"u{suffix}",
+                "employee_id": f"e{suffix}",
+                "org_id": f"o{suffix}",
+                "display_name": shown,
+            },
+        )
+        assert registered.status_code == 200, registered.text
+        owner = registered.json()["user_id"]
+        project_id = _create_project(client, owner)
+        room_id = _create_room(client, owner, project_id, title="署名")["id"]
+        posted = _post(client, owner, project_id, room_id, "看署名")
+        assert posted["author_id"] == owner
+        assert posted["author_name"] == shown
+
+        async def _store_raw_id() -> None:
+            from sqlalchemy import update
+
+            from backend.db import async_session_maker
+            from backend.models.project_room import ProjectRoomMessage
+
+            async with async_session_maker() as db:
+                await db.execute(
+                    update(ProjectRoomMessage)
+                    .where(ProjectRoomMessage.id == posted["id"])
+                    .values(author_name=owner)
+                )
+                await db.commit()
+
+        asyncio.run(_store_raw_id())
+        listed = _messages(client, owner, project_id, room_id)
+        human = next(item for item in listed["messages"] if item["author_type"] == "human")
+        assert human["author_name"] == shown
+
+
 def test_rename_and_archive_room(room_roles):
     owner = f"room_owner_{uuid.uuid4().hex[:8]}"
     viewer = f"room_view_{uuid.uuid4().hex[:8]}"

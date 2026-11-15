@@ -560,28 +560,19 @@ async def apply_actions(
     return {"patched": patched, "created": created, "skipped": skipped}
 
 
-async def evolve_recent(
-    db: AsyncSession,
-    *,
-    days: int = 14,
-    loader: SkillLoader | None = None,
-) -> dict[str, Any]:
-    """扫描近期反馈、用户纠正句和学习信号，并落成带版本的技能变更。"""
+async def collect_evolution(db: AsyncSession, *, days: int = 14) -> dict[str, Any]:
+    """只挖掘可执行的技能动作，不写技能文件。"""
     if not evolution_enabled():
         logger.info("skill_evolution disabled")
         return {
             "enabled": False,
             "days": days,
             "episodes": 0,
-            "actions": 0,
-            "patched": [],
-            "created": [],
-            "skipped": [],
+            "actions": [],
         }
 
     window = max(1, min(int(days), 60))
     since = (datetime.now() - timedelta(days=window)).isoformat()
-    skill_loader = loader or SkillLoader()
     known = await _known_skills(db)
     feedback = await _feedback_episodes(db, since=since, known=known)
     chat = await _chat_episodes(db, since=since, known=known)
@@ -606,11 +597,39 @@ async def evolve_recent(
         len(episodes),
         len(actions),
     )
-    applied = await apply_actions(db, actions, skill_loader)
     return {
         "enabled": True,
         "days": window,
         "episodes": len(episodes),
+        "actions": actions,
+    }
+
+
+async def evolve_recent(
+    db: AsyncSession,
+    *,
+    days: int = 14,
+    loader: SkillLoader | None = None,
+) -> dict[str, Any]:
+    """扫描近期反馈、用户纠正句和学习信号，并落成带版本的技能变更。"""
+    mined = await collect_evolution(db, days=days)
+    actions: list[EvolutionAction] = list(mined.get("actions") or [])
+    if not mined.get("enabled"):
+        return {
+            "enabled": False,
+            "days": mined.get("days", days),
+            "episodes": 0,
+            "actions": 0,
+            "patched": [],
+            "created": [],
+            "skipped": [],
+        }
+    skill_loader = loader or SkillLoader()
+    applied = await apply_actions(db, actions, skill_loader)
+    return {
+        "enabled": True,
+        "days": mined.get("days", days),
+        "episodes": mined.get("episodes", 0),
         "actions": len(actions),
         **applied,
     }

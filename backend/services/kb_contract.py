@@ -20,6 +20,8 @@ KB_DOMAIN_ENUM: frozenset[str] = frozenset(
 
 GEELYWIKI_PAGES_COLLECTION = "internal.geelywiki.pages"
 GEELYWIKI_PAGES_PUBLIC_COLLECTION = "public.geelywiki.pages"
+AUTOCAR_PAGES_COLLECTION = "internal.autocar.pages"
+AUTOCAR_PAGES_PUBLIC_COLLECTION = "public.autocar.pages"
 PUBLIC_INTEL_STRATEGY_COLLECTION = "public.public_intel.auto_company_strategy"
 PUBLIC_INTEL_VEHICLE_COLLECTION = "public.public_intel.vehicle_model_library"
 PUBLIC_INTEL_TECH_COLLECTION = "public.structured_tech.geely_tech"
@@ -49,6 +51,7 @@ AUTHORITY_RANK: dict[str, int] = {
 }
 
 SOURCE_GEELYWIKI = "geelywiki"
+SOURCE_AUTOCAR = "autocar"
 SOURCE_PUBLIC_INTEL = "public_intel"
 SOURCE_WEB = "web_retrieval"
 SOURCE_EXPERIENCE = "tpd_experience"
@@ -59,6 +62,12 @@ KB_COLLECTION_DESCRIPTIONS: dict[str, str] = {
     ),
     GEELYWIKI_PAGES_PUBLIC_COLLECTION: (
         "经 MCP 导入的外部 Wiki 页面，供参考，冲突时以内部知识库为准。"
+    ),
+    AUTOCAR_PAGES_COLLECTION: (
+        "Autocar Wiki 页面归档。公开技术发布，冲突时以内部 GeelyWiki 为准。"
+    ),
+    AUTOCAR_PAGES_PUBLIC_COLLECTION: (
+        "Autocar Wiki 对外技术页，供参考，冲突时以内部知识库为准。"
     ),
     PUBLIC_INTEL_TECH_COLLECTION: (
         "来自互联网检索的结构化技术点信息，供参考与补充，冲突时以真源集合为准。"
@@ -137,6 +146,16 @@ def geelywiki_import_target(scope: str) -> tuple[str, str]:
         return GEELYWIKI_PAGES_COLLECTION, AUTHORITY_CANONICAL
     if key == "external":
         return GEELYWIKI_PAGES_PUBLIC_COLLECTION, AUTHORITY_SUPPLEMENT
+    raise ValueError("导入范围只能是内部或外部")
+
+
+def autocar_import_target(scope: str) -> tuple[str, str]:
+    """Autocar 是公开技术 Wiki，内部或外部导入都不升为真源。"""
+    key = str(scope or "").strip()
+    if key == "internal":
+        return AUTOCAR_PAGES_COLLECTION, AUTHORITY_SUPPLEMENT
+    if key == "external":
+        return AUTOCAR_PAGES_PUBLIC_COLLECTION, AUTHORITY_SUPPLEMENT
     raise ValueError("导入范围只能是内部或外部")
 
 

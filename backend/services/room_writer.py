@@ -9,6 +9,7 @@ from typing import Any
 
 import httpx
 
+from backend.services.kernel_binding import resolve_chat_upstream
 from backend.services.room_contract import writer_driver_name
 
 logger = logging.getLogger("tpdx.hermes.co_create_room")
@@ -104,21 +105,23 @@ def build_writer_messages(role: dict[str, Any], ctx: dict[str, Any]) -> list[dic
 
 
 async def request_writer_completion(messages: list[dict[str, str]]) -> str:
-    url = os.getenv("HERMES_CHAT_API_URL", "").strip()
+    upstream = resolve_chat_upstream()
+    url = str(upstream.get("url") or "").strip()
     if not url:
         raise RuntimeError("真实主笔不可用：未配置 HERMES_CHAT_API_URL")
     model = os.getenv("HERMES_CHAT_MODEL", "").strip() or "hermes"
     timeout = float(os.getenv("ROOM_WRITER_TIMEOUT_SECONDS", "300"))
     payload = {"model": model, "messages": messages, "stream": False}
-    api_key = os.getenv("HERMES_CHAT_API_KEY", "").strip()
+    api_key = str(upstream.get("api_key") or "").strip()
     headers = {"Content-Type": "application/json"}
     if api_key:
         headers["Authorization"] = f"Bearer {api_key}"
     started = time.perf_counter()
     logger.info(
-        "[co-create-room] writer request driver=hermes model=%s auth=%s",
+        "[co-create-room] writer request driver=hermes model=%s auth=%s source=%s",
         model,
         "yes" if api_key else "no",
+        upstream.get("source") or "env",
     )
     try:
         async with httpx.AsyncClient(timeout=timeout, trust_env=False) as client:

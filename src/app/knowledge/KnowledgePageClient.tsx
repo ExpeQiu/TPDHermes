@@ -5042,7 +5042,7 @@ export default function KnowledgePageClient({
               <div>
                 <h1 className="text-3xl font-bold sm:text-4xl">MCP接入</h1>
                 <p className="mt-2 max-w-2xl text-sm text-slate-500 sm:text-base">
-                  接入 GeelyWiki，手动同步页面到知识库。
+                  接入 GeelyWiki 与 Autocar Wiki，手动同步页面到知识库。
                 </p>
               </div>
               <KnowledgePageLinks current="mcp" />

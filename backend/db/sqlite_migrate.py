@@ -657,6 +657,41 @@ def _ensure_growth_tables(connection: Connection) -> None:
         )
         logger.info("sqlite_migrate: created table learning_reports")
 
+    if "learning_tasks" not in names:
+        connection.execute(
+            text(
+                """
+                CREATE TABLE learning_tasks (
+                    id TEXT PRIMARY KEY,
+                    dedupe_key TEXT NOT NULL,
+                    kind TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    target_kind TEXT,
+                    target_id TEXT,
+                    summary TEXT,
+                    signal_type TEXT,
+                    rule_id TEXT,
+                    baseline_json TEXT,
+                    acceptance_json TEXT,
+                    evidence_json TEXT,
+                    payload_json TEXT,
+                    due_at TEXT,
+                    parent_id TEXT,
+                    night_key TEXT,
+                    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+                )
+                """
+            )
+        )
+        connection.execute(
+            text("CREATE INDEX IF NOT EXISTS idx_learning_tasks_status ON learning_tasks (status, due_at)")
+        )
+        connection.execute(
+            text("CREATE INDEX IF NOT EXISTS idx_learning_tasks_dedupe ON learning_tasks (dedupe_key)")
+        )
+        logger.info("sqlite_migrate: created table learning_tasks")
+
     if "feedback_prompts" not in names:
         connection.execute(
             text(

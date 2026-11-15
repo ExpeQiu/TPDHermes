@@ -14,11 +14,16 @@ from pathlib import Path
 from typing import Any
 
 from sqlalchemy import desc, func, select
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.models.feedback_event import FeedbackEvent
 from backend.models.learning_report import LearningReport
 from backend.models.learning_signal import LearningSignal
+from backend.models.learning_task import LearningTask
+from backend.models.orchestration_run import OrchestrationRun
+from backend.models.scenario_profile import ScenarioProfile
+from backend.models.skill import Skill
 from backend.services.feedback_service import feedback_stats
 
 logger = logging.getLogger("tpdx.hermes.learning")
@@ -135,9 +140,161 @@ async def analyze_feedbacks(db: AsyncSession, *, days: int = 14) -> list[Learnin
         )
         signals.append(sig)
 
+    underused = await _detect_skill_underuse(db, now=now)
+    signals.extend(underused)
+
     await db.commit()
-    logger.info("learning analyze complete signals=%s", len(signals))
+    logger.info("learning analyze complete signals=%s underused=%s", len(signals), len(underused))
     return signals
+
+
+def _called_skill_names(meta_raw: str | None, tool_raw: str | None) -> set[str]:
+    names: set[str] = set()
+    for raw in (meta_raw, tool_raw):
+        if not raw:
+            continue
+        try:
+            data = json.loads(raw)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(data, dict):
+            continue
+        calls = data.get("skill_calls")
+        if isinstance(calls, list):
+            for item in calls:
+                if isinstance(item, str) and item.strip():
+                    names.add(item.strip())
+                elif isinstance(item, dict):
+                    name = str(item.get("skill_name") or item.get("skill") or "").strip()
+                    if name:
+                        names.add(name)
+        used = data.get("used_skills")
+        if isinstance(used, list):
+            for item in used:
+                if isinstance(item, str) and item.strip():
+                    names.add(item.strip())
+        artifacts = data.get("artifacts")
+        if isinstance(artifacts, list):
+            for item in artifacts:
+                if isinstance(item, dict):
+                    name = str(item.get("skill") or "").strip()
+                    if name:
+                        names.add(name)
+    return names
+
+
+def _policy_skill_names(raw: str | None) -> set[str]:
+    try:
+        data = json.loads(raw or "{}")
+    except json.JSONDecodeError:
+        return set()
+    if not isinstance(data, dict):
+        return set()
+    found: set[str] = set()
+    for key in ("allowed", "preferred", "required"):
+        values = data.get(key)
+        if isinstance(values, list):
+            for item in values:
+                text = str(item or "").strip()
+                if text:
+                    found.add(text)
+    return found
+
+
+def _skill_is_old(installed_at: str | None, now: datetime) -> bool:
+    if not installed_at:
+        return True
+    try:
+        parsed = datetime.fromisoformat(installed_at.replace("Z", "+00:00"))
+    except ValueError:
+        return True
+    if parsed.tzinfo is not None:
+        parsed = parsed.replace(tzinfo=None)
+    return parsed <= now - timedelta(days=7)
+
+
+async def _detect_skill_underuse(db: AsyncSession, *, now: str) -> list[LearningSignal]:
+    """已安装超过 7 天且近 14 天零调用的技能。编排样本不足 5 次时不产生信号。"""
+    moment = datetime.fromisoformat(now)
+    since = (moment - timedelta(days=14)).isoformat()
+    try:
+        async with db.begin_nested():
+            run_rows = (
+                await db.execute(
+                    select(
+                        OrchestrationRun.response_metadata_json,
+                        OrchestrationRun.tool_capture_json,
+                    ).where(
+                        OrchestrationRun.status == "completed",
+                        OrchestrationRun.created_at >= since,
+                    )
+                )
+            ).all()
+            skills = (await db.execute(select(Skill).where(Skill.enabled == 1))).scalars().all()
+            scenarios = (
+                await db.execute(select(ScenarioProfile).where(ScenarioProfile.status == "published"))
+            ).scalars().all()
+            verifying = (
+                await db.execute(
+                    select(LearningTask.target_id).where(
+                        LearningTask.kind == "create_skill",
+                        LearningTask.status == "verifying",
+                    )
+                )
+            ).scalars().all()
+    except SQLAlchemyError:
+        logger.info("learning underuse probe skipped")
+        return []
+
+    if len(run_rows) < 5:
+        logger.info("learning underuse skipped runs=%s", len(run_rows))
+        return []
+
+    called: set[str] = set()
+    for meta_raw, tool_raw in run_rows:
+        called.update(_called_skill_names(meta_raw, tool_raw))
+    verifying_names = {str(name) for name in verifying if name}
+    scenario_for: dict[str, str] = {}
+    for scenario in scenarios:
+        for name in _policy_skill_names(scenario.skills_policy_json):
+            scenario_for.setdefault(name, scenario.id)
+
+    found: list[LearningSignal] = []
+    for skill in skills:
+        name = str(skill.name or "").strip()
+        if not name or name in called or name in verifying_names:
+            continue
+        if name.startswith("learned_") and name in verifying_names:
+            continue
+        if not _skill_is_old(skill.installed_at, moment):
+            continue
+        scenario_id = scenario_for.get(name)
+        payload: dict[str, Any] = {
+            "skill": name,
+            "runs": len(run_rows),
+            "calls": 0,
+            "suggestion": "技能已安装但近期编排没有调用",
+        }
+        if scenario_id:
+            payload["scenario_id"] = scenario_id
+        sig = await _upsert_signal(
+            db,
+            signal_type="skill_underused",
+            entity_kind="skill",
+            entity_id=name,
+            entity_label=name,
+            count=1,
+            payload=payload,
+            now=now,
+        )
+        found.append(sig)
+        logger.info(
+            "learning underuse signal skill=%s scenario_id=%s runs=%s",
+            name,
+            scenario_id,
+            len(run_rows),
+        )
+    return found
 
 
 async def _upsert_signal(
@@ -250,38 +407,39 @@ async def generate_weekly_report(db: AsyncSession) -> LearningReport:
     stats = await feedback_stats(db, days=7)
     signals = await list_open_signals(db, limit=30)
 
-    learned: list[str] = []
-    pending: list[str] = []
-    for fb_row in (
+    kind_label = {
+        "patch_skill": "改写技能",
+        "create_skill": "新建技能",
+        "fill_kb": "补齐知识",
+        "tune_scenario": "调整场景",
+    }
+    task_rows = (
         await db.execute(
-            select(FeedbackEvent)
-            .where(
-                FeedbackEvent.created_at >= (now - timedelta(days=7)).isoformat(),
-                FeedbackEvent.adoption_level == "full",
+            select(LearningTask).where(
+                LearningTask.updated_at >= week_start,
+                LearningTask.kind.in_(tuple(kind_label)),
+                LearningTask.status.in_(("done", "rolled_back")),
             )
-            .order_by(desc(FeedbackEvent.created_at))
-            .limit(10)
         )
-    ).scalars():
-        scene = fb_row.scenario_id or "general"
-        learned.append(f"场景 {scene} 获得采纳反馈")
-
-    for sig in signals[:10]:
-        payload = {}
-        if sig.payload_json:
-            try:
-                payload = json.loads(sig.payload_json)
-            except json.JSONDecodeError:
-                pass
-        suggestion = payload.get("suggestion", sig.signal_type)
-        pending.append(f"[{sig.signal_type}] {sig.entity_label}: {suggestion}")
+    ).scalars().all()
+    learned = [
+        f"{kind_label.get(row.kind, row.kind)} {row.summary or row.target_id} 已完成"
+        for row in task_rows
+        if row.status == "done"
+    ]
+    pending = [
+        f"{kind_label.get(row.kind, row.kind)} {row.summary or row.target_id} 已回滚"
+        for row in task_rows
+        if row.status == "rolled_back"
+    ]
 
     summary = {
         "week_start": week_start,
         "feedback_stats": stats,
-        "learned": learned[:5],
+        "learned": learned[:8],
         "pending_confirmations": pending[:8],
         "open_signals_count": len(signals),
+        "task_outcomes": {"done": len(learned), "rolled_back": len(pending)},
         "generated_at": now.isoformat(),
     }
 

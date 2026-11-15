@@ -95,6 +95,7 @@ from backend.models.usage_event import UsageEvent as _UsageEvent  # noqa: E402, 
 from backend.models.feedback_event import FeedbackEvent as _FeedbackEvent  # noqa: E402, F401
 from backend.models.learning_signal import LearningSignal as _LearningSignal  # noqa: E402, F401
 from backend.models.learning_report import LearningReport as _LearningReport  # noqa: E402, F401
+from backend.models.learning_task import LearningTask as _LearningTask  # noqa: E402, F401
 from backend.models.feedback_prompt import FeedbackPrompt as _FeedbackPrompt  # noqa: E402, F401
 from backend.models.experience_entry import ExperienceEntry as _ExperienceEntry  # noqa: E402, F401
 from backend.models.chat_session import ChatSessionRecord as _ChatSessionRecord  # noqa: E402, F401

@@ -37,6 +37,16 @@ type WeeklyReportSummary = {
   generated_at?: string;
 };
 
+type PlanTask = {
+  id: string;
+  kind: string;
+  status: string;
+  target_id?: string;
+  summary?: string;
+  acceptance?: { metric?: string; better?: string };
+  due_at?: string;
+};
+
 type SkillChange = {
   skill: string;
   action: "patched" | "created" | "restored" | string;
@@ -77,6 +87,47 @@ function changeActionLabel(action: string): string {
     restored: "已回滚",
   };
   return map[action] ?? action;
+}
+
+function planKindLabel(kind: string): string {
+  const map: Record<string, string> = {
+    patch_skill: "改写技能",
+    create_skill: "新建技能",
+    fill_kb: "补齐知识",
+    tune_scenario: "调整场景",
+    verify: "验收",
+    rollback: "回滚",
+  };
+  return map[kind] ?? kind;
+}
+
+function planStatusLabel(status: string): string {
+  const map: Record<string, string> = {
+    confirmed: "排队",
+    running: "执行中",
+    verifying: "待验收",
+    done: "已完成",
+    rolled_back: "已回滚",
+  };
+  return map[status] ?? status;
+}
+
+function acceptanceHint(task: PlanTask): string {
+  const metric = task.acceptance?.metric;
+  const better = task.acceptance?.better;
+  if (!metric) return task.due_at ? `到期 ${task.due_at.slice(0, 16)}` : "";
+  const name =
+    metric === "adoption_rate"
+      ? "采纳率"
+      : metric === "reject_count"
+        ? "拒绝次数"
+        : metric === "kb_miss_count"
+          ? "空命中"
+          : metric === "skill_calls"
+            ? "技能调用"
+            : metric;
+  const direction = better === "higher" ? "上升" : "下降";
+  return `7 天后${name}${direction}`;
 }
 
 function signalTypeLabel(t: string): string {
@@ -123,6 +174,7 @@ export default function LearningPageClient() {
   const [stats, setStats] = useState<FeedbackStats | null>(null);
   const [signals, setSignals] = useState<LearningSignal[]>([]);
   const [changes, setChanges] = useState<SkillChange[]>([]);
+  const [plan, setPlan] = useState<PlanTask[]>([]);
   const [report, setReport] = useState<WeeklyReportSummary | null>(null);
   const [reportMeta, setReportMeta] = useState<{ id?: string; week_start?: string; created_at?: string } | null>(
     null,
@@ -133,10 +185,13 @@ export default function LearningPageClient() {
     setLoading(true);
     setError("");
     try {
-      const [statsRes, signalsRes, changesRes, reportRes] = await Promise.all([
+      const [statsRes, signalsRes, changesRes, planRes, reportRes] = await Promise.all([
         apiGet<FeedbackStats>(`/feedback/stats?days=${days}`),
         apiGet<{ items: LearningSignal[] }>("/learning/signals?limit=50"),
         apiGet<{ items: SkillChange[] }>(`/learning/changes?days=${days}&limit=50`),
+        apiGet<{
+          items: PlanTask[];
+        }>("/learning/plan?limit=50"),
         apiGet<{
           report: {
             id: string;
@@ -149,6 +204,7 @@ export default function LearningPageClient() {
       setStats(statsRes);
       setSignals(signalsRes.items ?? []);
       setChanges(changesRes.items ?? []);
+      setPlan(planRes.items ?? []);
       if (reportRes.report) {
         setReport(reportRes.report.summary ?? null);
         setReportMeta({
@@ -309,6 +365,37 @@ export default function LearningPageClient() {
                 value={pct(stats?.kb_miss_rate)}
                 hint="相对反馈量的 miss 信号"
               />
+            </section>
+
+            <section className="mb-6 rounded-2xl border border-slate-200 bg-white/80 p-5 dark:border-slate-800 dark:bg-slate-900/50">
+              <h2 className="text-lg font-semibold">学习计划</h2>
+              <p className="mt-1 text-xs text-slate-500">白天入队，每天 0:00–5:00 逐条执行 · {plan.length} 条</p>
+              <ul className="mt-4 max-h-80 space-y-3 overflow-y-auto text-sm">
+                {plan.length === 0 ? (
+                  <li className="text-slate-500">还没有排进夜跑的任务</li>
+                ) : (
+                  plan.map((item) => (
+                    <li
+                      key={item.id}
+                      className="rounded-lg border border-slate-200 px-3 py-2 dark:border-slate-700"
+                    >
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="rounded bg-slate-100 px-2 py-0.5 text-xs dark:bg-slate-800">
+                          {planKindLabel(item.kind)}
+                        </span>
+                        <span className="rounded bg-blue-50 px-2 py-0.5 text-xs text-blue-800 dark:bg-blue-950/50 dark:text-blue-300">
+                          {planStatusLabel(item.status)}
+                        </span>
+                        {item.target_id ? <span className="text-xs text-slate-500">{item.target_id}</span> : null}
+                      </div>
+                      {item.summary ? <p className="mt-1 text-slate-700 dark:text-slate-300">{item.summary}</p> : null}
+                      {acceptanceHint(item) ? (
+                        <p className="mt-1 text-xs text-slate-500">{acceptanceHint(item)}</p>
+                      ) : null}
+                    </li>
+                  ))
+                )}
+              </ul>
             </section>
 
             <section className="mb-6 rounded-2xl border border-slate-200 bg-white/80 p-5 dark:border-slate-800 dark:bg-slate-900/50">

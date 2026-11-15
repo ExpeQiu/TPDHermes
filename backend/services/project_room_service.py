@@ -18,6 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import load_only
 
 from backend.db import async_session_maker
+from backend.models.local_account import LocalAccount
 from backend.models.output_asset import OutputAsset
 from backend.models.project import Project
 from backend.models.project_file_domain import ProjectFileActionLog
@@ -122,7 +123,60 @@ def _loads(raw: str | None, fallback: list) -> list:
 
 
 def _now() -> str:
-    return datetime.now().isoformat()
+    return datetime.now().astimezone().isoformat()
+
+
+def _usable_person_name(name: str) -> str:
+    shown = (name or "").strip()
+    if not shown or shown.startswith("user_") or shown.startswith("auto_"):
+        return ""
+    return shown
+
+
+async def human_display_names(db: AsyncSession, user_ids: list[str]) -> dict[str, str]:
+    """账号显示名优先，其次用户偏好。没有可用名字时不返回。"""
+    ids = list(dict.fromkeys(uid.strip() for uid in user_ids if uid and uid.strip()))
+    if not ids:
+        return {}
+    names: dict[str, str] = {}
+    accounts = (
+        await db.execute(select(LocalAccount).where(LocalAccount.user_id.in_(ids)))
+    ).scalars().all()
+    for account in accounts:
+        shown = _usable_person_name(str(account.display_name or "")) or _usable_person_name(
+            str(account.username or "")
+        )
+        if shown:
+            names[str(account.user_id)] = shown
+    missing = [uid for uid in ids if uid not in names]
+    if missing:
+        from backend.services.user_preference_service import get_user_preferences
+
+        for uid in missing:
+            prefs = await get_user_preferences(db, uid)
+            shown = _usable_person_name(str(prefs.get("display_name") or ""))
+            if shown:
+                names[uid] = shown
+    return names
+
+
+def apply_human_display_name(payload: dict[str, Any], names: dict[str, str]) -> dict[str, Any]:
+    if payload.get("author_type") != "human":
+        return payload
+    uid = str(payload.get("author_id") or "")
+    shown = names.get(uid, "")
+    current = str(payload.get("author_name") or "")
+    if shown and (not _usable_person_name(current) or current == uid):
+        payload["author_name"] = shown
+    return payload
+
+
+async def present_messages(db: AsyncSession, rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    names = await human_display_names(
+        db,
+        [str(row.get("author_id") or "") for row in rows if row.get("author_type") == "human"],
+    )
+    return [apply_human_display_name(row, names) for row in rows]
 
 
 def message_to_dict(row: ProjectRoomMessage) -> dict[str, Any]:
@@ -748,7 +802,7 @@ async def list_messages(
     payload["content_omitted"] = not include_content
     payload["has_more"] = has_more
     payload["oldest_seq"] = rows[0].seq if rows else None
-    payload["messages"] = [message_to_dict(row) for row in rows]
+    payload["messages"] = await present_messages(db, [message_to_dict(row) for row in rows])
     payload["turn_states"] = [
         {
             "id": row.id,
@@ -809,7 +863,7 @@ async def enqueue_human_message(
         if existing:
             if (existing.content or "") != text:
                 raise HTTPException(status_code=409, detail="同一消息标识不能复用不同正文")
-            payload = message_to_dict(existing)
+            payload = (await present_messages(db, [message_to_dict(existing)]))[0]
             payload["replayed"] = True
             logger.info(
                 "[co-create-room] message replay room_id=%s project_id=%s user_id=%s client_message_id=%s",
@@ -848,6 +902,7 @@ async def enqueue_human_message(
         room.active_turn_id = turn_id
         room.lease_until = _lease_deadline()
     now = _now()
+    author_name = (await human_display_names(db, [user_id])).get(user_id) or user_id
     row = ProjectRoomMessage(
         id=str(uuid.uuid4()),
         room_id=room_id,
@@ -856,7 +911,7 @@ async def enqueue_human_message(
         turn_id=turn_id,
         author_type="human",
         author_id=user_id,
-        author_name=user_id,
+        author_name=author_name,
         content=text,
         mention_role_ids_json=json.dumps(roles, ensure_ascii=False),
         mention_user_ids_json=json.dumps(users, ensure_ascii=False),
@@ -900,7 +955,7 @@ async def enqueue_human_message(
         mode,
         ",".join(roles),
     )
-    return message_to_dict(row)
+    return (await present_messages(db, [message_to_dict(row)]))[0]
 
 
 def schedule_room_drain(background_tasks: BackgroundTasks, room_id: str) -> None:
@@ -1515,7 +1570,7 @@ async def cancel_room_turn(
     if not human:
         raise HTTPException(status_code=404, detail="回合不存在")
     if human.turn_state in _TERMINAL_TURN_STATES and human.turn_state != "done":
-        return message_to_dict(human)
+        return (await present_messages(db, [message_to_dict(human)]))[0]
     human.turn_state = "cancelled"
     human.error_summary = "已取消"
     if room.active_turn_id == turn_id:
@@ -1524,7 +1579,7 @@ async def cancel_room_turn(
     room.updated_at = _now()
     await db.commit()
     logger.info("[co-create-room] turn cancelled room_id=%s turn_id=%s user_id=%s", room_id, turn_id, user_id)
-    return message_to_dict(human)
+    return (await present_messages(db, [message_to_dict(human)]))[0]
 
 
 async def retry_room_turn(
@@ -1559,7 +1614,7 @@ async def retry_room_turn(
         turn_id,
         room.turn_retry,
     )
-    return message_to_dict(human)
+    return (await present_messages(db, [message_to_dict(human)]))[0]
 
 
 async def recover_incomplete_turns() -> list[str]:

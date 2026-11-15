@@ -16,6 +16,7 @@ from typing import Any
 logger = logging.getLogger("tpdx.hermes.geelywiki_mcp_config")
 
 DEFAULT_MCP_URL = "http://127.0.0.1:8787/mcp"
+DEFAULT_ROOT = "/Volumes/Lexar/git/03T/GeelyWiki"
 IMPORT_SCOPES = frozenset({"internal", "external"})
 DEFAULT_IMPORT_SCOPE = "internal"
 
@@ -52,6 +53,8 @@ def load_written() -> dict[str, str]:
         scope = str(raw["import_scope"]).strip()
         if scope in IMPORT_SCOPES:
             written["import_scope"] = scope
+    if "root" in raw and raw["root"] is not None:
+        written["root"] = str(raw["root"]).strip()
     return written
 
 
@@ -72,12 +75,24 @@ def resolve_wiki_mcp() -> dict[str, Any]:
         import_scope, scope_source = written["import_scope"], "saved"
     else:
         import_scope, scope_source = DEFAULT_IMPORT_SCOPE, "default"
+    if "root" in written:
+        root, root_source = written["root"], "saved"
+    else:
+        env_root = os.getenv("GEELYWIKI_ROOT")
+        if env_root is not None and env_root.strip():
+            root, root_source = env_root.strip(), "env"
+        else:
+            root, root_source = DEFAULT_ROOT, "default"
     payload = {
+        "id": "geelywiki",
+        "label": "GeelyWiki",
         "config_path": str(path),
         "config_exists": path.is_file() and "url" in written,
         "writable": writable,
         "url": url,
         "url_source": source,
+        "root": root,
+        "root_source": root_source,
         "import_scope": import_scope,
         "import_scope_source": scope_source,
     }
@@ -91,8 +106,13 @@ def resolve_wiki_mcp() -> dict[str, Any]:
     return payload
 
 
-def save_wiki_mcp(*, url: str | None = None, import_scope: str | None = None) -> dict[str, Any]:
-    if url is None and import_scope is None:
+def save_wiki_mcp(
+    *,
+    url: str | None = None,
+    import_scope: str | None = None,
+    root: str | None = None,
+) -> dict[str, Any]:
+    if url is None and import_scope is None and root is None:
         raise ValueError("没有要保存的字段")
     if import_scope is not None and import_scope not in IMPORT_SCOPES:
         raise ValueError("导入范围只能是内部或外部")
@@ -103,6 +123,8 @@ def save_wiki_mcp(*, url: str | None = None, import_scope: str | None = None) ->
         document["url"] = url.strip()
     if import_scope is not None:
         document["import_scope"] = import_scope
+    if root is not None:
+        document["root"] = root.strip()
     tmp = path.with_suffix(".json.tmp")
     tmp.write_text(json.dumps(document, ensure_ascii=False, indent=2), encoding="utf-8")
     tmp.replace(path)

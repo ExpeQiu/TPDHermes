@@ -76,6 +76,10 @@ def pages_to_documents(
     staging: Path,
     *,
     authority: str = AUTHORITY_CANONICAL,
+    source: str = SOURCE_GEELYWIKI,
+    source_type: str = "geelywiki",
+    folder_prefix: str = "geelywiki",
+    doc_prefix: str = "wiki",
 ) -> list[dict[str, Any]]:
     """把 pages 写成 staging markdown，返回 ingestion documents（含 claims 独立文档）。"""
     staging.mkdir(parents=True, exist_ok=True)
@@ -86,20 +90,20 @@ def pages_to_documents(
         slug = str(page.get("slug") or "").strip()
         body = str(page.get("body") or "").strip()
         if not slug or len(body) < 8:
-            logger.warning("geelywiki skip page missing body/slug slug=%s", slug or "?")
+            logger.warning("%s skip page missing body/slug slug=%s", source_type, slug or "?")
             continue
         title = str(page.get("title") or slug)
         wiki_type = str(page.get("type") or "")
         wiki_domain = str(page.get("domain") or "structured_tech")
-        folder = f"geelywiki/{wiki_type or 'page'}"
+        folder = f"{folder_prefix}/{wiki_type or 'page'}"
         md_path = staging / f"{slug}.md"
         md_path.write_text(f"# {title}\n\n{body}\n", encoding="utf-8")
         base_meta = {
             "title": title,
             "domain": wiki_domain if wiki_domain in {"structured_tech", "release_assets", "internal_methodology", "public_intel", "market_research", "policy_regulation", "brand_map", "methodology"} else "structured_tech",
             "folder_path": folder,
-            "source": SOURCE_GEELYWIKI,
-            "source_type": "geelywiki",
+            "source": source,
+            "source_type": source_type,
             "published": True,
             "wiki_slug": slug,
             "wiki_type": wiki_type,
@@ -110,7 +114,7 @@ def pages_to_documents(
             "knowledge_status": page.get("knowledge_status") or "",
             "language": "zh",
         }
-        documents.append({"doc_id": f"wiki_{slug}", "file_path": str(md_path), **base_meta})
+        documents.append({"doc_id": f"{doc_prefix}_{slug}", "file_path": str(md_path), **base_meta})
         for claim in page.get("claims") or []:
             if not isinstance(claim, dict):
                 continue
@@ -122,7 +126,7 @@ def pages_to_documents(
             cpath.write_text(_claim_markdown(claim), encoding="utf-8")
             documents.append(
                 {
-                    "doc_id": f"wiki_{slug}__claim_{cid}",
+                    "doc_id": f"{doc_prefix}_{slug}__claim_{cid}",
                     "file_path": str(cpath),
                     **base_meta,
                     "title": f"{title} · {cid}",
