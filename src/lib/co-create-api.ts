@@ -22,6 +22,36 @@ export interface ProjectFileItem {
   /** 创建者 User ID（输出物有；附件当前未落库则为空） */
   owner_id?: string | null;
   version?: string | null;
+  session_id?: string | null;
+  session_kind?: string | null;
+  session_title?: string | null;
+}
+
+export interface ProjectSessionItem {
+  id: string;
+  project_id: string;
+  kind: string;
+  title: string;
+  source_id: string;
+}
+
+export async function ensureProjectSession(
+  projectId: string,
+  body: { kind: string; source_id: string; source_kind?: string; title?: string },
+): Promise<ProjectSessionItem> {
+  return apiPost<ProjectSessionItem>(`/projects/${projectId}/sessions`, body);
+}
+
+export async function mutateProjectFolder(
+  projectId: string,
+  body: { session_id: string; action: "create" | "update" | "archive"; file_id?: string; title?: string; content?: string },
+): Promise<{ id: string; title: string; content: string; status: string; session_id?: string | null }> {
+  const result = await apiPost<{ id: string; title: string; content: string; status: string; session_id?: string | null }>(
+    `/projects/${projectId}/folder`,
+    body,
+  );
+  console.info("[project-folder]", { projectId, action: body.action, file_id: result.id, session_id: body.session_id });
+  return result;
 }
 
 export interface ProjectFileDetail extends ProjectFileItem {

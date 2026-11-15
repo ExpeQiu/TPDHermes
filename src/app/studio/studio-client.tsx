@@ -1,8 +1,11 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { ProjectFilesRail } from "@/components/project-files-rail";
+import { CutPotPanel } from "./cutpot-panel";
+import { ProductWorkbench } from "./product-workbench";
+import { V04Workbench } from "./v04-workbench";
 import { apiGet, apiPost } from "@/lib/api";
 import { decodeProjectFileSelectValue, type ProjectRecord } from "@/lib/chat-context";
 import { fetchProjectFileDetail, fetchProjectFilesUnified, type ProjectFileDetail, type ProjectFileItem } from "@/lib/co-create-api";
@@ -111,6 +114,14 @@ export default function StudioClient({ initialProjectId = "" }: { initialProject
   const [demo, setDemo] = useState(false);
   const [sourceSnapshot, setSourceSnapshot] = useState<StudioTurnResponse["source"]>();
   const requestEpoch = useRef(0);
+  const [receiptSnapshot, setReceiptSnapshot] = useState<{
+    scope: string;
+    revision?: number;
+    source: { title: string; version: string; sha256: string };
+    cards: TechCard[];
+  }>();
+  const [workbenchFocus, setWorkbenchFocus] = useState<{ card_id: string; field?: string; receipt: string; scope: string }>();
+  const [workbenchRevision, setWorkbenchRevision] = useState(0);
   const [fileKey, setFileKey] = useState<string | null>(null);
   const [projectFiles, setProjectFiles] = useState<ProjectFileItem[]>([]);
   const [projectFilesLoading, setProjectFilesLoading] = useState(false);
@@ -122,8 +133,38 @@ export default function StudioClient({ initialProjectId = "" }: { initialProject
   );
   const activeSkill = visibleSkills.find((skill) => skill.id === skillId) ?? visibleSkills[0] ?? studioSkillById(skillId);
   const boundProjectId = includeProject ? projectId : "";
+  const workbenchFile = fileKey ? decodeProjectFileSelectValue(fileKey) : null;
+  const jobScope = boundProjectId && workbenchFile && !demo
+    ? JSON.stringify([boundProjectId, workbenchFile.kind, workbenchFile.id])
+    : "";
+  const [recentJobs, setRecentJobs] = useState<{ id: string; label: string }[]>([]);
+  const [job, setJob] = useState<{ id: string; scope: string } | null>(null);
+  const submittingJob = useRef(false);
+  useEffect(() => {
+    if (!boundProjectId) return;
+    const remembered = sessionStorage.getItem(`v04-file:${boundProjectId}`);
+    if (remembered) setFileKey(remembered);
+  }, [boundProjectId]);
   const boundProject = projects.find((project) => project.id === boundProjectId) ?? null;
-  const skillReady = activeSkill.status === "ready";
+  const cutpotSelected = activeSkill.id === "V17";
+  const productApp = activeSkill.id === "V05" || activeSkill.id === "V10" ? activeSkill.id : null;
+  const [cutpotUrl, setCutpotUrl] = useState("");
+  const [cutpotError, setCutpotError] = useState("");
+  const handleCutpotUrl = useCallback((url: string, error?: string) => {
+    setCutpotUrl(url);
+    setCutpotError(error ?? "");
+  }, []);
+  const cutpotEditorUrl = useMemo(() => {
+    if (!cutpotUrl) return "";
+    try {
+      const parsed = new URL(cutpotUrl);
+      if (parsed.protocol !== "http:" || parsed.hostname !== "127.0.0.1" || parsed.pathname !== "/editor") return "";
+      return `${parsed.origin}/editor`;
+    } catch {
+      return "";
+    }
+  }, [cutpotUrl]);
+  const skillReady = activeSkill.id === "V04" && activeSkill.status === "ready";
 
   const selected = studio.cards.find((card) => card.id === studio.selectedCardId) ?? null;
   const activeQuote = selected && studio.selectedField ? quoteFor(selected, studio.selectedField) : "";
@@ -132,8 +173,15 @@ export default function StudioClient({ initialProjectId = "" }: { initialProject
     requestEpoch.current += 1;
     setStudio(createStudioState());
     setSourceSnapshot(undefined);
-    setMessages([{ id: "context", role: "assistant", content: demo ? "样本演示已开启，不使用项目资料。" : "请选择资料后提取；候选仅保留于本次会话，刷新后需重新提取。" }]);
-  }, [boundProjectId, fileKey, demo]);
+    const content = cutpotSelected
+      ? (boundProjectId ? "可以直接输入工程指令，例如查看工程或修改名称。工作台显示在右侧。" : "请先在项目文件中绑定项目，再输入工程指令。")
+      : productApp
+        ? (boundProjectId ? "可以查看工程或载入示例。交给下一张技能卡时写入工程文件；从上一张卡导入时，先在项目文件里选中那份工程文件。" : "请先在项目文件中绑定项目。")
+      : demo
+        ? "样本演示已开启，不使用项目资料。"
+        : "选择项目资料后，可以对话提取技术卡、查看已保存候选或列出缺口。工作台显示在右侧。";
+    setMessages([{ id: "context", role: "assistant", content }]);
+  }, [boundProjectId, fileKey, demo, cutpotSelected, productApp]);
 
   useEffect(() => {
     let cancelled = false;
@@ -238,6 +286,76 @@ export default function StudioClient({ initialProjectId = "" }: { initialProject
     return `版本 ${studio.revision} · 卡片 ${studio.cards.length} · 锁定 ${locked} · 缺口 ${gaps}`;
   }, [studio]);
 
+  useEffect(() => {
+    setRecentJobs(jobScope ? JSON.parse(sessionStorage.getItem(`v04-receipts:${jobScope}`) ?? "[]") : []);
+    if (!jobScope) return;
+    const pending = sessionStorage.getItem(`v04-job:${jobScope}`);
+    if (pending) {
+      const { id } = JSON.parse(pending) as { id: string };
+      setJob({ id, scope: jobScope });
+    }
+  }, [jobScope]);
+
+  useEffect(() => {
+    if (!job || job.scope !== jobScope || !workbenchFile) return;
+    let active = true;
+    let timer: ReturnType<typeof setTimeout>;
+    const query = new URLSearchParams({
+      project_id: boundProjectId, file_id: workbenchFile.id, file_kind: workbenchFile.kind,
+    });
+    const poll = async () => {
+      try {
+        const saved = sessionStorage.getItem(`v04-job:${job.scope}`);
+        const submission = saved ? JSON.parse(saved) as { id: string; message?: string } : null;
+        if (submission?.message) {
+          await apiPost("/studio/workbench/jobs", {
+            request_id: job.id, message: submission.message,
+            project_id: boundProjectId, file_id: workbenchFile.id, file_kind: workbenchFile.kind,
+          });
+          sessionStorage.setItem(`v04-job:${job.scope}`, JSON.stringify({ id: job.id }));
+        }
+        const receipt = await apiGet<{
+          status: string;
+          result?: {
+            reply?: string;
+            revision?: number;
+            focus?: { card_id: string; field?: string };
+            snapshot?: { source: { title: string; version: string; sha256: string }; cards: TechCard[] };
+          };
+        }>(`/studio/workbench/jobs/${job.id}?${query}`);
+        if (!active) return;
+        if (receipt.status === "running") {
+          timer = setTimeout(poll, 1200);
+          return;
+        }
+        const result = receipt.result;
+        if (result?.snapshot) {
+          setReceiptSnapshot({ ...result.snapshot, revision: result.revision, scope: job.scope });
+        }
+        setMessages((current) => [...current, {
+          id: job.id, role: "assistant", content: result?.reply ?? "执行结果暂不可确认，请查看工作台。",
+        }]);
+        if (result?.revision !== undefined) setWorkbenchRevision(result.revision);
+        if (result?.focus) setWorkbenchFocus({ ...result.focus, receipt: job.id, scope: job.scope });
+        const key = `v04-receipts:${job.scope}`;
+        const previous = JSON.parse(sessionStorage.getItem(key) ?? "[]") as { id: string; label: string }[];
+        if (!previous.some((item) => item.id === job.id)) {
+          const next = [{ id: job.id, label: result?.reply?.split("\n")[0] ?? "结果暂不可确认" }, ...previous].slice(0, 20);
+          sessionStorage.setItem(key, JSON.stringify(next));
+          setRecentJobs(next);
+        }
+        sessionStorage.removeItem(`v04-job:${job.scope}`);
+        setJob(null);
+      } catch {
+        if (!active) return;
+        setKernelLabel("任务回执连接中断，正在重连");
+        timer = setTimeout(poll, 2500);
+      }
+    };
+    void poll();
+    return () => { active = false; clearTimeout(timer); };
+  }, [job, jobScope, boundProjectId, workbenchFile?.id, workbenchFile?.kind]);
+
   function chooseSkill(id: string) {
     const skill = studioSkillById(id);
     setSkillId(skill.id);
@@ -246,7 +364,142 @@ export default function StudioClient({ initialProjectId = "" }: { initialProject
 
   async function commit(text: string, base: StudioState = studio) {
     const content = text.trim();
-    if (!content || pending) return;
+    if (!content || pending || job?.scope === jobScope) return;
+    if (cutpotSelected) {
+      if (!boundProjectId) {
+        setMessages((current) => [
+          ...current,
+          { id: `user_${current.length}`, role: "user", content },
+          { id: `assistant_${current.length}`, role: "assistant", content: "请先在项目文件中绑定项目。" },
+        ]);
+        setDraft("");
+        return;
+      }
+      setPending(true);
+      setDraft("");
+      const epoch = requestEpoch.current;
+      try {
+        const result = await apiPost<{ reply: string }>("/studio/cutpot/chat", { project_id: boundProjectId, message: content });
+        if (epoch !== requestEpoch.current) return;
+        console.info("[studio]", { event: "studio.cutpot.instruction", project_id: boundProjectId });
+        setMessages((current) => [
+          ...current,
+          { id: `user_${current.length}`, role: "user", content },
+          { id: `assistant_${current.length}`, role: "assistant", content: result.reply },
+        ]);
+      } catch (error) {
+        if (epoch !== requestEpoch.current) return;
+        setMessages((current) => [
+          ...current,
+          { id: `user_${current.length}`, role: "user", content },
+          { id: `assistant_${current.length}`, role: "assistant", content: error instanceof Error ? error.message : String(error) },
+        ]);
+      } finally {
+        setPending(false);
+      }
+      return;
+    }
+    if ((skillReady || productApp) && (content === "写入工程文件" || content === "从工程文件导入")) {
+      const product = productApp ?? "V04";
+      if (!boundProjectId) {
+        setMessages((current) => [
+          ...current,
+          { id: `user_${current.length}`, role: "user", content },
+          { id: `assistant_${current.length}`, role: "assistant", content: "请先在项目文件中绑定项目。" },
+        ]);
+        setDraft("");
+        return;
+      }
+      const linked = fileKey ? decodeProjectFileSelectValue(fileKey) : null;
+      if (content === "从工程文件导入" && linked?.kind !== "output") {
+        setMessages((current) => [
+          ...current,
+          { id: `user_${current.length}`, role: "user", content },
+          { id: `assistant_${current.length}`, role: "assistant", content: "请在项目文件中选择上游技能卡写入的工程文件。" },
+        ]);
+        setDraft("");
+        return;
+      }
+      if (product === "V04" && !linked) {
+        setMessages((current) => [
+          ...current,
+          { id: `user_${current.length}`, role: "user", content },
+          { id: `assistant_${current.length}`, role: "assistant", content: "请先选择技术卡正在使用的项目资料。" },
+        ]);
+        setDraft("");
+        return;
+      }
+      setPending(true);
+      setDraft("");
+      const epoch = requestEpoch.current;
+      try {
+        const result = await apiPost<{ reply: string; revision?: number }>("/studio/engineering", {
+          action: content === "写入工程文件" ? "export" : "import",
+          product,
+          project_id: boundProjectId,
+          file_id: linked?.id,
+          file_kind: linked?.kind,
+        });
+        if (epoch !== requestEpoch.current) return;
+        console.info("[studio]", { event: "studio.engineering", product, project_id: boundProjectId, action: content });
+        if (typeof result.revision === "number") setWorkbenchRevision(result.revision);
+        setProjectFilesRefreshKey((value) => value + 1);
+        setMessages((current) => [
+          ...current,
+          { id: `user_${current.length}`, role: "user", content },
+          { id: `assistant_${current.length}`, role: "assistant", content: result.reply },
+        ]);
+      } catch (error) {
+        if (epoch !== requestEpoch.current) return;
+        setMessages((current) => [
+          ...current,
+          { id: `user_${current.length}`, role: "user", content },
+          { id: `assistant_${current.length}`, role: "assistant", content: error instanceof Error ? error.message : String(error) },
+        ]);
+      } finally {
+        setPending(false);
+      }
+      return;
+    }
+    if (productApp) {
+      if (!boundProjectId) {
+        setMessages((current) => [
+          ...current,
+          { id: `user_${current.length}`, role: "user", content },
+          { id: `assistant_${current.length}`, role: "assistant", content: "请先在项目文件中绑定项目。" },
+        ]);
+        setDraft("");
+        return;
+      }
+      setPending(true);
+      setDraft("");
+      const epoch = requestEpoch.current;
+      try {
+        const result = await apiPost<{ reply: string; revision?: number }>(`/studio/apps/${productApp}/chat`, {
+          project_id: boundProjectId,
+          message: content,
+        });
+        if (epoch !== requestEpoch.current) return;
+        console.info("[studio]", { event: "studio.app.instruction", product: productApp, project_id: boundProjectId });
+        setKernelLabel(`TPCstore · ${productApp}`);
+        if (typeof result.revision === "number") setWorkbenchRevision(result.revision);
+        setMessages((current) => [
+          ...current,
+          { id: `user_${current.length}`, role: "user", content },
+          { id: `assistant_${current.length}`, role: "assistant", content: result.reply },
+        ]);
+      } catch (error) {
+        if (epoch !== requestEpoch.current) return;
+        setMessages((current) => [
+          ...current,
+          { id: `user_${current.length}`, role: "user", content },
+          { id: `assistant_${current.length}`, role: "assistant", content: error instanceof Error ? error.message : String(error) },
+        ]);
+      } finally {
+        setPending(false);
+      }
+      return;
+    }
     if (!skillReady) {
       setMessages((current) => [
         ...current,
@@ -266,6 +519,35 @@ export default function StudioClient({ initialProjectId = "" }: { initialProject
     try {
       const linked = fileKey ? decodeProjectFileSelectValue(fileKey) : null;
       if (!demo && (!boundProjectId || !linked)) throw new Error("请选择项目和资料，或显式开启样本演示。");
+      if (!demo && linked) {
+        if (submittingJob.current || job?.scope === jobScope) return;
+        submittingJob.current = true;
+        const key = `v04-job:${jobScope}`;
+        const requestId = crypto.randomUUID();
+        sessionStorage.setItem(key, JSON.stringify({ id: requestId, message: content }));
+        try {
+          await apiPost("/studio/workbench/jobs", {
+            request_id: requestId,
+            message: content,
+            project_id: boundProjectId,
+            file_id: linked.id,
+            file_kind: linked.kind,
+          });
+          sessionStorage.setItem(key, JSON.stringify({ id: requestId }));
+        } catch (failure) {
+          if (!(failure instanceof TypeError)) {
+            sessionStorage.removeItem(key);
+            throw failure;
+          }
+        } finally {
+          submittingJob.current = false;
+        }
+        if (epoch !== requestEpoch.current) return;
+        setJob({ id: requestId, scope: jobScope });
+        setKernelLabel("Hermes-agent · V04 工作台");
+        setMessages((current) => [...current, { id: requestId + "-user", role: "user", content }]);
+        return;
+      }
       const result = await apiPost<StudioTurnResponse>("/studio/turn", {
         message: content,
         state: base,
@@ -317,8 +599,20 @@ export default function StudioClient({ initialProjectId = "" }: { initialProject
         setFileKey(null);
         setLinkedFile(null);
       }}
-      onFileChange={setFileKey}
+      onFileChange={(next) => {
+        setFileKey(next);
+        if (boundProjectId) {
+          const key = `v04-file:${boundProjectId}`;
+          if (next) sessionStorage.setItem(key, next);
+          else sessionStorage.removeItem(key);
+        }
+      }}
       onRefresh={() => setProjectFilesRefreshKey((value) => value + 1)}
+      folderActor={
+        boundProjectId
+          ? { kind: "scene", sourceId: `${skillId}:${boundProjectId}`, title: `${skillId} 场景` }
+          : null
+      }
     />
   );
 
@@ -378,15 +672,35 @@ export default function StudioClient({ initialProjectId = "" }: { initialProject
       <section className="flex h-[42%] min-h-0 w-full flex-col border-b border-slate-200 dark:border-slate-800 lg:h-full lg:w-[22rem] lg:shrink-0 lg:border-b-0 lg:border-r">
         <header className="border-b border-slate-200 px-4 py-3 dark:border-slate-800">
           <p className="text-xs text-slate-500">
-            {activeSkill.id} · {pending ? "内核处理中" : kernelLabel}
+            {activeSkill.id} · {(pending || job?.scope === jobScope) ? "内核处理中" : kernelLabel}
           </p>
           <h1 className="text-base font-semibold">{activeSkill.name}</h1>
+          {linkedFile ? <p className="text-xs text-slate-500">{linkedFile.title}</p> : null}
+          {jobScope && !job && recentJobs.length ? (
+            <label className="mr-2 text-xs">
+              <span className="sr-only">历史任务回执</span>
+              <select value="" onChange={(event) => {
+                const id = event.target.value;
+                if (id) setJob({ id, scope: jobScope });
+              }}>
+                <option value="">查看历史任务回执</option>
+                {recentJobs.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}
+              </select>
+            </label>
+          ) : null}
         </header>
+        {cutpotSelected && boundProjectId ? (
+          <CutPotPanel
+            key={boundProjectId}
+            projectId={boundProjectId}
+            onUrlChange={handleCutpotUrl}
+          />
+        ) : null}
         <div className="min-h-0 flex-1 space-y-3 overflow-y-auto px-4 py-3">
           {messages.map((message) => (
             <div
               key={message.id}
-              className={`rounded-2xl px-3 py-2 text-sm leading-6 ${
+              className={`whitespace-pre-wrap rounded-2xl px-3 py-2 text-sm leading-6 ${
                 message.role === "user"
                   ? "ml-8 bg-blue-600 text-white"
                   : "mr-6 bg-slate-100 text-slate-800 dark:bg-slate-900 dark:text-slate-100"
@@ -396,6 +710,23 @@ export default function StudioClient({ initialProjectId = "" }: { initialProject
             </div>
           ))}
         </div>
+        {receiptSnapshot?.scope === jobScope ? (
+          <details className="max-h-48 overflow-y-auto border-t border-slate-200 px-3 py-2 text-xs">
+            <summary className="cursor-pointer">结果快照 · 版本 {receiptSnapshot.revision}</summary>
+            <p className="my-2">{receiptSnapshot.source.title} · 原文版本 {receiptSnapshot.source.version}</p>
+            {receiptSnapshot.cards.map((card) => (
+              <article key={card.id} className="my-2">
+                <h3 className="font-semibold">{card.term}</h3>
+                {(Object.keys(FIELD_LABEL) as FieldKey[]).map((field) => {
+                  const anchor = card.sources?.[field];
+                  return <p key={field}>{FIELD_LABEL[field]}：{card[field] || "待补"}
+                    {anchor ? `（原文 ${anchor.line_start}–${anchor.line_end} 行：${anchor.quote}）` : ""}
+                  </p>;
+                })}
+              </article>
+            ))}
+          </details>
+        ) : null}
         <form
           className="space-y-2 border-t border-slate-200 p-3 dark:border-slate-800"
           onSubmit={(event) => {
@@ -403,12 +734,14 @@ export default function StudioClient({ initialProjectId = "" }: { initialProject
             void commit(draft);
           }}
         >
-          <label className="flex items-center gap-2 text-xs text-slate-500">
-            <input type="checkbox" checked={demo} disabled={pending} onChange={(event) => setDemo(event.target.checked)} />
-            样本演示（不使用项目资料）
-          </label>
+          {cutpotSelected || productApp ? null : (
+            <label className="flex items-center gap-2 text-xs text-slate-500">
+              <input type="checkbox" checked={demo} disabled={pending} onChange={(event) => setDemo(event.target.checked)} />
+              样本演示（不使用项目资料）
+            </label>
+          )}
           <div className="flex flex-wrap gap-1.5">
-            {(demo ? PROMPTS : PROMPTS.slice(0, 3)).map((prompt) => (
+            {(cutpotSelected ? ["查看工程"] : productApp ? ["查看工程", "载入示例", "从工程文件导入", "写入工程文件"] : demo ? PROMPTS : ["提取技术卡", "查看缺口", "查看工作区", "写入工程文件"]).map((prompt) => (
               <button
                 key={prompt}
                 type="button"
@@ -435,6 +768,54 @@ export default function StudioClient({ initialProjectId = "" }: { initialProject
         </form>
       </section>
 
+      {cutpotSelected ? (
+        <section className="flex min-h-0 min-w-0 flex-1 flex-col">
+          {cutpotEditorUrl ? (
+            <iframe
+              title="CutPot 编辑器"
+              src={cutpotEditorUrl}
+              className="min-h-0 w-full flex-1 border-0 bg-slate-950"
+              onLoad={() => console.info("[studio]", { event: "studio.cutpot.embed", url: cutpotEditorUrl })}
+            />
+          ) : (
+            <p className="p-4 text-sm">
+              {!boundProjectId
+                ? "请先在项目文件中绑定项目。"
+                : cutpotError || "正在打开 CutPot 工作台…"}
+            </p>
+          )}
+        </section>
+      ) : productApp && boundProjectId ? (
+        <section className="flex min-h-80 min-w-0 flex-1 flex-col">
+          <ProductWorkbench
+            key={`${productApp}:${boundProjectId}`}
+            product={productApp}
+            projectId={boundProjectId}
+            revision={workbenchRevision}
+          />
+        </section>
+      ) : productApp ? (
+        <section className="flex min-h-0 min-w-0 flex-1 flex-col p-4">
+          <h2 className="text-base font-semibold">{activeSkill.name}</h2>
+          <p className="mt-2 text-sm text-slate-500">绑定项目后，工作台显示在这里。</p>
+        </section>
+      ) : !demo && workbenchFile && boundProjectId && skillReady ? (
+        <section className="flex min-h-80 min-w-0 flex-1 flex-col">
+          <V04Workbench
+            key={JSON.stringify([boundProjectId, workbenchFile.kind, workbenchFile.id])}
+            projectId={boundProjectId}
+            fileId={workbenchFile.id}
+            fileKind={workbenchFile.kind}
+            revision={workbenchRevision}
+            focus={workbenchFocus?.scope === jobScope ? workbenchFocus : undefined}
+          />
+        </section>
+      ) : !demo && skillReady ? (
+        <section className="flex min-h-0 min-w-0 flex-1 flex-col p-4">
+          <h2 className="text-base font-semibold">技术卡工作台</h2>
+          <p className="mt-2 text-sm text-slate-500">选择项目资料后，工作台显示在这里。</p>
+        </section>
+      ) : (
       <section className="flex min-h-0 min-w-0 flex-1 flex-col">
         <header className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 px-4 py-3 dark:border-slate-800">
           <div>
@@ -526,6 +907,7 @@ export default function StudioClient({ initialProjectId = "" }: { initialProject
         </div>
         ) : null}
       </section>
+      )}
       <div className="hidden h-full min-h-0 lg:flex">{renderProjectFilesRail(true)}</div>
     </div>
   );

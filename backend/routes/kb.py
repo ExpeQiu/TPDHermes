@@ -20,10 +20,13 @@ from backend.services.kg_service import kb_kg_link_service
 from backend.services.kb_vault_assets import serve_vault_asset
 from backend.services.rbac import require_feature
 
+# 读取对全部平台角色开放（对话、创作等功能要拉集合与检索）。
+# 写入、删除、目录治理仍要求 knowledge 功能。
+_KB_MANAGE = [Depends(require_feature("knowledge"))]
+
 router = APIRouter(
     prefix="/kb",
     tags=["knowledge_base"],
-    dependencies=[Depends(require_feature("knowledge"))],
 )
 kb_route_logger = logging.getLogger("tpdx.hermes")
 
@@ -144,7 +147,7 @@ async def kb_list_kg_links(
     return {"items": items}
 
 
-@router.post("/kg-links")
+@router.post("/kg-links", dependencies=_KB_MANAGE)
 async def kb_add_kg_link(body: KbKgLinkCreate):
     try:
         row = await kb_kg_link_service.add_link(
@@ -161,7 +164,7 @@ async def kb_add_kg_link(body: KbKgLinkCreate):
     return row
 
 
-@router.delete("/kg-links/{link_id}")
+@router.delete("/kg-links/{link_id}", dependencies=_KB_MANAGE)
 async def kb_delete_kg_link(link_id: str):
     ok = await kb_kg_link_service.delete_link(link_id)
     if not ok:
@@ -360,7 +363,7 @@ async def get_cached_entry_by_id(
     return row
 
 
-@router.delete("/cache/entry/{entry_id}")
+@router.delete("/cache/entry/{entry_id}", dependencies=_KB_MANAGE)
 async def delete_cached_entry_by_id_route(
     entry_id: str,
     collection: Optional[str] = Query(None, description="doc_id 回退时必须带上集合"),
@@ -385,7 +388,7 @@ async def delete_cached_entry_by_id_route(
     return {"ok": True, "id": entry_id.strip()}
 
 
-@router.delete("/cache/by-doc/{doc_id}")
+@router.delete("/cache/by-doc/{doc_id}", dependencies=_KB_MANAGE)
 async def delete_cached_entries_by_doc_id_route(
     doc_id: str,
     collection: Optional[str] = Query(None),
@@ -443,7 +446,7 @@ async def get_cached_entries(
     return {"entries": entries, "count": len(entries)}
 
 
-@router.post("/cache/sync", response_model=SyncResponse)
+@router.post("/cache/sync", response_model=SyncResponse, dependencies=_KB_MANAGE)
 async def sync_from_external(
     data: SyncRequest,
     db: AsyncSession = Depends(get_db),
@@ -505,28 +508,28 @@ async def kb_catalog_list():
     return await list_catalog()
 
 
-@router.post("/catalog/domains")
+@router.post("/catalog/domains", dependencies=_KB_MANAGE)
 async def kb_catalog_create_domain(body: CatalogDomainBody):
     from backend.services.kb_catalog import create_domain
 
     return _catalog_or_400(await create_domain(key=body.key, label=body.label))
 
 
-@router.patch("/catalog/domains/{key}")
+@router.patch("/catalog/domains/{key}", dependencies=_KB_MANAGE)
 async def kb_catalog_update_domain(key: str, body: CatalogDomainLabelBody):
     from backend.services.kb_catalog import update_domain
 
     return _catalog_or_400(await update_domain(key=key, label=body.label))
 
 
-@router.delete("/catalog/domains/{key}")
+@router.delete("/catalog/domains/{key}", dependencies=_KB_MANAGE)
 async def kb_catalog_delete_domain(key: str):
     from backend.services.kb_catalog import delete_domain
 
     return _catalog_or_400(await delete_domain(key))
 
 
-@router.post("/catalog/folders")
+@router.post("/catalog/folders", dependencies=_KB_MANAGE)
 async def kb_catalog_create_folder(body: CatalogFolderBody):
     from backend.services.kb_catalog import create_folder
 
@@ -541,14 +544,14 @@ async def kb_catalog_create_folder(body: CatalogFolderBody):
     )
 
 
-@router.patch("/catalog/folders")
+@router.patch("/catalog/folders", dependencies=_KB_MANAGE)
 async def kb_catalog_rename_folder(body: CatalogFolderRenameBody):
     from backend.services.kb_catalog import rename_folder
 
     return _catalog_or_400(await rename_folder(path=body.path, new_path=body.new_path))
 
 
-@router.delete("/catalog/folders")
+@router.delete("/catalog/folders", dependencies=_KB_MANAGE)
 async def kb_catalog_delete_folder(path: str = Query(...)):
     from backend.services.kb_catalog import delete_folder
 

@@ -1701,6 +1701,11 @@ export default function CoCreateRoomApp() {
                     if (key) fileWorkspace.openFileTab(key);
                   }}
                   onRefresh={() => void fileWorkspace.refreshFiles()}
+                  folderActor={
+                    activeId
+                      ? { kind: "cocreate", sourceId: activeId, title: activeRoom?.title || "共创" }
+                      : null
+                  }
                   pinLabel={filesPinned ? "自动隐藏" : "固定"}
                   onTogglePin={() => {
                     setFilesPinned((pinned) => {

@@ -40,6 +40,7 @@ type SendMessageOptions = {
   scenarioPresetInstructionsAppend?: string;
   scenarioIdOverride?: string;
   scenarioPresetInstructionsOverride?: string;
+  invokedSkillNames?: string[];
 };
 
 type UseChatExecutionOptions = {
@@ -336,6 +337,7 @@ export function useChatExecution(options: UseChatExecutionOptions) {
       scenarioPresetInstructionsAppend,
       scenarioIdOverride,
       scenarioPresetInstructionsOverride,
+      invokedSkillNames,
     }: RunAssistantStreamParams) => {
       const effectiveUseOrchestration = useOrchestrationOverride ?? useOrchestration;
       setStreaming(true);
@@ -434,6 +436,17 @@ export function useChatExecution(options: UseChatExecutionOptions) {
                 allow_agent_free_choice: false,
               };
             }
+          }
+          const invoked = (invokedSkillNames ?? []).map((name) => name.trim()).filter(Boolean);
+          if (invoked.length > 0) {
+            const picked = invoked.slice(0, 8);
+            overrides.skills = {
+              mode: "preferred_list",
+              preferred: picked,
+              allowed: picked,
+              allow_agent_free_choice: false,
+            };
+            console.info("[chat] 本轮指定技能", { sessionId, skills: picked });
           }
           if (qc?.outputPreset === "structured" && qc.outputRequiredSections?.length) {
             overrides.output = {
@@ -951,6 +964,9 @@ export function useChatExecution(options: UseChatExecutionOptions) {
       sendOptions?: SendMessageOptions,
     ) => {
     const text = (overrideText ?? input).trim();
+    const invokedSkillNames = (sendOptions?.invokedSkillNames ?? [])
+      .map((name) => name.trim())
+      .filter(Boolean);
     const sessionId = activeIdRef.current;
     if (!text || !sessionId || streaming || preparingContext) return;
     const effectiveUseOrchestration = sendOptions?.useOrchestrationOverride ?? useOrchestration;
@@ -1010,10 +1026,12 @@ export function useChatExecution(options: UseChatExecutionOptions) {
         !sendOptions?.skipToolsContextBuild &&
         ((includeProjectContext && selectedProjectId) ||
           (includeKnowledgeContext && selectedCollection) ||
-          includeSkillsContext)
+          includeSkillsContext ||
+          invokedSkillNames.length > 0)
       ) {
         const qc = priorSession?.quickCreateOverrides;
         const skillsForContext = (() => {
+          if (invokedSkillNames.length > 0) return invokedSkillNames.slice(0, 8);
           if (!includeSkillsContext) return [] as string[];
           if (qc?.skillNames && qc.skillNames.length > 0) return qc.skillNames.slice(0, 32);
           return skills.slice(0, 32);
@@ -1090,6 +1108,7 @@ export function useChatExecution(options: UseChatExecutionOptions) {
       scenarioPresetInstructionsAppend: sendOptions?.scenarioPresetInstructionsAppend,
       scenarioIdOverride: sendOptions?.scenarioIdOverride,
       scenarioPresetInstructionsOverride: sendOptions?.scenarioPresetInstructionsOverride,
+      invokedSkillNames,
     });
   }, [
     activeIdRef,

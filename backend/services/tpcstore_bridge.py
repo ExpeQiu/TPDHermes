@@ -22,22 +22,74 @@ from backend.services.project_files_service import _attachments_root
 
 logger = logging.getLogger("tpdx.hermes.tpcstore")
 
+PRODUCTS: dict[str, dict[str, str]] = {
+    "V04": {"dir": "V04-tech-cards", "prefix": "tech-cards", "data": "tpdhermes-v04"},
+    "V05": {"dir": "V05-value-chain", "prefix": "value-chain", "data": "tpdhermes-v05"},
+    "V10": {"dir": "V10-claim-evidence", "prefix": "claim-evidence", "data": "tpdhermes-v10"},
+}
+APP_PRODUCTS = frozenset({"V05", "V10"})
+APP_OPERATIONS: dict[str, frozenset[str]] = {
+    "V05": frozenset({
+        "show", "import", "patch-link", "unlock", "revoke-support", "suggest",
+        "task-show", "wait", "cancel", "select-value", "export",
+    }),
+    "V10": frozenset({
+        "show", "import", "suggest", "task-show", "wait", "cancel", "patch-link",
+        "revise-claim", "unlock", "revoke-evidence", "confirm-strength", "export",
+    }),
+}
 
-def _command() -> list[str]:
+
+def _command(product: str = "V04") -> list[str]:
+    spec = PRODUCTS.get(product)
+    if spec is None:
+        raise HTTPException(404, "未接入的技能卡")
     configured = os.getenv("TPCSTORE_ROOT", "").strip()
     node = shutil.which(os.getenv("TPCSTORE_NODE_BIN", "node"))
     if not configured or not node:
         raise HTTPException(503, "TPCstore 未连接：请配置 TPCSTORE_ROOT 和 Node.js")
-    entry = Path(configured).expanduser().resolve() / "V04-tech-cards" / "cli.mjs"
+    entry = Path(configured).expanduser().resolve() / spec["dir"] / "cli.mjs"
     if not entry.is_file():
-        raise HTTPException(503, "TPCstore V04 CLI 不存在，请检查连接目录")
+        raise HTTPException(503, f"TPCstore {product} CLI 不存在，请检查连接目录")
     return [node, str(entry)]
 
 
-def _child_env() -> dict[str, str]:
+def product_data_dir(product: str) -> str:
+    if product == "V04":
+        return os.getenv("TPCSTORE_APP_DATA") or str(Path.home() / ".tpcstore" / "tpdhermes-v04")
+    override = os.getenv(f"TPCSTORE_{product}_APP_DATA", "").strip()
+    if override:
+        return str(Path(override).expanduser())
+    folder = PRODUCTS[product]["data"]
+    return str(Path.home() / ".tpcstore" / folder)
+
+
+def read_workbench_html(product: str = "V04") -> str:
+    page = Path(_command(product)[1]).with_name("workbench.html")
+    try:
+        return page.read_text(encoding="utf-8")
+    except OSError as exc:
+        raise HTTPException(503, f"TPCstore {product} 工作台页面不可用") from exc
+
+
+def read_product_fixture(product: str) -> dict[str, Any]:
+    if product not in APP_PRODUCTS:
+        raise HTTPException(404, "该技能卡没有示例")
+    page = Path(_command(product)[1]).parent / "fixtures"
+    name = "pitch-control.json" if product == "V05" else "pitch-claim.json"
+    try:
+        payload = json.loads((page / name).read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise HTTPException(503, f"TPCstore {product} 示例不可用") from exc
+    if not isinstance(payload, dict):
+        raise HTTPException(503, f"TPCstore {product} 示例无效")
+    return payload
+
+
+def _child_env(*, needs_model: bool = True, app_data: str | None = None) -> dict[str, str]:
     key = os.getenv("TPCSTORE_MODEL_KEY", "")
     env_file = os.getenv("TPCSTORE_MODEL_ENV_FILE", "").strip()
-    if not key and env_file:
+    if needs_model and not key and env_file:
         try:
             for raw in Path(env_file).expanduser().read_text().splitlines():
                 line = raw.strip().removeprefix("export ")
@@ -50,6 +102,7 @@ def _child_env() -> dict[str, str]:
             raise HTTPException(503, "TPCstore 受保护网关配置缺少 API_SERVER_KEY")
     return {
         "PATH": os.environ.get("PATH", ""),
+        "TPCSTORE_APP_DATA": app_data or product_data_dir("V04"),
         "LANG": "en_US.UTF-8",
         "TPCSTORE_MODEL_URL": os.getenv("TPCSTORE_MODEL_URL", "")
         or os.getenv("HERMES_CHAT_API_URL", ""),
@@ -63,22 +116,34 @@ def _child_env() -> dict[str, str]:
 
 
 async def call_tpcstore(
-    command: str, payload: dict[str, Any] | None = None
+    command: str,
+    payload: dict[str, Any] | None = None,
+    *,
+    product: str = "V04",
+    needs_model: bool | None = None,
 ) -> dict[str, Any]:
-    argv = [*_command(), command, "--json"]
+    argv = [*_command(product), command, "--json"]
     try:
         timeout = float(os.getenv("TPCSTORE_MODEL_TIMEOUT_SECONDS", "90")) + 10
     except ValueError as exc:
         raise HTTPException(503, "TPCstore 超时配置无效") from exc
     if not 11 <= timeout <= 310:
         raise HTTPException(503, "TPCstore 模型超时必须为 1–300 秒")
+    if needs_model is None:
+        needs_model = (
+            product == "V04"
+            and (command != "workspace" or (payload or {}).get("operation") == "extract")
+        )
     try:
         proc = await asyncio.create_subprocess_exec(
             *argv,
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
-            env=_child_env(),
+            env=_child_env(
+                needs_model=needs_model,
+                app_data=None if product == "V04" else product_data_dir(product),
+            ),
         )
     except OSError as exc:
         raise HTTPException(503, "TPCstore CLI 无法启动") from exc
@@ -104,7 +169,7 @@ async def call_tpcstore(
         envelope = json.loads(stdout)
         if not isinstance(envelope, dict) or envelope.get("schema_version") != "1.0.0":
             raise ValueError("invalid envelope")
-        expected = f"tech-cards.{command}"
+        expected = f"{PRODUCTS[product]['prefix']}.{command}"
         if envelope.get("command") != expected or type(envelope.get("ok")) is not bool:
             raise ValueError("invalid command")
     except (ValueError, UnicodeDecodeError) as exc:
@@ -113,7 +178,12 @@ async def call_tpcstore(
     if returncode != 0 or not envelope["ok"]:
         error = envelope.get("error") or {}
         status = {1: 422, 4: 422, 5: 409, 6: 502, 8: 503}.get(returncode, 502)
-        logger.warning("tpcstore failed command=%s code=%s", command, error.get("code"))
+        logger.warning(
+            "tpcstore failed product=%s command=%s code=%s",
+            product,
+            command,
+            error.get("code"),
+        )
         raise HTTPException(
             status,
             f"TPCstore {error.get('code', 'EXECUTION_FAILED')}：{error.get('message', '执行失败')}",

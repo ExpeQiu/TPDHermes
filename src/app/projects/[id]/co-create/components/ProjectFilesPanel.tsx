@@ -1,12 +1,18 @@
 "use client";
 
-import { useMemo, useRef, useState, type ChangeEvent, type MouseEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type ChangeEvent, type MouseEvent } from "react";
 import {
   decodeProjectFileSelectValue,
   encodeProjectFileSelectValue,
   type ProjectFileKind,
 } from "@/lib/chat-context";
-import { exportProjectFileToLocal, uploadProjectAttachment } from "@/lib/co-create-api";
+import {
+  ensureProjectSession,
+  exportProjectFileToLocal,
+  fetchProjectFileDetail,
+  mutateProjectFolder,
+  uploadProjectAttachment,
+} from "@/lib/co-create-api";
 import type { ProjectFileItem } from "@/lib/co-create-api";
 import type { FileRefState } from "@/app/projects/[id]/co-create/co-create-types";
 
@@ -61,6 +67,7 @@ type Props = {
   onRefresh: () => void;
   pinLabel?: string;
   onTogglePin?: () => void;
+  folderActor?: { kind: string; sourceId: string; title: string } | null;
 };
 
 function refStateFor(fileKey: string, pinned: string[], round: string[]): FileRefState {
@@ -94,6 +101,7 @@ export function ProjectFilesPanel({
   onRefresh,
   pinLabel,
   onTogglePin,
+  folderActor = null,
 }: Props) {
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState<FilterKind>("all");
@@ -102,6 +110,34 @@ export function ProjectFilesPanel({
   const [exportingKey, setExportingKey] = useState<string | null>(null);
   const [exportError, setExportError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [actorSessionId, setActorSessionId] = useState<string | null>(null);
+  const [draftTitle, setDraftTitle] = useState("");
+  const [draftContent, setDraftContent] = useState("");
+  const [folderError, setFolderError] = useState<string | null>(null);
+  const [folderBusy, setFolderBusy] = useState(false);
+
+  useEffect(() => {
+    if (!projectId || !folderActor?.sourceId) {
+      setActorSessionId(null);
+      return;
+    }
+    let cancelled = false;
+    ensureProjectSession(projectId, {
+      kind: folderActor.kind,
+      source_id: folderActor.sourceId,
+      source_kind: folderActor.kind,
+      title: folderActor.title,
+    })
+      .then((row) => {
+        if (!cancelled) setActorSessionId(row.id);
+      })
+      .catch((error: unknown) => {
+        if (!cancelled) setFolderError(error instanceof Error ? error.message : "无法登记 session");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [folderActor?.kind, folderActor?.sourceId, folderActor?.title, projectId]);
   const explicitRouteId = routeProjectId?.trim() ?? "";
   const routeId = explicitRouteId || projectId;
   const boundId = boundProjectId || projectId;
@@ -297,7 +333,10 @@ export function ProjectFilesPanel({
                   </span>
                   <span className="min-w-0 flex-1">
                     <span className="block truncate font-medium">{file.title}</span>
-                    <span className="block truncate text-[10px] text-slate-500">{file.path}</span>
+                    <span className="block truncate text-[10px] text-slate-500">
+                      {file.session_title ? `${file.session_title} · ` : ""}
+                      {file.path}
+                    </span>
                   </span>
                   {state !== "unselected" ? (
                     <span className="shrink-0 rounded bg-slate-200 px-1 text-[10px] dark:bg-slate-700">
@@ -328,6 +367,115 @@ export function ProjectFilesPanel({
           className="hidden"
           onChange={(e) => void handleAttachmentFileChange(e)}
         />
+        {folderActor && actorSessionId ? (
+          <div className="mb-2 space-y-1">
+            <input
+              value={draftTitle}
+              onChange={(event) => setDraftTitle(event.target.value)}
+              placeholder="文件标题"
+              className="w-full rounded border border-slate-300 bg-white px-1.5 py-1 text-[11px] dark:border-slate-600 dark:bg-slate-950"
+            />
+            <textarea
+              value={draftContent}
+              onChange={(event) => setDraftContent(event.target.value)}
+              placeholder="共享正文"
+              rows={3}
+              className="w-full rounded border border-slate-300 bg-white px-1.5 py-1 text-[11px] dark:border-slate-600 dark:bg-slate-950"
+            />
+            <div className="flex gap-1">
+              <button
+                type="button"
+                disabled={folderBusy}
+                className="rounded border px-1.5 py-1 text-[10px]"
+                onClick={() => {
+                  setFolderBusy(true);
+                  setFolderError(null);
+                  void mutateProjectFolder(projectId, {
+                    session_id: actorSessionId,
+                    action: "create",
+                    title: draftTitle,
+                    content: draftContent,
+                  })
+                    .then(() => {
+                      setDraftTitle("");
+                      setDraftContent("");
+                      onRefresh();
+                    })
+                    .catch((error: unknown) => setFolderError(error instanceof Error ? error.message : "新增失败"))
+                    .finally(() => setFolderBusy(false));
+                }}
+              >
+                新增
+              </button>
+              <button
+                type="button"
+                disabled={folderBusy || !activeFileKey}
+                className="rounded border px-1.5 py-1 text-[10px]"
+                onClick={() => {
+                  const decoded = activeFileKey ? decodeProjectFileSelectValue(activeFileKey) : null;
+                  if (!decoded || decoded.kind !== "output") {
+                    setFolderError("请选择项目产出后再修改");
+                    return;
+                  }
+                  setFolderBusy(true);
+                  setFolderError(null);
+                  void mutateProjectFolder(projectId, {
+                    session_id: actorSessionId,
+                    action: "update",
+                    file_id: decoded.id,
+                    title: draftTitle || undefined,
+                    content: draftContent,
+                  })
+                    .then(() => onRefresh())
+                    .catch((error: unknown) => setFolderError(error instanceof Error ? error.message : "修改失败"))
+                    .finally(() => setFolderBusy(false));
+                }}
+              >
+                修改
+              </button>
+              <button
+                type="button"
+                disabled={folderBusy || !activeFileKey}
+                className="rounded border px-1.5 py-1 text-[10px]"
+                onClick={() => {
+                  const decoded = activeFileKey ? decodeProjectFileSelectValue(activeFileKey) : null;
+                  if (!decoded || decoded.kind !== "output") {
+                    setFolderError("请选择项目产出后再归档");
+                    return;
+                  }
+                  setFolderBusy(true);
+                  setFolderError(null);
+                  void mutateProjectFolder(projectId, {
+                    session_id: actorSessionId,
+                    action: "archive",
+                    file_id: decoded.id,
+                  })
+                    .then(() => onRefresh())
+                    .catch((error: unknown) => setFolderError(error instanceof Error ? error.message : "归档失败"))
+                    .finally(() => setFolderBusy(false));
+                }}
+              >
+                归档
+              </button>
+              <button
+                type="button"
+                disabled={!activeFileKey}
+                className="rounded border px-1.5 py-1 text-[10px]"
+                onClick={() => {
+                  const decoded = activeFileKey ? decodeProjectFileSelectValue(activeFileKey) : null;
+                  if (!decoded || !projectId) return;
+                  void fetchProjectFileDetail(projectId, decoded.id, decoded.kind).then((detail) => {
+                    setDraftTitle(detail.title);
+                    setDraftContent(detail.content || "");
+                  });
+                }}
+              >
+                打开
+              </button>
+            </div>
+          </div>
+        ) : null}
+        {folderError ? <p className="mb-1 text-[10px] text-rose-600">{folderError}</p> : null}
         <button
           type="button"
           onClick={handlePickAttachment}

@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.models.output_asset import OutputAsset
 from backend.models.project_attachment import ProjectAttachment
+from backend.models.project_session import ProjectSession
 
 logger = logging.getLogger("tpdx.hermes.project_files")
 
@@ -105,8 +106,13 @@ async def list_project_files(db: AsyncSession, project_id: str) -> list[dict]:
         .where(ProjectAttachment.project_id == project_id)
         .order_by(ProjectAttachment.created_at.desc())
     )
+    session_rows = (
+        await db.execute(select(ProjectSession).where(ProjectSession.project_id == project_id))
+    ).scalars().all()
+    sessions = {row.id: row for row in session_rows}
     items: list[dict] = []
     for row in outputs_q.scalars().all():
+        origin = sessions.get(getattr(row, "session_id", None) or "")
         items.append(
             {
                 "id": row.id,
@@ -121,6 +127,9 @@ async def list_project_files(db: AsyncSession, project_id: str) -> list[dict]:
                 "created_at": row.created_at,
                 "owner_id": (row.owner_id or "").strip() or None,
                 "version": row.version,
+                "session_id": getattr(row, "session_id", None),
+                "session_kind": origin.kind if origin else None,
+                "session_title": origin.title if origin else None,
             }
         )
     for row in attachments_q.scalars().all():
@@ -161,6 +170,11 @@ async def get_project_file_detail(
         row = q.scalar_one_or_none()
         if not row:
             return None
+        origin = (
+            await db.execute(
+                select(ProjectSession).where(ProjectSession.id == getattr(row, "session_id", None))
+            )
+        ).scalar_one_or_none()
         return {
             "id": row.id,
             "kind": "output",
@@ -174,6 +188,9 @@ async def get_project_file_detail(
             "created_at": row.created_at,
             "owner_id": (row.owner_id or "").strip() or None,
             "version": row.version,
+            "session_id": getattr(row, "session_id", None),
+            "session_kind": origin.kind if origin else None,
+            "session_title": origin.title if origin else None,
         }
     if kind == "attachment":
         q = await db.execute(

@@ -18,6 +18,7 @@ import {
   ChatInit,
   ChatMode,
   decodeProjectFileSelectValue,
+  encodeProjectFileSelectValue,
   fetchChatBootstrap,
   fetchOrchestrationPreview,
   fetchProjectContext,
@@ -27,7 +28,15 @@ import {
   type OrchestrationPreviewResponse,
   type ProjectContextResponse,
   type QuickCreateFlowOverrides,
+  type WorkshopSkillCatalogItem,
 } from "@/lib/chat-context";
+import {
+  chatSkillOptions,
+  extractMentionedSkillNames,
+  filterSkillMentions,
+  skillMentionToken,
+  type ChatSkillOption,
+} from "@/lib/chat-skill-mentions";
 import { inferSessionKind } from "@/lib/chat-sessions-api";
 import { fetchRunKbSources } from "@/lib/chat-citations";
 import { CONTENT_MAX_CLASS } from "@/lib/content-shell";
@@ -137,6 +146,12 @@ function ChatPageInner() {
   const [projects, setProjects] = useState<ProjectRecord[]>([]);
   const [collections, setCollections] = useState<string[]>([]);
   const [skills, setSkills] = useState<string[]>([]);
+  const [skillCatalog, setSkillCatalog] = useState<WorkshopSkillCatalogItem[]>([]);
+  const [mentionOpen, setMentionOpen] = useState(false);
+  const [mentionQuery, setMentionQuery] = useState("");
+  const [mentionStart, setMentionStart] = useState(-1);
+  const [mentionIndex, setMentionIndex] = useState(0);
+  const [skillsPanelExpanded, setSkillsPanelExpanded] = useState(false);
   const [bootstrapWarnings, setBootstrapWarnings] = useState<string[]>([]);
   const [selectedProjectId, setSelectedProjectId] = useState("");
   const [selectedCollection, setSelectedCollection] = useState("");
@@ -419,6 +434,7 @@ function ChatPageInner() {
         setProjects(data.projects);
         setCollections(data.collections);
         setSkills(data.skills);
+        setSkillCatalog(data.skillCatalog ?? []);
         setBootstrapWarnings(data.warnings);
       })
       .catch((loadError) => {
@@ -676,10 +692,103 @@ function ChatPageInner() {
     condenseTopicTitle,
   });
 
+  const availableSkills = useMemo(
+    () => chatSkillOptions(skills, skillCatalog),
+    [skillCatalog, skills],
+  );
+  const mentionedSkillNames = useMemo(
+    () => extractMentionedSkillNames(input, availableSkills),
+    [availableSkills, input],
+  );
+  const mentionCandidates = useMemo(
+    () => (mentionOpen ? filterSkillMentions(availableSkills, mentionQuery) : []),
+    [availableSkills, mentionOpen, mentionQuery],
+  );
+
+  const syncSkillMention = useCallback((value: string, cursor: number) => {
+    if (availableSkills.length === 0) {
+      setMentionOpen(false);
+      return;
+    }
+    const before = value.slice(0, cursor);
+    const atMatch = before.match(/@([^\s@]*)$/);
+    if (!atMatch) {
+      setMentionOpen(false);
+      return;
+    }
+    setMentionOpen(true);
+    setMentionQuery(atMatch[1] ?? "");
+    setMentionStart(cursor - (atMatch[0]?.length ?? 0));
+    setMentionIndex(0);
+  }, [availableSkills.length]);
+
+  const insertSkillMention = useCallback((skill: ChatSkillOption, replaceActiveMention = false) => {
+    const token = `@${skillMentionToken(skill)}`;
+    if (!replaceActiveMention && input.includes(token)) {
+      const next = input.replace(token, "").replace(/[ \t]{2,}/g, " ").replace(/^\s+/, "");
+      setInput(next);
+      setMentionOpen(false);
+      console.info("[chat] 移除技能标记", { skill: skill.name, label: skill.label });
+      requestAnimationFrame(() => inputRef.current?.focus());
+      return;
+    }
+    const el = inputRef.current;
+    const cursor = el?.selectionStart ?? input.length;
+    const start = replaceActiveMention && mentionStart >= 0 ? mentionStart : cursor;
+    const end = replaceActiveMention ? cursor : (el?.selectionEnd ?? cursor);
+    const before = input.slice(0, start);
+    const after = input.slice(end);
+    const needsGap = before.length > 0 && !/\s$/.test(before);
+    const insertion = `${needsGap ? " " : ""}${token} `;
+    const next = `${before}${insertion}${after}`;
+    setInput(next);
+    setMentionOpen(false);
+    setMentionQuery("");
+    console.info("[chat] 插入技能标记", { skill: skill.name, label: skill.label });
+    requestAnimationFrame(() => {
+      const node = inputRef.current;
+      if (!node) return;
+      const pos = before.length + insertion.length;
+      node.focus();
+      node.setSelectionRange(pos, pos);
+      node.style.height = "auto";
+      node.style.height = `${Math.min(node.scrollHeight, 144)}px`;
+    });
+  }, [input, mentionStart]);
+
+  const submitChat = useCallback(() => {
+    const invoked = extractMentionedSkillNames(input, availableSkills);
+    setMentionOpen(false);
+    void sendMessage(undefined, invoked.length > 0 ? { invokedSkillNames: invoked } : undefined);
+  }, [availableSkills, input, sendMessage]);
+
   const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (mentionOpen && mentionCandidates.length > 0) {
+      if (e.key === "ArrowDown") {
+        e.preventDefault();
+        setMentionIndex((prev) => (prev + 1) % mentionCandidates.length);
+        return;
+      }
+      if (e.key === "ArrowUp") {
+        e.preventDefault();
+        setMentionIndex((prev) => (prev - 1 + mentionCandidates.length) % mentionCandidates.length);
+        return;
+      }
+      if (e.key === "Enter" || e.key === "Tab") {
+        e.preventDefault();
+        const picked = mentionCandidates[mentionIndex];
+        if (picked) insertSkillMention(picked, true);
+        return;
+      }
+      if (e.key === "Escape") {
+        e.preventDefault();
+        setMentionOpen(false);
+        return;
+      }
+    }
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
-      void sendMessage();
+      submitChat();
     }
   };
 
@@ -746,6 +855,11 @@ function ChatPageInner() {
         setSelectedFileId(next ?? "");
       }}
       onRefresh={() => setProjectFilesRefreshKey((value) => value + 1)}
+      folderActor={
+        boundProjectId && activeId
+          ? { kind: "dialogue", sourceId: activeId, title: activeSession?.title || "对话" }
+          : null
+      }
     />
   );
 
@@ -818,6 +932,64 @@ function ChatPageInner() {
             );
           })}
         </div>
+        <div
+          className={`flex min-h-0 flex-col overflow-hidden border-t border-slate-300/40 px-3 py-3 transition-[max-height] dark:border-slate-600/30 ${
+            skillsPanelExpanded ? "max-h-[70%] shrink" : "max-h-40 shrink-0"
+          }`}
+        >
+          <div className="mb-2 flex shrink-0 items-center justify-between gap-2">
+            <button
+              type="button"
+              aria-expanded={skillsPanelExpanded}
+              title={skillsPanelExpanded ? "收起技能" : "向上展开，显示更多技能"}
+              onClick={() => {
+                setSkillsPanelExpanded((open) => {
+                  const next = !open;
+                  console.info("[chat] 技能栏展开", { expanded: next, count: availableSkills.length });
+                  return next;
+                });
+              }}
+              className="inline-flex min-w-0 items-center gap-1 text-[11px] font-medium text-slate-600 transition hover:text-slate-900 dark:text-slate-300 dark:hover:text-white"
+            >
+              <span aria-hidden className={`inline-block transition-transform ${skillsPanelExpanded ? "rotate-180" : ""}`}>
+                ▲
+              </span>
+              <span>可用技能</span>
+              {availableSkills.length > 0 ? (
+                <span className="text-[10px] font-normal text-slate-500">{availableSkills.length}</span>
+              ) : null}
+            </button>
+            <Link href="/skills" className="shrink-0 text-[10px] text-slate-500 hover:text-slate-900 dark:hover:text-white">
+              技能工坊
+            </Link>
+          </div>
+          {availableSkills.length === 0 ? (
+            <p className="text-[11px] leading-relaxed text-slate-500">暂无已启用技能。</p>
+          ) : (
+            <div className={`min-h-0 overscroll-contain ${skillsPanelExpanded ? "flex-1 overflow-y-auto" : "overflow-hidden"}`}>
+              <div className="flex flex-wrap gap-1.5">
+                {availableSkills.map((skill) => {
+                  const active = mentionedSkillNames.includes(skill.name);
+                  return (
+                    <button
+                      key={skill.name}
+                      type="button"
+                      title={skill.hint || skill.name}
+                      onClick={() => insertSkillMention(skill)}
+                      className={`max-w-full truncate rounded-full border px-2 py-1 text-[11px] transition ${
+                        active
+                          ? "border-blue-500 bg-blue-600/15 text-blue-800 dark:text-blue-200"
+                          : "border-slate-300 bg-slate-100 text-slate-600 hover:border-slate-400 hover:text-slate-900 dark:border-slate-600 dark:bg-slate-900/50 dark:text-slate-300 dark:hover:text-white"
+                      }`}
+                    >
+                      @{skill.label}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+        </div>
       </aside>
 
       <div className="flex min-h-0 min-w-0 flex-1 flex-col lg:flex-row">
@@ -885,6 +1057,14 @@ function ChatPageInner() {
             scenarioFromUrl={scenarioFromUrl}
             selectedSourceOutputId={selectedSourceOutputId}
             onRegenerate={regenerateAssistantReply}
+            onDocumentCreated={(outputId) => {
+              const projectId = selectedProjectId || projectFromUrl;
+              setIncludeProjectContext(true);
+              setIncludeFileContext(true);
+              setSelectedFileId(encodeProjectFileSelectValue("output", outputId));
+              setProjectFilesRefreshKey((value) => value + 1);
+              console.info("[chat] 文档已挂到项目文件", { output_id: outputId, project_id: projectId });
+            }}
             titleFromSession={titleFromSession}
             error={error}
             messagesEndRef={messagesEndRef}
@@ -916,21 +1096,59 @@ function ChatPageInner() {
               </p>
             ) : null}
             <div className={`${CONTENT_MAX_CLASS} flex items-end gap-3 px-4 sm:px-6 md:px-8`}>
+              <div className="relative min-w-0 flex-1">
+                {mentionOpen && mentionCandidates.length > 0 ? (
+                  <div className="absolute bottom-full left-0 z-20 mb-1 max-h-52 w-full overflow-y-auto rounded-xl border border-slate-300 bg-white py-1 shadow-lg dark:border-slate-600 dark:bg-slate-900">
+                    {mentionCandidates.map((skill, index) => (
+                      <button
+                        key={skill.name}
+                        type="button"
+                        onMouseDown={(event) => event.preventDefault()}
+                        onClick={() => insertSkillMention(skill, true)}
+                        className={`flex w-full items-center gap-2 px-3 py-2 text-left text-xs ${
+                          index === mentionIndex
+                            ? "bg-blue-50 text-blue-800 dark:bg-blue-950/50 dark:text-blue-200"
+                            : "text-slate-700 hover:bg-slate-50 dark:text-slate-200 dark:hover:bg-slate-800"
+                        }`}
+                      >
+                        <span className="shrink-0 font-medium">@{skill.label}</span>
+                        {skill.hint ? (
+                          <span className="truncate text-[10px] text-slate-400">{skill.hint}</span>
+                        ) : null}
+                      </button>
+                    ))}
+                  </div>
+                ) : null}
               <textarea
                 ref={inputRef}
                 value={input}
-                onChange={(e) => setInput(e.target.value)}
+                onChange={(e) => {
+                  const next = e.target.value;
+                  setInput(next);
+                  syncSkillMention(next, e.target.selectionStart ?? next.length);
+                }}
+                onClick={(e) =>
+                  syncSkillMention(e.currentTarget.value, e.currentTarget.selectionStart ?? e.currentTarget.value.length)
+                }
                 onKeyDown={handleKeyDown}
+                onKeyUp={(e) => {
+                  if (e.key === "ArrowLeft" || e.key === "ArrowRight" || e.key === "Home" || e.key === "End") {
+                    syncSkillMention(
+                      e.currentTarget.value,
+                      e.currentTarget.selectionStart ?? e.currentTarget.value.length,
+                    );
+                  }
+                }}
                 placeholder={
                   docOptimizeBindingHint
                     ? "请先在右侧选择项目和要优化的文稿…"
                     : chatMode === "doc_optimize"
-                      ? "说明改写要求，回车发送…"
-                      : "输入问题，回车发送，Shift+回车换行…"
+                      ? "说明改写要求，@ 调用技能，回车发送…"
+                      : "输入问题，@ 调用技能，回车发送，Shift+回车换行…"
                 }
                 rows={1}
                 disabled={streaming || preparingContext}
-                className="flex-1 resize-none rounded-xl border border-slate-300 bg-slate-300/60 px-4 py-3 text-sm text-slate-900 transition placeholder-slate-400 focus:border-blue-500 focus:outline-none disabled:opacity-50 dark:border-slate-600 dark:bg-slate-700/60 dark:text-white dark:placeholder-slate-500"
+                className="w-full resize-none rounded-xl border border-slate-300 bg-slate-300/60 px-4 py-3 text-sm text-slate-900 transition placeholder-slate-400 focus:border-blue-500 focus:outline-none disabled:opacity-50 dark:border-slate-600 dark:bg-slate-700/60 dark:text-white dark:placeholder-slate-500"
                 style={{ maxHeight: "9rem", minHeight: "3rem", height: "auto" } as CSSProperties}
                 onInput={(e) => {
                   const el = e.currentTarget;
@@ -938,8 +1156,9 @@ function ChatPageInner() {
                   el.style.height = `${Math.min(el.scrollHeight, 144)}px`;
                 }}
               />
+              </div>
               <button
-                onClick={() => void sendMessage()}
+                onClick={() => submitChat()}
                 disabled={streaming || preparingContext || !input.trim() || !docOptimizeBindingReady}
                 className={`flex-shrink-0 rounded-xl px-5 py-3 text-sm font-medium transition ${
                   streaming || preparingContext || !input.trim() || !docOptimizeBindingReady

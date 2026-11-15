@@ -242,3 +242,186 @@ def test_attachment_text_comes_from_authorized_file(bridge, monkeypatch, tmp_pat
         assert result.status_code == 200, result.text
         assert result.json()["source"]["text"] == content
         assert result.json()["state"]["cards"][0]["term"] == "附件夹具"
+
+
+def test_persistent_workbench_uses_authorized_project_snapshot(
+    bridge, monkeypatch, tmp_path
+):
+    monkeypatch.setenv("TPCSTORE_APP_DATA", str(tmp_path))
+    with TestClient(app) as client:
+        headers, payload = seed_file(client, "workbench-owner-" + uuid.uuid4().hex)
+        path = "/api/v1/studio/workbench"
+        page = client.get(path + "/page")
+        assert page.status_code == 200
+        assert page.headers["content-type"].startswith("text/plain")
+        assert "v04-operation" in page.text
+        shown = client.post(
+            path, json={**payload, "operation": "show"}, headers=headers
+        )
+        assert shown.status_code == 200, shown.text
+        opened = shown.json()
+        assert opened["revision"] == 0
+        assert (
+            client.post(
+                path,
+                json={**payload, "operation": "show"},
+                headers={"X-User-ID": "stranger"},
+            ).status_code
+            == 404
+        )
+        request = {
+            **payload,
+            "operation": "extract",
+            "expected_revision": 0,
+            "source_sha256": opened["source"]["sha256"],
+        }
+        extracted = client.post(path, json=request, headers=headers)
+        assert extracted.status_code == 200, extracted.text
+        workspace = extracted.json()
+        card = workspace["cards"][0]
+        saved = client.post(
+            path,
+            json={
+                **request,
+                "operation": "save",
+                "expected_revision": 1,
+                "card_id": card["id"],
+                "fields": {
+                    "definition": {
+                        **card["sources"]["definition"],
+                        "value": "分层设计",
+                    },
+                    "principle": None,
+                    "parameter": None,
+                    "scope": None,
+                },
+            },
+            headers=headers,
+        )
+        assert saved.status_code == 200, saved.text
+        restored = client.post(
+            path, json={**payload, "operation": "show"}, headers=headers
+        )
+        assert restored.json() == saved.json()
+        assert restored.json()["cards"][0]["definition"] == "分层设计"
+        assert client.post(path, json=request, headers=headers).status_code == 409
+        assert len(bridge[0]) == 1
+
+
+def test_workbench_chat_persists_candidates_and_reads_gaps(
+    bridge, monkeypatch, tmp_path
+):
+    from backend.services import studio_agent
+
+    monkeypatch.setenv("TPCSTORE_APP_DATA", str(tmp_path))
+    decisions = {"提取并列出缺口": "extract", "查看缺口": "gaps"}
+    observed = []
+
+    async def choose(message):
+        observed.append(message)
+        return studio_agent.StudioAction(action=decisions[message])
+
+    monkeypatch.setattr(studio_agent, "choose_studio_action", choose)
+    with TestClient(app) as client:
+        headers, payload = seed_file(client, "studio-chat-owner-" + uuid.uuid4().hex)
+        path = "/api/v1/studio/workbench"
+        denied = client.post(
+            path + "/chat", json=payload, headers={"X-User-ID": "studio-chat-stranger"}
+        )
+        assert denied.status_code == 404
+        assert not observed
+        extracted = client.post(
+            path + "/chat",
+            json={**payload, "message": "提取并列出缺口"},
+            headers=headers,
+        )
+        assert extracted.status_code == 200, extracted.text
+        assert "候选已保存" in extracted.json()["reply"]
+        assert "原理、参数、适用范围" in extracted.json()["reply"]
+        workspace = client.post(
+            path, json={**payload, "operation": "show"}, headers=headers
+        ).json()
+        assert workspace["cards"][0]["term"] == "桥接夹具A"
+        gaps = client.post(
+            path + "/chat", json={**payload, "message": "查看缺口"}, headers=headers
+        )
+        assert gaps.json()["revision"] == workspace["revision"] == 1
+        assert observed == ["提取并列出缺口", "查看缺口"]
+        assert len(bridge[0]) == 1
+
+
+def test_workbench_job_replays_receipt_without_reextracting(
+    bridge, monkeypatch, tmp_path
+):
+    import time
+
+    from backend.services import studio_agent
+
+    monkeypatch.setenv("TPCSTORE_APP_DATA", str(tmp_path))
+
+    async def choose(_message):
+        return studio_agent.StudioAction(
+            action="extract", card_number=1, field="definition"
+        )
+
+    monkeypatch.setattr(studio_agent, "choose_studio_action", choose)
+    with TestClient(app) as client:
+        headers, payload = seed_file(client, "studio-job-" + uuid.uuid4().hex)
+        request_id = str(uuid.uuid4())
+        body = {**payload, "request_id": request_id}
+        path = "/api/v1/studio/workbench/jobs"
+        assert client.post(path, json=body, headers=headers).status_code == 202
+        assert client.post(path, json=body, headers=headers).status_code == 202
+        query = {key: payload[key] for key in ("project_id", "file_id", "file_kind")}
+        for _ in range(100):
+            status = client.get(
+                f"{path}/{request_id}", params=query, headers=headers
+            ).json()
+            if status["status"] != "running":
+                break
+            time.sleep(0.02)
+        assert status["status"] == "completed", status
+        assert status["result"]["focus"]["field"] == "definition"
+        assert status["result"]["revision"] == 1
+        assert len(bridge[0]) == 1
+        assert (
+            client.post(
+                path, json={**body, "message": "其他指令"}, headers=headers
+            ).status_code
+            == 409
+        )
+
+
+def test_workbench_dialogue_saves_exact_source_and_keeps_previous_snapshot(
+    bridge, monkeypatch, tmp_path
+):
+    from backend.services import studio_agent
+
+    monkeypatch.setenv("TPCSTORE_APP_DATA", str(tmp_path))
+
+    async def choose(message):
+        if message == "提取技术卡":
+            return studio_agent.StudioAction(action="extract")
+        return studio_agent.StudioAction(
+            action="save", card_number=1, field="parameter", line_start=2, line_end=2
+        )
+
+    monkeypatch.setattr(studio_agent, "choose_studio_action", choose)
+    with TestClient(app) as client:
+        headers, payload = seed_file(
+            client,
+            "studio-save-" + uuid.uuid4().hex,
+            "桥接夹具A采用分层设计。\n额定电压400V。",
+        )
+        path = "/api/v1/studio/workbench/chat"
+        first = client.post(path, json=payload, headers=headers)
+        assert first.status_code == 200, first.text
+        saved = client.post(
+            path, json={**payload, "message": "保存参数第2行"}, headers=headers
+        )
+        assert saved.status_code == 200, saved.text
+        card = saved.json()["snapshot"]["cards"][0]
+        assert card["parameter"] == "额定电压400V。"
+        assert card["sources"]["parameter"]["line_start"] == 2
+        assert first.json()["snapshot"]["cards"][0]["parameter"] == ""
+        assert len(bridge[0]) == 1

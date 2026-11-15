@@ -107,6 +107,7 @@ from backend.models.user_preference import UserPreference as _UserPreference  # 
 from backend.models.local_account import LocalAccount as _LocalAccount  # noqa: E402, F401
 from backend.models.skill import Skill as _Skill  # noqa: E402, F401
 from backend.models.project_member import ProjectMember as _ProjectMember  # noqa: E402, F401
+from backend.models.project_session import ProjectSession as _ProjectSession  # noqa: E402, F401
 from backend.models.project_room import ProjectRoom as _ProjectRoom  # noqa: E402, F401
 from backend.models.project_room import ProjectRoomMessage as _ProjectRoomMessage  # noqa: E402, F401
 from backend.models.digital_employee import DigitalEmployee as _DigitalEmployee  # noqa: E402, F401

@@ -106,7 +106,7 @@ interface WorkshopSkillsResponse {
   catalog?: WorkshopSkillCatalogItem[];
 }
 
-interface WorkshopSkillCatalogItem {
+export interface WorkshopSkillCatalogItem {
   name: string;
   display_name?: string;
   description?: string;
@@ -142,6 +142,8 @@ export interface ChatBootstrapData {
   projects: ProjectRecord[];
   collections: string[];
   skills: string[];
+  /** `/ws/skills` catalog，与技能工坊同一批可用技能的展示信息 */
+  skillCatalog?: WorkshopSkillCatalogItem[];
   transport: ChatTransportConfig | null;
   warnings: string[];
 }
@@ -702,12 +704,13 @@ export async function fetchChatBootstrap(): Promise<ChatBootstrapData> {
   if (collectionsRes.status === "rejected") warnings.push(`知识库集合加载失败：${String(collectionsRes.reason)}`);
 
   const skills = skillsRes.status === "fulfilled" ? skillsRes.value.skills : [];
+  const skillCatalog = skillsRes.status === "fulfilled" ? skillsRes.value.catalog ?? [] : [];
   if (skillsRes.status === "rejected") warnings.push(`技能列表加载失败：${String(skillsRes.reason)}`);
 
   const transport = transportRes.status === "fulfilled" ? transportRes.value : null;
   if (transportRes.status === "rejected") warnings.push(`聊天链路配置加载失败：${String(transportRes.reason)}`);
 
-  return { projects, collections, skills, transport, warnings };
+  return { projects, collections, skills, skillCatalog, transport, warnings };
 }
 
 export async function buildToolsContext(options: BuildContextOptions): Promise<BuildContextResult> {

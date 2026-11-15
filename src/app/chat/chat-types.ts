@@ -114,4 +114,6 @@ export type RunAssistantStreamParams = {
   scenarioPresetInstructionsAppend?: string;
   scenarioIdOverride?: string;
   scenarioPresetInstructionsOverride?: string;
+  /** 本轮通过 @ 或侧栏标签指定的技能名 */
+  invokedSkillNames?: string[];
 };

@@ -268,6 +268,7 @@ async def create_project(
     return _project_to_response(project)
 
 
+@router.get("", response_model=list[ProjectResponse], include_in_schema=False)
 @router.get("/", response_model=list[ProjectResponse])
 async def list_projects(
     status: Optional[str] = None,
@@ -1433,6 +1434,76 @@ async def set_default_project_scenario(
     return _project_scenario_item(ps, sp)
 
 
+class ProjectSessionEnsureRequest(BaseModel):
+    kind: str
+    source_id: str
+    source_kind: str = "client"
+    title: str = ""
+
+
+class ProjectFolderMutation(BaseModel):
+    session_id: str
+    action: str
+    file_id: str | None = None
+    title: str | None = None
+    content: str | None = None
+
+
+@router.get("/{project_id}/sessions")
+async def list_sessions_api(
+    project_id: str,
+    db: AsyncSession = Depends(get_db),
+    effective_uid: str = Depends(get_effective_user_id),
+):
+    from backend.services.project_session_service import list_project_sessions
+
+    items = await list_project_sessions(db, project_id, effective_uid)
+    return {"items": items}
+
+
+@router.post("/{project_id}/sessions")
+async def ensure_session_api(
+    project_id: str,
+    body: ProjectSessionEnsureRequest,
+    db: AsyncSession = Depends(get_db),
+    effective_uid: str = Depends(get_effective_user_id),
+):
+    from backend.services.project_session_service import ensure_project_session, session_dict
+
+    await require_project_for_user(db, project_id, effective_uid, min_perm="write")
+    row = await ensure_project_session(
+        db,
+        project_id=project_id,
+        kind=body.kind,
+        source_id=body.source_id,
+        source_kind=body.source_kind,
+        title=body.title,
+        owner_id=effective_uid,
+    )
+    return session_dict(row)
+
+
+@router.post("/{project_id}/folder")
+async def mutate_folder_api(
+    project_id: str,
+    body: ProjectFolderMutation,
+    db: AsyncSession = Depends(get_db),
+    effective_uid: str = Depends(get_effective_user_id),
+):
+    from backend.services.project_session_service import mutate_project_folder_file
+
+    return await mutate_project_folder_file(
+        db,
+        project_id=project_id,
+        user_id=effective_uid,
+        session_id=body.session_id,
+        action=body.action,
+        file_id=body.file_id,
+        title=body.title,
+        content=body.content,
+    )
+
+
 # --- 输出物治理 ---
 
 
@@ -1463,6 +1534,7 @@ class BrainstormOutputDepositRequest(BaseModel):
     consensus_reached: bool | None = None
     stopped_at_round: int | None = None
     stop_reason: str | None = None
+    session_id: str | None = None
 
 
 def _entrypoint_from_citations(citations_json: str | None) -> str | None:
@@ -1553,6 +1625,17 @@ async def deposit_chat_output(
                 user_message=meta.get("user_message"),
             )
 
+    from backend.services.project_session_service import resolve_output_session_id
+
+    origin_session = await resolve_output_session_id(
+        db,
+        project_id=project_id,
+        owner_id=effective_uid,
+        kind="dialogue",
+        source_id=body.session_id,
+        source_kind="chat",
+        title=title,
+    )
     row = OutputAsset(
         id=str(uuid.uuid4()),
         project_id=project_id,
@@ -1564,6 +1647,7 @@ async def deposit_chat_output(
         content_format="markdown",
         status="draft",
         owner_id=effective_uid or "default",
+        session_id=origin_session,
         created_at=now,
         updated_at=now,
     )
@@ -1687,6 +1771,17 @@ async def deposit_brainstorm_output(
             user_message=topic or None,
         )
 
+    from backend.services.project_session_service import resolve_output_session_id
+
+    origin_session = await resolve_output_session_id(
+        db,
+        project_id=project_id,
+        owner_id=effective_uid,
+        kind="brainstorm",
+        source_id=body.session_id or ma_run_id,
+        source_kind="brainstorm",
+        title=title,
+    )
     row = OutputAsset(
         id=str(uuid.uuid4()),
         project_id=project_id,
@@ -1699,6 +1794,7 @@ async def deposit_brainstorm_output(
         status="draft",
         citations_json=json.dumps(citations, ensure_ascii=False),
         owner_id=effective_uid or "default",
+        session_id=origin_session,
         created_at=now,
         updated_at=now,
     )

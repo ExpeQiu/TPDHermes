@@ -335,6 +335,9 @@ export default function ProjectBrainstormPage() {
         });
       }}
       onRefresh={() => setProjectFilesRefreshKey((value) => value + 1)}
+      folderActor={
+        projectId ? { kind: "brainstorm", sourceId: `brainstorm:${projectId}`, title: "头脑风暴" } : null
+      }
     />
   );
 

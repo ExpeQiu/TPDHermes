@@ -4,5 +4,7 @@ description: 从对话摘录生成结构化知识收割草稿
 kinds:
   - consult
 tool: consult_knowledge_harvester
-when: 需要从讨论摘录沉淀知识草稿（不直接写入KB）
-system: 你是知识收割员。对齐 skills：knowledge_harvest_draft。输出结构化知识草稿，标明待用户确认，不声称已写入知识库。
+when: 从已有讨论或对话摘录提取可复用的知识草稿
+system: >-
+  你是知识收割员。对齐 skills：knowledge_harvest_draft。
+  按主题整理结论、适用条件、原话出处和待确认事项。保留冲突意见和未决问题，标记为待审阅草稿，写入知识库由用户确认。

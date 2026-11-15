@@ -32,6 +32,7 @@ type ChatMessageStreamProps = {
   scenarioFromUrl: string;
   selectedSourceOutputId: string | null;
   onRegenerate: (assistantMessageId: string) => Promise<void>;
+  onDocumentCreated?: (outputId: string) => void;
   titleFromSession: (session: ChatSession | undefined) => string;
   error: string;
   messagesEndRef: React.RefObject<HTMLDivElement | null>;
@@ -115,6 +116,7 @@ export function ChatMessageStream({
   scenarioFromUrl,
   selectedSourceOutputId,
   onRegenerate,
+  onDocumentCreated,
   titleFromSession,
   error,
   messagesEndRef,
@@ -265,6 +267,7 @@ export function ChatMessageStream({
                   scenarioId={scenarioFromUrl || "general"}
                   sourceOutputId={selectedSourceOutputId}
                   onRegenerate={onRegenerate}
+                  onDocumentCreated={onDocumentCreated}
                   actionsDisabled={streaming || preparingContext}
                   initialFeedbackLevel={msg.feedbackLevel}
                 />

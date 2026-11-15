@@ -21,6 +21,20 @@ def test_platform_role_persist_and_access_features():
         assert "projects" in access["features"]
 
 
+def test_tenant_partner_can_read_kb_but_not_manage():
+    with TestClient(app) as client:
+        client.put("/api/v1/me/role", headers=HDR_PARTNER, json={"platform_role": "tenant_partner"})
+        listed = client.get("/api/v1/kb/collections", headers=HDR_PARTNER)
+        assert listed.status_code == 200
+        assert "collections" in listed.json()
+        denied = client.post(
+            "/api/v1/kb/catalog/domains",
+            headers=HDR_PARTNER,
+            json={"key": "partner_domain", "label": "不应写入"},
+        )
+        assert denied.status_code == 403
+
+
 def test_tenant_partner_blocked_from_scenarios_api():
     with TestClient(app) as client:
         client.put("/api/v1/me/role", headers=HDR_PARTNER, json={"platform_role": "tenant_partner"})

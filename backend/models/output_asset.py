@@ -27,6 +27,7 @@ class OutputAsset(Base):
     status = Column(String, nullable=False, default="draft")
     citations_json = Column(Text)
     owner_id = Column(String, default="default")
+    session_id = Column(String)
     created_at = Column(String, default=lambda: datetime.now().isoformat())
     updated_at = Column(String, default=lambda: datetime.now().isoformat())
     kb_ingest_status = Column(String)

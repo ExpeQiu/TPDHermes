@@ -438,6 +438,18 @@ async def create_room(
         updated_at=now,
     )
     db.add(room)
+    from backend.services.project_session_service import ensure_project_session
+
+    await ensure_project_session(
+        db,
+        project_id=project_id,
+        kind="cocreate",
+        source_id=room.id,
+        source_kind="room",
+        title=room.title,
+        owner_id=user_id,
+        commit=False,
+    )
     await db.commit()
     logger.info(
         "[co-create-room] room created room_id=%s project_id=%s user_id=%s roles=%s writer=%s",

@@ -156,6 +156,18 @@ async def brainstorm_run(
                 "attachment_items": attachment_ctx.get("items") or [],
             }
         )
+        if body.project_id:
+            from backend.services.project_session_service import ensure_project_session
+
+            await ensure_project_session(
+                db,
+                project_id=body.project_id,
+                kind="brainstorm",
+                source_id=started["job_id"],
+                source_kind="brainstorm",
+                title=topic[:80],
+                owner_id=effective_uid,
+            )
         return {
             "job_id": started["job_id"],
             "status": started["status"],
@@ -183,6 +195,19 @@ async def brainstorm_run(
         logger.exception("头脑风暴未预期错误 | user=%s", effective_uid)
         raise HTTPException(status_code=500, detail=f"头脑风暴执行失败: {exc}") from exc
 
+    if body.project_id:
+        from backend.services.project_session_service import ensure_project_session
+
+        run_key = str(result.get("run_id") or topic[:40])
+        await ensure_project_session(
+            db,
+            project_id=body.project_id,
+            kind="brainstorm",
+            source_id=run_key,
+            source_kind="brainstorm",
+            title=topic[:80],
+            owner_id=effective_uid,
+        )
     result["project_id"] = body.project_id
     result["user_id"] = effective_uid
     result["attachment_context"] = attachment_ctx.get("items") or []

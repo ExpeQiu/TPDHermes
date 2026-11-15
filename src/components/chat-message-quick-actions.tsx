@@ -84,6 +84,7 @@ export function ChatMessageQuickActions({
   scenarioId,
   sourceOutputId,
   onRegenerate,
+  onDocumentCreated,
   actionsDisabled = false,
   initialFeedbackLevel,
 }: {
@@ -102,6 +103,8 @@ export function ChatMessageQuickActions({
   sourceOutputId?: string | null;
   /** 仅助手消息：基于上一条用户问题重新生成回复 */
   onRegenerate?: (assistantMessageId: string) => void | Promise<void>;
+  /** 将本条回复创建为项目文档后通知页面刷新文件栏 */
+  onDocumentCreated?: (outputId: string) => void;
   actionsDisabled?: boolean;
   initialFeedbackLevel?: AdoptionLevel | null;
 }) {
@@ -110,6 +113,8 @@ export function ChatMessageQuickActions({
   const [kbHint, setKbHint] = useState<string | null>(null);
   const [projectState, setProjectState] = useState<"idle" | "busy" | "ok" | "fail">("idle");
   const [projectHint, setProjectHint] = useState<string | null>(null);
+  const [docState, setDocState] = useState<"idle" | "busy" | "ok" | "fail">("idle");
+  const [docHint, setDocHint] = useState<string | null>(null);
   const [exportFlash, setExportFlash] = useState(false);
   const [versionState, setVersionState] = useState<"idle" | "busy" | "ok" | "fail">("idle");
   const [versionHint, setVersionHint] = useState<string | null>(null);
@@ -277,6 +282,54 @@ export function ChatMessageQuickActions({
     }
   }, [collectionName, fileTitle, projectId, role, sessionId, trimmed]);
 
+  const onCreateDocument = useCallback(async () => {
+    const pid = projectId?.trim();
+    if (!trimmed || !pid || docState === "busy") return;
+    setDocState("busy");
+    setDocHint(null);
+    const title = titleFromContent(trimmed, 40);
+    try {
+      const res = await apiPost<ProjectDepositResponse>(`/projects/${pid}/outputs/deposit-from-chat`, {
+        content: trimmed,
+        title,
+        run_id: runId,
+        scenario_id: scenarioId,
+        session_id: sessionId ?? undefined,
+        message_id: messageId,
+      });
+      setDocState("ok");
+      setDocHint(res.title?.trim() || title);
+      trackUsage({
+        eventName: "chat_create_document",
+        feature: "chat_output",
+        action: "create_document",
+        projectId: pid,
+        properties: {
+          run_id: runId,
+          message_id: messageId,
+          output_id: res.id,
+        },
+      });
+      console.info("[chat] 创建文档", {
+        project_id: pid,
+        output_id: res.id,
+        title,
+        run_id: runId,
+        message_id: messageId,
+      });
+      if (res.id) onDocumentCreated?.(res.id);
+    } catch (e) {
+      setDocState("fail");
+      setDocHint(e instanceof Error ? e.message : String(e));
+      console.warn("[chat] 创建文档失败", e);
+    } finally {
+      window.setTimeout(() => {
+        setDocState("idle");
+        setDocHint(null);
+      }, 5000);
+    }
+  }, [docState, messageId, onDocumentCreated, projectId, runId, scenarioId, sessionId, trimmed]);
+
   const onSaveProject = useCallback(async () => {
     const pid = projectId?.trim();
     if (!trimmed || !pid || projectState === "busy") return;
@@ -390,11 +443,12 @@ export function ChatMessageQuickActions({
           </button>
           <button
             type="button"
-            className={`${btnClass} ${feedbackActiveClass("full")}`}
-            disabled={actionsDisabled || feedbackState === "busy"}
-            onClick={() => void submitFeedback("adopt", "用户点击采纳")}
+            className={btnClass}
+            disabled={actionsDisabled || !projectId?.trim() || docState === "busy"}
+            title={projectId?.trim() ? "将本条回复创建为项目文档" : "请先在右侧绑定项目"}
+            onClick={() => void onCreateDocument()}
           >
-            采纳
+            {docState === "busy" ? "创建中…" : docState === "ok" ? "已创建" : docState === "fail" ? "创建失败" : "创建文档"}
           </button>
           <button
             type="button"
@@ -493,6 +547,16 @@ export function ChatMessageQuickActions({
         >
           {versionHint}
           {versionState === "ok" && projectId ? (
+            <Link href={`/projects/${projectId}`} className={`ml-1 ${accentLink}`}>
+              打开项目
+            </Link>
+          ) : null}
+        </span>
+      ) : null}
+      {docHint ? (
+        <span className={`text-[10px] ${docState === "fail" ? accentRedSoft : accentEmeraldSoft}`}>
+          {docState === "ok" ? `已创建文档「${docHint}」` : docHint}
+          {docState === "ok" && projectId ? (
             <Link href={`/projects/${projectId}`} className={`ml-1 ${accentLink}`}>
               打开项目
             </Link>

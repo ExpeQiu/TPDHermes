@@ -277,6 +277,29 @@ async def list_sessions_full_for_user(db: AsyncSession, user_id: str) -> list[di
     return [session_records_to_client(row, messages_by_session.get(row.id, [])) for row in rows]
 
 
+async def _register_dialogue_session(db: AsyncSession, row: ChatSessionRecord) -> None:
+    if (row.session_kind or "") == "project_co_create":
+        return
+    context = _json_load(row.context_json, {})
+    project_id = ""
+    if isinstance(context, dict):
+        project_id = str(context.get("selectedProjectId") or "").strip()
+    if not project_id:
+        return
+    from backend.services.project_session_service import ensure_project_session
+
+    await ensure_project_session(
+        db,
+        project_id=project_id,
+        kind="dialogue",
+        source_id=row.id,
+        source_kind="chat",
+        title=row.title or "对话",
+        owner_id=row.user_id or "default",
+        commit=False,
+    )
+
+
 async def create_session_for_user(
     db: AsyncSession,
     *,
@@ -305,6 +328,7 @@ async def create_session_for_user(
     messages = payload.get("messages") or []
     if isinstance(messages, list):
         await _sync_messages(db, row.id, messages, replace_existing=True)
+    await _register_dialogue_session(db, row)
     await db.commit()
     detail = await get_session_detail_for_user(db, session_id=row.id, user_id=user_id)
     logger.info("chat_session created id=%s user_id=%s", row.id, user_id[:24])
@@ -346,6 +370,7 @@ async def upsert_session_for_user(
     messages = payload.get("messages")
     if isinstance(messages, list):
         await _sync_messages(db, session_id, messages, replace_existing=True)
+    await _register_dialogue_session(db, row)
     await db.commit()
     detail = await get_session_detail_for_user(db, session_id=session_id, user_id=user_id)
     logger.debug("chat_session upsert id=%s user_id=%s msgs=%s", session_id, user_id[:24], len(messages or []))

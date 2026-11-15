@@ -15,7 +15,7 @@ def test_default_opens_only_ready_cards(monkeypatch, tmp_path):
     payload = public_release()
     opened = [row["id"] for row in payload["skills"] if row["released"]]
     assert payload["data_source"] == "default"
-    assert opened == ["V04"]
+    assert opened == ["V04", "V05", "V10", "V17"]
     assert len(payload["skills"]) == 21
 
 

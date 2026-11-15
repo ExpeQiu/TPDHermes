@@ -205,6 +205,8 @@ def run_sqlite_migrations(connection: Connection) -> None:
         )
 
     if "outputs" in names:
+        _add_columns(connection, "outputs", [("session_id", "TEXT")])
+    if "outputs" in names:
         _add_columns(
             connection,
             "outputs",
