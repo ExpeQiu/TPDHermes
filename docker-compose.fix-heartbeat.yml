@@ -1,0 +1,5 @@
+# 工具调用间隙没有 token 时，30s 心跳会把上游 SSE 判超时。压测后默认 120s。
+services:
+  backend:
+    environment:
+      - CHAT_STREAM_HEARTBEAT_SEC=${CHAT_STREAM_HEARTBEAT_SEC:-120}

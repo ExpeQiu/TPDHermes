@@ -1,8 +1,9 @@
 "use client";
 
+import dynamic from "next/dynamic";
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
 import {
   coCreateAgentModeMeta,
@@ -10,10 +11,7 @@ import {
   roomPlanReady,
   type CoCreateAgentMode,
 } from "@/app/projects/[id]/co-create/co-create-agent-utils";
-import { FilePreviewPanel } from "@/app/projects/[id]/co-create/components/FilePreviewPanel";
-import { ChatMarkdownWithCitations } from "@/components/chat-markdown-with-citations";
 import { ChatMessageQuickActions } from "@/components/chat-message-quick-actions";
-import { ProjectFilesPanel } from "@/app/projects/[id]/co-create/components/ProjectFilesPanel";
 import { useFileWorkspace } from "@/app/projects/[id]/co-create/hooks/use-file-workspace";
 import {
   acceptRoomPayload,
@@ -77,8 +75,51 @@ const POLL_MS = 2000;
 const HISTORY_PAGE = 80;
 const ROOM_AGENT_MODES: CoCreateAgentMode[] = ["ask", "agent", "plan"];
 
+const FilePreviewPanel = dynamic(
+  () =>
+    import("@/app/projects/[id]/co-create/components/FilePreviewPanel").then(
+      (mod) => mod.FilePreviewPanel,
+    ),
+  {
+    loading: () => (
+      <div className="h-full animate-pulse bg-slate-200/70 dark:bg-slate-900/50" aria-hidden />
+    ),
+  },
+);
+
+const ProjectFilesPanel = dynamic(() =>
+  import("@/app/projects/[id]/co-create/components/ProjectFilesPanel").then(
+    (mod) => mod.ProjectFilesPanel,
+  ),
+);
+
+type MarkdownView = (props: { content: string }) => ReactNode;
+
+let markdownViewLoader: Promise<MarkdownView> | null = null;
+
+function loadMarkdownView(): Promise<MarkdownView> {
+  markdownViewLoader ??= import("@/components/chat-markdown-with-citations").then(
+    (mod) => mod.ChatMarkdownWithCitations,
+  );
+  return markdownViewLoader;
+}
+
 const AgentMessageBody = memo(function AgentMessageBody({ content }: { content: string }) {
-  return <ChatMarkdownWithCitations content={expandRoomFileActions(content)} />;
+  const expanded = expandRoomFileActions(content);
+  const [MarkdownView, setMarkdownView] = useState<MarkdownView | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    void loadMarkdownView().then((View) => {
+      if (!cancelled) setMarkdownView(() => View);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+  if (!MarkdownView) {
+    return <div className="text-sm leading-relaxed whitespace-pre-wrap">{expanded}</div>;
+  }
+  return <MarkdownView content={expanded} />;
 });
 
 function hashRoleId(value: string): number {

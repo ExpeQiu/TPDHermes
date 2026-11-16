@@ -104,7 +104,12 @@ def build_writer_messages(role: dict[str, Any], ctx: dict[str, Any]) -> list[dic
     ]
 
 
-async def request_writer_completion(messages: list[dict[str, str]]) -> str:
+async def request_writer_completion(
+    messages: list[dict[str, str]],
+    *,
+    employee_id: str = "",
+    scope: str = "",
+) -> str:
     upstream = resolve_chat_upstream()
     url = str(upstream.get("url") or "").strip()
     if not url:
@@ -116,6 +121,9 @@ async def request_writer_completion(messages: list[dict[str, str]]) -> str:
     headers = {"Content-Type": "application/json"}
     if api_key:
         headers["Authorization"] = f"Bearer {api_key}"
+    from backend.services.user_identity import apply_hermes_session_header
+
+    apply_hermes_session_header(headers, employee_id or "default", scope or "room-writer")
     started = time.perf_counter()
     logger.info(
         "[co-create-room] writer request driver=hermes model=%s auth=%s source=%s",
@@ -165,4 +173,8 @@ async def complete_with_hermes(role: dict[str, Any], ctx: dict[str, Any]) -> str
     if driver != "hermes":
         raise RuntimeError(f"当前驱动不是 hermes：{driver}")
     messages = build_writer_messages(role, ctx)
-    return await request_writer_completion(messages)
+    return await request_writer_completion(
+        messages,
+        employee_id=str(ctx.get("employee_id") or ""),
+        scope=str(ctx.get("session_scope") or ""),
+    )

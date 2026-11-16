@@ -8,26 +8,18 @@ mcp_servers:
     url: http://tphermes-mcp:8801/mcp
     enabled: true
     timeout: 120
-    connect_timeout: 30
+    connect_timeout: 5
     tools:
       include:
         - kb_query
         - kb_list_collections
         - kb_get_entry
-        - kb_add_entry
         - workshop_list_skills
         - workshop_get_skill_info
         - workshop_generate
         - workshop_generate_from_kb
-        - project_list
-        - project_create
-        - project_get
         - tavily_search
         - tavily_extract
-        - list_resources
-        - read_resource
-        - list_prompts
-        - get_prompt
 
 terminal:
   backend: "local"
@@ -35,6 +27,18 @@ terminal:
   timeout: 180
   lifetime_seconds: 300
   docker_mount_cwd_to_workspace: false
+
+# 共创热路径不挂 web/file/skills/code_execution。terminal 保留：关掉后模型会改走 terminal，失败轮次反而上升。
+agent:
+  disabled_toolsets:
+    - web
+    - file
+    - skills
+    - code_execution
+
+gateway:
+  api_server:
+    max_concurrent_runs: 32
 
 # 生产部署场景：Agent 需频繁 curl/ssh/docker 等运维命令，关闭交互式审批。
 # 硬线 blocklist（rm -rf /、fork bomb 等）仍会拦截，不受此配置影响。

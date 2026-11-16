@@ -78,6 +78,9 @@ fi
 if [[ -f docker-compose.prod.override.yml ]]; then
   COMPOSE_FILES+=(-f docker-compose.prod.override.yml)
 fi
+if [[ -f docker-compose.fix-heartbeat.yml ]]; then
+  COMPOSE_FILES+=(-f docker-compose.fix-heartbeat.yml)
+fi
 
 dc() { docker compose "${COMPOSE_FILES[@]}" "$@"; }
 

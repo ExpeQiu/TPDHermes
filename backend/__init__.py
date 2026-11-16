@@ -203,12 +203,14 @@ from backend.routes.system_config import router as system_config_router
 from backend.routes.studio import router as studio_router
 from backend.routes.employees import router as employees_router
 from backend.routes.project_rooms import router as project_rooms_router
+from backend.routes.promotion_packages import router as promotion_packages_router
 
 include_router_with_version(me_router)
 include_router_with_version(local_auth_router)
 include_router_with_version(mcp_router, strip_prefix="/mcp")
 include_router_with_version(projects_router, strip_prefix="/projects")
 include_router_with_version(project_rooms_router, strip_prefix="/projects")
+include_router_with_version(promotion_packages_router, strip_prefix="/projects")
 include_router_with_version(kb_router,       strip_prefix="/kb")
 include_router_with_version(kb_ingest_router, strip_prefix="/kb")
 include_router_with_version(kb_policies_router, strip_prefix="/kb")

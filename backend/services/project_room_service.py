@@ -1301,6 +1301,8 @@ async def _execute_turn(db: AsyncSession, room_id: str, turn_id: str) -> None:
         prior = "\n".join(text for _, text in discussion if text)
         await db.commit()
         ctx = {
+            "employee_id": human.author_id,
+            "session_scope": f"room:{room_id}",
             "human_text": human.content,
             "prior_agent_text": prior,
             "transcript": transcript + [f"{name}: {text}" for name, text in discussion],

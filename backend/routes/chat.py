@@ -155,6 +155,9 @@ async def chat_completions(req: Request, request: ChatCompletionRequest):
     headers = {"Content-Type": "application/json"}
     if api_key:
         headers["Authorization"] = f"Bearer {api_key}"
+    from backend.services.user_identity import apply_hermes_session_header, effective_user_id_for_api
+
+    apply_hermes_session_header(headers, effective_user_id_for_api(req))
     uid = (req.headers.get("X-User-ID") or req.headers.get("x-user-id") or "").strip()
     if uid:
         headers["X-User-ID"] = uid

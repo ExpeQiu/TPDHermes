@@ -1089,16 +1089,26 @@ export default function ProjectDetailPage() {
             <div className="mb-6 flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
               <div>
                 <p className="text-xs uppercase tracking-[0.2em] text-slate-500">项目控制台</p>
-                <h1 className="mt-2 text-2xl font-bold leading-tight sm:text-3xl md:text-4xl">
-                  {project.name}
-                </h1>
+                <div className="mt-2 flex flex-wrap items-center gap-3">
+                  <h1 className="text-2xl font-bold leading-tight sm:text-3xl md:text-4xl">
+                    {project.name}
+                  </h1>
+                  <span
+                    className={`rounded-full px-3 py-1 text-xs font-medium text-slate-900 dark:text-white sm:text-sm ${statusColors[project.status] ?? "bg-slate-500"}`}
+                  >
+                    {projectStatusLabel(project.status)}
+                  </span>
+                </div>
                 <p className="mt-2 text-sm text-slate-400">项目 ID: #{project.id}</p>
               </div>
-              <span
-                className={`self-start rounded-full px-3 py-1 text-xs font-medium text-slate-900 dark:text-white sm:text-sm ${statusColors[project.status] ?? "bg-slate-500"}`}
-              >
-                {projectStatusLabel(project.status)}
-              </span>
+              <div className="self-start">
+                <Link
+                  href={`/projects/${id}/promotion`}
+                  className="rounded-2xl bg-blue-600 px-8 py-3 text-base font-semibold text-white shadow-sm transition hover:bg-blue-500"
+                >
+                  资料包
+                </Link>
+              </div>
             </div>
 
             <div className="mb-6 grid gap-3 md:grid-cols-4">
@@ -1239,6 +1249,7 @@ export default function ProjectDetailPage() {
                   projectId={String(id)}
                   links={[
                     { href: `/projects/${id}/co-create`, label: "项目共创" },
+                    { href: `/projects/${id}/promotion`, label: "技术推广包" },
                     { href: `/projects/${id}/brainstorm`, label: "头脑风暴" },
                     { href: `/chat?project_id=${id}&new_chat=1`, label: "对话创作" },
                     { href: workshopEntryHref, label: "场景输出" },

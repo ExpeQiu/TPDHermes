@@ -120,3 +120,6 @@ from backend.models.digital_employee import FeishuEmployeeBinding as _FeishuEmpl
 from backend.models.digital_employee import FeishuInboundEvent as _FeishuInboundEvent  # noqa: E402, F401
 from backend.models.digital_employee import FeishuUserLink as _FeishuUserLink  # noqa: E402, F401
 from backend.models.digital_employee import ConfirmationStep as _ConfirmationStep  # noqa: E402, F401
+from backend.models.promotion_package import PromotionPackage as _PromotionPackage  # noqa: E402, F401
+from backend.models.promotion_package import PromotionPackageReview as _PromotionPackageReview  # noqa: E402, F401
+from backend.models.promotion_package import PromotionPackageStep as _PromotionPackageStep  # noqa: E402, F401

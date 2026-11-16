@@ -71,7 +71,12 @@ from backend.services.workshop_execution import (
 )
 from backend.services.workshop_tool_capture import load_workshop_tool_capture
 from backend.services.kb_source_capture import build_sources_for_sse, build_sources_payload_from_capture, load_kb_sources, prefetch_kb_sources_for_run
-from backend.services.user_identity import effective_user_id_for_api, normalize_user_id, viewer_role
+from backend.services.user_identity import (
+    apply_hermes_session_header,
+    effective_user_id_for_api,
+    normalize_user_id,
+    viewer_role,
+)
 
 logger = logging.getLogger("tpdx.hermes")
 
@@ -1129,9 +1134,9 @@ async def execute_task(req: Request, task_req: TaskExecuteRequest, db: AsyncSess
     kb_prefetch_timeout_sec = _env_float("KB_PREFETCH_TIMEOUT_SEC", 12.0, min_value=1.0, max_value=120.0)
     upstream_heartbeat_sec = _env_float(
         "CHAT_STREAM_HEARTBEAT_SEC",
-        30.0,
+        120.0,
         min_value=3.0,
-        max_value=120.0,
+        max_value=600.0,
     )
     agent_cold_start_ms = _env_int("CHAT_AGENT_COLD_START_MS", 8000, min_value=1000, max_value=120_000)
 
@@ -1186,6 +1191,11 @@ async def execute_task(req: Request, task_req: TaskExecuteRequest, db: AsyncSess
         headers = {"Content-Type": "application/json"}
         if api_key:
             headers["Authorization"] = f"Bearer {api_key}"
+        apply_hermes_session_header(
+            headers,
+            effective_uid,
+            payload.scenario.id or payload.entrypoint,
+        )
         timeout = httpx.Timeout(connect=10.0, read=120.0, write=30.0, pool=10.0)
         t0 = time.perf_counter()
         try:
@@ -1404,6 +1414,11 @@ async def execute_task(req: Request, task_req: TaskExecuteRequest, db: AsyncSess
         headers = {"Content-Type": "application/json"}
         if api_key:
             headers["Authorization"] = f"Bearer {api_key}"
+        apply_hermes_session_header(
+            headers,
+            effective_uid,
+            payload.scenario.id or payload.entrypoint,
+        )
         timeout = httpx.Timeout(connect=10.0, read=300.0, write=30.0, pool=10.0)
         t0 = time.perf_counter()
         full_text = ""
@@ -1425,62 +1440,79 @@ async def execute_task(req: Request, task_req: TaskExecuteRequest, db: AsyncSess
                     chunk_iter = resp.aiter_text()
                     first_chunk_seen = False
                     last_chunk_at = time.perf_counter()
-                    while True:
-                        try:
-                            chunk = await asyncio.wait_for(
-                                anext(chunk_iter),
-                                timeout=upstream_heartbeat_sec,
-                            )
-                        except StopAsyncIteration:
-                            break
-                        except TimeoutError:
-                            waiting_ms = int((time.perf_counter() - last_chunk_at) * 1000)
-                            if not first_chunk_seen and waiting_ms >= agent_cold_start_ms:
-                                phase = "agent_cold_start"
-                            elif not first_chunk_seen:
-                                phase = "agent_waiting_first_token"
-                            else:
-                                phase = "agent_streaming"
-                            yield sse_meta_event(
-                                {
-                                    "TPCharness_task": {
-                                        "phase": phase,
-                                        "run_id": run_id,
-                                        "waiting_ms": waiting_ms,
-                                    }
-                                }
-                            )
-                            continue
-                        if not chunk:
-                            continue
-                        first_chunk_seen = True
-                        last_chunk_at = time.perf_counter()
-                        yield chunk
-                        sse_buffer += chunk
-                        blocks, sse_buffer = _extract_sse_blocks(sse_buffer)
-                        for block in blocks:
-                            parsed_block = _parse_sse_block(block)
-                            if not parsed_block:
-                                continue
-                            event_name, data = parsed_block
-                            if event_name == "hermes.tool.progress":
-                                tool_event = _parse_file_tool_event(data)
-                                if tool_event:
-                                    tool_events = _merge_tool_event_rows(tool_events, tool_event)
-                                    yield sse_meta_event(
-                                        {
-                                            "TPCharness_task": {
-                                                "run_id": run_id,
-                                                "tool_events": [tool_event],
-                                            }
+                    # wait_for 超时会取消 anext，把上游 SSE 一起关掉。心跳只观察，不取消正在读的块。
+                    pending_chunk: asyncio.Task[str] | None = None
+                    try:
+                        while True:
+                            if pending_chunk is None:
+                                pending_chunk = asyncio.create_task(anext(chunk_iter))
+                            try:
+                                chunk = await asyncio.wait_for(
+                                    asyncio.shield(pending_chunk),
+                                    timeout=upstream_heartbeat_sec,
+                                )
+                            except TimeoutError:
+                                waiting_ms = int((time.perf_counter() - last_chunk_at) * 1000)
+                                if not first_chunk_seen and waiting_ms >= agent_cold_start_ms:
+                                    phase = "agent_cold_start"
+                                elif not first_chunk_seen:
+                                    phase = "agent_waiting_first_token"
+                                else:
+                                    phase = "agent_streaming"
+                                logger.info(
+                                    "upstream heartbeat run_id=%s phase=%s waiting_ms=%s timeout=%s",
+                                    run_id,
+                                    phase,
+                                    waiting_ms,
+                                    upstream_heartbeat_sec,
+                                )
+                                yield sse_meta_event(
+                                    {
+                                        "TPCharness_task": {
+                                            "phase": phase,
+                                            "run_id": run_id,
+                                            "waiting_ms": waiting_ms,
                                         }
-                                    )
+                                    }
+                                )
                                 continue
-                            delta, parsed = parse_sse_data_line(data)
-                            if parsed and parsed.get("error"):
+                            except StopAsyncIteration:
+                                pending_chunk = None
+                                break
+                            pending_chunk = None
+                            if not chunk:
                                 continue
-                            if delta:
-                                full_text += delta
+                            first_chunk_seen = True
+                            last_chunk_at = time.perf_counter()
+                            yield chunk
+                            sse_buffer += chunk
+                            blocks, sse_buffer = _extract_sse_blocks(sse_buffer)
+                            for block in blocks:
+                                parsed_block = _parse_sse_block(block)
+                                if not parsed_block:
+                                    continue
+                                event_name, data = parsed_block
+                                if event_name == "hermes.tool.progress":
+                                    tool_event = _parse_file_tool_event(data)
+                                    if tool_event:
+                                        tool_events = _merge_tool_event_rows(tool_events, tool_event)
+                                        yield sse_meta_event(
+                                            {
+                                                "TPCharness_task": {
+                                                    "run_id": run_id,
+                                                    "tool_events": [tool_event],
+                                                }
+                                            }
+                                        )
+                                    continue
+                                delta, parsed = parse_sse_data_line(data)
+                                if parsed and parsed.get("error"):
+                                    continue
+                                if delta:
+                                    full_text += delta
+                    finally:
+                        if pending_chunk is not None and not pending_chunk.done():
+                            pending_chunk.cancel()
                     if sse_buffer.strip():
                         parsed_block = _parse_sse_block(sse_buffer)
                         if parsed_block:

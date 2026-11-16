@@ -14,6 +14,9 @@ fi
 if [[ -f docker-compose.prod.override.yml ]]; then
   COMPOSE_FILES+=(-f docker-compose.prod.override.yml)
 fi
+if [[ -f docker-compose.fix-heartbeat.yml ]]; then
+  COMPOSE_FILES+=(-f docker-compose.fix-heartbeat.yml)
+fi
 
 dc() { docker compose "${COMPOSE_FILES[@]}" "$@"; }
 
@@ -24,12 +27,16 @@ if ! dc exec -T tphermes-mcp python -c "import backend.mcp_server as m; assert h
 fi
 echo "OK: mcp_server.kb_add_entry 存在"
 
-echo "[verify_kb_harvest] 2/3 deploy/hermes-agent/config.yaml 是否白名单 kb_add_entry"
-if ! grep -q 'kb_add_entry' deploy/hermes-agent/config.yaml; then
-  echo "FAIL: config.yaml tools.include 缺少 kb_add_entry"
+echo "[verify_kb_harvest] 2/3 共创热路径不挂 kb_add_entry，检索工具仍在"
+if grep -q 'kb_add_entry' deploy/hermes-agent/config.yaml; then
+  echo "FAIL: config.yaml 仍把 kb_add_entry 放进每轮工具定义"
   exit 1
 fi
-echo "OK: config.yaml 已包含 kb_add_entry"
+if ! grep -q 'kb_query' deploy/hermes-agent/config.yaml; then
+  echo "FAIL: config.yaml tools.include 缺少 kb_query"
+  exit 1
+fi
+echo "OK: 热路径保留 kb_query，未挂 kb_add_entry"
 
 echo "[verify_kb_harvest] 3/3 hermes-agent 是否已注册 mcp_tphermes_kb_add_entry（查 agent.log）"
 if dc ps --status running hermes-agent 2>/dev/null | grep -q hermes-agent; then

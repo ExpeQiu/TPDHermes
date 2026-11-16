@@ -65,6 +65,9 @@ async def classify_workbench_instruction(
     headers = {}
     if upstream["api_key"]:
         headers["Authorization"] = f"Bearer {upstream['api_key']}"
+    from backend.services.user_identity import apply_hermes_session_header
+
+    apply_hermes_session_header(headers, "studio-router", "classify")
     try:
         async with httpx.AsyncClient(timeout=90, trust_env=False) as client:
             response = await client.post(

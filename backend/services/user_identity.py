@@ -13,6 +13,9 @@ from backend.services.local_auth import local_session_user_id
 
 logger = logging.getLogger("tpdx.hermes.user_identity")
 
+# 客户端指定 Hermes 会话。未指定时 hermes-agent 用 system+首条消息派生，不同用户问同一句会串成一把锁。
+HERMES_SESSION_HEADER = "X-Hermes-Session-Id"
+
 GLOBAL_ADMIN_ENV = "TPDHERMES_GLOBAL_ADMIN_USER_IDS"
 # 显式打开后才允许 Query/Body 覆盖身份（仅调试）
 ALLOW_USER_ID_OVERRIDE_ENV = "TPDHERMES_ALLOW_USER_ID_OVERRIDE"
@@ -55,6 +58,33 @@ def default_is_platform_admin_enabled() -> bool:
         "yes",
         "on",
     )
+
+
+def derive_hermes_session_id(employee_id: str, scope: str | None = None) -> str:
+    """按用户（以及场景/房间）派生会话，避免内容相同的请求共用一把 turn lease。"""
+    identity = normalize_user_id(employee_id)
+    parts = [identity]
+    extra = (scope or "").strip()
+    if extra:
+        parts.append(extra)
+    digest = hashlib.sha256("\n".join(parts).encode("utf-8")).hexdigest()[:16]
+    return f"sess-{digest}"
+
+
+def apply_hermes_session_header(
+    headers: dict[str, str],
+    employee_id: str,
+    scope: str | None = None,
+) -> str:
+    session_id = derive_hermes_session_id(employee_id, scope)
+    headers[HERMES_SESSION_HEADER] = session_id
+    logger.info(
+        "hermes session header employee=%s scope=%s session=%s",
+        normalize_user_id(employee_id)[:24],
+        (scope or "")[:64],
+        session_id,
+    )
+    return session_id
 
 
 def derive_user_id(request: Request | None, provided_user_id: str | None = None) -> str:
