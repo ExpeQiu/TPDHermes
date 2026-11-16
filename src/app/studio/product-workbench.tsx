@@ -2,14 +2,22 @@
 
 import { useEffect, useRef, useState } from "react";
 import { apiFetch, apiGet, apiPost } from "@/lib/api";
+import { WorkbenchBoot } from "./workbench-boot";
 
-const OPERATIONS: Record<"V05" | "V10", string[]> = {
+const OPERATIONS: Record<"V05" | "V07" | "V10", string[]> = {
   V05: ["show", "import", "patch-link", "unlock", "revoke-support", "suggest", "task-show", "wait", "cancel", "select-value", "export"],
+  V07: ["show", "import", "suggest", "task-show", "wait", "cancel", "patch-message", "reorder", "adopt", "unlock", "revoke-evidence", "confirm-claims", "export"],
   V10: ["show", "import", "suggest", "task-show", "wait", "cancel", "patch-link", "revise-claim", "unlock", "revoke-evidence", "confirm-strength", "export"],
 };
 
+const TITLES: Record<"V05" | "V07" | "V10", string> = {
+  V05: "TPCstore V05 技术价值链",
+  V07: "TPCstore V07 核心信息屋",
+  V10: "TPCstore V10 主张与证据",
+};
+
 export function ProductWorkbench({ product, projectId, revision }: {
-  product: "V05" | "V10";
+  product: "V05" | "V07" | "V10";
   projectId: string;
   revision: number;
 }) {
@@ -19,7 +27,7 @@ export function ProductWorkbench({ product, projectId, revision }: {
   const opened = useRef(false);
   const [page, setPage] = useState("");
   const [error, setError] = useState("");
-  const title = product === "V05" ? "TPCstore V05 技术价值链" : "TPCstore V10 主张与证据";
+  const title = TITLES[product];
 
   useEffect(() => {
     const controller = new AbortController();
@@ -80,7 +88,10 @@ export function ProductWorkbench({ product, projectId, revision }: {
     frame.current?.contentWindow?.postMessage({ type: "tpc-refresh", product }, "*");
   }, [revision, page, product]);
 
-  if (!page) return <p className="p-4" role="status">{error || `正在加载${title}…`}</p>;
+  if (!page) {
+    const message = error === "Not Found" ? "工作台接口还没有就绪，请重启场景创作服务后再打开。" : error;
+    return <WorkbenchBoot title={`正在打开 ${title}`} progress={message ? 100 : 35} message={message || "正在加载工作台页面…"} failed={Boolean(message)} />;
+  }
   return (
     <iframe
       ref={frame}

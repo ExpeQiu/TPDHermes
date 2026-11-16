@@ -20,8 +20,13 @@ from backend.services.tpcstore_bridge import call_tpcstore, read_studio_source
 logger = logging.getLogger("tpdx.hermes.studio_engineering")
 
 KIND = "tpcstore.engineering"
-TITLES = {"V04": "V04 技术卡工程", "V05": "V05 价值链工程", "V10": "V10 主张证据工程"}
-ACCEPTS = {"V05": "V04", "V10": "V05"}
+TITLES = {
+    "V04": "V04 技术卡工程",
+    "V05": "V05 价值链工程",
+    "V07": "V07 信息屋工程",
+    "V10": "V10 主张证据工程",
+}
+ACCEPTS = {"V05": "V04", "V07": "V10", "V10": "V05"}
 
 
 def facts_from_v04(data: dict[str, Any]) -> list[dict[str, Any]]:
@@ -118,6 +123,23 @@ def engineering_document(product: str, data: dict[str, Any]) -> dict[str, Any]:
         }
         if not body["claims"] and not body["evidence"]:
             raise HTTPException(422, "当前主张证据工程没有可交出的内容")
+    elif product == "V07":
+        house = data.get("house") if isinstance(data.get("house"), dict) else {}
+        messages = [
+            item for item in (data.get("messages") or [])
+            if isinstance(item, dict) and item.get("status") != "superseded"
+        ]
+        body = {
+            "audience": house.get("audience"),
+            "purpose": house.get("purpose"),
+            "values": data.get("values") or [],
+            "claims": data.get("claims") or [],
+            "evidence": data.get("evidence") or [],
+            "messages": messages,
+            "draft_markdown": str((data.get("draft") or {}).get("markdown") or ""),
+        }
+        if not body["values"] and not body["claims"] and not body["messages"]:
+            raise HTTPException(422, "当前信息屋没有可交出的口径")
     else:
         raise HTTPException(404, "该技能卡不能写入工程文件")
     return {
@@ -254,6 +276,52 @@ async def import_engineering_file(
         payload["facts"] = document.get("facts") or []
         if not payload["facts"]:
             raise HTTPException(422, "这份技术卡工程没有可导入的事实")
+    elif product == "V07":
+        claims = [item for item in (document.get("claims") or []) if isinstance(item, dict)]
+        evidence = []
+        for item in document.get("evidence") or []:
+            if not isinstance(item, dict) or not str(item.get("evidence_id") or "").strip():
+                continue
+            evidence.append({
+                "evidence_id": str(item.get("evidence_id")),
+                "version": str(item.get("version") or "1"),
+                "source_id": str(item.get("source_id") or item.get("evidence_id")),
+                "locator": str(item.get("locator") or "未标明位置"),
+                "result": str(item.get("result") or "未记录结果"),
+                "unit": str(item.get("unit") or "未标明单位"),
+                "conditions": item.get("conditions") if isinstance(item.get("conditions"), list) else [],
+            })
+        values = []
+        for claim in claims:
+            text = str(claim.get("text") or "").strip()
+            claim_id = str(claim.get("claim_id") or "").strip()
+            if not text or not claim_id:
+                continue
+            values.append({
+                "object_id": claim_id,
+                "version_id": str(claim.get("version") or "1"),
+                "source_id": str(claim.get("source_id") or claim_id),
+                "role": "pillar",
+                "title": text[:80],
+                "text": text,
+                "conditions": claim.get("scope") if isinstance(claim.get("scope"), list) else [],
+            })
+        if not values and not evidence:
+            raise HTTPException(422, "这份主张证据工程没有可导入的主张或证据")
+        payload["claims"] = [
+            {
+                "claim_id": str(claim.get("claim_id")),
+                "version": str(claim.get("version") or "1"),
+                "text": str(claim.get("text") or ""),
+                "strength": str(claim.get("strength") or "待验证"),
+                "metric": str(claim.get("metric") or "未标明指标"),
+                "source_id": str(claim.get("source_id") or claim.get("claim_id")),
+            }
+            for claim in claims
+            if str(claim.get("text") or "").strip() and str(claim.get("claim_id") or "").strip()
+        ]
+        payload["evidence"] = evidence
+        payload["values"] = values
     else:
         payload["claims"] = document.get("claims") or []
         payload["evidence"] = document.get("evidence") or []

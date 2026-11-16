@@ -8,9 +8,9 @@ import { FeaturePageGuard } from "@/components/admin-only-page-guard";
 import { CONTENT_MAX_CLASS, PAGE_MAIN_CLASS } from "@/lib/content-shell";
 
 const OPS_TABS = [
-  { href: "/ops/employees", label: "数字员工" },
-  { href: "/ops/usage", label: "功能使用统计" },
   { href: "/ops/learning", label: "学习中心" },
+  { href: "/ops/usage", label: "功能使用统计" },
+  { href: "/ops/employees", label: "数字员工" },
   { href: "/ops/pteam", label: "P-team" },
   { href: "/ops/roles", label: "Roles" },
   { href: "/ops/studio-skills", label: "技能卡" },

@@ -114,7 +114,7 @@ export const WORKFLOW_NAV_ITEMS: WorkflowNavItem[] = [
     href: "/studio",
     label: "场景创作",
     shortLabel: "场景创作",
-    description: "按技能卡进入场景创作。当前接入技术卡、价值链、主张证据和 CutPot。",
+    description: "按技能卡进入场景创作。当前接入技术卡、价值链、信息屋、主张证据、SpeechStudio、CutPot 和 FrameFlow。",
   },
   {
     href: "/create",

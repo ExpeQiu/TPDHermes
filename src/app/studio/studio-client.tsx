@@ -4,6 +4,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { ProjectFilesRail } from "@/components/project-files-rail";
 import { CutPotPanel } from "./cutpot-panel";
+import { LocalAppFrame } from "./local-app-frame";
+import { WorkbenchBoot } from "./workbench-boot";
 import { ProductWorkbench } from "./product-workbench";
 import { V04Workbench } from "./v04-workbench";
 import { apiGet, apiPost } from "@/lib/api";
@@ -147,7 +149,8 @@ export default function StudioClient({ initialProjectId = "" }: { initialProject
   }, [boundProjectId]);
   const boundProject = projects.find((project) => project.id === boundProjectId) ?? null;
   const cutpotSelected = activeSkill.id === "V17";
-  const productApp = activeSkill.id === "V05" || activeSkill.id === "V10" ? activeSkill.id : null;
+  const localApp = activeSkill.id === "V14" || activeSkill.id === "V18" ? activeSkill.id : null;
+  const productApp = activeSkill.id === "V05" || activeSkill.id === "V07" || activeSkill.id === "V10" ? activeSkill.id : null;
   const [cutpotUrl, setCutpotUrl] = useState("");
   const [cutpotError, setCutpotError] = useState("");
   const handleCutpotUrl = useCallback((url: string, error?: string) => {
@@ -175,13 +178,15 @@ export default function StudioClient({ initialProjectId = "" }: { initialProject
     setSourceSnapshot(undefined);
     const content = cutpotSelected
       ? (boundProjectId ? "可以直接输入工程指令，例如查看工程或修改名称。工作台显示在右侧。" : "请先在项目文件中绑定项目，再输入工程指令。")
+      : localApp
+        ? "工作台显示在右侧。若本机服务未启动，右栏会给出地址。"
       : productApp
         ? (boundProjectId ? "可以查看工程或载入示例。交给下一张技能卡时写入工程文件；从上一张卡导入时，先在项目文件里选中那份工程文件。" : "请先在项目文件中绑定项目。")
       : demo
         ? "样本演示已开启，不使用项目资料。"
         : "选择项目资料后，可以对话提取技术卡、查看已保存候选或列出缺口。工作台显示在右侧。";
     setMessages([{ id: "context", role: "assistant", content }]);
-  }, [boundProjectId, fileKey, demo, cutpotSelected, productApp]);
+  }, [boundProjectId, fileKey, demo, cutpotSelected, localApp, productApp]);
 
   useEffect(() => {
     let cancelled = false;
@@ -386,6 +391,30 @@ export default function StudioClient({ initialProjectId = "" }: { initialProject
           ...current,
           { id: `user_${current.length}`, role: "user", content },
           { id: `assistant_${current.length}`, role: "assistant", content: result.reply },
+        ]);
+      } catch (error) {
+        if (epoch !== requestEpoch.current) return;
+        setMessages((current) => [
+          ...current,
+          { id: `user_${current.length}`, role: "user", content },
+          { id: `assistant_${current.length}`, role: "assistant", content: error instanceof Error ? error.message : String(error) },
+        ]);
+      } finally {
+        setPending(false);
+      }
+      return;
+    }
+    if (localApp) {
+      setPending(true);
+      setDraft("");
+      const epoch = requestEpoch.current;
+      try {
+        const result = await apiGet<{ ready: boolean; url: string; message?: string; name: string }>(`/studio/local-apps/${localApp}`);
+        if (epoch !== requestEpoch.current) return;
+        setMessages((current) => [
+          ...current,
+          { id: `user_${current.length}`, role: "user", content },
+          { id: `assistant_${current.length}`, role: "assistant", content: result.ready ? `${result.name} 已在右侧打开：${result.url}` : (result.message || "本机工作台未就绪") },
         ]);
       } catch (error) {
         if (epoch !== requestEpoch.current) return;
@@ -734,14 +763,14 @@ export default function StudioClient({ initialProjectId = "" }: { initialProject
             void commit(draft);
           }}
         >
-          {cutpotSelected || productApp ? null : (
+          {cutpotSelected || productApp || localApp ? null : (
             <label className="flex items-center gap-2 text-xs text-slate-500">
               <input type="checkbox" checked={demo} disabled={pending} onChange={(event) => setDemo(event.target.checked)} />
               样本演示（不使用项目资料）
             </label>
           )}
           <div className="flex flex-wrap gap-1.5">
-            {(cutpotSelected ? ["查看工程"] : productApp ? ["查看工程", "载入示例", "从工程文件导入", "写入工程文件"] : demo ? PROMPTS : ["提取技术卡", "查看缺口", "查看工作区", "写入工程文件"]).map((prompt) => (
+            {(cutpotSelected ? ["查看工程"] : localApp ? ["查看工作台"] : productApp ? ["查看工程", "载入示例", "从工程文件导入", "写入工程文件"] : demo ? PROMPTS : ["提取技术卡", "查看缺口", "查看工作区", "写入工程文件"]).map((prompt) => (
               <button
                 key={prompt}
                 type="button"
@@ -777,19 +806,26 @@ export default function StudioClient({ initialProjectId = "" }: { initialProject
               className="min-h-0 w-full flex-1 border-0 bg-slate-950"
               onLoad={() => console.info("[studio]", { event: "studio.cutpot.embed", url: cutpotEditorUrl })}
             />
+          ) : !boundProjectId ? (
+            <p className="p-4 text-sm">请先在项目文件中绑定项目。</p>
           ) : (
-            <p className="p-4 text-sm">
-              {!boundProjectId
-                ? "请先在项目文件中绑定项目。"
-                : cutpotError || "正在打开 CutPot 工作台…"}
-            </p>
+            <WorkbenchBoot
+              title="正在打开 CutPot"
+              progress={cutpotError ? 100 : 40}
+              message={cutpotError || "正在连接本机工作台…"}
+              failed={Boolean(cutpotError)}
+            />
           )}
+        </section>
+      ) : localApp ? (
+        <section className="flex min-h-80 min-w-0 flex-1 flex-col">
+          <LocalAppFrame key={localApp} product={localApp === "V18" ? "V18" : "V14"} />
         </section>
       ) : productApp && boundProjectId ? (
         <section className="flex min-h-80 min-w-0 flex-1 flex-col">
           <ProductWorkbench
             key={`${productApp}:${boundProjectId}`}
-            product={productApp}
+            product={productApp === "V07" ? "V07" : productApp === "V10" ? "V10" : "V05"}
             projectId={boundProjectId}
             revision={workbenchRevision}
           />

@@ -73,6 +73,11 @@ COMPOSE_FILES=(-f docker-compose.prod.yml)
 if [[ -f docker-compose.src-hermes.yml ]]; then
   COMPOSE_FILES+=(-f docker-compose.src-hermes.yml)
 fi
+# 端口覆盖（chroma 宿主机 8000 -> 8100，避让原生 uvicorn）：
+# 显式 -f 时 compose 不会自动加载 *.override.yml，必须显式追加。
+if [[ -f docker-compose.prod.override.yml ]]; then
+  COMPOSE_FILES+=(-f docker-compose.prod.override.yml)
+fi
 
 dc() { docker compose "${COMPOSE_FILES[@]}" "$@"; }
 

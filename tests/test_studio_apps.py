@@ -21,6 +21,21 @@ def test_unknown_operation_rejected(monkeypatch):
         assert denied.status_code == 422
 
 
+def test_v07_unknown_operation_rejected(monkeypatch):
+    async def fail(*_args, **_kwargs):
+        raise AssertionError("不应调用 CLI")
+
+    monkeypatch.setattr(studio_apps, "call_tpcstore", fail)
+    with TestClient(app) as client:
+        created = client.post("/api/v1/projects/", json={"name": "信息屋权限"})
+        assert created.status_code == 200
+        denied = client.post(
+            "/api/v1/studio/apps/V07/workspace",
+            json={"operation": "publish", "project_id": created.json()["id"]},
+        )
+        assert denied.status_code == 422
+
+
 def test_chat_imports_fixture_once(monkeypatch):
     calls = []
 

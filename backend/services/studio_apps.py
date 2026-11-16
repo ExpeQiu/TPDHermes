@@ -53,6 +53,8 @@ async def run_app_workspace(
 def _has_content(product: str, data: dict[str, Any]) -> bool:
     if product == "V05":
         return bool(data.get("facts"))
+    if product == "V07":
+        return bool(data.get("messages") or data.get("values") or data.get("claims"))
     return bool(data.get("claims") or data.get("evidence"))
 
 
@@ -62,6 +64,16 @@ def summarize(product: str, data: dict[str, Any]) -> str:
         return (
             f"价值链工程 revision {revision} · 事实 {len(data.get('facts') or [])} · "
             f"关系 {len(data.get('links') or [])} · 价值卡 {len(data.get('cards') or [])}。正式放行否。"
+        )
+    if product == "V07":
+        current = [
+            item for item in (data.get("messages") or [])
+            if isinstance(item, dict) and item.get("status") != "superseded"
+        ]
+        counts = {level: sum(1 for item in current if item.get("level") == level) for level in ("roof", "pillar", "base")}
+        return (
+            f"信息屋工程 revision {revision} · 屋顶 {counts['roof']} · "
+            f"支柱 {counts['pillar']} · 底座 {counts['base']}。正式放行否。"
         )
     return (
         f"主张证据工程 revision {revision} · 主张 {len(data.get('claims') or [])} · "
@@ -127,6 +139,13 @@ async def run_app_chat(
                 "unverified_claim": fixture.get("unverified_claim"),
                 "target_user": fixture.get("target_user"),
             }
+        elif product == "V07":
+            payload["audience"] = fixture.get("audience")
+            payload["purpose"] = fixture.get("purpose")
+            payload["values"] = fixture.get("values") or []
+            payload["evidence"] = fixture.get("evidence") or []
+            payload["claims"] = fixture.get("claims") or []
+            payload["messages"] = fixture.get("messages") or []
         else:
             payload["claims"] = fixture.get("claims") or []
             payload["evidence"] = fixture.get("evidence") or []

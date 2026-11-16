@@ -1,0 +1,9 @@
+# 本地端口冲突修复（2026-11-16）：
+# 宿主机 127.0.0.1:8000 已被 TPDHermes 原生 uvicorn（com.tphermes.backend, pid 7516）占用，
+# chroma 容器无法绑定 8000。改用 8100 发布到宿主机。
+# 注意：只改宿主机发布端口，容器内部端口仍为 8000；
+#       compose 内部服务通过容器网络别名 chroma:8000 访问，不受影响。
+services:
+  chroma:
+    ports: !override
+      - "8100:8000"

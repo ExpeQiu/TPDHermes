@@ -25,13 +25,18 @@ logger = logging.getLogger("tpdx.hermes.tpcstore")
 PRODUCTS: dict[str, dict[str, str]] = {
     "V04": {"dir": "V04-tech-cards", "prefix": "tech-cards", "data": "tpdhermes-v04"},
     "V05": {"dir": "V05-value-chain", "prefix": "value-chain", "data": "tpdhermes-v05"},
+    "V07": {"dir": "V07-message-house", "prefix": "message-house", "data": "tpdhermes-v07"},
     "V10": {"dir": "V10-claim-evidence", "prefix": "claim-evidence", "data": "tpdhermes-v10"},
 }
-APP_PRODUCTS = frozenset({"V05", "V10"})
+APP_PRODUCTS = frozenset({"V05", "V07", "V10"})
 APP_OPERATIONS: dict[str, frozenset[str]] = {
     "V05": frozenset({
         "show", "import", "patch-link", "unlock", "revoke-support", "suggest",
         "task-show", "wait", "cancel", "select-value", "export",
+    }),
+    "V07": frozenset({
+        "show", "import", "suggest", "task-show", "wait", "cancel", "patch-message",
+        "reorder", "adopt", "unlock", "revoke-evidence", "confirm-claims", "export",
     }),
     "V10": frozenset({
         "show", "import", "suggest", "task-show", "wait", "cancel", "patch-link",
@@ -76,7 +81,7 @@ def read_product_fixture(product: str) -> dict[str, Any]:
     if product not in APP_PRODUCTS:
         raise HTTPException(404, "该技能卡没有示例")
     page = Path(_command(product)[1]).parent / "fixtures"
-    name = "pitch-control.json" if product == "V05" else "pitch-claim.json"
+    name = {"V05": "pitch-control.json", "V07": "pitch-house.json"}.get(product, "pitch-claim.json")
     try:
         payload = json.loads((page / name).read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:

@@ -496,7 +496,7 @@ class AppChatRequest(BaseModel):
 
 class EngineeringRequest(BaseModel):
     action: Literal["export", "import"]
-    product: Literal["V04", "V05", "V10"]
+    product: Literal["V04", "V05", "V07", "V10"]
     project_id: str = Field(min_length=1, max_length=80)
     file_id: str | None = None
     file_kind: Literal["output", "attachment"] | None = None
@@ -528,6 +528,24 @@ async def engineering_transfer(
         project_id=request.project_id,
         file_id=request.file_id,
     )
+
+
+@router.get("/local-apps/{product}")
+async def local_app(product: str) -> dict[str, object]:
+    import asyncio
+
+    from backend.services.studio_local_apps import local_app_status
+
+    return await asyncio.to_thread(local_app_status, product)
+
+
+@router.post("/local-apps/{product}/start")
+async def local_app_start(product: str) -> dict[str, object]:
+    import asyncio
+
+    from backend.services.studio_local_apps import start_local_app
+
+    return await asyncio.to_thread(start_local_app, product)
 
 
 @router.get("/apps/{product}/page", response_class=PlainTextResponse)
