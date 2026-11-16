@@ -76,7 +76,7 @@ export default function GlobalWorkflowNav() {
               <Link
                 key={item.shortLabel}
                 href={href}
-                className={`inline-flex w-[5.5rem] shrink-0 items-center justify-center whitespace-nowrap rounded-full border px-2 py-2 text-center text-sm transition ${
+                className={`inline-flex w-[5.5rem] shrink-0 items-center justify-center whitespace-nowrap rounded-md border px-2 py-2 text-center text-sm transition ${
                   active
                     ? "border-blue-500/40 bg-blue-500/15 text-blue-700 dark:text-blue-200"
                     : "border-slate-200 bg-slate-100 text-slate-600 hover:border-slate-300 hover:bg-slate-200 hover:text-slate-900 dark:border-slate-800 dark:bg-slate-900/60 dark:text-slate-400 dark:hover:border-slate-700 dark:hover:bg-slate-900 dark:hover:text-slate-200"

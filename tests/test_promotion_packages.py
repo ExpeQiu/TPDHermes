@@ -434,3 +434,122 @@ def test_expired_step_is_recovered_once():
         assert len(generated["products_state"]["a4_skill"]["versions"]) == 1
         repeated = _generate(client, owner, project_id, generated)
         assert len(repeated["products_state"]["a4_skill"]["versions"]) == 1
+
+
+def test_promotion_package_mock_e2e(monkeypatch):
+    """脱敏样例走完评估、采纳联网证据、生成、改稿、审核和选择性下载。"""
+
+    async def _search(query: str):
+        assert "8分钟" not in query
+        return [
+            {
+                "claim": "comparison",
+                "value": "公开竞品预热约12分钟",
+                "url": "https://example.com/public-competitor",
+            }
+        ]
+
+    monkeypatch.setattr("backend.services.promotion_package_service.public_search", _search)
+    owner = f"owner-{uuid.uuid4().hex[:8]}"
+    viewer = f"viewer-{uuid.uuid4().hex[:8]}"
+    outsider = f"outsider-{uuid.uuid4().hex[:8]}"
+    with TestClient(app) as client:
+        project_id = _create_project(client, owner)
+        other_project = _create_project(client, outsider)
+        _add_member(client, owner, project_id, viewer, "viewer")
+        file_id = _upload(client, owner, project_id, "spec.md", SPEC.encode(), "text/markdown")
+        package = _create_package(client, owner, project_id, [file_id])
+        assessed = _assess(client, owner, project_id, package)
+        reopened = client.get(
+            f"/api/v1/projects/{project_id}/promotion-packages/{package['id']}",
+            headers=_headers(owner),
+        )
+        assert reopened.status_code == 200, reopened.text
+        assert reopened.json()["snapshot"]
+        web = next(
+            item
+            for item in assessed["assessment"]["candidates"]
+            if item["origin"] == "web" and item["value"] == "公开竞品预热约12分钟"
+        )
+        assert web["source"]["url"] == "https://example.com/public-competitor"
+        assert web["adopted"] is False
+        facts = [item for item in _file_facts(assessed) if item["claim"] != "comparison"]
+        facts.append(
+            {
+                "id": "fact_comparison_web",
+                "claim": "comparison",
+                "value": web["value"],
+                "conditions": "",
+                "visibility": "public",
+                "source_type": "web",
+                "source_ref": web["source"]["url"],
+                "candidate_id": web["id"],
+            }
+        )
+        confirmed = _confirm(client, owner, project_id, assessed, facts, [web["id"]])
+        adopted = next(item for item in confirmed["facts"] if item["id"] == "fact_comparison_web")
+        assert adopted["source_type"] == "web"
+        assert adopted["confirmed_by"] == owner
+        generated = _generate(client, owner, project_id, confirmed)
+        for product in ("a4_skill", "tech_pr_skill", "interview_qa_skill"):
+            assert generated["products_state"][product]["status"] == "draft"
+            assert generated["products_state"][product]["head_output_id"]
+        a4 = generated["products_state"]["a4_skill"]
+        head = next(item for item in a4["versions"] if item["output_id"] == a4["head_output_id"])
+        revised_text = head["content"].rstrip() + "\n补充公开口径。\n"
+        revised = client.post(
+            f"/api/v1/projects/{project_id}/promotion-packages/{generated['id']}/revise",
+            headers=_headers(owner),
+            json={
+                "expected_revision": generated["revision"],
+                "output_id": head["output_id"],
+                "expected_version": head["version"],
+                "content": revised_text,
+                "fact_ids": head["fact_ids"],
+            },
+        )
+        assert revised.status_code == 200, revised.text
+        revised_body = revised.json()
+        approved = _approve_all(
+            client,
+            owner,
+            project_id,
+            revised_body,
+            ["a4_skill", "interview_qa_skill"],
+        )
+        assert approved["products_state"]["tech_pr_skill"]["status"] == "draft"
+        a4_id = approved["products_state"]["a4_skill"]["head_output_id"]
+        qa_id = approved["products_state"]["interview_qa_skill"]["head_output_id"]
+        pr_id = approved["products_state"]["tech_pr_skill"]["head_output_id"]
+        exported = client.post(
+            f"/api/v1/projects/{project_id}/promotion-packages/{package['id']}/export",
+            headers=_headers(viewer),
+            json={"output_ids": [a4_id, qa_id]},
+        )
+        assert exported.status_code == 200, exported.text
+        archive = zipfile.ZipFile(io.BytesIO(exported.content))
+        assert set(archive.namelist()) == {"A4技术一页纸.md", "采访QA.md", "manifest.json"}
+        assert "补充公开口径。" in archive.read("A4技术一页纸.md").decode("utf-8")
+        manifest = json.loads(archive.read("manifest.json"))
+        assert {item["output_id"] for item in manifest["items"]} == {a4_id, qa_id}
+        unapproved = client.post(
+            f"/api/v1/projects/{project_id}/promotion-packages/{package['id']}/export",
+            headers=_headers(viewer),
+            json={"output_ids": [pr_id, a4_id]},
+        )
+        assert unapproved.status_code == 409
+        assert "not_approved" in unapproved.json()["detail"]
+        assert unapproved.headers["content-type"].startswith("application/json")
+        foreign = client.post(
+            f"/api/v1/projects/{other_project}/promotion-packages/{package['id']}/export",
+            headers=_headers(outsider),
+            json={"output_ids": [a4_id, qa_id]},
+        )
+        assert foreign.status_code == 404
+        kept = client.get(
+            f"/api/v1/projects/{project_id}/promotion-packages/{package['id']}",
+            headers=_headers(viewer),
+        )
+        assert kept.status_code == 200, kept.text
+        assert kept.json()["products_state"]["a4_skill"]["status"] == "approved"
+        assert kept.json()["facts"]

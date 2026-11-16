@@ -241,6 +241,7 @@ async def brainstorm_job_status(job_id: str):
         "turns": job.get("turns") or [],
         "ma_run_id": job.get("ma_run_id"),
         "title": job.get("title"),
+        "activity": job.get("activity") or "",
     }
 
 
@@ -264,6 +265,7 @@ class RoleIn(BaseModel):
     tool: str = ""
     when: str = ""
     system: str = ""
+    skills: list[str] = Field(default_factory=list)
 
 
 @router.get("/packs")

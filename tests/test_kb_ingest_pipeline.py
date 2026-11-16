@@ -1,5 +1,6 @@
 """KB 导入链路：metadata 还原、doc_id、旧 chunk 清理。"""
 
+import json
 import uuid
 from datetime import datetime
 from pathlib import Path
@@ -284,6 +285,57 @@ def test_kb_ingest_returns_queued_job(mock_queue, tmp_path, monkeypatch):
     assert body["status"] == "queued"
     assert isinstance(body["job_id"], str) and body["job_id"]
     mock_queue.assert_called_once()
+
+
+def test_kb_upload_ingest_job_e2e(tmp_path, monkeypatch):
+    """上传资料后创建入库任务，刷新仍能看到排队状态；无知识库权限的成员不能入库。"""
+    monkeypatch.setenv("KB_UPLOAD_DIR", str(tmp_path / "up"))
+
+    async def _hold(job_id: str) -> None:
+        assert job_id
+
+    monkeypatch.setattr("backend.routes.kb_ingest.queue_ingest_job", _hold)
+    with TestClient(app) as client:
+        uploaded = client.post(
+            "/api/v1/kb/upload",
+            files={"file": ("热管理.md", "技术名称：星海热管理\n".encode(), "text/markdown")},
+            data={"doc_id": "e2e_heat"},
+            headers=HDR_KNOWLEDGE_ADMIN,
+        )
+        assert uploaded.status_code == 200, uploaded.text
+        upload_id = uploaded.json()["upload_id"]
+        assert uploaded.json()["doc_id_hint"] == "e2e_heat"
+        created = client.post(
+            "/api/v1/kb/ingest",
+            json={
+                "source_type": "upload",
+                "collection": "public.test.ingest",
+                "project_id": "__all__",
+                "sync_cache": False,
+                "upload_ids": [upload_id],
+                "defaults": {"domain": "structured_tech", "published": False},
+            },
+            headers=HDR_KNOWLEDGE_ADMIN,
+        )
+        assert created.status_code == 200, created.text
+        job_id = created.json()["job_id"]
+        assert created.json()["doc_ids"]
+        denied = client.post(
+            "/api/v1/kb/ingest",
+            json={
+                "source_type": "upload",
+                "collection": "public.test.ingest",
+                "project_id": "__all__",
+                "upload_ids": [upload_id],
+            },
+            headers={"X-User-ID": f"kb_member_{uuid.uuid4().hex[:8]}"},
+        )
+        assert denied.status_code == 403
+        fetched = client.get(f"/api/v1/kb/ingest-jobs/{job_id}", headers=HDR_KNOWLEDGE_ADMIN)
+        assert fetched.status_code == 200, fetched.text
+        assert fetched.json()["status"] == "queued"
+        assert fetched.json()["collection"] == "public.test.ingest"
+        assert upload_id in json.dumps(fetched.json()["payload"], ensure_ascii=False)
 
 
 @pytest.mark.asyncio

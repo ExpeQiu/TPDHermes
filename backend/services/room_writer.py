@@ -10,6 +10,11 @@ from typing import Any
 import httpx
 
 from backend.services.kernel_binding import resolve_chat_upstream
+from backend.services.role_skills import (
+    role_workshop_skills,
+    strip_legacy_skill_sentence,
+    workshop_skill_contract,
+)
 from backend.services.room_contract import writer_driver_name
 
 logger = logging.getLogger("tpdx.hermes.co_create_room")
@@ -33,7 +38,7 @@ def build_writer_messages(role: dict[str, Any], ctx: dict[str, Any]) -> list[dic
     target = ctx.get("target") if isinstance(ctx.get("target"), dict) else {}
     direct = bool(ctx.get("direct_hermes"))
     if direct and not ctx.get("allow_write"):
-        system = str(role.get("system") or "你是 Hermes。")
+        system = strip_legacy_skill_sentence(str(role.get("system") or "")) or "你是 Hermes。"
         system += (
             "\n用对话口吻直接回答。不要写成某个入座角色的正式文稿，也不要加文档标题。"
             "\n平台已授权执行文件动作。用户要求存档、成稿或修订时，回复末尾输出"
@@ -42,15 +47,27 @@ def build_writer_messages(role: dict[str, Any], ctx: dict[str, Any]) -> list[dic
             "纯问答不要输出该代码块。"
         )
     else:
-        system = str(role.get("system") or "你是项目主笔。")
-        system += (
-            "\n只输出正式正文或对目标文稿的完整修订稿。"
-            "不要复述用户指令，不要写讨论纪要。"
-            "若要求删除原句，正文中不得保留该句。"
-            "资料缺失时明确写出缺失，不要编造正文来源。"
-        )
+        system = strip_legacy_skill_sentence(str(role.get("system") or "")) or "你是项目主笔。"
+        has_skills = bool(role_workshop_skills(role))
+        if has_skills:
+            system += (
+                "\n不要复述用户指令，不要写讨论纪要。"
+                "资料缺失时明确写出缺失，不要编造来源。"
+            )
+        else:
+            system += (
+                "\n只输出正式正文或对目标文稿的完整修订稿。"
+                "不要复述用户指令，不要写讨论纪要。"
+                "若要求删除原句，正文中不得保留该句。"
+                "资料缺失时明确写出缺失，不要编造正文来源。"
+            )
         has_document = bool(str(ctx.get("document") or "").strip())
-        if ctx.get("allow_write") and not ctx.get("final_editor"):
+        if has_skills and ctx.get("allow_write"):
+            system += (
+                "\n本轮要落成项目文件。调用本提示列出的工坊技能，平台用工具返回覆盖右侧文件。"
+                "回复不要写全文，也不要调用 write_file，不要写入 /opt/data/输出。"
+            )
+        elif ctx.get("allow_write") and not ctx.get("final_editor"):
             system += (
                 "\n本轮还有后面的角色执笔。只写你负责的修改意见，不要输出整篇文稿，"
                 "也不要调用 write_file。"
@@ -67,16 +84,16 @@ def build_writer_messages(role: dict[str, Any], ctx: dict[str, Any]) -> list[dic
                 "不要调用 write_file，也不要写入 /opt/data/输出。"
                 "回复从文稿标题开始，不要解释落盘路径。"
             )
+        elif has_skills:
+            system += "\n本轮不写入项目文件。调用工坊技能后，用工具返回的正文回答。"
         else:
             system += (
                 "\n本轮没有要求改稿。纯问答不要输出文稿。"
                 "若仍给出带 content 的 TPCharness_file_actions create 或 patch，平台已授权并会执行。"
                 "不要写入 /opt/data/输出，不要声称平台禁止落库。"
             )
-    system += (
-        "\n技能文件在 /opt/project-skills 和 /app/skills。读到技能后，在本回复里写出全文。"
-        "\n工具失败时不要重复调用，直接根据已有信息作答。"
-    )
+    system += "\n工具失败时不要重复调用，直接根据已有信息作答。"
+    system += workshop_skill_contract(role, ctx)
     run_id = str(ctx.get("run_id") or "").strip()
     if run_id:
         system += (

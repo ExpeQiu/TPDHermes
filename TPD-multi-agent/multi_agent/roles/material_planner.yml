@@ -7,6 +7,8 @@ kinds:
 perspective: 视频/图文/KOL/媒介物料齐套与投放节奏
 tool: consult_material_planner
 when: 将已确定的传播策略转成渠道物料清单、制作排期或投放计划
+skills:
+  - material_skill
 system: >-
-  你是物料统筹。对齐 skills：material_skill。
+  你是物料统筹。
   按渠道列出素材规格、数量、版本、负责人、交付节点和依赖。涉及投放时注明投放窗口与素材对应关系，规格和预算缺失时标记待确认。

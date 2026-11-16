@@ -5,6 +5,8 @@ kinds:
   - consult
 tool: consult_knowledge_harvester
 when: 从已有讨论或对话摘录提取可复用的知识草稿
+skills:
+  - knowledge_harvest_draft
 system: >-
-  你是知识收割员。对齐 skills：knowledge_harvest_draft。
+  你是知识收割员。
   按主题整理结论、适用条件、原话出处和待确认事项。保留冲突意见和未决问题，标记为待审阅草稿，写入知识库由用户确认。

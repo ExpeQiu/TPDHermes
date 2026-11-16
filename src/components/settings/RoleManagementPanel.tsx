@@ -19,6 +19,7 @@ interface RoleDetail {
   tool: string;
   when: string;
   system: string;
+  skills: string[];
   source?: string;
 }
 
@@ -31,6 +32,7 @@ const blankRole = (): RoleDetail => ({
   tool: "",
   when: "",
   system: "",
+  skills: [],
 });
 
 const inputClass =
@@ -73,6 +75,7 @@ export default function RoleManagementPanel() {
       tool: data.tool || "",
       when: data.when || "",
       system: data.system || "",
+      skills: data.skills || [],
     });
     setCreating(false);
     setSelectedId(id);
@@ -141,6 +144,7 @@ export default function RoleManagementPanel() {
         tool: draft.tool.trim(),
         when: draft.when.trim(),
         system: draft.system.trim(),
+        skills: draft.skills,
       };
       const data = creating
         ? await apiPost<RoleDetail>("/brainstorm/roles", payload)
@@ -157,6 +161,7 @@ export default function RoleManagementPanel() {
         tool: data.tool || "",
         when: data.when || "",
         system: data.system || "",
+        skills: data.skills || [],
       });
       setCreating(false);
       await refreshList(data.id);
@@ -335,6 +340,23 @@ export default function RoleManagementPanel() {
                   value={draft.when}
                   onChange={(e) => setDraft((p) => ({ ...p, when: e.target.value }))}
                   placeholder="触发条件"
+                />
+              </label>
+              <label className={labelClass}>
+                工坊技能
+                <input
+                  className={inputClass}
+                  value={draft.skills.join("、")}
+                  onChange={(e) =>
+                    setDraft((p) => ({
+                      ...p,
+                      skills: e.target.value
+                        .split(/[\s,，、]+/)
+                        .map((item) => item.trim())
+                        .filter((item, index, all) => item && all.indexOf(item) === index),
+                    }))
+                  }
+                  placeholder="tech_trend_skill、benchmark_skill"
                 />
               </label>
               <label className={labelClass}>

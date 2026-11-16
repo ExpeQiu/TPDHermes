@@ -140,7 +140,6 @@ export default function KnowledgePolicyDomain({
   const [editConfigText, setEditConfigText] = useState(CONFIG_TEMPLATE);
   const [projects, setProjects] = useState<ProjectBindingItem[]>([]);
   const [scenarios, setScenarios] = useState<ScenarioBindingItem[]>([]);
-  const [bindingBusy, setBindingBusy] = useState(false);
 
   const loadList = useCallback(
     async (preferredId?: string | null) => {
@@ -233,13 +232,6 @@ export default function KnowledgePolicyDomain({
     setCreateConfigText(CONFIG_TEMPLATE);
   };
 
-  const refreshAfterBinding = async () => {
-    await loadBindings();
-    if (detail?.id) {
-      await loadDetail(detail.id);
-    }
-  };
-
   const createPolicy = async () => {
     if (!createCode.trim() || !createName.trim()) {
       setError("请填写策略编码和策略名称");
@@ -314,48 +306,6 @@ export default function KnowledgePolicyDomain({
     }
   };
 
-  const bindProject = async (project: ProjectBindingItem, nextPolicyId: string | null) => {
-    setBindingBusy(true);
-    setError(null);
-    setMessage(null);
-    try {
-      await apiPut(`/projects/${encodeURIComponent(project.id)}`, {
-        knowledge_policy_id: nextPolicyId,
-      });
-      setMessage(
-        nextPolicyId
-          ? `项目「${project.name}」已绑定当前策略`
-          : `项目「${project.name}」已清空策略绑定`,
-      );
-      await refreshAfterBinding();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "项目策略绑定失败");
-    } finally {
-      setBindingBusy(false);
-    }
-  };
-
-  const bindScenario = async (scenario: ScenarioBindingItem, nextPolicyId: string | null) => {
-    setBindingBusy(true);
-    setError(null);
-    setMessage(null);
-    try {
-      await apiPut(`/scenarios/${encodeURIComponent(scenario.id)}`, {
-        knowledge_policy_id: nextPolicyId,
-      });
-      setMessage(
-        nextPolicyId
-          ? `场景「${scenario.name}」已绑定当前策略`
-          : `场景「${scenario.name}」已清空策略绑定`,
-      );
-      await refreshAfterBinding();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "场景策略绑定失败");
-    } finally {
-      setBindingBusy(false);
-    }
-  };
-
   const boundProjects = useMemo(
     () => projects.filter((item) => item.knowledge_policy_id === detail?.id),
     [detail?.id, projects],
@@ -371,13 +321,13 @@ export default function KnowledgePolicyDomain({
         <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
           {embedded ? (
             <p className="text-sm text-slate-600 dark:text-slate-400">
-              管理策略版本、审批发布，以及项目和场景的绑定。
+              管理策略版本、审批与发布。
             </p>
           ) : (
             <div>
               <h3 className="text-lg font-semibold text-slate-900 dark:text-white">Policy 管理台</h3>
               <p className="mt-1 text-sm text-slate-600 dark:text-slate-400">
-                统一管理知识策略实体、版本快照和审批发布状态；项目与场景可绑定 `knowledge_policy_id`。
+                统一管理知识策略实体、版本快照和审批发布状态。
               </p>
             </div>
           )}
@@ -460,7 +410,7 @@ export default function KnowledgePolicyDomain({
               <li>`collections` 控制检索可见范围。</li>
               <li>`write_control.allowed_collections` 控制知识收割/写入白名单。</li>
               <li>`project_bound` 与 `eligible_domains` 可作为编排侧附加约束。</li>
-              <li>项目与场景绑定后，服务端会优先读取实体策略而不是环境变量。</li>
+              <li>服务端按策略实体读取检索与写入约束，而不是环境变量。</li>
             </ul>
           </div>
         </div>
@@ -611,133 +561,6 @@ export default function KnowledgePolicyDomain({
                   <p className="mt-1 text-lg font-semibold text-slate-900 dark:text-white">
                     {boundScenarios.length}
                   </p>
-                </div>
-              </div>
-
-              <div className="rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950/40 p-4 space-y-4">
-                <div className="flex items-center justify-between gap-2">
-                  <div>
-                    <p className="text-sm font-medium text-slate-900 dark:text-white">项目 / 场景绑定</p>
-                    <p className="text-xs text-slate-500">
-                      直接把当前策略绑定到项目或场景，形成从创建、治理到使用的完整闭环。
-                    </p>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => void loadBindings()}
-                    disabled={bindingBusy}
-                    className="rounded-lg border border-slate-300 dark:border-slate-600 px-3 py-1.5 text-xs text-slate-800 dark:text-slate-200 disabled:opacity-40"
-                  >
-                    刷新绑定列表
-                  </button>
-                </div>
-                <div className="grid gap-4 xl:grid-cols-2">
-                  <div className="space-y-2">
-                    <p className="text-xs font-medium uppercase tracking-wide text-slate-500">项目绑定</p>
-                    <div className="space-y-2 max-h-72 overflow-auto">
-                      {projects.map((project) => {
-                        const isCurrent = project.knowledge_policy_id === detail.id;
-                        return (
-                          <div
-                            key={project.id}
-                            className="rounded-lg border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 px-3 py-3"
-                          >
-                            <div className="flex items-start justify-between gap-3">
-                              <div className="min-w-0">
-                                <p className="truncate font-medium text-slate-900 dark:text-white">
-                                  {project.name}
-                                </p>
-                                <p className="mt-1 truncate text-[11px] text-slate-500">
-                                  {project.description || project.id}
-                                </p>
-                              </div>
-                              <span
-                                className={`rounded-full px-2 py-0.5 text-[11px] ${
-                                  isCurrent
-                                    ? "bg-violet-100 text-violet-900 border border-violet-300 dark:bg-violet-500/20 dark:text-violet-100 dark:border-violet-500/30"
-                                    : "bg-slate-100 text-slate-700 border border-slate-300 dark:bg-slate-800 dark:text-slate-200 dark:border-slate-600"
-                                }`}
-                              >
-                                {isCurrent ? "当前策略" : project.knowledge_policy_id ? "已绑定其他策略" : "未绑定"}
-                              </span>
-                            </div>
-                            <div className="mt-3 flex flex-wrap gap-2">
-                              <button
-                                type="button"
-                                disabled={bindingBusy || isCurrent}
-                                onClick={() => void bindProject(project, detail.id)}
-                                className="rounded-lg bg-violet-600 px-3 py-1.5 text-xs text-white disabled:opacity-40"
-                              >
-                                绑定当前策略
-                              </button>
-                              <button
-                                type="button"
-                                disabled={bindingBusy || !project.knowledge_policy_id}
-                                onClick={() => void bindProject(project, null)}
-                                className="rounded-lg border border-slate-300 dark:border-slate-600 px-3 py-1.5 text-xs text-slate-800 dark:text-slate-200 disabled:opacity-40"
-                              >
-                                清空绑定
-                              </button>
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </div>
-
-                  <div className="space-y-2">
-                    <p className="text-xs font-medium uppercase tracking-wide text-slate-500">场景绑定</p>
-                    <div className="space-y-2 max-h-72 overflow-auto">
-                      {scenarios.map((scenario) => {
-                        const isCurrent = scenario.knowledge_policy_id === detail.id;
-                        return (
-                          <div
-                            key={scenario.id}
-                            className="rounded-lg border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 px-3 py-3"
-                          >
-                            <div className="flex items-start justify-between gap-3">
-                              <div className="min-w-0">
-                                <p className="truncate font-medium text-slate-900 dark:text-white">
-                                  {scenario.name}
-                                </p>
-                                <p className="mt-1 truncate text-[11px] text-slate-500">
-                                  {scenario.code}
-                                  {scenario.category ? ` · ${scenario.category}` : ""}
-                                </p>
-                              </div>
-                              <span
-                                className={`rounded-full px-2 py-0.5 text-[11px] ${
-                                  isCurrent
-                                    ? "bg-violet-100 text-violet-900 border border-violet-300 dark:bg-violet-500/20 dark:text-violet-100 dark:border-violet-500/30"
-                                    : "bg-slate-100 text-slate-700 border border-slate-300 dark:bg-slate-800 dark:text-slate-200 dark:border-slate-600"
-                                }`}
-                              >
-                                {isCurrent ? "当前策略" : scenario.knowledge_policy_id ? "已绑定其他策略" : "未绑定"}
-                              </span>
-                            </div>
-                            <div className="mt-3 flex flex-wrap gap-2">
-                              <button
-                                type="button"
-                                disabled={bindingBusy || isCurrent}
-                                onClick={() => void bindScenario(scenario, detail.id)}
-                                className="rounded-lg bg-violet-600 px-3 py-1.5 text-xs text-white disabled:opacity-40"
-                              >
-                                绑定当前策略
-                              </button>
-                              <button
-                                type="button"
-                                disabled={bindingBusy || !scenario.knowledge_policy_id}
-                                onClick={() => void bindScenario(scenario, null)}
-                                className="rounded-lg border border-slate-300 dark:border-slate-600 px-3 py-1.5 text-xs text-slate-800 dark:text-slate-200 disabled:opacity-40"
-                              >
-                                清空绑定
-                              </button>
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </div>
                 </div>
               </div>
 

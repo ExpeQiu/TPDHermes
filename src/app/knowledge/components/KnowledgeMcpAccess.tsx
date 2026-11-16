@@ -38,6 +38,9 @@ type SyncReport = {
   import_scope?: ImportScope;
   graph_error?: string;
   graph_skipped?: boolean;
+  cache_synced?: number;
+  cache_failed?: number;
+  cache_error?: string;
 };
 
 type WikiSourceSpec = {
@@ -243,6 +246,7 @@ function WikiSourceCard({ spec, onSynced }: { spec: WikiSourceSpec; onSynced?: (
               本次写入 {report.page_count ?? 0} 页、{report.doc_count ?? 0} 篇文档
               {typeof report.claim_docs === "number" ? `（含 ${report.claim_docs} 条主张）` : ""}
               {report.collection ? ` · ${report.collection}` : ""}
+              {typeof report.cache_synced === "number" ? ` · 浏览缓存 ${report.cache_synced} 条` : ""}
               {report.graph_skipped ? " · 不并入内部图谱" : ""}
               {report.data_source ? ` · 来源 ${report.data_source}` : ""}
               {report.build_id ? ` · ${report.build_id}` : ""}

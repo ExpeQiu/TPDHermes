@@ -142,9 +142,9 @@ export const WORKFLOW_NAV_ITEMS: WorkflowNavItem[] = [
     requiredFeature: "skills",
   },
   {
-    href: "/ops/usage",
-    label: "成长",
-    shortLabel: "成长",
+    href: "/ops/learning",
+    label: "迭代成长",
+    shortLabel: "迭代成长",
     description: "功能使用统计、学习中心、P-team、Roles 与技能卡。",
     requiredFeature: "ops",
     matchActive: (pathname) => pathname.startsWith("/ops"),

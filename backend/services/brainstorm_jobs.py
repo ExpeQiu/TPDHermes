@@ -59,6 +59,7 @@ async def create_brainstorm_job(params: dict[str, Any]) -> dict[str, Any]:
         "turns": [],
         "ma_run_id": None,
         "title": None,
+        "activity": "",
     }
     async with _lock:
         _prune_locked()
@@ -105,6 +106,7 @@ async def _execute_job(job_id: str, params: dict[str, Any]) -> None:
             turns=turns,
             ma_run_id=progress.get("run_id"),
             title=progress.get("title"),
+            activity=str(progress.get("activity") or ""),
         )
 
     try:

@@ -286,7 +286,7 @@ export function BrainstormSetupPanel({
                 engineReady ? "bg-emerald-500" : "bg-amber-500"
               }`}
             />
-            {engineReady ? "引擎就绪" : "引擎未就绪"}
+            {engineReady ? "内核就绪" : "内核未就绪"}
           </span>
         ) : null}
       </div>
@@ -586,7 +586,7 @@ export function BrainstormSetupPanel({
                 })}
               </div>
               <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">
-                每位专家每轮发言一次；达到轮次或共识后由引擎收束方案。
+                每位专家每轮发言一次；达到轮次或共识后由内核收束方案。
               </p>
               {values.rounds >= 4 && !values.demo ? (
                 <p className="mt-2 rounded-xl border border-amber-200 bg-amber-50/80 px-3 py-2 text-xs text-amber-800 dark:border-amber-800/60 dark:bg-amber-950/40 dark:text-amber-200">
@@ -614,7 +614,7 @@ export function BrainstormSetupPanel({
                     启用共识检测（提前终止）
                   </span>
                   <span className="mt-1 block text-xs text-slate-500 dark:text-slate-400">
-                    由 multi-agent 引擎在每轮后判断是否可收束；达到阈值则提前结束。
+                    由本机内核在每轮后判断是否可收束；达到阈值则提前结束。
                   </span>
                   {values.consensusEnabled ? (
                     <span className="mt-3 block">

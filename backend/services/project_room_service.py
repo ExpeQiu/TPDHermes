@@ -1174,6 +1174,57 @@ async def _open_run(db: AsyncSession, *, room: ProjectRoom, human: ProjectRoomMe
     return run_id
 
 
+async def _execution_token_for_run(db: AsyncSession, run_id: str) -> str:
+    """房间一轮里多个角色共用同一执行凭证。进程内没有明文时重新签发。"""
+    from backend.models.orchestration_run import OrchestrationRun
+    from backend.services.execution_grant import issue_execution_grant
+    from backend.services.run_log_service import current_execution_token, remember_execution_token
+
+    rid = (run_id or "").strip()
+    if not rid:
+        return ""
+    cached = current_execution_token(rid)
+    if cached:
+        return cached
+    row = await db.get(OrchestrationRun, rid)
+    if row is None:
+        logger.warning("[co-create-room] exec grant skipped run missing run_id=%s", rid)
+        return ""
+    token, digest, expires = issue_execution_grant()
+    row.exec_token_hash = digest
+    row.exec_token_expires_at = expires
+    await db.commit()
+    remember_execution_token(rid, token)
+    logger.info("[co-create-room] exec grant reissued run_id=%s", rid)
+    return token
+
+
+async def _bind_role_skill_contract(db: AsyncSession, run_id: str, skills: list[str]) -> None:
+    from backend.models.orchestration_run import OrchestrationRun
+
+    rid = (run_id or "").strip()
+    if not rid:
+        return
+    row = await db.get(OrchestrationRun, rid)
+    if row is None:
+        logger.warning("[co-create-room] skill policy skipped run missing run_id=%s", rid)
+        return
+    if skills:
+        row.skills_policy_json = json.dumps(
+            {
+                "mode": "allowed_list",
+                "allowed": skills,
+                "preferred": skills,
+                "allow_agent_free_choice": False,
+            },
+            ensure_ascii=False,
+        )
+    else:
+        row.skills_policy_json = ""
+    await db.commit()
+    logger.info("[co-create-room] skill policy run_id=%s skills=%s", rid, ",".join(skills))
+
+
 async def _finish_without_write(
     db: AsyncSession,
     *,
@@ -1299,6 +1350,12 @@ async def _execute_turn(db: AsyncSession, room_id: str, turn_id: str) -> None:
         if role.get("missing"):
             continue
         prior = "\n".join(text for _, text in discussion if text)
+        from backend.services.role_skills import role_workshop_skills
+
+        skills = [] if direct else role_workshop_skills(role)
+        if human.run_id:
+            await _bind_role_skill_contract(db, human.run_id, skills)
+        exec_token = await _execution_token_for_run(db, human.run_id or "")
         await db.commit()
         ctx = {
             "employee_id": human.author_id,
@@ -1318,6 +1375,8 @@ async def _execute_turn(db: AsyncSession, room_id: str, turn_id: str) -> None:
             "direct_hermes": direct,
             "agent_mode": effective_room_mode(getattr(human, "agent_mode", None), human.content or ""),
             "system": role.get("system") or "",
+            "project_id": room.project_id,
+            "execution_token": exec_token,
             "run_id": human.run_id,
         }
         reply = (await complete_room_turn(role, ctx)).strip() or f"{role.get('name') or rid} 暂无补充。"
@@ -1427,7 +1486,25 @@ async def _execute_turn(db: AsyncSession, room_id: str, turn_id: str) -> None:
         )
         return
 
-    source = str((proposed or {}).get("content") or "").strip() or project_file_body(writer_reply, transcript)
+    captured_text = ""
+    if human.run_id:
+        from backend.services.workshop_execution import primary_text_from_capture
+        from backend.services.workshop_tool_capture import load_workshop_tool_capture
+
+        capture = await load_workshop_tool_capture(db, human.run_id)
+        captured_text = primary_text_from_capture(capture).strip()
+        if captured_text:
+            logger.info(
+                "[co-create-room] skill capture hit room_id=%s turn_id=%s run_id=%s chars=%s",
+                room_id,
+                turn_id,
+                human.run_id,
+                len(captured_text),
+            )
+    if captured_text:
+        source = captured_text
+    else:
+        source = str((proposed or {}).get("content") or "").strip() or project_file_body(writer_reply, transcript)
     document = delivery_document(room.title, source)
     target_id = str(target.get("file_id") or room.output_id or "")
     if target_id and base_version:

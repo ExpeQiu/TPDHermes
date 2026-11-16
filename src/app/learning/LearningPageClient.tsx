@@ -41,6 +41,7 @@ type PlanTask = {
   id: string;
   kind: string;
   status: string;
+  target_kind?: string;
   target_id?: string;
   summary?: string;
   acceptance?: { metric?: string; better?: string };
@@ -99,6 +100,35 @@ function planKindLabel(kind: string): string {
     rollback: "回滚",
   };
   return map[kind] ?? kind;
+}
+
+const PLAN_LANES: Record<string, { label: string; className: string }> = {
+  skill: {
+    label: "skill优化",
+    className: "bg-emerald-50 text-emerald-800 dark:bg-emerald-950/50 dark:text-emerald-300",
+  },
+  kb: {
+    label: "KB知识库",
+    className: "bg-amber-50 text-amber-800 dark:bg-amber-950/50 dark:text-amber-300",
+  },
+  scenario: {
+    label: "场景优化",
+    className: "bg-violet-50 text-violet-800 dark:bg-violet-950/50 dark:text-violet-300",
+  },
+  workflow: {
+    label: "工作流优化",
+    className: "bg-cyan-50 text-cyan-800 dark:bg-cyan-950/50 dark:text-cyan-300",
+  },
+};
+
+function planLane(task: PlanTask): { label: string; className: string } | null {
+  const kind = task.kind;
+  const target = task.target_kind || "";
+  if (kind === "patch_skill" || kind === "create_skill" || target === "skill") return PLAN_LANES.skill;
+  if (kind === "fill_kb" || target === "kb") return PLAN_LANES.kb;
+  if (kind === "tune_scenario" || target === "scenario") return PLAN_LANES.scenario;
+  if (kind === "tune_workflow" || target === "workflow") return PLAN_LANES.workflow;
+  return null;
 }
 
 function planStatusLabel(status: string): string {
@@ -374,26 +404,36 @@ export default function LearningPageClient() {
                 {plan.length === 0 ? (
                   <li className="text-slate-500">还没有排进夜跑的任务</li>
                 ) : (
-                  plan.map((item) => (
+                  plan.map((item) => {
+                    const lane = planLane(item);
+                    return (
                     <li
                       key={item.id}
-                      className="rounded-lg border border-slate-200 px-3 py-2 dark:border-slate-700"
+                      className="flex items-start justify-between gap-3 rounded-lg border border-slate-200 px-3 py-2 dark:border-slate-700"
                     >
-                      <div className="flex flex-wrap items-center gap-2">
-                        <span className="rounded bg-slate-100 px-2 py-0.5 text-xs dark:bg-slate-800">
-                          {planKindLabel(item.kind)}
-                        </span>
-                        <span className="rounded bg-blue-50 px-2 py-0.5 text-xs text-blue-800 dark:bg-blue-950/50 dark:text-blue-300">
-                          {planStatusLabel(item.status)}
-                        </span>
-                        {item.target_id ? <span className="text-xs text-slate-500">{item.target_id}</span> : null}
+                      <div className="min-w-0 flex-1">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="rounded bg-slate-100 px-2 py-0.5 text-xs dark:bg-slate-800">
+                            {planKindLabel(item.kind)}
+                          </span>
+                          <span className="rounded bg-blue-50 px-2 py-0.5 text-xs text-blue-800 dark:bg-blue-950/50 dark:text-blue-300">
+                            {planStatusLabel(item.status)}
+                          </span>
+                          {item.target_id ? <span className="truncate text-xs text-slate-500">{item.target_id}</span> : null}
+                        </div>
+                        {item.summary ? <p className="mt-1 text-slate-700 dark:text-slate-300">{item.summary}</p> : null}
+                        {acceptanceHint(item) ? (
+                          <p className="mt-1 text-xs text-slate-500">{acceptanceHint(item)}</p>
+                        ) : null}
                       </div>
-                      {item.summary ? <p className="mt-1 text-slate-700 dark:text-slate-300">{item.summary}</p> : null}
-                      {acceptanceHint(item) ? (
-                        <p className="mt-1 text-xs text-slate-500">{acceptanceHint(item)}</p>
+                      {lane ? (
+                        <span className={`shrink-0 rounded-full px-2.5 py-0.5 text-xs ${lane.className}`}>
+                          {lane.label}
+                        </span>
                       ) : null}
                     </li>
-                  ))
+                    );
+                  })
                 )}
               </ul>
             </section>

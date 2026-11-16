@@ -565,7 +565,7 @@ def test_t12_writer_reads_attachment_and_revises(room_roles, tmp_path: Path, mon
     source.write_text("附件原句ALPHA\n待删句子BETA\n", encoding="utf-8")
     calls: list[list[dict[str, str]]] = []
 
-    async def upstream(messages):
+    async def upstream(messages, **kwargs):
         calls.append(messages)
         user = "\n".join(item.get("content") or "" for item in messages if item.get("role") == "user")
         assert "附件原句ALPHA" in user

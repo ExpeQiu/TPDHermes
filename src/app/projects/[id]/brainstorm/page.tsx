@@ -70,6 +70,7 @@ export default function ProjectBrainstormPage() {
   const [jobStatus, setJobStatus] = useState<string | null>(null);
   const [liveTurns, setLiveTurns] = useState<BrainstormTurn[]>([]);
   const [liveTitle, setLiveTitle] = useState<string | null>(null);
+  const [activity, setActivity] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<BrainstormRunResult | null>(null);
   /** setup：配置表单；session：运行中 / 结果（逐条发言） */
@@ -201,6 +202,7 @@ export default function ProjectBrainstormPage() {
     setJobStatus("queued");
     setLiveTurns([]);
     setLiveTitle(null);
+    setActivity("");
     setSavedOutputId(null);
     setSaveError(null);
     setShowTrajectory(false);
@@ -238,6 +240,7 @@ export default function ProjectBrainstormPage() {
         onJobUpdate: (job: BrainstormJobStatus) => {
           setJobStatus(job.status);
           if (job.title) setLiveTitle(job.title);
+          setActivity(job.activity || "");
           if (Array.isArray(job.turns)) {
             const next = normalizeLiveTurns(job.turns);
             setLiveTurns(next);
@@ -335,9 +338,6 @@ export default function ProjectBrainstormPage() {
         });
       }}
       onRefresh={() => setProjectFilesRefreshKey((value) => value + 1)}
-      folderActor={
-        projectId ? { kind: "brainstorm", sourceId: `brainstorm:${projectId}`, title: "头脑风暴" } : null
-      }
     />
   );
 
@@ -354,8 +354,8 @@ export default function ProjectBrainstormPage() {
 
   const engineHint = health
     ? health.ready
-      ? `引擎就绪（${health.http_ok ? "HTTP" : "SDK"}）· AI 由 multi-agent 提供 · 默认 ${health.mock_default ? "Mock" : "Live"}`
-      : "引擎未就绪：请启动 multi-agent Web，或配置 MULTI_AGENT_ROOT"
+      ? `内核就绪${health.kernel_id ? `（${health.kernel_id}）` : ""} · 圆桌发言由本机内核生成`
+      : "内核未就绪：请在配置中绑定本机内核"
     : null;
 
   return (
@@ -458,11 +458,11 @@ export default function ProjectBrainstormPage() {
                 </div>
                 <div className="flex items-center gap-2 text-xs text-slate-500">
                   <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-amber-500" />
-                  {jobStatus === "queued" ? "任务入队" : "逐条接收发言"}
+                  {activity || (jobStatus === "queued" ? "任务入队" : "逐条接收发言")}
                 </div>
               </div>
               <div className="mt-5">
-                <BrainstormTurnList turns={liveTurns} running />
+                <BrainstormTurnList turns={liveTurns} running waitingLabel={activity || undefined} />
               </div>
             </div>
           </section>

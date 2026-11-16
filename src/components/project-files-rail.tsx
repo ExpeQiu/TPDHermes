@@ -19,7 +19,6 @@ type Props = {
   onProjectChange: (projectId: string) => void;
   onFileChange: (fileKey: string | null) => void;
   onRefresh: () => void;
-  folderActor?: { kind: string; sourceId: string; title: string } | null;
 };
 
 /** 对话创作与场景创作共用的项目文件栏，交互与项目共创文件栏一致。 */
@@ -35,7 +34,6 @@ export function ProjectFilesRail({
   onProjectChange,
   onFileChange,
   onRefresh,
-  folderActor = null,
 }: Props) {
   const [pinned, setPinned] = useState(false);
   const [revealed, setRevealed] = useState(false);
@@ -99,7 +97,6 @@ export function ProjectFilesRail({
         onFileChange(key);
       }}
       onRefresh={onRefresh}
-      folderActor={folderActor}
       pinLabel={autoHide ? (pinned ? "自动隐藏" : "固定") : undefined}
       onTogglePin={
         autoHide

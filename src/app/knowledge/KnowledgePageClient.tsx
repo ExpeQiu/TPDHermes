@@ -1212,7 +1212,7 @@ export default function KnowledgePageClient({
     | "harvest"
     | "experience"
     | "policy"
-  >(surface === "govern" ? "policy" : "tree");
+  >(surface === "govern" ? "policy" : "collections");
   const [governPane, setGovernPane] = useState<"node" | "auto" | "collection" | "policy">("node");
 
   const [searchScopeCollection, setSearchScopeCollection] = useState<string>("");
@@ -1719,7 +1719,7 @@ export default function KnowledgePageClient({
       return;
     }
     if (surface !== "hub") {
-      router.push(m === "tree" ? "/knowledge" : `/knowledge?mode=${m}`);
+      router.push(m === "collections" ? "/knowledge" : `/knowledge?mode=${m}`);
       return;
     }
     if (m === "harvest") {

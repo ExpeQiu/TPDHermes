@@ -8,6 +8,21 @@ HDR_A = {"X-User-ID": "isolate_user_a"}
 HDR_B = {"X-User-ID": "isolate_user_b"}
 
 
+def test_create_project_accepts_missing_trailing_slash():
+    """Next 会把 /projects/ 308 到 /projects，无斜杠的 POST 必须能创建。"""
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/v1/projects",
+            json={"name": "slash-probe"},
+            headers=HDR_A,
+            follow_redirects=False,
+        )
+        assert response.status_code == 200, response.text
+        created = response.json()
+        assert created["name"] == "slash-probe"
+        client.delete(f"/api/v1/projects/{created['id']}", headers=HDR_A)
+
+
 def test_project_not_visible_to_other_user():
     with TestClient(app) as client:
         pa = client.post("/api/v1/projects/", json={"name": "Iso A"}, headers=HDR_A).json()

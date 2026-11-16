@@ -52,6 +52,12 @@ export const KB_HIDDEN_COLLECTIONS: ReadonlySet<string> = new Set([
   "public.structured_tech.remote_debug",
 ]);
 
+/** 集合名仍是 public.*，但在浏览里归到「内部知识库」。 */
+export const KB_BROWSE_AS_INTERNAL: ReadonlySet<string> = new Set([
+  "public.internal_methodology.process_docs",
+  "public.release_assets.speeches",
+]);
+
 export function isAuthoritativeKbCollection(name: string): boolean {
   return KB_AUTHORITATIVE_COLLECTIONS.includes(name.trim());
 }
@@ -63,7 +69,8 @@ export function kbCollectionDescription(name: string): string | undefined {
 
 /** 内部知识库 collection（scope=internal，在按集合浏览中独立展示为按钮） */
 export function isInternalKbCollection(name: string): boolean {
-  return name.trim().startsWith("internal.");
+  const key = name.trim();
+  return key.startsWith("internal.") || KB_BROWSE_AS_INTERNAL.has(key);
 }
 
 export function isKbCollectionHidden(name: string): boolean {
@@ -94,7 +101,7 @@ export function kbCollectionScopeLabel(scope: KbCollectionScope): string {
 export function kbCollectionScope(name: string): KbCollectionScope | "other" {
   const key = name.trim();
   if (/^project\.[^.]+\.kb$/.test(key) || key.startsWith("project.")) return "project";
-  if (key.startsWith("internal.")) return "internal";
+  if (KB_BROWSE_AS_INTERNAL.has(key) || key.startsWith("internal.")) return "internal";
   if (key.startsWith("public.")) return "public";
   return "other";
 }

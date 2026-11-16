@@ -604,7 +604,7 @@ async def assemble_payload(
                     len(fallback_cols),
                 )
 
-    # 对话场景改为用户手动「存入项目」，不在编排完成时自动落 outputs
+    # 对话场景改为用户手动「创建文件」，不在编排完成时自动落 outputs
     save_output = entrypoint != "chat"
     execution = OrchestrationExecution(
         stream=request.stream,

@@ -2,11 +2,14 @@
 
 import asyncio
 import uuid
+from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
 
 from backend import app
+from backend.db import async_session_maker
+from backend.models.project_attachment import ProjectAttachment
 from backend.services import project_room_service as rooms
 
 ROLES = [
@@ -598,3 +601,121 @@ def test_plain_message_talks_to_hermes_member_mention_does_not(room_roles):
         assert "Hermes回应：你好" in by_turn[humans[0]["turn_id"]][0]["content"]
         assert humans[1]["turn_id"] not in by_turn
         assert humans[1]["turn_state"] == "succeeded"
+
+
+def test_room_co_create_mock_e2e(room_roles, tmp_path: Path):
+    """两名成员、一份附件：询问不落稿，成稿后修订，只读可见、外人不可见。"""
+    owner = f"room_owner_{uuid.uuid4().hex[:8]}"
+    viewer = f"room_viewer_{uuid.uuid4().hex[:8]}"
+    outsider = f"room_out_{uuid.uuid4().hex[:8]}"
+    source = tmp_path / "note.md"
+    source.write_text("附件原句ALPHA\n待删句子BETA\n", encoding="utf-8")
+
+    async def completer(role: dict, ctx: dict) -> str:
+        human = str(ctx.get("human_text") or "")
+        if not ctx.get("allow_write"):
+            return f"简答：{human}"
+        document = str(ctx.get("document") or "")
+        excerpts = "\n".join(
+            str(item.get("excerpt") or "")
+            for item in (ctx.get("materials") or [])
+            if isinstance(item, dict)
+        )
+        if "删除" in human:
+            return (document or excerpts).replace("待删句子BETA", "").strip() + "\n"
+        return f"# 引用稿\n\n{excerpts}"
+
+    rooms.set_room_completer_for_tests(completer)
+    with TestClient(app) as client:
+        project_id = _create_project(client, owner)
+        _add_member(client, owner, project_id, viewer, "viewer")
+        room_id = _create_room(client, owner, project_id, title="共创端到端")["id"]
+        asked = client.post(
+            f"/api/v1/projects/{project_id}/rooms/{room_id}/messages",
+            headers=_headers(owner),
+            json={"content": "这版只问不改", "agent_mode": "ask"},
+        )
+        assert asked.status_code == 200, asked.text
+
+    asyncio.run(rooms.drain_project_room(room_id))
+
+    async def add_attachment() -> str:
+        async with async_session_maker() as db:
+            row = ProjectAttachment(
+                id=str(uuid.uuid4()),
+                project_id=project_id,
+                original_filename="note.md",
+                content_type="text/markdown",
+                size_bytes=source.stat().st_size,
+                stored_path=str(source),
+            )
+            db.add(row)
+            await db.commit()
+            return row.id
+
+    attachment_id = asyncio.run(add_attachment())
+    with TestClient(app) as client:
+        asked_done = _messages(client, owner, project_id, room_id)
+        assert asked_done["doc_version"] == 0
+        assert not asked_done["output_id"]
+        assert any("简答：这版只问不改" in item["content"] for item in asked_done["messages"])
+        drafted = client.post(
+            f"/api/v1/projects/{project_id}/rooms/{room_id}/messages",
+            headers=_headers(owner),
+            json={
+                "content": "请根据附件写一版",
+                "agent_mode": "agent",
+                "files": [
+                    {
+                        "project_id": project_id,
+                        "file_id": attachment_id,
+                        "kind": "attachment",
+                        "purpose": "material",
+                    }
+                ],
+            },
+        )
+        assert drafted.status_code == 200, drafted.text
+
+    asyncio.run(rooms.drain_project_room(room_id))
+
+    with TestClient(app) as client:
+        first = _messages(client, owner, project_id, room_id)
+        assert first["doc_version"] == 1
+        assert "附件原句ALPHA" in first["content"]
+        assert "待删句子BETA" in first["content"]
+        output_id = first["output_id"]
+        revised = client.post(
+            f"/api/v1/projects/{project_id}/rooms/{room_id}/messages",
+            headers=_headers(owner),
+            json={
+                "content": "删除原句待删句子BETA",
+                "agent_mode": "agent",
+                "files": [
+                    {
+                        "project_id": project_id,
+                        "file_id": output_id,
+                        "kind": "output",
+                        "purpose": "revise",
+                        "version": "1",
+                    }
+                ],
+            },
+        )
+        assert revised.status_code == 200, revised.text
+
+    asyncio.run(rooms.drain_project_room(room_id))
+
+    with TestClient(app) as client:
+        done = _messages(client, viewer, project_id, room_id)
+        assert "附件原句ALPHA" in done["content"]
+        assert "待删句子BETA" not in done["content"]
+        assert done["doc_version"] >= 2
+        hidden = client.get(
+            f"/api/v1/projects/{project_id}/rooms/{room_id}/messages",
+            headers=_headers(outsider),
+        )
+        assert hidden.status_code == 404
+        reopened = _messages(client, owner, project_id, room_id)
+        assert reopened["output_id"]
+        assert reopened["content"] == done["content"]

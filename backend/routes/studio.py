@@ -554,7 +554,7 @@ async def app_workbench_page(product: str) -> str:
 
     if product not in APP_PRODUCTS:
         raise HTTPException(404, "未接入的技能卡")
-    return read_workbench_html(product)
+    return PlainTextResponse(read_workbench_html(product), headers={"Cache-Control": "no-store"})
 
 
 @router.get("/apps/{product}/fixture")

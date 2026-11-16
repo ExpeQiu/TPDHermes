@@ -30,9 +30,16 @@ def test_manual_sync_uses_mcp_and_hides_bundle(monkeypatch, tmp_path):
     async def admin_role(*_args, **_kwargs):
         return "platform_admin"
 
+    cache_calls: list[dict] = []
+
+    async def fake_cache(**kwargs):
+        cache_calls.append(kwargs)
+        return {"synced": 3, "failed": 0, "skipped": 0, "removed": 0}
+
     monkeypatch.setattr("backend.services.rbac.resolve_platform_role", admin_role)
     monkeypatch.setattr("backend.services.geelywiki_ingest.ingest_geelywiki", fake_ingest)
     monkeypatch.setattr("backend.services.geelywiki_ingest.apply_geelywiki_graph", fake_graph)
+    monkeypatch.setattr("backend.routes.kb_ingest.kb_cache_service.sync_from_external", fake_cache)
 
     with TestClient(app) as client:
         response = client.post(
@@ -48,5 +55,8 @@ def test_manual_sync_uses_mcp_and_hides_bundle(monkeypatch, tmp_path):
     assert body["kg_counts"]["vehicles"] == 1
     assert "kg_bundle" not in body
     assert body["collection"] == "public.geelywiki.pages"
+    assert body["cache_synced"] == 3
+    assert cache_calls[0]["project_id"] == "__all__"
+    assert cache_calls[0]["collections"] == ["public.geelywiki.pages"]
     assert body["graph_skipped"] is True
     assert "kg" not in body

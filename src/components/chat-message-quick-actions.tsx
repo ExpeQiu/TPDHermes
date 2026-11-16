@@ -111,10 +111,8 @@ export function ChatMessageQuickActions({
   const [copyState, setCopyState] = useState<"idle" | "ok" | "fail">("idle");
   const [kbState, setKbState] = useState<"idle" | "busy" | "ok" | "fail">("idle");
   const [kbHint, setKbHint] = useState<string | null>(null);
-  const [projectState, setProjectState] = useState<"idle" | "busy" | "ok" | "fail">("idle");
-  const [projectHint, setProjectHint] = useState<string | null>(null);
-  const [docState, setDocState] = useState<"idle" | "busy" | "ok" | "fail">("idle");
-  const [docHint, setDocHint] = useState<string | null>(null);
+  const [fileState, setFileState] = useState<"idle" | "busy" | "ok" | "fail">("idle");
+  const [fileHint, setFileHint] = useState<string | null>(null);
   const [exportFlash, setExportFlash] = useState(false);
   const [versionState, setVersionState] = useState<"idle" | "busy" | "ok" | "fail">("idle");
   const [versionHint, setVersionHint] = useState<string | null>(null);
@@ -282,11 +280,11 @@ export function ChatMessageQuickActions({
     }
   }, [collectionName, fileTitle, projectId, role, sessionId, trimmed]);
 
-  const onCreateDocument = useCallback(async () => {
+  const onCreateFile = useCallback(async () => {
     const pid = projectId?.trim();
-    if (!trimmed || !pid || docState === "busy") return;
-    setDocState("busy");
-    setDocHint(null);
+    if (!trimmed || !pid || fileState === "busy") return;
+    setFileState("busy");
+    setFileHint(null);
     const title = titleFromContent(trimmed, 40);
     try {
       const res = await apiPost<ProjectDepositResponse>(`/projects/${pid}/outputs/deposit-from-chat`, {
@@ -297,12 +295,13 @@ export function ChatMessageQuickActions({
         session_id: sessionId ?? undefined,
         message_id: messageId,
       });
-      setDocState("ok");
-      setDocHint(res.title?.trim() || title);
+      const savedTitle = res.title?.trim() || title;
+      setFileState("ok");
+      setFileHint(savedTitle);
       trackUsage({
-        eventName: "chat_create_document",
+        eventName: "chat_create_project_file",
         feature: "chat_output",
-        action: "create_document",
+        action: "create_file",
         projectId: pid,
         properties: {
           run_id: runId,
@@ -310,70 +309,25 @@ export function ChatMessageQuickActions({
           output_id: res.id,
         },
       });
-      console.info("[chat] 创建文档", {
+      console.info("[chat] 创建文件", {
         project_id: pid,
         output_id: res.id,
-        title,
+        title: savedTitle,
         run_id: runId,
         message_id: messageId,
       });
       if (res.id) onDocumentCreated?.(res.id);
     } catch (e) {
-      setDocState("fail");
-      setDocHint(e instanceof Error ? e.message : String(e));
-      console.warn("[chat] 创建文档失败", e);
+      setFileState("fail");
+      setFileHint(e instanceof Error ? e.message : String(e));
+      console.warn("[chat] 创建文件失败", e);
     } finally {
       window.setTimeout(() => {
-        setDocState("idle");
-        setDocHint(null);
+        setFileState("idle");
+        setFileHint(null);
       }, 5000);
     }
-  }, [docState, messageId, onDocumentCreated, projectId, runId, scenarioId, sessionId, trimmed]);
-
-  const onSaveProject = useCallback(async () => {
-    const pid = projectId?.trim();
-    if (!trimmed || !pid || projectState === "busy") return;
-    setProjectState("busy");
-    setProjectHint(null);
-    try {
-      const res = await apiPost<ProjectDepositResponse>(`/projects/${pid}/outputs/deposit-from-chat`, {
-        content: trimmed,
-        title: fileTitle,
-        run_id: runId,
-        scenario_id: scenarioId,
-        session_id: sessionId ?? undefined,
-        message_id: messageId,
-      });
-      setProjectState("ok");
-      setProjectHint(res.id ? `输出 ${res.id.slice(0, 8)}…` : "已存入项目");
-      trackUsage({
-        eventName: "chat_deposit_project_output",
-        feature: "chat_output",
-        action: "deposit",
-        projectId: pid,
-        properties: {
-          run_id: runId,
-          message_id: messageId,
-          output_id: res.id,
-        },
-      });
-      console.info("[chat-output-deposit] 消息存入项目输出", {
-        project_id: pid,
-        output_id: res.id,
-        run_id: runId,
-        message_id: messageId,
-      });
-    } catch (e) {
-      setProjectState("fail");
-      setProjectHint(e instanceof Error ? e.message : String(e));
-      console.warn("[chat-output-deposit] 存入项目失败", e);
-    } finally {
-      window.setTimeout(() => {
-        setProjectState("idle");
-        setProjectHint(null);
-      }, 5000);
-    }
-  }, [fileTitle, messageId, projectId, projectState, runId, scenarioId, sessionId, trimmed]);
+  }, [fileState, messageId, onDocumentCreated, projectId, runId, scenarioId, sessionId, trimmed]);
 
   const onSaveOutputVersion = useCallback(async () => {
     const pid = projectId?.trim();
@@ -444,15 +398,6 @@ export function ChatMessageQuickActions({
           <button
             type="button"
             className={btnClass}
-            disabled={actionsDisabled || !projectId?.trim() || docState === "busy"}
-            title={projectId?.trim() ? "将本条回复创建为项目文档" : "请先在右侧绑定项目"}
-            onClick={() => void onCreateDocument()}
-          >
-            {docState === "busy" ? "创建中…" : docState === "ok" ? "已创建" : docState === "fail" ? "创建失败" : "创建文档"}
-          </button>
-          <button
-            type="button"
-            className={btnClass}
             disabled={actionsDisabled || feedbackState === "busy"}
             onClick={() => void submitFeedback("rewrite", "用户请求重写")}
           >
@@ -504,16 +449,16 @@ export function ChatMessageQuickActions({
         <button
           type="button"
           className={btnClass}
-          disabled={actionsDisabled || projectState === "busy"}
-          title="将本条助手回复写入当前项目的对话类输出"
-          onClick={() => void onSaveProject()}
+          disabled={actionsDisabled || fileState === "busy"}
+          title="将本条回复创建为项目文件，并存入项目文件夹"
+          onClick={() => void onCreateFile()}
         >
-          {projectState === "busy"
-            ? "存入中…"
-            : projectState === "ok"
-              ? "✓ 已存项目"
-              : projectState === "fail"
-                ? "存入失败"
+          {fileState === "busy"
+            ? "创建中…"
+            : fileState === "ok"
+              ? "已创建"
+              : fileState === "fail"
+                ? "创建失败"
                 : "存入项目"}
         </button>
       ) : null}
@@ -553,22 +498,10 @@ export function ChatMessageQuickActions({
           ) : null}
         </span>
       ) : null}
-      {docHint ? (
-        <span className={`text-[10px] ${docState === "fail" ? accentRedSoft : accentEmeraldSoft}`}>
-          {docState === "ok" ? `已创建文档「${docHint}」` : docHint}
-          {docState === "ok" && projectId ? (
-            <Link href={`/projects/${projectId}`} className={`ml-1 ${accentLink}`}>
-              打开项目
-            </Link>
-          ) : null}
-        </span>
-      ) : null}
-      {projectHint ? (
-        <span
-          className={`text-[10px] ${projectState === "fail" ? accentRedSoft : accentEmeraldSoft}`}
-        >
-          {projectHint}
-          {projectState === "ok" && projectId ? (
+      {fileHint ? (
+        <span className={`text-[10px] ${fileState === "fail" ? accentRedSoft : accentEmeraldSoft}`}>
+          {fileState === "ok" ? `已创建文件「${fileHint}」` : fileHint}
+          {fileState === "ok" && projectId ? (
             <Link href={`/projects/${projectId}`} className={`ml-1 ${accentLink}`}>
               打开项目
             </Link>

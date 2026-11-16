@@ -501,6 +501,27 @@ class GeelyWikiSyncRequest(BaseModel):
     import_scope: str | None = None
 
 
+async def _refresh_browse_cache(collection: str) -> dict[str, Any]:
+    """把刚写入 Chroma 的集合回填到浏览用的 kb_cache。项目号用 __all__，与其它全局集合一致。"""
+    name = str(collection or "").strip()
+    if not name:
+        return {"synced": 0, "failed": 0, "skipped": 1}
+    result = await kb_cache_service.sync_from_external(
+        external_kb_url=CHROMA_HOST,
+        project_id="__all__",
+        collections=[name],
+    )
+    log.info(
+        "kb browse cache refreshed collection=%s project_id=__all__ synced=%s failed=%s skipped=%s removed=%s",
+        name,
+        result.get("synced"),
+        result.get("failed"),
+        result.get("skipped"),
+        result.get("removed"),
+    )
+    return result
+
+
 def _public_geelywiki_report(report: dict[str, Any]) -> dict[str, Any]:
     bundle = report.get("kg_bundle")
     public = {key: value for key, value in report.items() if key != "kg_bundle"}
@@ -550,9 +571,17 @@ async def sync_geelywiki_manual(body: GeelyWikiSyncRequest):
     elif scope == "external":
         report["graph_skipped"] = True
         log.info("geelywiki manual sync graph skipped import_scope=external")
+    if report.get("ok") and report.get("collection"):
+        try:
+            cache = await _refresh_browse_cache(str(report["collection"]))
+            report["cache_synced"] = int(cache.get("synced") or 0)
+            report["cache_failed"] = int(cache.get("failed") or 0)
+        except Exception as exc:
+            log.exception("geelywiki browse cache refresh failed collection=%s", report.get("collection"))
+            report["cache_error"] = str(exc)
     public = _public_geelywiki_report(report)
     log.info(
-        "geelywiki manual sync done ok=%s pages=%s docs=%s source=%s build_id=%s import_scope=%s collection=%s",
+        "geelywiki manual sync done ok=%s pages=%s docs=%s source=%s build_id=%s import_scope=%s collection=%s cache_synced=%s",
         public.get("ok"),
         public.get("page_count"),
         public.get("doc_count"),
@@ -560,6 +589,7 @@ async def sync_geelywiki_manual(body: GeelyWikiSyncRequest):
         public.get("build_id"),
         public.get("import_scope"),
         public.get("collection"),
+        public.get("cache_synced"),
     )
     return public
 
@@ -593,9 +623,17 @@ async def sync_autocar_manual(body: AutocarSyncRequest):
     except Exception as exc:
         log.exception("autocar manual sync failed")
         raise HTTPException(status_code=500, detail=str(exc)) from exc
+    if report.get("ok") and report.get("collection"):
+        try:
+            cache = await _refresh_browse_cache(str(report["collection"]))
+            report["cache_synced"] = int(cache.get("synced") or 0)
+            report["cache_failed"] = int(cache.get("failed") or 0)
+        except Exception as exc:
+            log.exception("autocar browse cache refresh failed collection=%s", report.get("collection"))
+            report["cache_error"] = str(exc)
     public = _public_geelywiki_report(report)
     log.info(
-        "autocar manual sync done ok=%s pages=%s docs=%s source=%s build_id=%s import_scope=%s collection=%s",
+        "autocar manual sync done ok=%s pages=%s docs=%s source=%s build_id=%s import_scope=%s collection=%s cache_synced=%s",
         public.get("ok"),
         public.get("page_count"),
         public.get("doc_count"),
@@ -603,5 +641,6 @@ async def sync_autocar_manual(body: AutocarSyncRequest):
         public.get("build_id"),
         public.get("import_scope"),
         public.get("collection"),
+        public.get("cache_synced"),
     )
     return public

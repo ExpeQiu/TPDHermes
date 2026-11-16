@@ -3,7 +3,7 @@
 import dynamic from "next/dynamic";
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import {
   coCreateAgentModeMeta,
@@ -11,6 +11,7 @@ import {
   roomPlanReady,
   type CoCreateAgentMode,
 } from "@/app/projects/[id]/co-create/co-create-agent-utils";
+import { ChatMarkdownWithCitations } from "@/components/chat-markdown-with-citations";
 import { ChatMessageQuickActions } from "@/components/chat-message-quick-actions";
 import { useFileWorkspace } from "@/app/projects/[id]/co-create/hooks/use-file-workspace";
 import {
@@ -93,33 +94,8 @@ const ProjectFilesPanel = dynamic(() =>
   ),
 );
 
-type MarkdownView = (props: { content: string }) => ReactNode;
-
-let markdownViewLoader: Promise<MarkdownView> | null = null;
-
-function loadMarkdownView(): Promise<MarkdownView> {
-  markdownViewLoader ??= import("@/components/chat-markdown-with-citations").then(
-    (mod) => mod.ChatMarkdownWithCitations,
-  );
-  return markdownViewLoader;
-}
-
 const AgentMessageBody = memo(function AgentMessageBody({ content }: { content: string }) {
-  const expanded = expandRoomFileActions(content);
-  const [MarkdownView, setMarkdownView] = useState<MarkdownView | null>(null);
-  useEffect(() => {
-    let cancelled = false;
-    void loadMarkdownView().then((View) => {
-      if (!cancelled) setMarkdownView(() => View);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-  if (!MarkdownView) {
-    return <div className="text-sm leading-relaxed whitespace-pre-wrap">{expanded}</div>;
-  }
-  return <MarkdownView content={expanded} />;
+  return <ChatMarkdownWithCitations content={expandRoomFileActions(content)} />;
 });
 
 function hashRoleId(value: string): number {
@@ -173,8 +149,10 @@ type CloudChip = {
   label: string;
 };
 
-/** 成员芯片上的短名。优先用户名，避免露出随机 user_id。 */
-export function memberChipLabel(userId: string, displayName?: string): string {
+/** 成员芯片上的短名。优先登录用户名，避免露出随机 user_id。 */
+export function memberChipLabel(userId: string, displayName?: string, username?: string): string {
+  const account = (username || "").trim();
+  if (account && !account.startsWith("user_") && !account.startsWith("auto_")) return account;
   const named = (displayName || "").trim();
   if (named && !named.startsWith("user_") && !named.startsWith("auto_")) return named;
   const id = userId.trim();
@@ -261,7 +239,7 @@ export default function CoCreateRoomApp() {
   const [fileProjectId, setFileProjectId] = useState(projectId);
   const [bindableProjects, setBindableProjects] = useState<ProjectRecord[]>([]);
   const [roles, setRoles] = useState<RoleMeta[]>([]);
-  const [members, setMembers] = useState<{ user_id: string; display_name?: string }[]>([]);
+  const [members, setMembers] = useState<{ user_id: string; display_name?: string; username?: string }[]>([]);
   const [voices, setVoices] = useState<{ users: string[]; roles: string[] }>({ users: [], roles: [] });
   const [fileSaving, setFileSaving] = useState(false);
   const [filesPinned, setFilesPinned] = useState(false);
@@ -412,7 +390,7 @@ export default function CoCreateRoomApp() {
       }
     };
     void load<{ items: RoleMeta[] }>("/brainstorm/roles", (data) => setRoles(data.items ?? []));
-    void load<{ user_id: string; display_name?: string }[]>("/projects/" + projectId + "/members", (data) => {
+    void load<{ user_id: string; display_name?: string; username?: string }[]>("/projects/" + projectId + "/members", (data) => {
       const rows = Array.isArray(data) ? data : [];
       setMembers(rows.filter((item) => item?.user_id));
       console.info("[co-create-room] 项目成员", { projectId, count: rows.length });
@@ -688,13 +666,13 @@ export default function CoCreateRoomApp() {
         }));
       const memberItems = members
         .filter((member) => {
-          const label = memberChipLabel(member.user_id, member.display_name).toLowerCase();
-          return !q || label.includes(q) || member.user_id.toLowerCase().includes(q);
+          const label = memberChipLabel(member.user_id, member.display_name, member.username).toLowerCase();
+          return !q || label.includes(q) || member.user_id.toLowerCase().includes(q) || (member.username || "").toLowerCase().includes(q);
         })
         .map((member) => ({
           kind: "member" as const,
           id: member.user_id,
-          label: memberChipLabel(member.user_id, member.display_name),
+          label: memberChipLabel(member.user_id, member.display_name, member.username),
           seat: false,
         }));
       return [...roleItems, ...memberItems];
@@ -735,14 +713,20 @@ export default function CoCreateRoomApp() {
         key: `user:${id}`,
         kind: "member",
         id,
-        label: memberChipLabel(id, member.display_name),
+        label: memberChipLabel(id, member.display_name, member.username),
       });
     }
-    const nameById = new Map(members.map((member) => [member.user_id, member.display_name] as const));
+    const nameById = new Map(members.map((member) => [member.user_id, member] as const));
     for (const id of activeUsers) {
       if (seen.has(id)) continue;
       seen.add(id);
-      chips.push({ key: `user:${id}`, kind: "member", id, label: memberChipLabel(id, nameById.get(id)) });
+      const known = nameById.get(id);
+      chips.push({
+        key: `user:${id}`,
+        kind: "member",
+        id,
+        label: memberChipLabel(id, known?.display_name, known?.username),
+      });
     }
     for (const role of roles) {
       chips.push({ key: `bot:${role.id}`, kind: "bot", id: role.id, label: role.name });
@@ -818,7 +802,7 @@ export default function CoCreateRoomApp() {
       const mentionUserIds = members
         .filter(
           (member) =>
-            mentionTokenPresent(text, "@", memberChipLabel(member.user_id, member.display_name)) ||
+            mentionTokenPresent(text, "@", memberChipLabel(member.user_id, member.display_name, member.username)) ||
             mentionTokenPresent(text, "@", member.user_id),
         )
         .map((member) => member.user_id);
@@ -1333,7 +1317,7 @@ export default function CoCreateRoomApp() {
                         data-kind="member"
                         data-id={chip.id}
                         data-voice={voiced ? "on" : "off"}
-                        title={chip.id}
+                        title={chip.label}
                         className={className}
                         style={style}
                       >
@@ -1368,14 +1352,12 @@ export default function CoCreateRoomApp() {
                   );
                 })}
               </div>
-              <button
-                type="button"
-                disabled={creating}
-                onClick={() => void createRoom("bot")}
-                className="w-full shrink-0 rounded-full border border-blue-500/40 bg-blue-500/15 px-2 py-1 text-xs text-blue-700 transition hover:bg-blue-500/25 disabled:opacity-40 dark:text-blue-200"
+              <Link
+                href="/ops/roles"
+                className="block w-full shrink-0 rounded-full border border-blue-500/40 bg-blue-500/15 px-2 py-1 text-center text-xs text-blue-700 transition hover:bg-blue-500/25 dark:text-blue-200"
               >
-                新建Bot
-              </button>
+                发现更多专家
+              </Link>
               {selectedRoles.length > 0 ? (
                 <div className="flex flex-wrap gap-1" role="group" aria-label="主笔">
                   {roles
@@ -1414,7 +1396,7 @@ export default function CoCreateRoomApp() {
         </div>
         <div ref={listRef} className="min-h-0 flex-1 space-y-3 overflow-y-auto px-4 py-4">
           {!activeRoom ? (
-            <p className="pt-16 text-center text-sm text-slate-500">与你的团队成员+AIbot进行共创项目</p>
+            <p className="pt-16 text-center text-sm text-slate-500">与你的团队成员+AI专家进行共创项目</p>
           ) : !historyReady ? (
             <p className="pt-16 text-center text-sm text-slate-500">加载对话…</p>
           ) : messages.length === 0 ? (
@@ -1569,7 +1551,7 @@ export default function CoCreateRoomApp() {
                       setFilesRevealed(true);
                       void fileWorkspace.refreshFiles();
                       fileWorkspace.openFileTab(encodeProjectFileSelectValue("output", outputId));
-                      console.info("[co-create-room] 回复已创建文档", { projectId, outputId, messageId: message.id });
+                      console.info("[co-create-room] 回复已创建文件", { projectId, outputId, messageId: message.id });
                     }}
                   />
                 ) : null}
@@ -1800,11 +1782,6 @@ export default function CoCreateRoomApp() {
                     if (key) fileWorkspace.openFileTab(key);
                   }}
                   onRefresh={() => void fileWorkspace.refreshFiles()}
-                  folderActor={
-                    activeId
-                      ? { kind: "cocreate", sourceId: activeId, title: activeRoom?.title || "共创" }
-                      : null
-                  }
                   pinLabel={filesPinned ? "自动隐藏" : "固定"}
                   onTogglePin={() => {
                     setFilesPinned((pinned) => {

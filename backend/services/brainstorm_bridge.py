@@ -589,6 +589,30 @@ async def run_roundtable(
     demo_hint = resolve_mock_hint(demo)
     context_s = (context or "").strip() or None
 
+    # 正式圆桌走已绑定内核。Mock（demo=True）仍留给 multi-agent，避免单测依赖模型。
+    if demo_hint is False:
+        from backend.services.brainstorm_kernel import run_kernel_roundtable
+
+        logger.info(
+            "头脑风暴走内核 | pack=%s | rounds=%s | mode=%s | consensus=%s",
+            pack,
+            rounds,
+            discussion_mode,
+            consensus_enabled,
+        )
+        return await run_kernel_roundtable(
+            topic,
+            pack=pack,
+            rounds=rounds,
+            discussion_mode=discussion_mode,
+            consensus_enabled=consensus_enabled,
+            consensus_threshold=consensus_threshold,
+            debate_config=debate_config,
+            moderator_enabled=moderator_enabled,
+            context=context_s,
+            on_progress=on_progress,
+        )
+
     use_http = prefer_http
     if use_http is None:
         use_http = True  # 默认优先独立 Web 引擎
@@ -675,16 +699,21 @@ async def health_check() -> dict[str, Any]:
         http_error = str(exc)
 
     root = resolve_multi_agent_root()
-    mock_default = (
-        upstream_mock if upstream_mock is not None else (resolve_mock_hint(None) is not False)
-    )
+    from backend.services.brainstorm_kernel import kernel_status
+
+    kernel = kernel_status()
+    kernel_ready = bool(kernel.get("ready"))
     return {
         "http_url": base,
         "http_ok": http_ok,
         "http_error": http_error,
         "sdk_root": str(root) if root else None,
         "sdk_ok": root is not None,
-        "mock_default": mock_default,
-        "ai_owner": "multi-agent",
-        "ready": http_ok or root is not None,
+        "mock_default": not kernel_ready,
+        "ai_owner": "kernel",
+        "ready": kernel_ready,
+        "kernel_ready": kernel_ready,
+        "kernel_id": kernel.get("kernel_id") or None,
+        "kernel_source": kernel.get("source") or None,
+        "upstream_mock": upstream_mock,
     }

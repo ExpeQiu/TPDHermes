@@ -658,7 +658,7 @@ def test_chat_stream_normalizes_file_tool_events(monkeypatch):
         async def __aexit__(self, *args):
             return None
 
-        def stream(self, _method, _url, _headers=None, _json=None):
+        def stream(self, method, url, headers=None, json=None, **kwargs):
             return FakeStreamResp()
 
     monkeypatch.setattr("backend.routes.tasks._chat_client", lambda timeout: FakeClient())

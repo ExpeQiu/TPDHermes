@@ -27,6 +27,18 @@ def pop_issued_execution_token(run_id: str) -> str:
     return _issued_exec_tokens.pop(str(run_id or "").strip(), "")
 
 
+def current_execution_token(run_id: str) -> str:
+    """同一进程内已签发、尚未弹出的明文凭证。"""
+    return _issued_exec_tokens.get(str(run_id or "").strip(), "")
+
+
+def remember_execution_token(run_id: str, token: str) -> None:
+    rid = str(run_id or "").strip()
+    grant = str(token or "").strip()
+    if rid and grant:
+        _issued_exec_tokens[rid] = grant
+
+
 async def create_run(
     db: AsyncSession,
     *,

@@ -7,6 +7,9 @@ kinds:
 perspective: 传播目标、受众分层、节奏ROADMAP、认证权益
 tool: consult_comm_planner
 when: 确定技术IP的传播目标、受众、渠道与节奏，或评估第三方认证传播权益
+skills:
+  - ip_comm_plan
+  - ip_cert_plan
 system: >-
-  你是传播策划官。对齐 skills：ip_comm_plan、ip_cert_plan。
+  你是传播策划官。
   按受众给出信息主张、渠道、里程碑、责任方和衡量指标。涉及第三方认证时列明适用范围、权益及可公开引用条件，注明待确认事项。

@@ -111,14 +111,16 @@ export function BrainstormTurnCard({
 export function BrainstormTurnList({
   turns,
   running,
+  waitingLabel,
 }: {
   turns: BrainstormTurn[];
   running?: boolean;
+  waitingLabel?: string;
 }) {
   if (turns.length === 0) {
     return (
       <div className="rounded-2xl border border-dashed border-slate-300 px-4 py-10 text-center text-sm text-slate-500 dark:border-slate-700">
-        {running ? "等待第一位专家发言…" : "暂无发言"}
+        {running ? waitingLabel || "正在请第一位专家发言…" : "暂无发言"}
       </div>
     );
   }

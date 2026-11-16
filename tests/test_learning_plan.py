@@ -103,7 +103,9 @@ async def _install(db: AsyncSession, skills: Path, name: str) -> SkillLoader:
 
 
 def _night(hour: int, minute: int = 0) -> datetime:
-    return datetime(2026, 11, 16, hour, minute)
+    """领取时刻必须晚于入队时写入的 due_at（真实当前时间）。"""
+    start = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=1)
+    return start.replace(hour=hour, minute=minute)
 
 
 @pytest.mark.asyncio
@@ -401,3 +403,60 @@ async def test_create_skill_is_removed_when_verify_fails(tmp_path, monkeypatch):
             parent_after = await db.get(LearningTask, parent.id)
             assert parent_after is not None
             assert parent_after.status == "rolled_back"
+
+
+@pytest.mark.asyncio
+async def test_learning_plan_mock_e2e(tmp_path, monkeypatch):
+    """白天只入队，夜窗改写技能，验收变差后回滚并记入周报。"""
+    name = "plane2e"
+    async with _db(tmp_path, monkeypatch) as (maker, skills):
+        async with maker() as db:
+            loader = await _install(db, skills, name)
+            now = datetime.now().isoformat()
+            db.add(
+                LearningSignal(
+                    id=str(uuid.uuid4()),
+                    signal_type="repeated_correction",
+                    entity_kind="scenario",
+                    entity_id=name,
+                    entity_label=name,
+                    count=2,
+                    status="open",
+                    payload_json=json.dumps({"reason_samples": [RULE]}, ensure_ascii=False),
+                    last_seen_at=now,
+                )
+            )
+            await db.commit()
+            queued = await enqueue_learning_plan(db, days=14)
+            assert any(item["kind"] == "patch_skill" for item in queued["items"])
+            skipped = await claim_one(db, now=_night(23, 59), loader=loader, respect_quiet=False)
+            assert skipped["reason"] == "outside_window"
+            assert "自进化" not in (skills / name / "SKILL.md").read_text(encoding="utf-8")
+
+            applied = await claim_one(db, now=_night(1, 0), loader=loader, respect_quiet=False)
+            assert applied["status"] == "verifying"
+            assert "三条要点" in (skills / name / "SKILL.md").read_text(encoding="utf-8")
+            parent = await db.get(LearningTask, applied["task_id"])
+            assert parent is not None
+            baseline = json.loads(parent.baseline_json or "{}")
+            baseline["value"] = 1
+            parent.baseline_json = json.dumps(baseline)
+            child = (
+                await db.execute(
+                    LearningTask.__table__.select().where(LearningTask.parent_id == parent.id)
+                )
+            ).first()
+            assert child is not None
+            child_row = await db.get(LearningTask, child.id)
+            assert child_row is not None
+            child_row.due_at = (_night(1, 0) - timedelta(minutes=1)).isoformat()
+            await db.commit()
+
+            checked = await claim_one(db, now=_night(1, 20), loader=loader, respect_quiet=False)
+            assert checked["kind"] == "verify"
+            rolled = (skills / name / "SKILL.md").read_text(encoding="utf-8")
+            assert "自进化" not in rolled
+            assert "原步骤" in rolled
+            report = await generate_weekly_report(db)
+            summary = json.loads(report.summary_json)
+            assert summary["task_outcomes"]["rolled_back"] >= 1

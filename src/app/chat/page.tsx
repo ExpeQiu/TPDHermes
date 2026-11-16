@@ -13,7 +13,7 @@ import {
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 
-import { apiV1 } from "@/lib/api";
+import { apiFetch, apiV1 } from "@/lib/api";
 import {
   ChatInit,
   ChatMode,
@@ -39,7 +39,12 @@ import {
 } from "@/lib/chat-skill-mentions";
 import { inferSessionKind } from "@/lib/chat-sessions-api";
 import { fetchRunKbSources } from "@/lib/chat-citations";
-import { CONTENT_MAX_CLASS } from "@/lib/content-shell";
+import {
+  filterBindableKbCollections,
+  isKbCollectionHidden,
+  kbCollectionDescription,
+} from "@/lib/kb-collection-catalog";
+import { kbCollectionLabel } from "@/lib/ui-labels";
 import { useEffectiveUserScopeId } from "@/lib/use-effective-user-scope-id";
 import type { ChatSession } from "@/app/chat/chat-types";
 import { ChatMessageStream } from "@/app/chat/components/chat-message-stream";
@@ -109,6 +114,32 @@ function DocOptimizeSessionIcon({ className = "h-4 w-4" }: { className?: string 
   );
 }
 
+function ContentCreationMark() {
+  return (
+    <div className="flex flex-col items-center gap-2">
+      <svg
+        viewBox="0 0 64 64"
+        className="h-16 w-16"
+        role="img"
+        aria-label="内容创作"
+      >
+        <rect x="2" y="2" width="60" height="60" rx="18" fill="#DBEAFE" className="dark:fill-blue-950" />
+        <path
+          d="M18 18h15l9 9v19a3 3 0 0 1-3 3H18a3 3 0 0 1-3-3V21a3 3 0 0 1 3-3z"
+          fill="#FFFFFF"
+          stroke="#2563EB"
+          strokeWidth="2"
+          strokeLinejoin="round"
+        />
+        <path d="M33 18v9h9" fill="#BFDBFE" stroke="#2563EB" strokeWidth="2" strokeLinejoin="round" />
+        <path d="M21 36h11M21 42h7" fill="none" stroke="#60A5FA" strokeWidth="2" strokeLinecap="round" />
+        <path d="M36 46c5.2-1.6 8.4-6.4 10.4-11.6" fill="none" stroke="#1D4ED8" strokeWidth="2.2" strokeLinecap="round" />
+        <path d="M45.2 32.2l3.2-1.6.4 3.4" fill="none" stroke="#1D4ED8" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />
+      </svg>
+    </div>
+  );
+}
+
 function sessionListIcon(session: ChatSession) {
   if (isProjectCoCreateSession(session)) return <span className="text-xs">📁</span>;
   const mode = session.chatMode ?? "co_create";
@@ -151,7 +182,10 @@ function ChatPageInner() {
   const [mentionQuery, setMentionQuery] = useState("");
   const [mentionStart, setMentionStart] = useState(-1);
   const [mentionIndex, setMentionIndex] = useState(0);
-  const [skillsPanelExpanded, setSkillsPanelExpanded] = useState(false);
+  const [skillsMenuOpen, setSkillsMenuOpen] = useState(false);
+  const [skillCallCounts, setSkillCallCounts] = useState<Record<string, number>>({});
+  const [kbMenuOpen, setKbMenuOpen] = useState(false);
+  const [taskFilter, setTaskFilter] = useState("");
   const [bootstrapWarnings, setBootstrapWarnings] = useState<string[]>([]);
   const [selectedProjectId, setSelectedProjectId] = useState("");
   const [selectedCollection, setSelectedCollection] = useState("");
@@ -248,8 +282,6 @@ function ChatPageInner() {
     }
     return grouped;
   }, [sessions]);
-
-  const sidebarSessions = sessionsByCategory.chat;
 
   const workspaceSession = useMemo(() => {
     if (!activeSession || isProjectCoCreateSession(activeSession)) return undefined;
@@ -427,6 +459,32 @@ function ChatPageInner() {
     }
     chatDeepLinkAppliedRef.current = true;
   }, [outputIdFromUrl, scopeUserId, sessionIdFromUrl, sessions, setActiveId]);
+
+  useEffect(() => {
+    let cancelled = false;
+    apiFetch("/skills/usage?days=30")
+      .then(async (res) => {
+        if (!res.ok) throw new Error(`skills usage ${res.status}`);
+        return (await res.json()) as { skill_usage?: { skill_name?: string; call_count?: number }[] };
+      })
+      .then((data) => {
+        if (cancelled) return;
+        const counts: Record<string, number> = {};
+        for (const row of data.skill_usage ?? []) {
+          const name = row.skill_name?.trim();
+          if (!name) continue;
+          counts[name] = row.call_count ?? 0;
+        }
+        setSkillCallCounts(counts);
+        console.info("[chat] 常用技能用量", { tracked: Object.keys(counts).length });
+      })
+      .catch((err) => {
+        console.warn("[chat] 常用技能用量加载失败", err);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     fetchChatBootstrap()
@@ -645,6 +703,15 @@ function ChatPageInner() {
     updateSession,
   ]);
 
+  const visibleCollections = useMemo(
+    () => collections.filter((name) => name.trim() && !isKbCollectionHidden(name)),
+    [collections],
+  );
+  const defaultKnowledgeCollections = useMemo(() => {
+    const bindable = filterBindableKbCollections(visibleCollections);
+    return bindable.length > 0 ? bindable : visibleCollections;
+  }, [visibleCollections]);
+
   const { sendMessage, regenerateAssistantReply } = useChatExecution({
     input,
     streaming,
@@ -657,7 +724,8 @@ function ChatPageInner() {
     setSessionsSyncError,
     chatMode,
     includeFileContext,
-    includeKnowledgeContext,
+    includeKnowledgeContext: true,
+    knowledgeCollections: selectedCollection.trim() ? undefined : defaultKnowledgeCollections,
     includeProjectContext,
     includeSkillsContext,
     selectedCollection,
@@ -696,6 +764,28 @@ function ChatPageInner() {
     () => chatSkillOptions(skills, skillCatalog),
     [skillCatalog, skills],
   );
+  const frequentSkills = useMemo(() => {
+    const ranked = [...availableSkills].sort(
+      (a, b) => (skillCallCounts[b.name] ?? 0) - (skillCallCounts[a.name] ?? 0),
+    );
+    return ranked.slice(0, 3);
+  }, [availableSkills, skillCallCounts]);
+
+  useEffect(() => {
+    if (frequentSkills.length === 0) return;
+    console.info("[chat] 常用技能快捷", {
+      skills: frequentSkills.map((skill) => skill.name),
+      calls: frequentSkills.map((skill) => skillCallCounts[skill.name] ?? 0),
+    });
+  }, [frequentSkills, skillCallCounts]);
+
+  const chooseCollection = useCallback((name: string) => {
+    const next = name.trim();
+    setSelectedCollection(next);
+    setIncludeKnowledgeContext(true);
+    setKbMenuOpen(false);
+    console.info("[chat] 知识库选择", { mode: next ? "single" : "all", collection: next || null });
+  }, []);
   const mentionedSkillNames = useMemo(
     () => extractMentionedSkillNames(input, availableSkills),
     [availableSkills, input],
@@ -833,6 +923,68 @@ function ChatPageInner() {
 
   const projectBindingLocked = isChatConversationStarted(workspaceSession);
   const chatFileKey = includeFileContext && selectedFileId ? selectedFileId : null;
+  const hasThread = Boolean(workspaceSession?.messages.length) || Boolean(error);
+  const welcome = useMemo(() => {
+    const projectName = projects.find((item) => item.id === boundProjectId)?.name?.trim() || "";
+    const fileTitles = projectFiles
+      .map((file) => file.title?.trim())
+      .filter((title): title is string => Boolean(title));
+    const selected = chatFileKey ? decodeProjectFileSelectValue(chatFileKey) : null;
+    const selectedTitle = selected
+      ? projectFiles.find((file) => file.kind === selected.kind && file.id === selected.id)?.title?.trim() || ""
+      : "";
+
+    if (!boundProjectId || !projectName) {
+      return { title: "今天想完成什么？", files: [] as string[] };
+    }
+    if (projectFilesLoading && fileTitles.length === 0) {
+      return { title: "正在读取项目文件", files: [] as string[] };
+    }
+    if (selectedTitle) {
+      return { title: `围绕「${selectedTitle}」`, files: fileTitles };
+    }
+    if (fileTitles.length === 0) {
+      return { title: `${projectName} 还没有文件`, files: [] as string[] };
+    }
+    return { title: `从 ${projectName} 的材料开始`, files: fileTitles };
+  }, [boundProjectId, chatFileKey, projectFiles, projectFilesLoading, projects]);
+
+  useEffect(() => {
+    console.info("[chat] 欢迎语", {
+      project_id: boundProjectId || null,
+      files: projectFiles.length,
+      loading: projectFilesLoading,
+      title: welcome.title,
+    });
+  }, [boundProjectId, projectFiles.length, projectFilesLoading, welcome.title]);
+
+  const taskGroups = useMemo(() => {
+    const query = taskFilter.trim().toLowerCase();
+    const match = (session: ChatSession) => {
+      if (!query) return true;
+      const title = titleFromSession(session).toLowerCase();
+      const project = sessionProjectIdentifier(session, projects).toLowerCase();
+      return title.includes(query) || project.includes(query);
+    };
+    const groups: { id: SessionHistoryCategory; label: string; sessions: ChatSession[] }[] = [
+      { id: "chat", label: "对话", sessions: sessionsByCategory.chat.filter(match) },
+      { id: "scenario", label: "场景", sessions: sessionsByCategory.scenario.filter(match) },
+    ];
+    return groups.filter((group) => group.sessions.length > 0 || (!query && group.id === "chat"));
+  }, [projects, sessionsByCategory, taskFilter]);
+
+  useEffect(() => {
+    console.info("[chat] 工作台", {
+      layout: hasThread ? "thread" : "composer",
+      tasks: sessionsByCategory.chat.length + sessionsByCategory.scenario.length,
+      files_rail: "auto-hide",
+    });
+  }, [hasThread, sessionsByCategory.chat.length, sessionsByCategory.scenario.length]);
+
+  useEffect(() => {
+    if (hasThread) return;
+    inputRef.current?.focus();
+  }, [activeId, hasThread]);
 
   const renderProjectFilesRail = (autoHide = false) => (
     <ProjectFilesRail
@@ -855,160 +1007,128 @@ function ChatPageInner() {
         setSelectedFileId(next ?? "");
       }}
       onRefresh={() => setProjectFilesRefreshKey((value) => value + 1)}
-      folderActor={
-        boundProjectId && activeId
-          ? { kind: "dialogue", sourceId: activeId, title: activeSession?.title || "对话" }
-          : null
-      }
     />
   );
 
   return (
     <>
-    <div className="flex min-h-0 flex-1 overflow-hidden bg-slate-100 text-slate-900 dark:bg-slate-900 dark:text-white">
+    <div className="flex min-h-0 flex-1 overflow-hidden bg-[#f7f8f6] text-slate-900 dark:bg-slate-900 dark:text-white">
       <aside
         className={`${
           sidebarOpen ? "w-64" : "w-0"
-        } flex h-full min-h-0 shrink-0 flex-col overflow-hidden border-r border-slate-300 bg-slate-200 transition-all dark:border-slate-700 dark:bg-slate-800`}
+        } flex h-full min-h-0 shrink-0 flex-col overflow-hidden border-r border-slate-200/90 bg-[#f3f4f1] transition-all dark:border-slate-700 dark:bg-slate-800`}
       >
-        <div className="flex shrink-0 items-center justify-between border-b border-slate-300 p-4 dark:border-slate-700">
-          <div>
-            <span className="text-sm font-semibold text-slate-700 dark:text-slate-300">历史记录</span>
-            <p className="mt-0.5 text-[10px] text-slate-500">对话</p>
+        <div className="shrink-0 px-3 pb-2 pt-3">
+          <div className="mb-2 flex items-center justify-between px-1">
+            <span className="text-sm font-semibold text-slate-700 dark:text-slate-200">任务</span>
+            <button
+              type="button"
+              onClick={() => createSession()}
+              className="rounded-md px-2 py-1 text-xs text-slate-500 transition hover:bg-white hover:text-slate-900 dark:hover:bg-slate-700 dark:hover:text-white"
+            >
+              + 新对话
+            </button>
           </div>
-          <button
-            onClick={() => createSession()}
-            className="rounded-lg bg-blue-600 px-3 py-1.5 text-xs text-white transition hover:bg-blue-500"
-          >
-            + 新对话
-          </button>
+          <input
+            value={taskFilter}
+            onChange={(event) => {
+              const next = event.target.value;
+              setTaskFilter(next);
+              console.info("[chat] 任务列表筛选", { query: next.trim() });
+            }}
+            placeholder="搜索任务"
+            className="w-full rounded-lg border border-transparent bg-white/80 px-3 py-1.5 text-xs text-slate-800 outline-none placeholder:text-slate-400 focus:border-slate-300 dark:bg-slate-900/60 dark:text-slate-100 dark:focus:border-slate-600"
+          />
         </div>
 
-        {sessionsLoading ? <p className="px-4 py-6 text-xs text-slate-500">加载历史记录…</p> : null}
+        {sessionsLoading ? <p className="px-4 py-6 text-xs text-slate-500">加载任务…</p> : null}
         {sessionsSyncError ? (
-          <p className="mx-4 mt-2 rounded-lg border border-amber-400/40 bg-amber-50 px-2 py-1.5 text-[10px] text-amber-800 dark:bg-amber-950/30 dark:text-amber-300">
+          <p className="mx-3 mt-1 rounded-lg border border-amber-400/40 bg-amber-50 px-2 py-1.5 text-[10px] text-amber-800 dark:bg-amber-950/30 dark:text-amber-300">
             同步异常：{sessionsSyncError.slice(0, 80)}
           </p>
         ) : null}
 
-        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
-          {sidebarSessions.length === 0 && !sessionsLoading ? (
-            <p className="px-4 py-6 text-xs leading-relaxed text-slate-500">
-              暂无对话记录，点击「+ 新对话」开始。
+        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-2 pb-3">
+          {taskGroups.every((group) => group.sessions.length === 0) && !sessionsLoading ? (
+            <p className="px-2 py-6 text-xs leading-relaxed text-slate-500">
+              {taskFilter.trim() ? "没有匹配的任务。" : "还没有任务。点「+ 新对话」开始。"}
             </p>
           ) : null}
-          {sidebarSessions.map((session) => {
-            const sessionTitle = titleFromSession(session);
-            return (
-            <div
-              key={session.id}
-              onClick={() => handleHistorySessionClick(session)}
-              className={`group flex cursor-pointer items-center gap-2 border-b border-slate-300 px-4 py-3 transition dark:border-slate-700/50 ${
-                session.id === activeId
-                  ? "bg-slate-300/70 text-slate-900 dark:bg-slate-700/70 dark:text-white"
-                  : "text-slate-400 hover:bg-slate-300/40 hover:text-slate-900 dark:bg-slate-700/40 dark:hover:text-white"
-              }`}
-            >
-              {sessionListIcon(session)}
-              <div className="min-w-0 flex-1">
-                <span className="block truncate text-sm">{sessionTitle}</span>
-                <span className="block truncate text-[10px] text-slate-500">
-                  {sessionProjectIdentifier(session, projects)}
-                </span>
+          {taskGroups.map((group) => (
+            <section key={group.id} className="mb-3">
+              <div className="flex items-center justify-between px-2 py-1.5">
+                <span className="text-[11px] font-medium text-slate-500">{group.label}</span>
+                {group.id === "chat" ? (
+                  <button
+                    type="button"
+                    aria-label="新建对话"
+                    onClick={() => createSession()}
+                    className="rounded px-1 text-sm leading-none text-slate-400 hover:bg-white hover:text-slate-800 dark:hover:bg-slate-700 dark:hover:text-white"
+                  >
+                    +
+                  </button>
+                ) : null}
               </div>
-              <button
-                type="button"
-                title="删除"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setPendingDeleteSession({ id: session.id, title: sessionTitle });
-                }}
-                className="text-xs text-slate-500 opacity-0 transition group-hover:opacity-100 hover:text-red-400"
-                aria-label={`删除对话：${sessionTitle}`}
-              >
-                ✕
-              </button>
-            </div>
-            );
-          })}
-        </div>
-        <div
-          className={`flex min-h-0 flex-col overflow-hidden border-t border-slate-300/40 px-3 py-3 transition-[max-height] dark:border-slate-600/30 ${
-            skillsPanelExpanded ? "max-h-[70%] shrink" : "max-h-40 shrink-0"
-          }`}
-        >
-          <div className="mb-2 flex shrink-0 items-center justify-between gap-2">
-            <button
-              type="button"
-              aria-expanded={skillsPanelExpanded}
-              title={skillsPanelExpanded ? "收起技能" : "向上展开，显示更多技能"}
-              onClick={() => {
-                setSkillsPanelExpanded((open) => {
-                  const next = !open;
-                  console.info("[chat] 技能栏展开", { expanded: next, count: availableSkills.length });
-                  return next;
-                });
-              }}
-              className="inline-flex min-w-0 items-center gap-1 text-[11px] font-medium text-slate-600 transition hover:text-slate-900 dark:text-slate-300 dark:hover:text-white"
-            >
-              <span aria-hidden className={`inline-block transition-transform ${skillsPanelExpanded ? "rotate-180" : ""}`}>
-                ▲
-              </span>
-              <span>可用技能</span>
-              {availableSkills.length > 0 ? (
-                <span className="text-[10px] font-normal text-slate-500">{availableSkills.length}</span>
-              ) : null}
-            </button>
-            <Link href="/skills" className="shrink-0 text-[10px] text-slate-500 hover:text-slate-900 dark:hover:text-white">
-              技能工坊
-            </Link>
-          </div>
-          {availableSkills.length === 0 ? (
-            <p className="text-[11px] leading-relaxed text-slate-500">暂无已启用技能。</p>
-          ) : (
-            <div className={`min-h-0 overscroll-contain ${skillsPanelExpanded ? "flex-1 overflow-y-auto" : "overflow-hidden"}`}>
-              <div className="flex flex-wrap gap-1.5">
-                {availableSkills.map((skill) => {
-                  const active = mentionedSkillNames.includes(skill.name);
-                  return (
+              {group.sessions.map((session) => {
+                const sessionTitle = titleFromSession(session);
+                const active = session.id === activeId;
+                return (
+                  <div
+                    key={session.id}
+                    onClick={() => handleHistorySessionClick(session)}
+                    className={`group mb-0.5 flex cursor-pointer items-center gap-2 rounded-lg px-2 py-2 transition ${
+                      active
+                        ? "bg-white text-slate-900 shadow-sm dark:bg-slate-700 dark:text-white"
+                        : "text-slate-600 hover:bg-white/70 hover:text-slate-900 dark:text-slate-300 dark:hover:bg-slate-700/60 dark:hover:text-white"
+                    }`}
+                  >
+                    {sessionListIcon(session)}
+                    <div className="min-w-0 flex-1">
+                      <span className="block truncate text-sm">{sessionTitle}</span>
+                      <span className="block truncate text-[10px] text-slate-400">
+                        {sessionProjectIdentifier(session, projects)}
+                      </span>
+                    </div>
                     <button
-                      key={skill.name}
                       type="button"
-                      title={skill.hint || skill.name}
-                      onClick={() => insertSkillMention(skill)}
-                      className={`max-w-full truncate rounded-full border px-2 py-1 text-[11px] transition ${
-                        active
-                          ? "border-blue-500 bg-blue-600/15 text-blue-800 dark:text-blue-200"
-                          : "border-slate-300 bg-slate-100 text-slate-600 hover:border-slate-400 hover:text-slate-900 dark:border-slate-600 dark:bg-slate-900/50 dark:text-slate-300 dark:hover:text-white"
-                      }`}
+                      title="删除"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        setPendingDeleteSession({ id: session.id, title: sessionTitle });
+                      }}
+                      className="text-xs text-slate-400 opacity-0 transition group-hover:opacity-100 hover:text-red-500"
+                      aria-label={`删除对话：${sessionTitle}`}
                     >
-                      @{skill.label}
+                      ✕
                     </button>
-                  );
-                })}
-              </div>
-            </div>
-          )}
+                  </div>
+                );
+              })}
+            </section>
+          ))}
         </div>
       </aside>
 
       <div className="flex min-h-0 min-w-0 flex-1 flex-col lg:flex-row">
         <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
-          <header className="flex shrink-0 items-center gap-3 border-b border-slate-300 bg-slate-200/80 px-4 py-3 dark:border-slate-700 dark:bg-slate-800/80">
+          <header
+            className={`flex shrink-0 items-center gap-3 px-4 py-3 ${
+              hasThread ? "border-b border-slate-200/80 dark:border-slate-700" : ""
+            }`}
+          >
             <button
               onClick={() => setSidebarOpen((value) => !value)}
               className="text-sm text-slate-400 transition hover:text-slate-900 dark:hover:text-white"
+              aria-label={sidebarOpen ? "收起任务列表" : "展开任务列表"}
             >
               {sidebarOpen ? "◀" : "▶"}
             </button>
-            <Link
-              href="/"
-              className="text-sm text-slate-400 transition hover:text-slate-900 dark:hover:text-white"
-            >
-              ← 首页
-            </Link>
-            <h1 className="flex-1 truncate text-sm font-semibold text-slate-900 dark:text-white">
-              {titleFromSession(workspaceSession)}
+            <h1 className="min-w-0 flex-1 truncate text-sm text-slate-500">
+              对话创作
+              <span className="px-1.5 text-slate-300">/</span>
+              <span className="font-medium text-slate-800 dark:text-slate-100">
+                {titleFromSession(workspaceSession)}
+              </span>
             </h1>
             {employeeFromUrl ? (
               <button
@@ -1044,6 +1164,7 @@ function ChatPageInner() {
             </div>
           </details>
 
+          {hasThread ? (
           <ChatMessageStream
             activeSession={workspaceSession}
             streaming={streaming}
@@ -1069,8 +1190,60 @@ function ChatPageInner() {
             error={error}
             messagesEndRef={messagesEndRef}
           />
+          ) : (
+            <div className="flex min-h-0 flex-1 flex-col items-center justify-center px-6 text-center">
+              <ContentCreationMark />
+              <h2 className="mt-3 max-w-xl text-2xl font-semibold tracking-tight text-slate-900 dark:text-white">
+                {welcome.title}
+              </h2>
+              {frequentSkills.length > 0 ? (
+                <div className="mt-4 flex max-w-xl flex-wrap justify-center gap-2">
+                  {frequentSkills.map((skill) => {
+                    const token = `@${skillMentionToken(skill)}`;
+                    const active = input.includes(token);
+                    return (
+                      <button
+                        key={skill.name}
+                        type="button"
+                        title={skill.hint || skill.label}
+                        onClick={() => {
+                          if (!active) insertSkillMention(skill);
+                          else inputRef.current?.focus();
+                          console.info("[chat] 插入常用技能", { skill: skill.name, token });
+                        }}
+                        className={`max-w-[16rem] truncate rounded-full border px-3 py-1 text-xs transition ${
+                          active
+                            ? "border-blue-500 bg-blue-50 text-blue-800 dark:bg-blue-950/40 dark:text-blue-200"
+                            : "border-slate-200 bg-white text-slate-700 hover:border-slate-400 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200"
+                        }`}
+                      >
+                        {token}
+                      </button>
+                    );
+                  })}
+                </div>
+              ) : null}
+              {welcome.files.length > 0 ? (
+                <div className="mt-4 flex max-w-xl flex-wrap justify-center gap-1.5">
+                  {welcome.files.slice(0, 6).map((title) => (
+                    <span
+                      key={title}
+                      className="max-w-[14rem] truncate rounded-full bg-white px-2.5 py-1 text-[11px] text-slate-600 shadow-sm dark:bg-slate-800 dark:text-slate-300"
+                    >
+                      {title}
+                    </span>
+                  ))}
+                  {welcome.files.length > 6 ? (
+                    <span className="rounded-full px-2 py-1 text-[11px] text-slate-400">
+                      还有 {welcome.files.length - 6} 份
+                    </span>
+                  ) : null}
+                </div>
+              ) : null}
+            </div>
+          )}
 
-          <div className="shrink-0 border-t border-slate-300 bg-slate-200/60 py-4 dark:border-slate-700 dark:bg-slate-800/60">
+          <div className={hasThread ? "shrink-0 px-4 pb-4 pt-2" : "shrink-0 px-6 pb-8"}>
             {selectedProjectId &&
             chatMode === "co_create" &&
             (includeFileContext || selectedFileId) ? (
@@ -1095,8 +1268,7 @@ function ChatPageInner() {
                 {docOptimizeBindingHint}
               </p>
             ) : null}
-            <div className={`${CONTENT_MAX_CLASS} flex items-end gap-3 px-4 sm:px-6 md:px-8`}>
-              <div className="relative min-w-0 flex-1">
+            <div className="relative mx-auto w-full max-w-3xl rounded-2xl border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-800">
                 {mentionOpen && mentionCandidates.length > 0 ? (
                   <div className="absolute bottom-full left-0 z-20 mb-1 max-h-52 w-full overflow-y-auto rounded-xl border border-slate-300 bg-white py-1 shadow-lg dark:border-slate-600 dark:bg-slate-900">
                     {mentionCandidates.map((skill, index) => (
@@ -1142,45 +1314,164 @@ function ChatPageInner() {
                 placeholder={
                   docOptimizeBindingHint
                     ? "请先在右侧选择项目和要优化的文稿…"
-                    : chatMode === "doc_optimize"
-                      ? "说明改写要求，@ 调用技能，回车发送…"
-                      : "输入问题，@ 调用技能，回车发送，Shift+回车换行…"
+                    : "输入问题开始对话，@ 调用技能，回车发送"
                 }
-                rows={1}
+                rows={hasThread ? 1 : 2}
                 disabled={streaming || preparingContext}
-                className="w-full resize-none rounded-xl border border-slate-300 bg-slate-300/60 px-4 py-3 text-sm text-slate-900 transition placeholder-slate-400 focus:border-blue-500 focus:outline-none disabled:opacity-50 dark:border-slate-600 dark:bg-slate-700/60 dark:text-white dark:placeholder-slate-500"
-                style={{ maxHeight: "9rem", minHeight: "3rem", height: "auto" } as CSSProperties}
+                className="w-full resize-none bg-transparent px-4 pt-3 text-sm text-slate-900 outline-none placeholder:text-slate-400 disabled:opacity-50 dark:text-white"
+                style={{ maxHeight: "9rem", minHeight: hasThread ? "2.75rem" : "4.5rem", height: "auto" } as CSSProperties}
                 onInput={(e) => {
                   const el = e.currentTarget;
                   el.style.height = "auto";
                   el.style.height = `${Math.min(el.scrollHeight, 144)}px`;
                 }}
               />
+              <div className="flex items-center gap-2 px-3 pb-3">
+                <div className="relative">
+                  <button
+                    type="button"
+                    aria-expanded={skillsMenuOpen}
+                    onClick={() => {
+                      setKbMenuOpen(false);
+                      setSkillsMenuOpen((open) => {
+                        const next = !open;
+                        console.info("[chat] 技能菜单", { open: next, count: availableSkills.length });
+                        return next;
+                      });
+                    }}
+                    className="rounded-full px-2.5 py-1 text-xs text-slate-500 transition hover:bg-slate-100 hover:text-slate-800 dark:hover:bg-slate-700 dark:hover:text-white"
+                  >
+                    技能{availableSkills.length > 0 ? ` ${availableSkills.length}` : ""}
+                  </button>
+                  {skillsMenuOpen ? (
+                    <div className="absolute bottom-full left-0 z-20 mb-2 max-h-64 w-72 overflow-y-auto rounded-xl border border-slate-200 bg-white p-2 shadow-lg dark:border-slate-600 dark:bg-slate-900">
+                      {availableSkills.length === 0 ? (
+                        <p className="px-2 py-1.5 text-xs text-slate-500">暂无已启用技能。</p>
+                      ) : (
+                        <div className="flex flex-wrap gap-1.5">
+                          {availableSkills.map((skill) => {
+                            const active = mentionedSkillNames.includes(skill.name);
+                            return (
+                              <button
+                                key={skill.name}
+                                type="button"
+                                title={skill.hint || skill.name}
+                                onClick={() => insertSkillMention(skill)}
+                                className={`max-w-full truncate rounded-full border px-2 py-1 text-[11px] transition ${
+                                  active
+                                    ? "border-blue-500 bg-blue-600/15 text-blue-800 dark:text-blue-200"
+                                    : "border-slate-200 text-slate-600 hover:border-slate-400 dark:border-slate-600 dark:text-slate-300"
+                                }`}
+                              >
+                                @{skill.label}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      )}
+                      <Link href="/skills" className="mt-2 block px-1 text-[10px] text-slate-400 hover:text-slate-700 dark:hover:text-white">
+                        技能工坊
+                      </Link>
+                    </div>
+                  ) : null}
+                </div>
+                <div className="relative min-w-0">
+                  <button
+                    type="button"
+                    aria-expanded={kbMenuOpen}
+                    onClick={() => {
+                      setSkillsMenuOpen(false);
+                      setKbMenuOpen((open) => {
+                        const next = !open;
+                        console.info("[chat] 知识库菜单", {
+                          open: next,
+                          count: visibleCollections.length,
+                          selected: selectedCollection || null,
+                        });
+                        return next;
+                      });
+                    }}
+                    className="max-w-[12rem] truncate rounded-full bg-blue-50 px-2.5 py-1 text-xs text-blue-800 transition hover:bg-blue-100 dark:bg-blue-950/40 dark:text-blue-200 dark:hover:bg-blue-950/60"
+                    title={
+                      selectedCollection
+                        ? kbCollectionLabel(selectedCollection)
+                        : `默认检索全部知识库（${defaultKnowledgeCollections.length}）`
+                    }
+                  >
+                    {selectedCollection ? kbCollectionLabel(selectedCollection) : "全部知识库"}
+                  </button>
+                  {kbMenuOpen ? (
+                    <div className="absolute bottom-full left-0 z-20 mb-2 max-h-64 w-72 overflow-y-auto rounded-xl border border-slate-200 bg-white py-1 shadow-lg dark:border-slate-600 dark:bg-slate-900">
+                      <button
+                        type="button"
+                        onClick={() => chooseCollection("")}
+                        className={`flex w-full px-3 py-2 text-left text-xs ${
+                          !selectedCollection
+                            ? "bg-slate-50 text-slate-900 dark:bg-slate-800 dark:text-white"
+                            : "text-slate-600 hover:bg-slate-50 dark:text-slate-300 dark:hover:bg-slate-800"
+                        }`}
+                      >
+                        全部知识库{defaultKnowledgeCollections.length > 0 ? `（${defaultKnowledgeCollections.length}）` : ""}
+                      </button>
+                      {visibleCollections.length === 0 ? (
+                        <p className="px-3 py-2 text-xs text-slate-500">暂无可用知识库。</p>
+                      ) : (
+                        visibleCollections.map((name) => {
+                          const active = selectedCollection === name;
+                          const label = kbCollectionLabel(name);
+                          return (
+                            <button
+                              key={name}
+                              type="button"
+                              title={kbCollectionDescription(name) || label}
+                              onClick={() => chooseCollection(name)}
+                              className={`flex w-full px-3 py-2 text-left text-xs ${
+                                active
+                                  ? "bg-blue-50 text-blue-800 dark:bg-blue-950/50 dark:text-blue-200"
+                                  : "text-slate-700 hover:bg-slate-50 dark:text-slate-200 dark:hover:bg-slate-800"
+                              }`}
+                            >
+                              <span className="truncate">{label}</span>
+                            </button>
+                          );
+                        })
+                      )}
+                      <Link href="/knowledge" className="block px-3 py-2 text-[10px] text-slate-400 hover:text-slate-700 dark:hover:text-white">
+                        打开知识库
+                      </Link>
+                    </div>
+                  ) : null}
+                </div>
+                <div className="ml-auto flex items-center gap-2">
+                  {streaming ? (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (abortRef.current) abortRef.current.abort();
+                        setStreaming(false);
+                      }}
+                      className="rounded-full px-3 py-1.5 text-xs text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-700"
+                    >
+                      停止
+                    </button>
+                  ) : null}
+                  <button
+                    type="button"
+                    onClick={() => submitChat()}
+                    disabled={streaming || preparingContext || !input.trim() || !docOptimizeBindingReady}
+                    aria-label="发送"
+                    className={`flex h-9 w-9 items-center justify-center rounded-full text-sm transition ${
+                      streaming || preparingContext || !input.trim() || !docOptimizeBindingReady
+                        ? "cursor-not-allowed bg-slate-200 text-slate-400 dark:bg-slate-700"
+                        : "bg-blue-600 text-white hover:bg-blue-500"
+                    }`}
+                  >
+                    {preparingContext ? "…" : "↑"}
+                  </button>
+                </div>
               </div>
-              <button
-                onClick={() => submitChat()}
-                disabled={streaming || preparingContext || !input.trim() || !docOptimizeBindingReady}
-                className={`flex-shrink-0 rounded-xl px-5 py-3 text-sm font-medium transition ${
-                  streaming || preparingContext || !input.trim() || !docOptimizeBindingReady
-                    ? "cursor-not-allowed bg-slate-300 text-slate-500 dark:bg-slate-700"
-                    : "bg-blue-600 text-white hover:bg-blue-500"
-                }`}
-              >
-                {preparingContext ? "准备中" : streaming ? "…" : "发送"}
-              </button>
-              {streaming && (
-                <button
-                  onClick={() => {
-                    if (abortRef.current) abortRef.current.abort();
-                    setStreaming(false);
-                  }}
-                  className="flex-shrink-0 rounded-xl border border-slate-300 px-4 py-3 text-sm text-slate-700 transition hover:bg-slate-300 dark:border-slate-600 dark:bg-slate-700 dark:text-slate-300"
-                >
-                  停止
-                </button>
-              )}
             </div>
-            <p className="mt-2 text-center text-xs text-slate-600">AI 回复仅供参考，如有疑问请核实信息</p>
+            <p className="mt-2 text-center text-xs text-slate-400">AI 回复仅供参考，如有疑问请核实信息</p>
           </div>
         </div>
 

@@ -7,6 +7,8 @@ kinds:
 perspective: 顾客需求、场景演示、异议回应与成交跟进
 tool: consult_sales_coach
 when: 将技术卖点转为门店接待、试驾演示、异议回应或成交跟进话术
+skills:
+  - sales_skill
 system: >-
-  你是销售话术教练。对齐 skills：sales_skill。
+  你是销售话术教练。
   交付可直接演练的顾客问题、口语回应、演示动作及下一步。话术需对应具体车型、版本和场景，技术参数、权益和承诺以已核验资料为准。

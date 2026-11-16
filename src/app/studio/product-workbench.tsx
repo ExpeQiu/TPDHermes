@@ -97,7 +97,7 @@ export function ProductWorkbench({ product, projectId, revision }: {
       ref={frame}
       title={title}
       sandbox="allow-scripts allow-modals"
-      className="min-h-0 w-full flex-1 border-0 bg-slate-950"
+      className="min-h-0 w-full flex-1 border-0 bg-[#e7eee9]"
       srcDoc={page}
     />
   );

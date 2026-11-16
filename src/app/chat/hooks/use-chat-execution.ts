@@ -59,6 +59,8 @@ type UseChatExecutionOptions = {
   includeProjectContext: boolean;
   includeSkillsContext: boolean;
   selectedCollection: string;
+  /** 未单选时使用的知识库集合；空则不追加「全部」覆盖 */
+  knowledgeCollections?: string[];
   selectedFileId: string;
   selectedProjectId: string;
   projectFiles: ProjectFileListItem[];
@@ -289,6 +291,7 @@ export function useChatExecution(options: UseChatExecutionOptions) {
     includeProjectContext,
     includeSkillsContext,
     selectedCollection,
+    knowledgeCollections = [],
     selectedFileId,
     selectedProjectId,
     projectFiles,
@@ -420,11 +423,24 @@ export function useChatExecution(options: UseChatExecutionOptions) {
         if (effectiveUseOrchestration) {
           const qc = priorSession?.quickCreateOverrides;
           const overrides: TaskExecuteBody["overrides"] = {};
-          if (showAdvancedOrchestration && includeKnowledgeContext) {
-            const cols =
-              qc?.knowledgeCollections?.filter(Boolean) ??
-              (selectedCollection ? [selectedCollection] : []);
-            if (cols.length > 0) overrides.knowledge = { collections: cols };
+          if (includeKnowledgeContext) {
+            const picked = selectedCollection.trim();
+            const fromQuickCreate = showAdvancedOrchestration
+              ? qc?.knowledgeCollections?.filter(Boolean)
+              : undefined;
+            const cols = picked
+              ? [picked]
+              : fromQuickCreate && fromQuickCreate.length > 0
+                ? fromQuickCreate
+                : knowledgeCollections.filter(Boolean);
+            if (cols.length > 0) {
+              overrides.knowledge = { collections: cols };
+              console.info("[chat] 本轮知识库", {
+                sessionId,
+                mode: picked ? "single" : fromQuickCreate && fromQuickCreate.length > 0 ? "preset" : "all",
+                count: cols.length,
+              });
+            }
           }
           if (showAdvancedOrchestration && includeSkillsContext) {
             const list = qc?.skillNames && qc.skillNames.length > 0 ? qc.skillNames : skills;
@@ -939,6 +955,7 @@ export function useChatExecution(options: UseChatExecutionOptions) {
       interactionMode,
       scopeUserId,
       selectedCollection,
+      knowledgeCollections,
       selectedFileId,
       selectedProjectId,
       setError,

@@ -56,6 +56,7 @@ export type BrainstormJobStatus = {
   turns?: BrainstormLiveTurn[];
   ma_run_id?: string | null;
   title?: string | null;
+  activity?: string | null;
 };
 
 export type BrainstormHealth = {
@@ -67,6 +68,9 @@ export type BrainstormHealth = {
   mock_default: boolean;
   ready: boolean;
   ai_owner?: string;
+  kernel_ready?: boolean;
+  kernel_id?: string | null;
+  kernel_source?: string | null;
 };
 
 const POLL_INTERVAL_MS = 1500;
@@ -102,7 +106,7 @@ export async function runBrainstorm(params: {
   onJobUpdate?: (job: BrainstormJobStatus) => void;
 }): Promise<BrainstormRunResult> {
   const discussionMode = params.discussion_mode ?? "round_robin";
-  console.info("[brainstorm] 发起圆桌（引擎=multi-agent，异步）", {
+  console.info("[brainstorm] 发起圆桌（引擎=内核，异步）", {
     projectId: params.project_id,
     pack: params.pack ?? "tech-ip",
     rounds: params.rounds ?? 2,

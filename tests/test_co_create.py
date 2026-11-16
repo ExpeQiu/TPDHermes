@@ -741,6 +741,108 @@ def test_stale_base_version_does_not_overwrite():
         assert detail.json()["version"] == "2"
 
 
+def test_file_actions_mock_e2e():
+    """创建、修订、旧版本冲突和撤销走完一次，冲突不改当前正文。"""
+    headers = {"X-User-ID": f"co_create_e2e_{uuid.uuid4().hex[:8]}"}
+    with TestClient(app) as client:
+        project_id = client.post(
+            "/api/v1/projects",
+            headers=headers,
+            json={"name": "改稿端到端", "status": "active"},
+        ).json()["id"]
+        created = client.post(
+            f"/api/v1/projects/{project_id}/file-actions/apply",
+            headers=headers,
+            json={
+                "proposal_id": "e2e-create",
+                "action": {
+                    "type": "create",
+                    "file_name": "共创稿.md",
+                    "path": "/输出",
+                    "content": "# 第一版",
+                },
+            },
+        )
+        assert created.status_code == 200, created.text
+        file_id = created.json()["file_id"]
+        replay = client.post(
+            f"/api/v1/projects/{project_id}/file-actions/apply",
+            headers=headers,
+            json={
+                "proposal_id": "e2e-create",
+                "action": {
+                    "type": "create",
+                    "file_name": "共创稿.md",
+                    "path": "/输出",
+                    "content": "# 第一版",
+                },
+            },
+        )
+        assert replay.status_code == 200, replay.text
+        assert replay.json()["file_id"] == file_id
+        newer = client.post(
+            f"/api/v1/projects/{project_id}/file-actions/apply",
+            headers=headers,
+            json={
+                "proposal_id": "e2e-patch",
+                "action": {
+                    "type": "patch",
+                    "target_file_id": file_id,
+                    "content": "# 第二版",
+                    "save_mode": "overwrite",
+                    "base_version": "1",
+                },
+            },
+        )
+        assert newer.status_code == 200, newer.text
+        assert newer.json()["version"] == "2"
+        stale = client.post(
+            f"/api/v1/projects/{project_id}/file-actions/apply",
+            headers=headers,
+            json={
+                "proposal_id": "e2e-stale",
+                "action": {
+                    "type": "patch",
+                    "target_file_id": file_id,
+                    "content": "# 旧提案",
+                    "save_mode": "overwrite",
+                    "base_version": "1",
+                },
+            },
+        )
+        assert stale.status_code == 409
+        detail = client.get(
+            f"/api/v1/projects/{project_id}/files/{file_id}?kind=output",
+            headers=headers,
+        )
+        assert detail.json()["content"] == "# 第二版"
+        disposable = client.post(
+            f"/api/v1/projects/{project_id}/file-actions/apply",
+            headers=headers,
+            json={
+                "proposal_id": "e2e-undo",
+                "action": {
+                    "type": "create",
+                    "file_name": "待撤销.md",
+                    "path": "/输出",
+                    "content": "# 撤销我",
+                },
+            },
+        )
+        assert disposable.status_code == 200, disposable.text
+        undone = client.post(
+            f"/api/v1/projects/{project_id}/file-actions/{disposable.json()['action_id']}/undo",
+            headers=headers,
+        )
+        assert undone.status_code == 200, undone.text
+        titles = [
+            item["title"]
+            for item in client.get(f"/api/v1/projects/{project_id}/files", headers=headers).json()["items"]
+        ]
+        assert "待撤销.md" not in titles
+        assert any("共创稿" in title for title in titles)
+
+
 def test_file_apply_rejects_ask_and_unconfirmed_plan():
     headers = {"X-User-ID": f"co_create_guard_{uuid.uuid4().hex[:8]}"}
     with TestClient(app) as client:

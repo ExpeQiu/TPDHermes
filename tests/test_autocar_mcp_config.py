@@ -82,8 +82,15 @@ def test_autocar_sync_route(monkeypatch, tmp_path):
     async def admin_role(*_args, **_kwargs):
         return "platform_admin"
 
+    cache_calls: list[dict] = []
+
+    async def fake_cache(**kwargs):
+        cache_calls.append(kwargs)
+        return {"synced": 4, "failed": 0, "skipped": 0, "removed": 0}
+
     monkeypatch.setattr("backend.services.rbac.resolve_platform_role", admin_role)
     monkeypatch.setattr("backend.services.autocar_ingest.ingest_autocar", fake_ingest)
+    monkeypatch.setattr("backend.routes.kb_ingest.kb_cache_service.sync_from_external", fake_cache)
 
     with TestClient(app) as client:
         response = client.post(
@@ -96,4 +103,6 @@ def test_autocar_sync_route(monkeypatch, tmp_path):
     body = response.json()
     assert body["ok"] is True
     assert body["collection"] == "public.autocar.pages"
+    assert body["cache_synced"] == 4
+    assert cache_calls[0]["collections"] == ["public.autocar.pages"]
     assert body["graph_skipped"] is True

@@ -24,7 +24,14 @@ mkdir -p "$LOCAL_ROOT" "$LOCAL_LOGS" "$PLIST_DIR" "$ROOT/logs"
 export DATABASE_URL="${DATABASE_URL:-sqlite+aiosqlite:///${LOCAL_DB}}"
 export PYTHONPATH="$ROOT"
 
-if [[ -z "${HERMES_CHAT_API_KEY:-}" && -f "$HERMES_ENV_FILE" ]]; then
+map_hermes_chat_key() {
+  local current="${HERMES_CHAT_API_KEY:-}"
+  case "$current" in
+    ""|test-key|change-me) ;;
+    *) return 0 ;;
+  esac
+  [[ -f "$HERMES_ENV_FILE" ]] || return 0
+  local hermes_api_key
   hermes_api_key="$(python3 - "$HERMES_ENV_FILE" <<'PY'
 from pathlib import Path
 import sys
@@ -36,7 +43,7 @@ for raw in env_path.read_text(encoding="utf-8", errors="ignore").splitlines():
     if line.startswith("export "):
         line = line[len("export "):]
     if line.startswith("API_SERVER_KEY="):
-        print(line.split("=", 1)[1])
+        print(line.split("=", 1)[1].strip().strip('"').strip("'"))
         break
 PY
 )"
@@ -44,7 +51,7 @@ PY
     export HERMES_CHAT_API_KEY="$hermes_api_key"
     echo "[start] mapped HERMES_CHAT_API_KEY from $HERMES_ENV_FILE"
   fi
-fi
+}
 
 # 加载 .env.local 到当前 shell（写入 runner 时再导出）
 if [[ -f "$ROOT/.env.local" ]]; then
@@ -67,8 +74,10 @@ if [[ -f "$ROOT/.env.local" ]]; then
   done <"$ROOT/.env.local"
 fi
 
+map_hermes_chat_key
 export HERMES_CHAT_API_URL="${HERMES_CHAT_API_URL:-http://127.0.0.1:8642/v1/chat/completions}"
 export HERMES_CHAT_API_KEY="${HERMES_CHAT_API_KEY:-${API_SERVER_KEY:-}}"
+export CHROMA_HOST="${CHROMA_HOST:-http://127.0.0.1:8100}"
 export KB_EMBED_CACHE_DIR="${KB_EMBED_CACHE_DIR:-$ROOT/.cache/huggingface}"
 export HF_HOME="${HF_HOME:-$KB_EMBED_CACHE_DIR}"
 export HUGGINGFACE_HUB_CACHE="${HUGGINGFACE_HUB_CACHE:-$KB_EMBED_CACHE_DIR/hub}"
@@ -111,6 +120,7 @@ export DATABASE_URL="${DATABASE_URL}"
 export PYTHONPATH="${ROOT}"
 export HERMES_CHAT_API_URL="${HERMES_CHAT_API_URL}"
 export HERMES_CHAT_API_KEY="${HERMES_CHAT_API_KEY}"
+export CHROMA_HOST="${CHROMA_HOST}"
 export TPCSTORE_APP_DATA="${TPCSTORE_APP_DATA:-${LOCAL_ROOT}/tpcstore-v04}"
 export TPCSTORE_ROOT="${TPCSTORE_ROOT:-}"
 export TPCSTORE_NODE_BIN="${TPCSTORE_NODE_BIN:-node}"

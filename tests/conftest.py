@@ -20,6 +20,8 @@ os.environ["PROJECT_KB_INGEST_ENABLED"] = "1"
 # 测试进程是受控调用方：沿用 X-User-ID，并允许测试里指向假 Chroma。
 os.environ.setdefault("TPDHERMES_TRUST_USER_ID_HEADER", "1")
 os.environ.setdefault("TPDHERMES_ALLOW_CLIENT_CHROMA_URL", "1")
+# 回归用例仍用 X-User-ID=default 操作系统能力。生产默认关闭；RBAC 用例会自行删掉该开关。
+os.environ["TPDHERMES_DEFAULT_IS_PLATFORM_ADMIN"] = "1"
 
 
 def _ensure_kb_columns() -> None:

@@ -113,7 +113,7 @@ export default function StudioClient({ initialProjectId = "" }: { initialProject
   const [projects, setProjects] = useState<ProjectRecord[]>([]);
   const [projectId, setProjectId] = useState(initialProjectId);
   const [includeProject, setIncludeProject] = useState(Boolean(initialProjectId));
-  const [demo, setDemo] = useState(false);
+  const [demo] = useState(false);
   const [sourceSnapshot, setSourceSnapshot] = useState<StudioTurnResponse["source"]>();
   const requestEpoch = useRef(0);
   const [receiptSnapshot, setReceiptSnapshot] = useState<{
@@ -637,20 +637,15 @@ export default function StudioClient({ initialProjectId = "" }: { initialProject
         }
       }}
       onRefresh={() => setProjectFilesRefreshKey((value) => value + 1)}
-      folderActor={
-        boundProjectId
-          ? { kind: "scene", sourceId: `${skillId}:${boundProjectId}`, title: `${skillId} 场景` }
-          : null
-      }
     />
   );
 
   return (
     <div className="flex h-full min-h-0 flex-col lg:flex-row">
       <aside className="flex max-h-52 min-h-0 w-full shrink-0 flex-col border-b border-slate-200 dark:border-slate-800 lg:max-h-none lg:h-full lg:w-60 lg:border-b-0 lg:border-r">
-        <header className="border-b border-slate-200 px-3 py-3 dark:border-slate-800">
-          <p className="text-xs text-slate-500">技能卡 · {visibleSkills.length}</p>
-          <h2 className="text-sm font-semibold">已开放</h2>
+        <header className="flex h-14 shrink-0 flex-col justify-center border-b border-slate-200 px-3 dark:border-slate-800">
+          <p className="truncate text-xs leading-4 text-slate-500">技能卡 · {visibleSkills.length}</p>
+          <h2 className="truncate text-sm font-semibold leading-5">已开放</h2>
         </header>
         <div className="min-h-0 flex-1 space-y-3 overflow-y-auto px-2 py-2">
           {visibleSkills.length === 0 ? (
@@ -699,25 +694,25 @@ export default function StudioClient({ initialProjectId = "" }: { initialProject
         <div className="h-[42vh] min-h-0 border-t border-slate-200 dark:border-slate-800">{renderProjectFilesRail()}</div>
       </details>
       <section className="flex h-[42%] min-h-0 w-full flex-col border-b border-slate-200 dark:border-slate-800 lg:h-full lg:w-[22rem] lg:shrink-0 lg:border-b-0 lg:border-r">
-        <header className="border-b border-slate-200 px-4 py-3 dark:border-slate-800">
-          <p className="text-xs text-slate-500">
+        <header className="flex h-14 shrink-0 flex-col justify-center border-b border-slate-200 px-4 dark:border-slate-800">
+          <p className="truncate text-xs leading-4 text-slate-500">
             {activeSkill.id} · {(pending || job?.scope === jobScope) ? "内核处理中" : kernelLabel}
+            {linkedFile ? ` · ${linkedFile.title}` : ""}
           </p>
-          <h1 className="text-base font-semibold">{activeSkill.name}</h1>
-          {linkedFile ? <p className="text-xs text-slate-500">{linkedFile.title}</p> : null}
-          {jobScope && !job && recentJobs.length ? (
-            <label className="mr-2 text-xs">
-              <span className="sr-only">历史任务回执</span>
-              <select value="" onChange={(event) => {
-                const id = event.target.value;
-                if (id) setJob({ id, scope: jobScope });
-              }}>
-                <option value="">查看历史任务回执</option>
-                {recentJobs.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}
-              </select>
-            </label>
-          ) : null}
+          <h1 className="truncate text-sm font-semibold leading-5">{activeSkill.name}</h1>
         </header>
+        {jobScope && !job && recentJobs.length ? (
+          <label className="border-b border-slate-200 px-4 py-1.5 text-xs dark:border-slate-800">
+            <span className="sr-only">历史任务回执</span>
+            <select value="" onChange={(event) => {
+              const id = event.target.value;
+              if (id) setJob({ id, scope: jobScope });
+            }}>
+              <option value="">查看历史任务回执</option>
+              {recentJobs.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}
+            </select>
+          </label>
+        ) : null}
         {cutpotSelected && boundProjectId ? (
           <CutPotPanel
             key={boundProjectId}
@@ -763,12 +758,6 @@ export default function StudioClient({ initialProjectId = "" }: { initialProject
             void commit(draft);
           }}
         >
-          {cutpotSelected || productApp || localApp ? null : (
-            <label className="flex items-center gap-2 text-xs text-slate-500">
-              <input type="checkbox" checked={demo} disabled={pending} onChange={(event) => setDemo(event.target.checked)} />
-              样本演示（不使用项目资料）
-            </label>
-          )}
           <div className="flex flex-wrap gap-1.5">
             {(cutpotSelected ? ["查看工程"] : localApp ? ["查看工作台"] : productApp ? ["查看工程", "载入示例", "从工程文件导入", "写入工程文件"] : demo ? PROMPTS : ["提取技术卡", "查看缺口", "查看工作区", "写入工程文件"]).map((prompt) => (
               <button
@@ -821,19 +810,14 @@ export default function StudioClient({ initialProjectId = "" }: { initialProject
         <section className="flex min-h-80 min-w-0 flex-1 flex-col">
           <LocalAppFrame key={localApp} product={localApp === "V18" ? "V18" : "V14"} />
         </section>
-      ) : productApp && boundProjectId ? (
+      ) : productApp ? (
         <section className="flex min-h-80 min-w-0 flex-1 flex-col">
           <ProductWorkbench
-            key={`${productApp}:${boundProjectId}`}
+            key={`${productApp}:${boundProjectId || "unbound"}`}
             product={productApp === "V07" ? "V07" : productApp === "V10" ? "V10" : "V05"}
             projectId={boundProjectId}
             revision={workbenchRevision}
           />
-        </section>
-      ) : productApp ? (
-        <section className="flex min-h-0 min-w-0 flex-1 flex-col p-4">
-          <h2 className="text-base font-semibold">{activeSkill.name}</h2>
-          <p className="mt-2 text-sm text-slate-500">绑定项目后，工作台显示在这里。</p>
         </section>
       ) : !demo && workbenchFile && boundProjectId && skillReady ? (
         <section className="flex min-h-80 min-w-0 flex-1 flex-col">

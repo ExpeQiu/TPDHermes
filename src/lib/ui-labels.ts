@@ -258,6 +258,8 @@ const KB_SCOPE_LABELS: Record<string, string> = {
 export const KB_DOMAIN_LABELS: Record<string, string> = {
   public_intel: "公开情报",
   structured_tech: "结构化技术",
+  geelywiki: "吉利Wiki",
+  autocar: "Autocar Wiki",
   release_assets: "发布素材",
   market_research: "市场研究",
   policy_regulation: "政策法规",

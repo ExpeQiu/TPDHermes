@@ -197,6 +197,7 @@ class ProjectMemberResponse(BaseModel):
     created_at: str
     updated_at: str
     display_name: str = ""
+    username: str = ""
     employee_id: str = ""
     org_id: str = ""
 
@@ -237,6 +238,7 @@ def _project_to_response(project: Project, *, my_role: str | None = None) -> Pro
 
 # --- Endpoints ---
 
+@router.post("", response_model=ProjectResponse, include_in_schema=False)
 @router.post("/", response_model=ProjectResponse)
 async def create_project(
     data: ProjectCreate,
@@ -2031,11 +2033,22 @@ async def list_project_members_api(
 ):
     await require_project_for_user(db, project_id, effective_uid, min_perm="read")
     rows = await list_project_members(db, project_id)
+    from backend.models.local_account import LocalAccount
     from backend.services.user_preference_service import get_user_preferences
 
+    user_ids = [row.user_id for row in rows if row.user_id]
+    accounts = (
+        await db.execute(select(LocalAccount).where(LocalAccount.user_id.in_(user_ids)))
+    ).scalars().all() if user_ids else []
+    account_by_user = {str(account.user_id): account for account in accounts}
     profiles = []
     for row in rows:
         prefs = await get_user_preferences(db, row.user_id)
+        account = account_by_user.get(row.user_id)
+        username = str(account.username or "").strip() if account else ""
+        display_name = str(prefs.get("display_name") or "").strip()
+        if not display_name and account is not None:
+            display_name = str(account.display_name or "").strip()
         profiles.append(
             ProjectMemberResponse(
                 id=row.id,
@@ -2044,11 +2057,18 @@ async def list_project_members_api(
                 role=row.role,
                 created_at=row.created_at,
                 updated_at=row.updated_at,
-                display_name=str(prefs.get("display_name") or "").strip(),
+                display_name=display_name,
+                username=username,
                 employee_id=str(prefs.get("employee_id") or "").strip(),
                 org_id=str(prefs.get("org_id") or "").strip(),
             )
         )
+    logger.info(
+        "[project-members] listed project_id=%s count=%s named=%s",
+        project_id,
+        len(profiles),
+        sum(1 for item in profiles if item.username),
+    )
     return profiles
 
 

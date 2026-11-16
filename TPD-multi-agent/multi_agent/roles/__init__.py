@@ -15,6 +15,8 @@ logger = logging.getLogger("multi_agent.roles")
 
 ROLES_ROOT = Path(__file__).resolve().parent
 ROLE_ID_RE = re.compile(r"^[a-z][a-z0-9_]*$")
+SKILL_ID_RE = re.compile(r"^[a-z][a-z0-9_]*$")
+_LEGACY_SKILL_SENTENCE = re.compile(r"对齐\s*skills\s*[:：]\s*[^。\n]*[。]?\s*")
 VALID_KINDS = frozenset({"roundtable", "consult"})
 
 
@@ -78,6 +80,56 @@ def load_roles_index() -> dict[str, dict[str, Any]]:
     return out
 
 
+def parse_skill_names(raw: Any) -> list[str]:
+    if raw is None:
+        values: list[Any] = []
+    elif isinstance(raw, str):
+        values = re.split(r"[\s,，、]+", raw)
+    elif isinstance(raw, list):
+        values = raw
+    else:
+        raise MultiAgentError("skills 须为技能 id 列表")
+    names: list[str] = []
+    for item in values:
+        name = str(item or "").strip()
+        if not name:
+            continue
+        if not SKILL_ID_RE.match(name):
+            raise MultiAgentError(f"无效 skill: {name}")
+        if name not in names:
+            names.append(name)
+    return names
+
+
+def split_legacy_role_skills(system: str) -> tuple[str, list[str]]:
+    """旧人设把技能写在「对齐 skills：…」。拆出 id，并从 system 删掉这句。"""
+    text = str(system or "")
+    found: list[str] = []
+    for match in _LEGACY_SKILL_SENTENCE.finditer(text):
+        clause = match.group(0)
+        body = re.sub(r"^对齐\s*skills\s*[:：]\s*", "", clause).strip(" 。")
+        for part in re.split(r"[\s,，、]+", body):
+            name = part.strip()
+            if SKILL_ID_RE.match(name) and name not in found:
+                found.append(name)
+    cleaned = _LEGACY_SKILL_SENTENCE.sub("", text)
+    cleaned = re.sub(r"[ \t]{2,}", " ", cleaned).strip()
+    return cleaned, found
+
+
+def _system_for_slot(role: dict[str, Any]) -> str:
+    system = str(role.get("system") or "").strip()
+    skills = [str(item) for item in (role.get("skills") or []) if str(item).strip()]
+    if not skills:
+        return system
+    hint = (
+        "可调用的工坊技能："
+        + "、".join(skills)
+        + "。成稿时调用 workshop_generate 或 workshop_generate_from_kb，不要读取技能文件。"
+    )
+    return f"{system}\n{hint}".strip() if system else hint
+
+
 def normalize_role(payload: dict[str, Any]) -> dict[str, Any]:
     rid = validate_role_id(str(payload.get("id") or ""))
     name = str(payload.get("name") or "").strip()
@@ -96,13 +148,19 @@ def normalize_role(payload: dict[str, Any]) -> dict[str, Any]:
         if kk not in kinds:
             kinds.append(kk)
 
+    system, legacy_skills = split_legacy_role_skills(str(payload.get("system") or ""))
+    explicit = payload.get("skills")
+    skills = parse_skill_names(explicit) if explicit not in (None, "", []) else []
+    if not skills:
+        skills = legacy_skills
     role = {
         "id": rid,
         "name": name,
         "description": str(payload.get("description") or "").strip(),
         "kinds": kinds,
         "perspective": str(payload.get("perspective") or "").strip(),
-        "system": str(payload.get("system") or "").strip(),
+        "system": system,
+        "skills": skills,
         "tool": str(payload.get("tool") or "").strip(),
         "when": str(payload.get("when") or "").strip(),
     }
@@ -116,7 +174,7 @@ def to_roundtable_slot(role: dict[str, Any]) -> dict[str, str]:
         "id": role["id"],
         "name": role["name"],
         "perspective": role.get("perspective") or "",
-        **({"system": role["system"]} if role.get("system") else {}),
+        **({"system": slot_system} if (slot_system := _system_for_slot(role)) else {}),
     }
 
 
@@ -126,7 +184,7 @@ def to_consult_slot(role: dict[str, Any]) -> dict[str, str]:
         "name": role["name"],
         "tool": role.get("tool") or f"consult_{role['id']}",
         "when": role.get("when") or "",
-        **({"system": role["system"]} if role.get("system") else {}),
+        **({"system": slot_system} if (slot_system := _system_for_slot(role)) else {}),
     }
 
 
