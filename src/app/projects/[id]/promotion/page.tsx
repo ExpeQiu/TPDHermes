@@ -22,7 +22,7 @@ export default function PromotionEntryPage() {
   const params = useParams<{ id: string }>();
   const projectId = String(params.id || "");
   const router = useRouter();
-  const [message, setMessage] = useState("正在打开技术推广包…");
+  const [message, setMessage] = useState("正在打开快捷创作…");
 
   useEffect(() => {
     if (!projectId) return;
@@ -38,7 +38,7 @@ export default function PromotionEntryPage() {
       const files = await apiGet<{ items: ProjectFile[] }>(`/projects/${projectId}/files`);
       const refs = (files.items ?? []).map((file) => ({ file_id: file.id, kind: file.kind }));
       if (!refs.length) {
-        if (!cancelled) setMessage("这个项目还没有资料，先在项目里放入文件后再打开技术推广包。");
+        if (!cancelled) setMessage("这个项目还没有资料，先在项目里放入文件后再打开快捷创作。");
         return;
       }
       const created = await apiPost<{ id: string }>(`/projects/${projectId}/promotion-packages`, {
@@ -50,7 +50,7 @@ export default function PromotionEntryPage() {
       router.replace(`/projects/${projectId}/promotion/${created.id}?tab=materials`);
     }
     void openWorkspace().catch((err: Error) => {
-      if (!cancelled) setMessage(err.message || "打开技术推广包失败");
+      if (!cancelled) setMessage(err.message || "打开快捷创作失败");
     });
     return () => {
       cancelled = true;

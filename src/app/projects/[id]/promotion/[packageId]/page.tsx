@@ -10,7 +10,7 @@ import { apiFetch, apiGet, apiPost } from "@/lib/api";
 import { decodeProjectFileSelectValue, type ProjectRecord } from "@/lib/chat-context";
 import { fetchProjectFilesUnified, type ProjectFileItem } from "@/lib/co-create-api";
 import { CONTENT_MAX_CLASS } from "@/lib/content-shell";
-import { blockedProductIds, exportConflicts, promotionProductLabel, PROMOTION_PRODUCTS, RETIRED_PROMOTION_PRODUCTS, structuredHighAccuracyRows, type StructuredAccuracyRow } from "@/lib/promotion-package";
+import { blockedProductIds, exportConflicts, promotionProductLabel, PROMOTION_PRODUCTS, RETIRED_PROMOTION_PRODUCTS } from "@/lib/promotion-package";
 
 interface Evidence {
   file_id?: string;
@@ -101,9 +101,9 @@ interface PackageDetail {
 }
 
 const STAGES = [
-  { id: "materials", title: "资料", hint: "先识别项目资料，再评估质量、补充缺口，最后压缩成可引用事实。" },
+  { id: "materials", title: "整理资料", hint: "先识别项目资料，再评估质量、补充缺口，最后压缩成可引用事实。" },
   { id: "outputs", title: "出品与审核", hint: "勾选出品后，选一篇用单一驱动生成，选多篇用批量驱动生成。改稿先保存，再提交审核。" },
-  { id: "export", title: "导出", hint: "勾选已生成的文件，保存到项目文件夹；已批准的文件可下载 ZIP。" },
+  { id: "export", title: "保存导出", hint: "勾选已生成的文件，保存到项目文件夹；已批准的文件可下载 ZIP。" },
 ];
 
 const RETIRED_PRODUCT_IDS = new Set<string>(RETIRED_PROMOTION_PRODUCTS);
@@ -118,6 +118,14 @@ function outputRows(detail: PackageDetail) {
     product,
     state: state[product] || { head_output_id: "", status: "idle", versions: [] as VersionRow[] },
   }));
+}
+
+function generatedExportProducts(detail: PackageDetail) {
+  return outputRows(detail).flatMap(({ product, state }) => {
+    const head = (state.versions || []).find((item) => item.output_id === state.head_output_id);
+    if (!head?.output_id || state.status === "idle") return [];
+    return [product];
+  });
 }
 
 const WORKSPACE = "min-h-0 flex-1 overflow-y-auto bg-gradient-to-br from-slate-50 via-white to-slate-100 p-4 text-slate-900 sm:p-6 md:p-8 dark:from-slate-950 dark:via-slate-900 dark:to-slate-950 dark:text-white";
@@ -141,6 +149,28 @@ function openStep(body: PackageDetail): number {
   if (gaps && body.facts.length === 0) return 2;
   if (body.brief_version || body.facts.length > 0) return 3;
   return 1;
+}
+
+function structuredFactRows(
+  detail: PackageDetail,
+  manualFacts: Record<string, string>,
+  adopted: string[],
+) {
+  return (detail.assessment.fields ?? []).flatMap((field) => {
+    if (field.key === "parse") return [];
+    const confirmed = detail.facts.find((fact) => fact.claim === field.key && fact.value.trim() && !fact.value.includes("待补充"));
+    const manual = manualFacts[field.key]?.trim() ?? "";
+    const hits = (detail.assessment.candidates ?? []).filter((item) => item.claim === field.key && item.value.trim() && !item.value.includes("待补充"));
+    const hit = hits.find((item) => adopted.includes(item.id)) ?? hits[0];
+    const value = (confirmed?.value || manual || hit?.value || "").trim();
+    if (!value) return [];
+    const source = confirmed
+      ? "已确认事实"
+      : manual
+        ? "手工修改"
+        : [LABELS[hit?.origin || ""] || "检索", hit?.source?.locator, hit?.source?.doc_id, hit?.source?.url].filter(Boolean).join(" · ");
+    return [{ key: field.key, label: field.label, value, conditions: confirmed?.conditions || "", source }];
+  });
 }
 
 const LABELS: Record<string, string> = {
@@ -190,16 +220,17 @@ function PromotionTaskTabs() {
     window.history.pushState(null, "", url);
   }
   const [busy, setBusy] = useState(false);
-  const [goal, setGoal] = useState("对外介绍技术价值");
-  const [audience, setAudience] = useState("行业媒体");
   const [adopted, setAdopted] = useState<string[]>([]);
   const [manualFacts, setManualFacts] = useState<Record<string, string>>({});
+  const [gapEditing, setGapEditing] = useState<Record<string, boolean>>({});
+  const [gapDrafts, setGapDrafts] = useState<Record<string, string>>({});
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [exportSelection, setExportSelection] = useState<string[] | null>(null);
   const [selectedProducts, setSelectedProducts] = useState<string[]>([]);
   const [comment, setComment] = useState("");
   const [detailStep, setDetailStep] = useState<number | null>(null);
-  const [accurateRows, setAccurateRows] = useState<StructuredAccuracyRow[]>([]);
+  const [previewProduct, setPreviewProduct] = useState<string | null>(null);
+  const [editingProducts, setEditingProducts] = useState<Record<string, boolean>>({});
   const [openMaterial, setOpenMaterial] = useState<{ id: string; kind: string; title: string } | null>(null);
   const [materialDetail, setMaterialDetail] = useState<{ title?: string; content?: string; status?: string; file_type?: string; version?: string | null } | null>(null);
 
@@ -207,8 +238,6 @@ function PromotionTaskTabs() {
     const body = await apiGet<PackageDetail>(`/projects/${projectId}/promotion-packages/${packageId}`);
     setDetail(body);
     setAdopted(body.facts.flatMap((fact) => fact.candidate_id ? [fact.candidate_id] : []));
-    if (body.brief?.goal) setGoal(body.brief.goal);
-    if (body.brief?.audience) setAudience(body.brief.audience);
     setDetailStep((current) => {
       if (current !== null) return current;
       const step = openStep(body);
@@ -299,38 +328,11 @@ function PromotionTaskTabs() {
     console.info("[promotion] open-material", { packageId, fileId: picked.id });
   }, [detail, detailStep, openMaterial, packageId, projectFiles]);
 
-  const sourceKey = (detail?.file_refs?.length
-    ? detail.file_refs.map((ref) => `${ref.file_id}:${ref.kind || "output"}`)
-    : projectFiles.map((file) => `${file.id}:${file.kind}`)
-  ).join("|");
-
   useEffect(() => {
-    if (detailStep !== 3 || !sourceKey) {
-      return;
-    }
-    const refs = sourceKey.split("|").map((item) => {
-      const [id, kind] = item.split(":");
-      return { id, kind: kind || "output" };
-    });
-    let cancelled = false;
-    void Promise.all(
-      refs.map((ref) =>
-        apiGet<{ title?: string; content?: string }>(
-          `/projects/${projectId}/files/${ref.id}?kind=${encodeURIComponent(ref.kind)}`,
-        )
-          .then((body) => structuredHighAccuracyRows(body.content || "", body.title || ""))
-          .catch(() => [] as StructuredAccuracyRow[]),
-      ),
-    ).then((groups) => {
-      if (cancelled) return;
-      const rows = groups.flat();
-      console.info("[promotion] structured-facts", { packageId, count: rows.length });
-      setAccurateRows(rows);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [detailStep, packageId, projectId, sourceKey]);
+    if (detailStep !== 3 || !detail) return;
+    const rows = structuredFactRows(detail, manualFacts, adopted);
+    console.info("[promotion] structured-facts", { packageId, count: rows.length, fields: rows.map((item) => item.key) });
+  }, [adopted, detail, detailStep, manualFacts, packageId]);
 
   useEffect(() => {
     if (!detail?.steps.some((step) => step.status === "running")) return;
@@ -339,6 +341,21 @@ function PromotionTaskTabs() {
     }, 1500);
     return () => window.clearTimeout(timer);
   }, [detail, load]);
+
+  useEffect(() => {
+    if (!detail) return;
+    const requested = STAGES.findIndex(({ id }) => id === searchParams.get("tab"));
+    const stage = stageIndex ?? (requested >= 0 ? requested : 0);
+    if (stage !== 1) return;
+    const rows = outputRows(detail);
+    const open = rows.find((row) => row.product === previewProduct);
+    const openHead = open?.state.versions.find((item) => item.output_id === open.state.head_output_id);
+    if (openHead?.content) return;
+    const next = rows.find((row) => row.state.versions.some((item) => item.output_id === row.state.head_output_id && item.content));
+    if (!next || next.product === previewProduct) return;
+    setPreviewProduct(next.product);
+    console.info("[promotion] preview-output", { packageId, product: next.product, reason: "auto" });
+  }, [detail, packageId, previewProduct, searchParams, stageIndex]);
 
   const blocked = useMemo(
     () => blockedProductIds(detail?.assessment.fields ?? []),
@@ -359,10 +376,16 @@ function PromotionTaskTabs() {
           return next;
         });
       }
-      if (path.endsWith("/facts")) setManualFacts({});
+      if (path.endsWith("/facts")) {
+        setManualFacts({});
+        setGapEditing({});
+        setGapDrafts({});
+      }
       await load();
+      return true;
     } catch (err) {
       setError(err instanceof Error ? err.message : "操作失败");
+      return false;
     } finally {
       setBusy(false);
     }
@@ -379,11 +402,18 @@ function PromotionTaskTabs() {
         visibility: "public", source_type: "file", source_ref: evidence.file_id || "",
       });
     }
-    for (const candidate of detail.assessment.candidates ?? []) {
-      if (!adopted.includes(candidate.id) || facts.get(candidate.claim)?.candidate_id === candidate.id) continue;
-      facts.set(candidate.claim, {
-        id: facts.get(candidate.claim)?.id ?? "", claim: candidate.claim, value: candidate.value,
-        visibility: "public", source_type: candidate.origin, candidate_id: candidate.id,
+    for (const field of detail.assessment.fields ?? []) {
+      if (field.key === "parse") continue;
+      const current = facts.get(field.key);
+      if (current?.value.trim() && !current.value.includes("待补充")) continue;
+      const hits = (detail.assessment.candidates ?? []).filter(
+        (item) => item.claim === field.key && item.value.trim() && !item.value.includes("待补充"),
+      );
+      const hit = hits.find((item) => adopted.includes(item.id)) ?? hits[0];
+      if (!hit) continue;
+      facts.set(field.key, {
+        id: current?.id ?? "", claim: field.key, value: hit.value.trim(),
+        visibility: "public", source_type: hit.origin, candidate_id: hit.id,
       });
     }
     for (const [claim, value] of Object.entries(manualFacts)) {
@@ -393,10 +423,22 @@ function PromotionTaskTabs() {
         visibility: "public", source_type: "human",
       });
     }
-    return [...facts.values()].filter((fact) => !fact.candidate_id || adopted.includes(fact.candidate_id));
+    return [...facts.values()].filter((fact) => fact.value.trim() && !fact.value.includes("待补充"));
   }
 
-  const chosenProducts = exportSelection ?? (detail ? outputRows(detail).map((item) => item.product) : []);
+  function coveredClaims(): Set<string> {
+    const covered = new Set<string>();
+    if (!detail) return covered;
+    for (const fact of factsForConfirm()) covered.add(fact.claim);
+    return covered;
+  }
+
+  const chosenProducts = exportSelection ?? (detail ? generatedExportProducts(detail) : []);
+  const defaultExportKey = exportSelection ? "" : chosenProducts.join(",");
+  useEffect(() => {
+    if (!defaultExportKey) return;
+    console.info("[promotion] default export selection", { packageId, products: defaultExportKey.split(",") });
+  }, [defaultExportKey, packageId]);
   const saveIds = useMemo(() => {
     if (!detail) return [];
     return Object.entries(detail.products_state || {}).flatMap(([product, state]) => {
@@ -537,7 +579,7 @@ function PromotionTaskTabs() {
   const allApproved = visibleStates.length > 0 && visibleStates.every((state) => state.status === "approved");
   const requestedTab = STAGES.findIndex(({ id }) => id === searchParams.get("tab"));
   const currentStage = stageIndex ?? (requestedTab >= 0 ? requestedTab : !detail.brief_version ? 0 : hasApproved && allApproved ? 2 : 1);
-  const fieldLabels = Object.fromEntries((detail.assessment.fields ?? []).map((field) => [field.key, field.label]));
+  const structuredFacts = structuredFactRows(detail, manualFacts, adopted);
 
   return (
     <div className="flex h-full min-h-0 flex-col lg:flex-row">
@@ -556,7 +598,7 @@ function PromotionTaskTabs() {
       <div className={`${CONTENT_MAX_CLASS} space-y-6`}>
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-semibold">技术推广包</h1>
+          <h1 className="text-2xl font-semibold">快捷创作</h1>
         </div>
         <Link href={`/projects/${projectId}/promotion`} className="text-sm text-slate-500">
           返回列表
@@ -564,7 +606,7 @@ function PromotionTaskTabs() {
       </div>
       {error ? <p role="alert" className="whitespace-pre-wrap text-sm text-red-600">{error}</p> : null}
 
-      <div role="tablist" aria-label="技术推广包" className="flex gap-4 border-b border-slate-200 dark:border-slate-700">
+      <div role="tablist" aria-label="快捷创作" className="flex gap-4 border-b border-slate-200 dark:border-slate-700">
         {STAGES.map(({ id, title }, index) => (
           <button
             key={id}
@@ -711,13 +753,14 @@ function PromotionTaskTabs() {
                 event.stopPropagation();
                 setDetailStep(3);
                 const facts = factsForConfirm();
-                console.info("[promotion] compress-facts", { packageId, factCount: facts.length });
+                const adoptedIds = [...new Set([...adopted, ...facts.flatMap((fact) => fact.candidate_id ? [fact.candidate_id] : [])])];
+                console.info("[promotion] compress-facts", { packageId, factCount: facts.length, claims: facts.map((fact) => fact.claim) });
                 void run(`/projects/${projectId}/promotion-packages/${packageId}/facts`, {
                   expected_revision: detail.revision,
-                  goal,
-                  audience,
+                  goal: detail.brief?.goal ?? "",
+                  audience: detail.brief?.audience ?? "",
                   facts,
-                  adopted_candidate_ids: adopted,
+                  adopted_candidate_ids: adoptedIds,
                 });
               }}
             >
@@ -725,7 +768,7 @@ function PromotionTaskTabs() {
             </button>
           ) : null}
           <p className="mt-3 text-sm text-slate-500">
-            {detail.facts.length > 0 ? `已压缩 ${detail.facts.length} 条事实，详情在右侧。` : "目标和事实条目在右侧确认。"}
+            {detail.facts.length > 0 ? `已压缩 ${detail.facts.length} 条事实，详情在右侧。` : "只压缩已有事实，结果在右侧。"}
           </p>
         </section>
       </section>
@@ -749,6 +792,32 @@ function PromotionTaskTabs() {
             {detailStep === 0 && openMaterial ? (
               <button type="button" className="shrink-0 text-sm text-slate-500" onClick={() => setOpenMaterial(null)}>
                 关闭文稿
+              </button>
+            ) : null}
+            {detailStep !== null && detailStep > 0 ? (
+              <button
+                type="button"
+                className={`shrink-0 ${BTN}`}
+                onClick={() => {
+                  const next = detailStep + 1;
+                  if (next < 4) {
+                    setDetailStep(next);
+                    console.info("[promotion] confirm-step", { packageId, from: detailStep, next });
+                    return;
+                  }
+                  const facts = factsForConfirm();
+                  const adoptedIds = [...new Set([...adopted, ...facts.flatMap((fact) => fact.candidate_id ? [fact.candidate_id] : [])])];
+                  console.info("[promotion] confirm-step", { packageId, from: detailStep, next: "outputs", factCount: facts.length });
+                  void run(`/projects/${projectId}/promotion-packages/${packageId}/facts`, {
+                    expected_revision: detail.revision,
+                    goal: detail.brief?.goal ?? "",
+                    audience: detail.brief?.audience ?? "",
+                    facts,
+                    adopted_candidate_ids: adoptedIds,
+                  }).then(() => setStage(1));
+                }}
+              >
+                确认
               </button>
             ) : null}
           </div>
@@ -812,8 +881,39 @@ function PromotionTaskTabs() {
                     .filter((field) => field.status === "missing" || field.status === "conflict")
                     .map((field) => {
                       const hits = (detail.assessment.candidates ?? []).filter((item) => item.claim === field.key);
-                      const confirmed = hits.some((item) => adopted.includes(item.id)) || Boolean(manualFacts[field.key]?.trim());
+                      const savedManual = manualFacts[field.key]?.trim() ?? "";
+                      const confirmed = hits.some((item) => adopted.includes(item.id)) || Boolean(savedManual);
                       const tone = confirmed ? "" : hits.length || field.status === "conflict" || field.attention === "confirm" ? "confirm" : "fill";
+                      const retrieved = [...new Set(hits.map((item) => item.value.trim()).filter(Boolean))];
+                      const displayValues = savedManual ? [savedManual] : retrieved;
+                      const editing = Boolean(gapEditing[field.key]);
+                      const draft = gapDrafts[field.key] ?? (savedManual || retrieved[0] || "");
+                      const confirmGap = () => {
+                        const nextValue = (editing ? draft : savedManual || retrieved[0] || "").trim();
+                        const candidateIds = hits.map((item) => item.id);
+                        const useManual = Boolean(nextValue) && nextValue !== (retrieved[0] || "");
+                        if (useManual) {
+                          setManualFacts((current) => ({ ...current, [field.key]: nextValue }));
+                          setAdopted((current) => current.filter((id) => !candidateIds.includes(id)));
+                        } else if (candidateIds.length) {
+                          setAdopted((current) => [...new Set([...current, ...candidateIds])]);
+                          setManualFacts((current) => {
+                            const next = { ...current };
+                            delete next[field.key];
+                            return next;
+                          });
+                        } else if (nextValue) {
+                          setManualFacts((current) => ({ ...current, [field.key]: nextValue }));
+                        } else {
+                          return;
+                        }
+                        setGapEditing((current) => ({ ...current, [field.key]: false }));
+                        console.info("[promotion] gap-confirm", {
+                          packageId,
+                          field: field.key,
+                          source: useManual || !candidateIds.length ? "manual" : "candidate",
+                        });
+                      };
                       return (
                         <div
                           key={field.key}
@@ -825,37 +925,63 @@ function PromotionTaskTabs() {
                         >
                           <p className="flex flex-wrap items-center gap-2 font-medium">
                             {field.label}
+                            {confirmed ? <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-xs text-emerald-800">已确认</span> : null}
                             {tone === "confirm" ? <span className="rounded-full bg-amber-200 px-2 py-0.5 text-xs text-amber-900">待确认</span> : null}
                             {tone === "fill" ? <span className="rounded-full bg-amber-200 px-2 py-0.5 text-xs text-amber-900">待填写</span> : null}
                           </p>
-                          {field.reason ? <p className="mt-1 text-xs text-slate-500">{field.reason}</p> : null}
-                          {hits.map((candidate) => (
-                            <label key={candidate.id} className="mt-2 flex items-start gap-2">
+                          {displayValues.length > 0 ? (
+                            displayValues.map((value) => (
+                              <p key={value} className="mt-2 whitespace-pre-wrap text-sm leading-6">{value}</p>
+                            ))
+                          ) : field.reason ? (
+                            <p className="mt-1 text-xs text-slate-500">{field.reason}</p>
+                          ) : null}
+                          {!savedManual
+                            ? hits
+                                .filter((item, index) => hits.findIndex((other) => other.value === item.value) === index)
+                                .map((candidate) => {
+                                  const source = [LABELS[candidate.origin], candidate.source?.doc_id, candidate.source?.locator, candidate.source?.url]
+                                    .filter(Boolean)
+                                    .join(" · ");
+                                  return source ? (
+                                    <p key={candidate.id} className="mt-1 text-xs text-slate-500">{source}</p>
+                                  ) : null;
+                                })
+                            : <p className="mt-1 text-xs text-slate-500">手工修改</p>}
+                          {editing ? (
+                            <label className="mt-3 grid gap-1 text-sm">
+                              修改取值
                               <input
-                                type="checkbox"
-                                checked={adopted.includes(candidate.id)}
-                                onChange={(event) =>
-                                  setAdopted((current) =>
-                                    event.target.checked ? [...current, candidate.id] : current.filter((item) => item !== candidate.id),
-                                  )
-                                }
+                                className={FIELD}
+                                value={draft}
+                                onChange={(event) => setGapDrafts((current) => ({ ...current, [field.key]: event.target.value }))}
                               />
-                              <span>
-                                确认{LABELS[candidate.origin] || "检索"}结果 · {candidate.value}
-                                <span className="block text-xs text-slate-500">
-                                  {[candidate.source?.doc_id, candidate.source?.locator, candidate.source?.url].filter(Boolean).join(" ")}
-                                </span>
-                              </span>
                             </label>
-                          ))}
-                          <label className="mt-2 grid gap-1">
-                            {tone === "fill" ? "请填写" : "或手工补录"}
-                            <input
-                              className={tone === "fill" ? `${FIELD} border-amber-400 bg-amber-50 dark:bg-amber-950/40` : FIELD}
-                              value={manualFacts[field.key] ?? ""}
-                              onChange={(event) => setManualFacts((current) => ({ ...current, [field.key]: event.target.value }))}
-                            />
-                          </label>
+                          ) : null}
+                          <div className="mt-3 flex flex-wrap gap-2">
+                            <button
+                              type="button"
+                              className={BTN_LINE}
+                              onClick={() => {
+                                setGapEditing((current) => ({ ...current, [field.key]: true }));
+                                setGapDrafts((current) => ({
+                                  ...current,
+                                  [field.key]: current[field.key] ?? (savedManual || retrieved[0] || ""),
+                                }));
+                                console.info("[promotion] gap-edit", { packageId, field: field.key });
+                              }}
+                            >
+                              修改
+                            </button>
+                            <button
+                              type="button"
+                              className={BTN}
+                              disabled={!(editing ? draft : savedManual || retrieved[0] || "").trim()}
+                              onClick={confirmGap}
+                            >
+                              确认
+                            </button>
+                          </div>
                         </div>
                       );
                     })}
@@ -893,62 +1019,19 @@ function PromotionTaskTabs() {
                 </div>
               ) : null}
               <div className="mt-3 space-y-2 text-sm">
-                {(detail.assessment.fields ?? [])
-                  .filter((field) => field.status === "present")
-                  .map((field) => (
-                    <div key={field.key} className={ROW}>
-                      <p>{field.label} · {(field.evidence ?? []).map((item) => item.excerpt).filter(Boolean).join("；")}</p>
-                      <p className="text-xs text-slate-500">资料原文，取值唯一</p>
-                    </div>
-                  ))}
-                {accurateRows.map((row) => (
-                  <div key={`${row.source}-${row.metric}`} className={ROW}>
-                    <p>{row.metric} · {row.value}</p>
-                    <p className="text-xs text-slate-500">{[row.condition, row.source].filter(Boolean).join(" · ")}</p>
+                {structuredFacts.map((fact) => (
+                  <div key={fact.key} className={ROW}>
+                    <p className="font-medium">{fact.label}</p>
+                    <p className="mt-1 whitespace-pre-wrap">{fact.value}{fact.conditions ? `（${fact.conditions}）` : ""}</p>
+                    <p className="mt-1 text-xs text-slate-500">{fact.source}</p>
                   </div>
                 ))}
-                {detail.facts
-                  .filter((fact) => fact.value && !fact.value.includes("待补充"))
-                  .map((fact) => (
-                    <div key={fact.id} className={ROW}>
-                      <p>{fieldLabels[fact.claim] || fact.claim} · {fact.value}{fact.conditions ? `（${fact.conditions}）` : ""}</p>
-                      <p className="text-xs text-slate-500">已确认事实</p>
-                    </div>
-                  ))}
-                {(detail.assessment.fields ?? []).every((field) => field.status !== "present") && accurateRows.length === 0 && detail.facts.length === 0 ? (
-                  <p className="text-slate-500">资料里还没有带口径的结构化条目。</p>
-                ) : null}
+                {structuredFacts.length === 0 ? <p className="text-slate-500">还没有可压缩的结构化事实。</p> : null}
               </div>
-              {detail.brief?.goal || detail.brief?.audience ? (
-                <p className="mt-3 text-xs text-slate-500">
-                  {[detail.brief?.goal ? `推广目标 ${detail.brief.goal}` : "", detail.brief?.audience ? `受众 ${detail.brief.audience}` : ""].filter(Boolean).join(" · ")}
-                </p>
+              {assessed && !detail.actions.confirm ? (
+                <p className="mt-2 text-sm text-slate-500">当前不能修改已确认事实。</p>
               ) : null}
-              {assessed && detail.actions.confirm ? (
-                <>
-                  <div className="mt-3 grid gap-2 sm:grid-cols-2">
-                    <label className="grid gap-1 text-sm">推广目标<input className={FIELD} value={goal} onChange={(event) => setGoal(event.target.value)} /></label>
-                    <label className="grid gap-1 text-sm">目标受众<input className={FIELD} value={audience} onChange={(event) => setAudience(event.target.value)} /></label>
-                  </div>
-                  <button
-                    type="button"
-                    className={`mt-3 ${BTN}`}
-                    onClick={() =>
-                      void run(`/projects/${projectId}/promotion-packages/${packageId}/facts`, {
-                        expected_revision: detail.revision,
-                        goal,
-                        audience,
-                        facts: factsForConfirm(),
-                        adopted_candidate_ids: adopted,
-                      })
-                    }
-                  >
-                    压缩为事实条目
-                  </button>
-                </>
-              ) : (
-                <p className="mt-2 text-sm text-slate-500">{assessed ? "当前不能修改已确认事实。" : "补充完成后，再压缩成事实条目。"}</p>
-              )}
+              {!assessed ? <p className="mt-2 text-sm text-slate-500">补充完成后，再压缩成事实条目。</p> : null}
             </section>
             ) : null}
           </div>
@@ -956,7 +1039,8 @@ function PromotionTaskTabs() {
       ) : null}
       </div>
 
-      <section role="tabpanel" id="panel-outputs" aria-labelledby="tab-outputs" tabIndex={0} hidden={currentStage !== 1} className={`${SURFACE} p-5`}>
+      <section role="tabpanel" id="panel-outputs" aria-labelledby="tab-outputs" tabIndex={0} hidden={currentStage !== 1} className="grid items-start gap-4 lg:grid-cols-3">
+        <div className={`${SURFACE} p-5 lg:col-span-1`}>
         <div className="flex flex-wrap items-center justify-between gap-3">
           <h2 className="font-medium">{STAGES[1].title}</h2>
           <div className="flex flex-wrap gap-2">
@@ -995,14 +1079,24 @@ function PromotionTaskTabs() {
           {outputRows(detail).map(({ product, state }) => {
             const head = (state.versions || []).find((item) => item.output_id === state.head_output_id);
             const productActions = detail.actions.products?.[product] || {};
+            const covered = coveredClaims();
             const missing = (detail.assessment.fields ?? []).filter((field) =>
-              field.blocks?.includes(product) && !detail.facts.some((fact) => fact.claim === field.key && fact.value.trim()),
+              field.blocks?.includes(product) && !covered.has(field.key),
             );
             const blockedByFacts = missing.length > 0 && !head;
             const label = promotionProductLabel(product);
             const chosen = selectedProducts.includes(product);
+            const opened = previewProduct === product;
             return (
-              <article key={product} className={`rounded-2xl border p-3 ${chosen ? "border-blue-500 bg-blue-50/80 ring-1 ring-blue-500 dark:bg-blue-950/40" : "border-slate-200 bg-white/80 dark:border-slate-800 dark:bg-slate-950/40"}`}>
+              <article
+                key={product}
+                className={`rounded-2xl border p-3 ${opened || chosen ? "border-blue-500 bg-blue-50/80 ring-1 ring-blue-500 dark:bg-blue-950/40" : "border-slate-200 bg-white/80 dark:border-slate-800 dark:bg-slate-950/40"} ${head ? "cursor-pointer" : ""}`}
+                onClick={() => {
+                  if (!head) return;
+                  setPreviewProduct(product);
+                  console.info("[promotion] preview-output", { packageId, product });
+                }}
+              >
                 <div className="flex items-start gap-2">
                   <input
                     type="checkbox"
@@ -1010,6 +1104,7 @@ function PromotionTaskTabs() {
                     aria-label={`选择${label}`}
                     checked={chosen}
                     disabled={blockedByFacts}
+                    onClick={(event) => event.stopPropagation()}
                     onChange={(event) =>
                       setSelectedProducts((current) =>
                         event.target.checked
@@ -1040,31 +1135,8 @@ function PromotionTaskTabs() {
                 ) : !head && detail.steps.some((step) => step.step_key === `generate:${product}` && step.status === "failed") ? (
                   <p className="mt-2 text-sm text-amber-700">上次生成失败，勾选后可再次生成。</p>
                 ) : null}
-                {head ? <textarea
-                  aria-label={promotionProductLabel(product)}
-                  readOnly={!productActions.revise}
-                  className={`mt-2 h-40 w-full p-2 text-sm ${FIELD}`}
-                  value={drafts[product] ?? head?.content ?? ""}
-                  onChange={(event) => setDrafts((current) => ({ ...current, [product]: event.target.value }))}
-                /> : <p className="mt-2 text-sm text-slate-500">草稿生成后可在这里查看。</p>}
-                <div className="mt-2 flex flex-wrap gap-2">
-                  {productActions.revise && head ? (
-                    <button
-                      type="button"
-                      className="rounded-lg border border-slate-200 bg-white px-3 py-1 text-xs text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200"
-                      onClick={() =>
-                        void run(`/projects/${projectId}/promotion-packages/${packageId}/revise`, {
-                          expected_revision: detail.revision,
-                          output_id: head.output_id,
-                          expected_version: head.version,
-                          content: drafts[product] ?? head?.content ?? "",
-                          fact_ids: head.fact_ids,
-                        })
-                      }
-                    >
-                      保存修订
-                    </button>
-                  ) : null}
+                {head ? <p className="mt-2 text-sm text-slate-500">{opened ? "正文在右侧预览。" : "点击查看正文。"}</p> : <p className="mt-2 text-sm text-slate-500">草稿生成后可在右侧查看。</p>}
+                <div className="mt-2 flex flex-wrap gap-2" onClick={(event) => event.stopPropagation()}>
                   {productActions.submit && head ? (
                     <button
                       type="button"
@@ -1130,6 +1202,136 @@ function PromotionTaskTabs() {
           onChange={(event) => setComment(event.target.value)}
         /> : null}
         {hasApproved ? <button type="button" className={`mt-4 ${BTN_LINE}`} onClick={() => setStage(2)}>选择已批准的文件</button> : null}
+        </div>
+        <aside className={`${SURFACE} sticky top-4 flex max-h-[calc(100vh-8rem)] flex-col overflow-hidden lg:col-span-2`}>
+          {(() => {
+            const row = outputRows(detail).find((item) => item.product === previewProduct);
+            const head = row?.state.versions.find((item) => item.output_id === row.state.head_output_id);
+            const label = previewProduct ? promotionProductLabel(previewProduct) : "";
+            const content = previewProduct ? drafts[previewProduct] ?? head?.content ?? "" : "";
+            const productActions = previewProduct ? detail.actions.products?.[previewProduct] || {} : {};
+            const editing = Boolean(previewProduct && editingProducts[previewProduct]);
+            const dirty = Boolean(head && drafts[previewProduct || ""] !== undefined && drafts[previewProduct || ""] !== head.content);
+            return (
+              <>
+                <div className="flex items-start justify-between gap-3 border-b border-slate-200 px-5 py-4 dark:border-slate-700">
+                  <div className="min-w-0">
+                    <h2 className="truncate font-medium">{head ? label : "详情预览"}</h2>
+                    <p className="mt-1 text-xs text-slate-500">{head ? LABELS[head.status] || head.status : "点选左侧已生成的稿件"}</p>
+                  </div>
+                  {head && previewProduct ? (
+                    <div className="flex shrink-0 items-center gap-2">
+                      <button
+                        type="button"
+                        className={BTN_LINE}
+                        aria-pressed={editing}
+                        disabled={!productActions.revise}
+                        onClick={() => {
+                          const product = previewProduct;
+                          setDrafts((current) => current[product] === undefined ? { ...current, [product]: head.content ?? "" } : current);
+                          setEditingProducts((current) => ({ ...current, [product]: !current[product] }));
+                          console.info("[promotion] edit-output", { packageId, product, editing: !editing });
+                        }}
+                      >
+                        编辑
+                      </button>
+                      <button
+                        type="button"
+                        className={BTN}
+                        disabled={!productActions.revise || !dirty || busy}
+                        onClick={() => {
+                          const product = previewProduct;
+                          console.info("[promotion] save-output", { packageId, product, output_id: head.output_id });
+                          void run(`/projects/${projectId}/promotion-packages/${packageId}/revise`, {
+                            expected_revision: detail.revision,
+                            output_id: head.output_id,
+                            expected_version: head.version,
+                            content,
+                            fact_ids: head.fact_ids ?? [],
+                          }).then((saved) => {
+                            if (!saved) return;
+                            setEditingProducts((current) => ({ ...current, [product]: false }));
+                          });
+                        }}
+                      >
+                        保存
+                      </button>
+                    </div>
+                  ) : null}
+                </div>
+                <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-5 py-4">
+                  {head && editing ? (
+                    <textarea
+                      aria-label={`${label}正文`}
+                      className={`min-h-[24rem] w-full text-sm ${FIELD}`}
+                      value={content}
+                      onChange={(event) => {
+                        const product = previewProduct || "";
+                        setDrafts((current) => ({ ...current, [product]: event.target.value }));
+                      }}
+                    />
+                  ) : head && content ? <ChatMarkdownBody content={content} /> : <p className="text-sm text-slate-500">点选左侧已生成的稿件，在这里查看正文。</p>}
+                  {head ? (
+                    <div className="flex flex-wrap gap-2">
+                      {productActions.submit ? (
+                        <button
+                          type="button"
+                          className="rounded-lg border border-slate-200 bg-white px-3 py-1 text-xs text-slate-700 hover:bg-slate-50 disabled:opacity-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200"
+                          disabled={drafts[previewProduct || ""] !== undefined && drafts[previewProduct || ""] !== head.content}
+                          onClick={() =>
+                            void run(`/projects/${projectId}/promotion-packages/${packageId}/reviews`, {
+                              expected_revision: detail.revision,
+                              output_id: head.output_id,
+                              expected_version: head.version,
+                              action: "submit",
+                            })
+                          }
+                        >
+                          提交审核
+                        </button>
+                      ) : null}
+                      {productActions.reject ? (
+                        <button
+                          type="button"
+                          className="rounded-lg border border-slate-200 bg-white px-3 py-1 text-xs text-slate-700 hover:bg-slate-50 disabled:opacity-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200"
+                          disabled={drafts[previewProduct || ""] !== undefined && drafts[previewProduct || ""] !== head.content}
+                          onClick={() =>
+                            void run(`/projects/${projectId}/promotion-packages/${packageId}/reviews`, {
+                              expected_revision: detail.revision,
+                              output_id: head.output_id,
+                              expected_version: head.version,
+                              action: "reject",
+                              comment,
+                            })
+                          }
+                        >
+                          退回
+                        </button>
+                      ) : null}
+                      {productActions.approve ? (
+                        <button
+                          type="button"
+                          className="rounded-lg border border-slate-200 bg-white px-3 py-1 text-xs text-slate-700 hover:bg-slate-50 disabled:opacity-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200"
+                          disabled={drafts[previewProduct || ""] !== undefined && drafts[previewProduct || ""] !== head.content}
+                          onClick={() =>
+                            void run(`/projects/${projectId}/promotion-packages/${packageId}/reviews`, {
+                              expected_revision: detail.revision,
+                              output_id: head.output_id,
+                              expected_version: head.version,
+                              action: "approve",
+                            })
+                          }
+                        >
+                          批准
+                        </button>
+                      ) : null}
+                    </div>
+                  ) : null}
+                </div>
+              </>
+            );
+          })()}
+        </aside>
       </section>
 
       <section role="tabpanel" id="panel-export" aria-labelledby="tab-export" tabIndex={0} hidden={currentStage !== 2} className={`${SURFACE} p-5`}>
@@ -1159,7 +1361,7 @@ function PromotionTaskTabs() {
                 disabled={!downloadIds.length || conflicts.length > 0}
                 onClick={() => void download().catch(() => setError("下载失败，请重试"))}
               >
-                {downloadIds.length ? `下载 ${downloadIds.length} 个文件（ZIP）` : "下载推广包"}
+                {downloadIds.length ? `下载 ${downloadIds.length} 个文件（ZIP）` : "下载已选文件"}
               </button>
             </div>
             {saveHint ? <p className="mt-2 text-sm text-emerald-700 dark:text-emerald-300">{saveHint}</p> : null}
@@ -1179,7 +1381,7 @@ function PromotionTaskTabs() {
                       checked={checked}
                       onChange={(event) =>
                         setExportSelection((current) => {
-                          const base = current ?? outputRows(detail).map((item) => item.product);
+                          const base = current ?? generatedExportProducts(detail);
                           return event.target.checked
                             ? base.includes(product) ? base : [...base, product]
                             : base.filter((item) => item !== product);

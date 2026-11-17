@@ -62,13 +62,13 @@ def _attachment_path(filename: str) -> str:
     return f"/附件/{filename}"
 
 
-def _read_attachment_preview_content(path: Path, *, content_type: str | None) -> tuple[str, str]:
-    """将附件抽取为可预览文本，返回 (content, content_format)。"""
+def _read_attachment_preview_content(path: Path, *, content_type: str | None) -> tuple[str, str, bool]:
+    """将附件抽取为可预览文本，返回 (content, content_format, readable)。"""
     from backend.services.document_extract import DocumentExtractError, extract_to_markdown
 
     if not path.is_file():
         logger.warning("[project-files] attachment preview file missing path=%s", path)
-        return "（附件文件不存在或已被删除，请重新上传。）", "text"
+        return "（附件文件不存在或已被删除，请重新上传。）", "text", False
 
     try:
         text = (extract_to_markdown(path, content_type=content_type) or "").strip()
@@ -77,22 +77,22 @@ def _read_attachment_preview_content(path: Path, *, content_type: str | None) ->
         logger.warning("[project-files] attachment preview extract failed path=%s err=%s", path, err)
         if err.startswith("unsupported_format"):
             suffix = path.suffix or "此格式"
-            return f"（暂不支持在线预览 {suffix} 文件，请下载原文件查看。）", "text"
+            return f"（暂不支持在线预览 {suffix} 文件，请下载原文件查看。）", "text", False
         if err == "pymupdf_not_installed":
-            return "（PDF 预览依赖未安装，请联系管理员。）", "text"
+            return "（PDF 预览依赖未安装，请联系管理员。）", "text", False
         if err == "python_docx_not_installed":
-            return "（Word 预览依赖未安装，请联系管理员。）", "text"
-        return f"（预览失败：{err}，请下载原文件查看。）", "text"
+            return "（Word 预览依赖未安装，请联系管理员。）", "text", False
+        return f"（预览失败：{err}，请下载原文件查看。）", "text", False
 
     if not text:
-        return "（文件为空或无法提取可读文本。）", "text"
+        return "（文件为空或无法提取可读文本。）", "text", False
 
     if len(text) > ATTACHMENT_PREVIEW_MAX_CHARS:
         text = text[:ATTACHMENT_PREVIEW_MAX_CHARS] + "\n\n…（预览已截断）"
 
     suffix = path.suffix.lower()
     content_format = "markdown" if suffix in {".md", ".markdown", ".pdf", ".docx"} else "text"
-    return text, content_format
+    return text, content_format, True
 
 
 async def list_project_files(db: AsyncSession, project_id: str) -> list[dict]:
@@ -203,7 +203,7 @@ async def get_project_file_detail(
         if not row:
             return None
         path = _attachments_root() / (row.stored_path or "")
-        content, content_format = _read_attachment_preview_content(
+        content, content_format, readable = _read_attachment_preview_content(
             path,
             content_type=row.content_type,
         )
@@ -214,6 +214,7 @@ async def get_project_file_detail(
             "path": _attachment_path(row.original_filename or row.id),
             "file_type": _guess_file_type(row.original_filename or ""),
             "status": row.ingest_status,
+            "readable": readable,
             "content": content,
             "content_format": content_format,
             "updated_at": row.created_at,

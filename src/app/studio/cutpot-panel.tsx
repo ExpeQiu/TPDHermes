@@ -7,7 +7,7 @@ const inflight = new Map<string, Promise<{ url: string; error?: string }>>();
 
 async function connectOnce(projectId: string): Promise<{ url: string; error?: string }> {
   try {
-    const result = await apiPost<{ webUrl?: string }>("/studio/cutpot", { project_id: projectId, action: "connect" });
+    const result = await apiPost<{ webUrl?: string }>("/studio/cutpot", { project_id: projectId || null, action: "connect" });
     const url = result.webUrl ?? "";
     return { url, error: url ? undefined : "CutPot 没有返回编辑器地址" };
   } catch (error) {

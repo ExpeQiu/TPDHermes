@@ -110,7 +110,8 @@ export default function StudioClient({ initialProjectId = "" }: { initialProject
   const [draft, setDraft] = useState("");
   const [skillId, setSkillId] = useState("V04");
   const [released, setReleased] = useState<Record<string, boolean> | null>(null);
-  const [projects, setProjects] = useState<ProjectRecord[]>([]);
+  const [projectList, setProjectList] = useState<ProjectRecord[] | null>();
+  const projects = projectList ?? [];
   const [projectId, setProjectId] = useState(initialProjectId);
   const [includeProject, setIncludeProject] = useState(Boolean(initialProjectId));
   const [demo] = useState(false);
@@ -149,14 +150,20 @@ export default function StudioClient({ initialProjectId = "" }: { initialProject
   }, [boundProjectId]);
   const boundProject = projects.find((project) => project.id === boundProjectId) ?? null;
   const cutpotSelected = activeSkill.id === "V17";
+  const cutpotScopePending = Boolean(boundProjectId) && projectList === undefined;
+  const cutpotProjectId = projectList && !boundProject ? "" : boundProjectId;
+  const cutpotUsingPersonalWorkspace = Boolean(boundProjectId && !cutpotProjectId);
   const localApp = activeSkill.id === "V14" || activeSkill.id === "V18" || activeSkill.id === "V22" ? activeSkill.id : null;
   const productApp = activeSkill.id === "V05" || activeSkill.id === "V07" || activeSkill.id === "V10" ? activeSkill.id : null;
-  const [cutpotUrl, setCutpotUrl] = useState("");
-  const [cutpotError, setCutpotError] = useState("");
+  const [cutpotConnection, setCutpotConnection] = useState<{ projectId: string; url: string; error?: string }>();
   const handleCutpotUrl = useCallback((url: string, error?: string) => {
-    setCutpotUrl(url);
-    setCutpotError(error ?? "");
-  }, []);
+    setCutpotConnection({ projectId: cutpotProjectId, url, error });
+  }, [cutpotProjectId]);
+  const currentCutpotConnection = !cutpotScopePending && cutpotConnection?.projectId === cutpotProjectId
+    ? cutpotConnection
+    : undefined;
+  const cutpotUrl = currentCutpotConnection?.url;
+  const cutpotError = currentCutpotConnection?.error;
   const cutpotEditorUrl = useMemo(() => {
     if (!cutpotUrl) return "";
     try {
@@ -192,11 +199,11 @@ export default function StudioClient({ initialProjectId = "" }: { initialProject
     let cancelled = false;
     apiGet<ProjectRecord[]>("/projects/")
       .then((rows) => {
-        if (!cancelled) setProjects(Array.isArray(rows) ? rows : []);
+        if (!cancelled) setProjectList(Array.isArray(rows) ? rows : null);
       })
       .catch((error) => {
         console.warn("[studio] 项目列表加载失败", error);
-        if (!cancelled) setProjects([]);
+        if (!cancelled) setProjectList(null);
       });
     return () => {
       cancelled = true;
@@ -369,18 +376,18 @@ export default function StudioClient({ initialProjectId = "" }: { initialProject
 
   async function commit(text: string, base: StudioState = studio) {
     const content = text.trim();
-    if (!content || pending || job?.scope === jobScope) return;
+    if (!content || pending || job?.scope === jobScope || (cutpotSelected && cutpotScopePending)) return;
     if (cutpotSelected) {
       setPending(true);
       setDraft("");
       const epoch = requestEpoch.current;
       try {
         const result = await apiPost<{ reply: string }>("/studio/cutpot/chat", {
-          project_id: boundProjectId || null,
+          project_id: cutpotProjectId || null,
           message: content,
         });
         if (epoch !== requestEpoch.current) return;
-        console.info("[studio]", { event: "studio.cutpot.instruction", project_id: boundProjectId || null });
+        console.info("[studio]", { event: "studio.cutpot.instruction", project_id: cutpotProjectId || null });
         setMessages((current) => [
           ...current,
           { id: `user_${current.length}`, role: "user", content },
@@ -707,10 +714,10 @@ export default function StudioClient({ initialProjectId = "" }: { initialProject
             </select>
           </label>
         ) : null}
-        {cutpotSelected ? (
+        {cutpotSelected && !cutpotScopePending ? (
           <CutPotPanel
-            key={boundProjectId || "unbound"}
-            projectId={boundProjectId}
+            key={cutpotProjectId || "unbound"}
+            projectId={cutpotProjectId}
             onUrlChange={handleCutpotUrl}
           />
         ) : null}
@@ -757,7 +764,7 @@ export default function StudioClient({ initialProjectId = "" }: { initialProject
               <button
                 key={prompt}
                 type="button"
-                disabled={pending}
+                disabled={pending || (cutpotSelected && cutpotScopePending)}
                 onClick={() => void commit(prompt)}
                 className="rounded-full border border-slate-300 px-2 py-1 text-xs text-slate-600 hover:bg-slate-100 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-900"
               >
@@ -773,7 +780,7 @@ export default function StudioClient({ initialProjectId = "" }: { initialProject
               aria-label={`${activeSkill.name}指令`}
               className="min-w-0 flex-1 rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm outline-none focus:border-blue-500 dark:border-slate-700 dark:bg-slate-950"
             />
-            <button type="submit" disabled={pending} className="rounded-xl bg-blue-600 px-3 py-2 text-sm text-white disabled:opacity-60">
+            <button type="submit" disabled={pending || (cutpotSelected && cutpotScopePending)} className="rounded-xl bg-blue-600 px-3 py-2 text-sm text-white disabled:opacity-60">
               发送
             </button>
           </div>
@@ -782,6 +789,11 @@ export default function StudioClient({ initialProjectId = "" }: { initialProject
 
       {cutpotSelected ? (
         <section className="flex min-h-0 min-w-0 flex-1 flex-col">
+          {cutpotUsingPersonalWorkspace ? (
+            <p className="shrink-0 border-b px-3 py-2 text-xs text-slate-500">
+              链接中的项目不可用，已切换到个人 CutPot 工作区。
+            </p>
+          ) : null}
           {cutpotEditorUrl ? (
             <iframe
               title="CutPot 编辑器"

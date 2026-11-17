@@ -4,8 +4,11 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import re
 from typing import Any
+
+logger = logging.getLogger("tpdx.hermes.promotion")
 
 TEMPLATE_VERSION = "2026-11-17"
 GEO_PRODUCT = "geo_card_skill"
@@ -249,54 +252,174 @@ def gap_fields(fields: list[dict[str, Any]]) -> list[dict[str, Any]]:
     ]
 
 
+_META_FACT = re.compile(
+    r"系统识别出|已有依据|证据缺口|检索超时|未返回候选|pytest|验收|API 主流程|测试审批|占位符|误判"
+)
+_CUES: dict[str, tuple[re.Pattern[str], ...]] = {
+    "tech_name": (
+        re.compile(r"((?:吉利)?星瑞\s*i-HEV(?:\s*智擎混动)?)"),
+        re.compile(r"(i-HEV\s*智擎混动)"),
+    ),
+    "audience_scene": (re.compile(r"([^，。；]{2,30})作为(?:创作)?场景"),),
+    "selling_points": (re.compile(r"(\d+\s*合\s*\d+[^，。；]{0,36})"),),
+    "mechanism": (re.compile(r"将([^，。；]{2,24})作为([^，。；]{2,48})"),),
+    "vehicle_scope": (re.compile(r"适用车型以([^，。；]{4,48})为准"),),
+    "public_wording": (re.compile(r"确认(技术构成、适用车型和发布边界)"),),
+    "comparison": (
+        re.compile(r"对比项(.+)"),
+        re.compile(r"对比\s*(.{4,80})"),
+    ),
+    "quantified_data": (
+        re.compile(r"(\d+(?:\.\d+)?\s*(?:%|％|L/100\s*km|kWh|kW|分钟|秒)[^，。；]{0,24})"),
+    ),
+    "conditions": (
+        re.compile(r"((?:环境)?零下\s*\d+\s*度[^，。；]{0,20})"),
+        re.compile(r"(WLTC[^，。；]{0,30})"),
+    ),
+}
+
+
+def _table_cells(line: str) -> list[str]:
+    text = line.strip()
+    if not (text.startswith("|") and text.endswith("|")):
+        return []
+    cells = [cell.strip() for cell in text.strip("|").split("|")]
+    if not cells or all(re.fullmatch(r":?-{3,}:?", cell or "") for cell in cells):
+        return []
+    return cells
+
+
+def _passages(content: str) -> list[str]:
+    passages: list[str] = []
+    for raw in (content or "").splitlines():
+        line = raw.strip()
+        if not line:
+            continue
+        if line.startswith("#"):
+            heading = line.lstrip("#").strip()
+            if heading:
+                passages.append(heading)
+            continue
+        cells = _table_cells(line)
+        if cells:
+            if cells[0] in LABEL_TO_KEY and len(cells) > 1:
+                passages.append(f"{cells[0]}：{' '.join(cells[1:])}")
+            else:
+                passages.extend(cell for cell in cells[1:] if cell)
+            continue
+        passages.append(line.lstrip("-").strip())
+    return [item for item in passages if item]
+
+
+def _sentences(passage: str) -> list[str]:
+    return [item.strip() for item in re.split(r"[。；]", passage) if item.strip()]
+
+
+def _label_keys(text: str) -> list[str]:
+    return [item["key"] for item in FIELDS if item["label"] in text]
+
+
+def _is_meta(text: str) -> bool:
+    return bool(_META_FACT.search(text))
+
+
+def _explicit_value(passage: str, label: str) -> str:
+    for sep in ("：", ":"):
+        head, found, tail = passage.partition(sep)
+        if found and head.strip() == label:
+            return tail.strip()
+    return ""
+
+
+def _cue_value(key: str, sentence: str) -> str:
+    for pattern in _CUES.get(key, ()):
+        matched = pattern.search(sentence)
+        if not matched:
+            continue
+        parts = [group.strip() for group in matched.groups() if group and group.strip()]
+        if not parts:
+            continue
+        if key == "mechanism" and len(parts) == 2:
+            return f"{parts[0]} 作为 {parts[1]}"
+        if key == "comparison":
+            text = parts[0].strip()
+            if text.startswith("记录"):
+                text = text[2:].strip()
+            return text
+        return parts[0]
+    return ""
+
+
+def _pick_fact(field: dict[str, Any], passages: list[str]) -> str:
+    label = str(field.get("label") or "")
+    key = str(field.get("key") or "")
+    sentences = [sentence for passage in passages for sentence in _sentences(passage)]
+    for passage in passages:
+        explicit = _explicit_value(passage, label)
+        if explicit and not is_placeholder(explicit) and not _is_meta(explicit):
+            return explicit[:160]
+    for sentence in sentences:
+        if _is_meta(sentence) or len(_label_keys(sentence)) >= 2:
+            continue
+        cued = _cue_value(key, sentence)
+        if cued and not is_placeholder(cued):
+            return cued[:160]
+    for sentence in sentences:
+        if _is_meta(sentence) or _label_keys(sentence) != [key]:
+            continue
+        value = sentence
+        for sep in ("：", ":"):
+            head, found, tail = sentence.partition(sep)
+            if found and label in head:
+                value = tail.strip()
+        if value and value != label and not is_placeholder(value):
+            return value[:160]
+    return ""
+
+
 def suggest_from_project_docs(
     documents: list[dict[str, Any]],
     fields: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
-    """在项目资料正文里为缺口找可核对的短句。结果只作候选，不直接成为事实。"""
+    """在项目资料正文里为缺口找可核对的事实。检查结论和字段名罗列不算取值。"""
     found: list[dict[str, Any]] = []
     seen: set[tuple[str, str]] = set()
     for field in gap_fields(fields):
-        label = str(field.get("label") or "")
         key = str(field.get("key") or "")
+        label = str(field.get("label") or "")
         if not label:
             continue
         for doc in documents:
             if doc.get("parse_status") != "ok":
                 continue
-            for raw in str(doc.get("content") or "").splitlines():
-                line = raw.strip()
-                if not line or label not in line:
-                    continue
-                value = line
-                head, sep, tail = line.partition("：")
-                if not sep:
-                    head, sep, tail = line.partition(":")
-                if sep and label in head:
-                    value = tail.strip()
-                value = value.strip()
-                if is_placeholder(value):
-                    continue
-                value = value[:160]
-                token = (key, value)
-                if token in seen:
-                    continue
-                seen.add(token)
-                found.append(
-                    {
-                        "origin": "project",
-                        "claim": key,
-                        "value": value,
-                        "needs_confirm": True,
-                        "source": {
-                            "doc_id": "",
-                            "locator": str(doc.get("title") or ""),
-                            "url": "",
-                            "file_id": str(doc.get("file_id") or ""),
-                        },
-                    }
-                )
-                break
+            value = _pick_fact(field, _passages(str(doc.get("content") or "")))
+            if not value:
+                continue
+            token = (key, value)
+            if token in seen:
+                continue
+            seen.add(token)
+            found.append(
+                {
+                    "origin": "project",
+                    "claim": key,
+                    "value": value,
+                    "needs_confirm": True,
+                    "source": {
+                        "doc_id": "",
+                        "locator": str(doc.get("title") or ""),
+                        "url": "",
+                        "file_id": str(doc.get("file_id") or ""),
+                    },
+                }
+            )
+            logger.info(
+                "promotion fact candidate claim=%s file_id=%s value=%s",
+                key,
+                doc.get("file_id") or "",
+                value[:80],
+            )
+            break
     return found
 
 

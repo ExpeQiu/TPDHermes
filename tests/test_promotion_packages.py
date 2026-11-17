@@ -728,3 +728,27 @@ def test_geo_card_is_discoverable_and_replaces_legacy_product():
         assert "8 分钟（适用条件：零下7度）" in version["content"]
         assert "项目内部对比" not in version["content"]
         assert len(version["fact_ids"]) == 5
+
+
+def test_project_gap_uses_fact_not_checklist_sentence():
+    from backend.services.promotion_quality import assess_documents, suggest_from_project_docs
+
+    content = """# 吉利 i-HEV 快捷创作验收记录
+使用吉利星瑞 i-HEV 智擎混动公开资料。
+| 准备资料 | 以星瑞官网车型及技术说明为依据，城市通勤和家庭用车作为创作场景。将 11 合 1 作为星瑞 i-HEV 混动专用电驱的集成口径。 |
+| 检查资料 | 系统识别出技术名称、用户与场景、卖点、机理、量化数据、条件、搭载范围和可公开口径共 8 项已有依据，另有同工况对比证据缺口。 |
+| 补齐与确认 | 人工核对官网后确认技术构成、适用车型和发布边界。对比项记录动力形式差异，并明确当前缺少同工况证据，省略节油幅度比较。 |
+| 改稿与审核 | 补充适用车型以星瑞 i-HEV 对应版本官方配置为准。 |
+"""
+    documents = [{"file_id": "f1", "title": "验收记录.md", "parse_status": "ok", "content": content}]
+    assessment = assess_documents(documents, selected=["a4_skill", "interview_qa_skill"])
+    hits = {item["claim"]: item["value"] for item in suggest_from_project_docs(documents, assessment["fields"])}
+    assert hits["tech_name"] == "吉利星瑞 i-HEV 智擎混动"
+    assert hits["audience_scene"] == "城市通勤和家庭用车"
+    assert hits["mechanism"] == "11 合 1 作为 星瑞 i-HEV 混动专用电驱的集成口径"
+    assert hits["vehicle_scope"] == "星瑞 i-HEV 对应版本官方配置"
+    assert "技术构成、适用车型和发布边界" in hits["public_wording"]
+    assert "动力形式差异" in hits["comparison"]
+    assert "系统识别出" not in " ".join(hits.values())
+    assert "quantified_data" not in hits
+    assert "conditions" not in hits

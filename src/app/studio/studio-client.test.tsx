@@ -80,6 +80,30 @@ describe("TPCstore Studio 通路", () => {
     expect(container.textContent).not.toContain("原文A技术");
   });
 
+  it.each([
+    ["", null],
+    ["missing-project", null],
+    ["p1", "p1"],
+  ])("CutPot 使用当前身份可打开的工程（入口 %s）", async (initialProjectId: string, expectedProjectId: string | null) => {
+    apiPost.mockResolvedValueOnce({ webUrl: "http://127.0.0.1:4317/editor" });
+    apiPost.mockResolvedValueOnce({ reply: "已读取 CutPot 工程" });
+    const container = mount(<StudioClient initialProjectId={initialProjectId} />);
+    const card = Array.from(container.querySelectorAll("button")).find(button =>
+      button.textContent?.includes("CutPot 视频制作"),
+    )!;
+    clickElement(card);
+    await waitFor(() => expect(container.querySelector('iframe[title="CutPot 编辑器"]')).not.toBeNull());
+    expect(apiPost.mock.calls).toEqual([
+      ["/studio/cutpot", { project_id: expectedProjectId, action: "connect" }],
+    ]);
+    click(container, "查看工程");
+    await waitFor(() => expect(container.textContent).toContain("已读取 CutPot 工程"));
+    expect(apiPost).toHaveBeenCalledWith("/studio/cutpot/chat", {
+      project_id: expectedProjectId,
+      message: "查看工程",
+    });
+  });
+
   it("重复原文按指定行定位", () => {
     const container = mount(<SourcePane text={"相同原文\n其他\n相同原文"} quote="相同原文" lineStart={3} />);
     const mark = container.querySelector("mark")!;

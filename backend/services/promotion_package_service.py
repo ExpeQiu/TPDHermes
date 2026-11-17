@@ -1042,7 +1042,7 @@ async def save_package_to_project(
         kind="cocreate",
         source_id=f"promotion:{row.id}",
         source_kind="promotion",
-        title="技术推广包",
+        title="快捷创作",
         owner_id=user_id,
         commit=False,
     )
@@ -1131,7 +1131,7 @@ async def _read_snapshot_docs(db: AsyncSession, row: PromotionPackage) -> list[d
         if not detail:
             raise PromotionError(400, "所选文件不存在")
         content = str(detail.get("content") or "")
-        unreadable = content.startswith("（") or str(detail.get("status") or "") in {"failed", "error"}
+        unreadable = not content.strip() or detail.get("readable") is False
         docs.append(
             {
                 "file_id": file_id,

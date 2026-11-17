@@ -1239,7 +1239,7 @@ export default function ProjectDetailPage() {
                   projectId={String(id)}
                   links={[
                     { href: `/projects/${id}/co-create`, label: "项目共创" },
-                    { href: `/projects/${id}/promotion`, label: "技术推广包" },
+                    { href: `/projects/${id}/promotion`, label: "快捷创作" },
                     { href: `/projects/${id}/brainstorm`, label: "头脑风暴" },
                     { href: `/chat?project_id=${id}&new_chat=1`, label: "对话创作" },
                     { href: workshopEntryHref, label: "场景输出" },
