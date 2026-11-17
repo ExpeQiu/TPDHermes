@@ -17,6 +17,7 @@ from backend.services.promotion_package_service import (
     create_package,
     export_package,
     generate_package,
+    save_package_to_project,
     get_package,
     list_packages,
     review_output,
@@ -40,6 +41,7 @@ class PackageCreateBody(BaseModel):
 
 class RevisionBody(BaseModel):
     expected_revision: int
+    fill: bool = False
 
 
 class FactBody(BaseModel):
@@ -151,6 +153,7 @@ async def api_assess_package(
             package_id=package_id,
             user_id=user_id,
             expected_revision=body.expected_revision,
+            fill=body.fill,
         )
     except PromotionError as exc:
         _raise(exc)
@@ -274,3 +277,23 @@ async def api_export_package(
         media_type="application/zip",
         headers={"Content-Disposition": disposition},
     )
+
+
+@router.post("/{project_id}/promotion-packages/{package_id}/save-to-project")
+async def api_save_package_to_project(
+    project_id: str,
+    package_id: str,
+    body: ExportBody,
+    db: AsyncSession = Depends(get_db),
+    user_id: str = Depends(get_effective_user_id),
+):
+    try:
+        return await save_package_to_project(
+            db,
+            project_id=project_id,
+            package_id=package_id,
+            user_id=user_id,
+            output_ids=body.output_ids,
+        )
+    except PromotionError as exc:
+        _raise(exc)

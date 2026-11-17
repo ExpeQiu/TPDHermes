@@ -1,6 +1,6 @@
 import catalog from "../../shared/studio-skills.json";
 
-/** 专业工作区技能卡。目录与 TPCstore V01–V21 对齐。已接入工作区的是 V04、V05、V10、V17。 */
+/** 专业工作区技能卡。目录与 TPCstore V01–V21 对齐，V22 为本机 Peditor。已接入工作区的是 V04、V05、V10、V17、V22。 */
 
 export type StudioSkill = {
   id: string;

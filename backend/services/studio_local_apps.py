@@ -12,6 +12,7 @@ import threading
 import time
 from pathlib import Path
 from urllib.error import URLError
+from urllib.parse import urlparse
 from urllib.request import urlopen
 
 from fastapi import HTTPException
@@ -22,6 +23,7 @@ logger = logging.getLogger("tpdx.hermes.studio_local")
 LOCAL_APPS = {
     "V14": ("SpeechStudio", "SPEECH_STUDIO_URL", "http://127.0.0.1:3217", "/api/health", "speech-rehearsal-studio", "SpeechStudio", ["scripts/start.mjs"], 45),
     "V18": ("FrameFlow", "FRAMEFLOW_URL", "http://127.0.0.1:4318", "/health", "frameflow", "FrameFlow", ["scripts/service.py", "start"], 20),
+    "V22": ("Peditor", "PEDITOR_URL", "http://127.0.0.1:4320", "/health", "peditor", "Peditor", ["backend/server.py"], 20),
 }
 _guard = threading.Lock()
 _jobs: dict[str, dict[str, object]] = {}
@@ -116,22 +118,34 @@ def _command(product: str, spec: tuple) -> list[str]:
         if not script.is_file():
             raise HTTPException(503, "SpeechStudio 启动脚本不存在")
         return [node, str(script)]
+    if product == "V22":
+        python = shutil.which("python3") or sys.executable
+        script = folder / spec[6][0]
+        if not script.is_file():
+            raise HTTPException(503, "Peditor 启动脚本不存在")
+        return [python, str(script)]
     script = folder / spec[6][0]
     if not script.is_file():
-        raise HTTPException(503, "FrameFlow 启动脚本不存在")
+        raise HTTPException(503, f"{spec[0]} 启动脚本不存在")
     return [sys.executable, str(script), *spec[6][1:]]
 
 
 def _run(product: str, spec: tuple, url: str, command: list[str]) -> None:
     log_path = _log_path(product)
     cwd = str(Path(command[1]).resolve().parent.parent)
-    logger.info("studio local app start product=%s command=%s", product, command[1])
+    env = os.environ.copy()
+    if product == "V22":
+        port = urlparse(url).port
+        if port:
+            env["PEDITOR_PORT"] = str(port)
+    logger.info("studio local app start product=%s command=%s cwd=%s", product, command[1], cwd)
     try:
         with log_path.open("ab") as handle:
             handle.write(f"\n--- start {product} ---\n".encode())
             proc = subprocess.Popen(
                 command,
                 cwd=cwd,
+                env=env,
                 stdout=handle,
                 stderr=subprocess.STDOUT,
                 start_new_session=True,

@@ -224,6 +224,7 @@ const SKILL_LABELS: Record<string, string> = {
   knowledge_harvest_draft: "知识收割草稿",
   sales_skill: "销售话术手册",
   material_skill: "传播素材清单",
+  geo_card_skill: "GEO结构化信息卡",
   tech_trend_skill: "技术发展趋势洞察报告",
   model_brand_skill: "技术品牌赋能车型策略",
   brand_name_skill: "技术品牌命名策略报告",

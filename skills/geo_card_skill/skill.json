@@ -1,0 +1,14 @@
+{
+  "name": "GEO结构化信息卡",
+  "description": "把已确认且可公开的汽车技术事实整理为含场景、指标、适用条件及公开来源的 GEO 信息卡。",
+  "when": "GEO结构化信息卡 / GEO技术事实卡",
+  "triggers": ["GEO结构化信息卡", "GEO技术事实卡"],
+  "market_tags": ["GEO", "技术事实", "结构化信息"],
+  "market_category": "传播物料",
+  "version": "1.0.0",
+  "author": "TPD Team",
+  "input_schema": {
+    "facts": "array (已确认事实，字段为 claim、value、visibility、unit、conditions、source_ref)"
+  },
+  "execution": {"type": "python"}
+}

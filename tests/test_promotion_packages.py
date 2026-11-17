@@ -553,3 +553,178 @@ def test_promotion_package_mock_e2e(monkeypatch):
         assert kept.status_code == 200, kept.text
         assert kept.json()["products_state"]["a4_skill"]["status"] == "approved"
         assert kept.json()["facts"]
+
+
+def test_wiki_compress_keeps_core_claims():
+    from backend.services.promotion_quality import wiki_page
+
+    page = wiki_page(
+        [
+            {"id": "f1", "claim": "tech_name", "value": "星海热管理", "visibility": "public", "source_type": "file", "source_ref": "spec.md"},
+            {"id": "f2", "claim": "quantified_data", "value": "8分钟", "conditions": "零下7度", "visibility": "public", "source_type": "file"},
+            {"id": "f3", "claim": "selling_points", "value": "待补充", "visibility": "public"},
+        ],
+        goal="对外介绍",
+        audience="媒体",
+    )
+    assert page["type"] == "product"
+    assert page["title"] == "星海热管理"
+    ids = [item["id"] for item in page["claims"]]
+    assert ids == ["f1", "f2"]
+    metric = page["claims"][1]
+    assert metric["conditions"] == "零下7度"
+    assert metric["statement"] == "量化数据：8分钟"
+    assert [section["heading"] for section in page["sections"]] == ["技术定义与定位", "核心指标"]
+
+
+def test_fill_searches_project_kb_and_web(monkeypatch):
+    calls = {"kb": 0, "web": 0}
+
+    async def _kb(_project_id: str, query: str):
+        calls["kb"] += 1
+        assert "对比" in query
+        return [{"value": "对比：知识库记录公开竞品约 12 分钟", "doc_id": "kb-1", "locator": "第3节"}]
+
+    async def _web(query: str):
+        calls["web"] += 1
+        assert "8分钟" not in query
+        return [{"value": "对比 公开报道预热约 12 分钟", "url": "https://example.com/warm"}]
+
+    async def _public(_query: str):
+        return []
+
+    monkeypatch.setattr("backend.services.promotion_package_service.search_knowledge", _kb)
+    monkeypatch.setattr("backend.services.promotion_package_service.search_web", _web)
+    monkeypatch.setattr("backend.services.promotion_package_service.public_search", _public)
+    owner = f"owner-{uuid.uuid4().hex[:8]}"
+    body = """技术名称：星海热管理
+用户与场景：冬季通勤预热
+卖点：上车即暖
+机理：热泵回收余热
+量化数据：待补充
+条件：环境零下7度
+搭载范围：A级纯电
+可公开口径：可对外发布舱温曲线
+补充说明里提到对比公开竞品预热更慢
+"""
+    with TestClient(app) as client:
+        project_id = _create_project(client, owner)
+        file_id = _upload(client, owner, project_id, "gap.md", body.encode(), "text/markdown")
+        package = _create_package(client, owner, project_id, [file_id])
+        response = client.post(
+            f"/api/v1/projects/{project_id}/promotion-packages/{package['id']}/assess",
+            headers=_headers(owner),
+            json={"expected_revision": package["revision"], "fill": True},
+        )
+        assert response.status_code == 200, response.text
+        detail = response.json()
+        fields = {item["key"]: item for item in detail["assessment"]["fields"]}
+        origins = {(item["origin"], item["claim"]) for item in detail["assessment"]["candidates"]}
+        assert ("project", "comparison") in origins
+        assert ("kb", "comparison") in origins
+        assert ("web", "comparison") in origins
+        assert fields["comparison"]["attention"] == "confirm"
+        assert fields["quantified_data"]["attention"] == "fill"
+        assert detail["assessment"]["fill"]["project"] >= 1
+        assert detail["assessment"]["fill"]["kb"] >= 1
+        assert detail["assessment"]["fill"]["web"] >= 1
+        assert calls == {"kb": 1, "web": 1}
+
+
+def test_complex_manuscripts_stay_out_of_promotion_and_drafts_save_to_project(monkeypatch):
+    from backend.services import promotion_package_service as promotion
+    from backend.services.promotion_quality import PRODUCTS
+
+    for name in ("speech_skill", "speech_draft_skill", "video_skill", "video_script_skill"):
+        assert name not in PRODUCTS
+
+    async def fake_skill(product, context):
+        return {"content": f"# {product}\n可保存正文", "skill_version": "test", "error_type": "", "elapsed_ms": 1}
+
+    monkeypatch.setattr(promotion, "_run_skill", fake_skill)
+    owner = f"owner-{uuid.uuid4().hex[:8]}"
+    with TestClient(app) as client:
+        project_id = _create_project(client, owner)
+        file_id = _upload(client, owner, project_id, "spec.md", SPEC.encode(), "text/markdown")
+        only_speech = client.post(
+            f"/api/v1/projects/{project_id}/promotion-packages",
+            headers=_headers(owner),
+            json={
+                "idempotency_key": uuid.uuid4().hex,
+                "products": ["speech_skill", "video_script_skill"],
+                "file_refs": [{"file_id": file_id, "kind": "attachment"}],
+            },
+        )
+        assert only_speech.status_code == 400
+        package = _create_package(client, owner, project_id, [file_id])
+        assessed = _assess(client, owner, project_id, package)
+        confirmed = _confirm(client, owner, project_id, assessed, _file_facts(assessed), [])
+        generated = _generate(client, owner, project_id, confirmed, ["a4_skill", "speech_skill"])
+        assert "speech_skill" not in generated["products_state"] or generated["products_state"].get("speech_skill", {}).get("head_output_id", "") == ""
+        output_id = generated["products_state"]["a4_skill"]["head_output_id"]
+        assert output_id
+        saved = client.post(
+            f"/api/v1/projects/{project_id}/promotion-packages/{generated['id']}/save-to-project",
+            headers=_headers(owner),
+            json={"output_ids": [output_id]},
+        )
+        assert saved.status_code == 200, saved.text
+        body = saved.json()
+        assert body["saved"] == 1
+        assert body["files"][0]["title"] == "A4技术一页纸"
+        again = client.post(
+            f"/api/v1/projects/{project_id}/promotion-packages/{generated['id']}/save-to-project",
+            headers=_headers(owner),
+            json={"output_ids": [output_id]},
+        )
+        assert again.status_code == 200, again.text
+        assert again.json()["files"][0]["id"] == body["files"][0]["id"]
+        listed = client.get(f"/api/v1/projects/{project_id}/files", headers=_headers(owner))
+        assert listed.status_code == 200
+        matched = [item for item in listed.json()["items"] if item["title"] == "A4技术一页纸"]
+        assert len(matched) == 1
+        assert matched[0]["id"] == body["files"][0]["id"]
+        assert matched[0]["session_id"] == body["session_id"]
+
+
+def test_geo_card_is_discoverable_and_replaces_legacy_product():
+    owner = f"owner-{uuid.uuid4().hex[:8]}"
+    with TestClient(app) as client:
+        workshop = client.get("/api/v1/ws/skills", headers=_headers(owner))
+        assert workshop.status_code == 200, workshop.text
+        assert "geo_card_skill" in workshop.json()["skills"]
+
+        project_id = _create_project(client, owner)
+        file_id = _upload(client, owner, project_id, "geo.md", SPEC.encode(), "text/markdown")
+        response = client.post(
+            f"/api/v1/projects/{project_id}/promotion-packages",
+            headers=_headers(owner),
+            json={
+                "idempotency_key": uuid.uuid4().hex,
+                "products": ["material_skill"],
+                "file_refs": [{"file_id": file_id, "kind": "attachment"}],
+            },
+        )
+        assert response.status_code == 200, response.text
+        package = response.json()
+        assert package["products"] == ["geo_card_skill"]
+        facts = [
+            {"claim": key, "value": value, "visibility": "public", "source_type": "human"}
+            for key, value in {
+                "tech_name": "测试技术",
+                "audience_scene": "冬季通勤",
+                "selling_points": "缩短预热时间",
+                "public_wording": "指定工况下适用",
+            }.items()
+        ]
+        facts.extend([
+            {"claim": "quantified_data", "value": "8", "unit": "分钟", "conditions": "零下7度", "visibility": "public"},
+            {"claim": "comparison", "value": "项目内部对比", "visibility": "project"},
+        ])
+        confirmed = _confirm(client, owner, project_id, package, facts, [])
+        card = _generate(client, owner, project_id, confirmed)["products_state"]["geo_card_skill"]
+        assert card["status"] == "draft"
+        version = card["versions"][0]
+        assert "8 分钟（适用条件：零下7度）" in version["content"]
+        assert "项目内部对比" not in version["content"]
+        assert len(version["fact_ids"]) == 5

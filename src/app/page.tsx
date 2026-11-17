@@ -18,9 +18,9 @@ const entries = [
     eyebrow: "项目",
   },
   {
-    href: "/projects?entry=co-create",
+    href: "/co-create",
     title: "项目共创",
-    desc: "基于项目文件的 Agent 协同工作台，需从项目内进入",
+    desc: "进入项目共创工作台，自动打开最近或首个项目",
     accent: "from-indigo-600 to-violet-700",
     eyebrow: "共创",
   },
@@ -101,7 +101,7 @@ export default function Home() {
               进入项目管理
             </Link>
             <Link
-              href="/projects?entry=co-create"
+              href="/co-create"
               className="inline-flex min-w-40 items-center justify-center rounded-xl border border-slate-300 dark:border-slate-700 bg-white/90 dark:bg-slate-900/60 px-5 py-3 text-sm font-medium text-slate-800 dark:text-slate-200 transition hover:border-slate-300 dark:border-slate-600 hover:bg-slate-200 dark:hover:bg-slate-900"
             >
               项目共创

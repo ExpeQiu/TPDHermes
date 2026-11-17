@@ -18,11 +18,34 @@ export type WorkflowNavItem = {
 };
 
 export function isCoCreateNavPath(pathname: string): boolean {
-  return /\/projects\/[^/]+\/co-create(?:\/|$)/.test(pathname);
+  return pathname === "/co-create" || /\/projects\/[^/]+\/co-create(?:\/|$)/.test(pathname);
 }
 
 export function isBrainstormNavPath(pathname: string): boolean {
   return /\/projects\/[^/]+\/brainstorm(?:\/|$)/.test(pathname);
+}
+
+export function isPromotionNavPath(pathname: string): boolean {
+  return /\/projects\/[^/]+\/promotion(?:\/|$)/.test(pathname);
+}
+
+export function projectIdFromPath(pathname: string): string | null {
+  const id = pathname.match(/^\/projects\/([^/]+)/)?.[1];
+  if (!id || id === "new") return null;
+  return id;
+}
+
+export function resolveTechIpNavHref(scopeUserId: string): string {
+  if (typeof window === "undefined") return "/projects";
+  const current = projectIdFromPath(window.location.pathname);
+  if (current) return `/projects/${current}/promotion`;
+  const brainstormHref = resolveBrainstormNavHref(scopeUserId);
+  const fromBrainstorm = brainstormHref.match(/^\/projects\/([^/]+)\/brainstorm$/)?.[1];
+  if (fromBrainstorm) return `/projects/${fromBrainstorm}/promotion`;
+  const coCreateHref = resolveCoCreateNavHref(scopeUserId);
+  const fromCoCreate = coCreateHref.match(/^\/projects\/([^/]+)\/co-create$/)?.[1];
+  if (fromCoCreate) return `/projects/${fromCoCreate}/promotion`;
+  return "/projects";
 }
 
 export function brainstormProjectStorageKey(scopeUserId: string): string {
@@ -43,15 +66,17 @@ export function resolveBrainstormNavHref(scopeUserId: string): string {
   return "/projects?entry=brainstorm";
 }
 
+const CO_CREATE_ENTRY = "/co-create";
+
 export function resolveCoCreateNavHref(scopeUserId: string): string {
-  if (typeof window === "undefined") return "/projects?entry=co-create";
+  if (typeof window === "undefined") return CO_CREATE_ENTRY;
   try {
     const activeId = window.localStorage.getItem(`TPCharness-co-create-active:${scopeUserId}`);
     const raw = window.localStorage.getItem(`TPCharness-co-create-sessions:${scopeUserId}`);
-    if (!raw) return "/projects?entry=co-create";
+    if (!raw) return CO_CREATE_ENTRY;
     const sessions = JSON.parse(raw) as { id?: string; selectedProjectId?: string }[];
     if (!Array.isArray(sessions) || sessions.length === 0) {
-      return "/projects?entry=co-create";
+      return CO_CREATE_ENTRY;
     }
     const active = activeId
       ? sessions.find((session) => session.id === activeId)
@@ -59,9 +84,52 @@ export function resolveCoCreateNavHref(scopeUserId: string): string {
     const projectId = active?.selectedProjectId?.trim();
     if (projectId) return `/projects/${projectId}/co-create`;
   } catch {
-    // 解析失败时回退到项目列表
+    // 解析失败时进入共创入口，由入口页选择项目
   }
-  return "/projects?entry=co-create";
+  return CO_CREATE_ENTRY;
+}
+
+/** 顶栏把三条创作入口收成一组，页面权限仍按单页判断。 */
+export const CONTENT_CREATION_CENTER = {
+  id: "content-creation",
+  label: "内容创作中心",
+  shortLabel: "内容创作中心",
+  memberLabels: ["项目共创", "头脑风暴", "对话创作"],
+} as const;
+
+export type WorkflowNavGroup = {
+  kind: "group";
+  id: string;
+  label: string;
+  shortLabel: string;
+  items: WorkflowNavItem[];
+};
+
+export type WorkflowNavEntry = { kind: "link"; item: WorkflowNavItem } | WorkflowNavGroup;
+
+export function groupWorkflowNavEntries(items: WorkflowNavItem[]): WorkflowNavEntry[] {
+  const members = new Set<string>(CONTENT_CREATION_CENTER.memberLabels);
+  const grouped: WorkflowNavItem[] = [];
+  const entries: WorkflowNavEntry[] = [];
+  let inserted = false;
+  for (const item of items) {
+    if (members.has(item.label)) {
+      grouped.push(item);
+      if (!inserted) {
+        entries.push({
+          kind: "group",
+          id: CONTENT_CREATION_CENTER.id,
+          label: CONTENT_CREATION_CENTER.label,
+          shortLabel: CONTENT_CREATION_CENTER.shortLabel,
+          items: grouped,
+        });
+        inserted = true;
+      }
+      continue;
+    }
+    entries.push({ kind: "link", item });
+  }
+  return entries;
 }
 
 export const WORKFLOW_NAV_ITEMS: WorkflowNavItem[] = [
@@ -79,10 +147,19 @@ export const WORKFLOW_NAV_ITEMS: WorkflowNavItem[] = [
     matchActive: (pathname) =>
       pathname.startsWith("/projects") &&
       !isCoCreateNavPath(pathname) &&
-      !isBrainstormNavPath(pathname),
+      !isBrainstormNavPath(pathname) &&
+      !isPromotionNavPath(pathname),
   },
   {
-    href: "/projects?entry=co-create",
+    href: "/projects",
+    label: "快捷创作",
+    shortLabel: "快捷创作",
+    description: "进入当前项目的快捷创作。",
+    matchActive: isPromotionNavPath,
+    resolveHref: resolveTechIpNavHref,
+  },
+  {
+    href: "/co-create",
     label: "项目共创",
     shortLabel: "项目共创",
     description: "项目成员与角色 Agent 一起讨论，不自动新建文档。",
@@ -112,9 +189,9 @@ export const WORKFLOW_NAV_ITEMS: WorkflowNavItem[] = [
   },
   {
     href: "/studio",
-    label: "场景创作",
-    shortLabel: "场景创作",
-    description: "按技能卡进入场景创作。当前接入技术卡、价值链、信息屋、主张证据、SpeechStudio、CutPot 和 FrameFlow。",
+    label: "媒体工作台",
+    shortLabel: "媒体工作台",
+    description: "按技能卡进入媒体工作台。当前接入技术卡、价值链、信息屋、主张证据、SpeechStudio、CutPot 和 FrameFlow。",
   },
   {
     href: "/create",

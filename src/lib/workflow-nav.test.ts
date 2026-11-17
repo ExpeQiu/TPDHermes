@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 
-import { accessibleWorkflowPages } from "./workflow-nav";
+import {
+  accessibleWorkflowPages,
+  groupWorkflowNavEntries,
+  isCoCreateNavPath,
+  WORKFLOW_NAV_ITEMS,
+} from "./workflow-nav";
 
 const editorFeatures = [
   "create",
@@ -11,6 +16,35 @@ const editorFeatures = [
   "workshop",
   "settings",
 ];
+
+describe("groupWorkflowNavEntries", () => {
+  it("folds co-create, brainstorm and chat into one content center", () => {
+    const entries = groupWorkflowNavEntries(WORKFLOW_NAV_ITEMS);
+    const labels = entries.map((entry) => (entry.kind === "group" ? entry.label : entry.item.label));
+    expect(labels).toContain("内容创作中心");
+    expect(labels).not.toContain("项目共创");
+    expect(labels).not.toContain("头脑风暴");
+    expect(labels).not.toContain("对话创作");
+    const group = entries.find((entry) => entry.kind === "group");
+    expect(group?.kind === "group" ? group.items.map((item) => item.label) : []).toEqual([
+      "项目共创",
+      "头脑风暴",
+      "对话创作",
+    ]);
+    const centerIndex = labels.indexOf("内容创作中心");
+    expect(labels[centerIndex - 1]).toBe("快捷创作");
+    expect(labels[centerIndex - 2]).toBe("项目中心");
+  });
+});
+
+describe("co-create nav", () => {
+  it("points the menu at /co-create instead of the project center", () => {
+    const item = WORKFLOW_NAV_ITEMS.find((entry) => entry.label === "项目共创");
+    expect(item?.href).toBe("/co-create");
+    expect(isCoCreateNavPath("/co-create")).toBe(true);
+    expect(isCoCreateNavPath("/projects/p1/co-create")).toBe(true);
+  });
+});
 
 describe("accessibleWorkflowPages", () => {
   it("hides admin entries until access is known", () => {
@@ -29,7 +63,7 @@ describe("accessibleWorkflowPages", () => {
       platformRole: "tenant_editor",
     }).map((page) => page.label);
     expect(labels).toEqual(
-      expect.arrayContaining(["工作台首页", "项目中心", "头脑风暴", "对话创作", "场景创作", "技能工坊"]),
+      expect.arrayContaining(["工作台首页", "项目中心", "快捷创作", "头脑风暴", "对话创作", "媒体工作台", "技能工坊"]),
     );
     expect(labels).not.toContain("场景输出");
     expect(labels).not.toContain("场景编排");
@@ -56,10 +90,11 @@ describe("accessibleWorkflowPages", () => {
     expect(labels).toEqual([
       "工作台首页",
       "项目中心",
+      "快捷创作",
       "项目共创",
       "头脑风暴",
       "对话创作",
-      "场景创作",
+      "媒体工作台",
       "技能工坊",
     ]);
   });

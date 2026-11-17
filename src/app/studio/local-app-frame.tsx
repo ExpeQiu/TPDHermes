@@ -14,7 +14,7 @@ type LocalStatus = {
 };
 
 /** 点击技能卡后请求后台启动，进度完成再嵌入本机工作台。 */
-export function LocalAppFrame({ product }: { product: "V14" | "V18" }) {
+export function LocalAppFrame({ product }: { product: "V14" | "V18" | "V22" }) {
   const [status, setStatus] = useState<LocalStatus | null>(null);
   const [error, setError] = useState("");
   const [attempt, setAttempt] = useState(0);
@@ -77,6 +77,7 @@ export function LocalAppFrame({ product }: { product: "V14" | "V18" }) {
       title={status.name}
       src={status.url}
       className="min-h-0 w-full flex-1 border-0 bg-slate-950"
+      onLoad={() => console.info("[studio]", { event: "studio.local_app.embed", product, url: status.url })}
     />
   );
 }

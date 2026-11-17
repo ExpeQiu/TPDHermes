@@ -33,7 +33,7 @@ function connectCutpot(projectId: string): Promise<{ url: string; error?: string
   return task;
 }
 
-/** 绑定项目后连接本机 CutPot，把编辑器地址交给右侧工作台。 */
+/** 连接本机 CutPot。未选项目时走用户工作区，选中项目后再隔离到该项目。 */
 export function CutPotPanel({
   projectId,
   onUrlChange,

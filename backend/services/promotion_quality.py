@@ -7,17 +7,23 @@ import json
 import re
 from typing import Any
 
-TEMPLATE_VERSION = "2026-11-16"
+TEMPLATE_VERSION = "2026-11-17"
+GEO_PRODUCT = "geo_card_skill"
+# 发言稿、领导讲稿、短视频脚本、导演脚本需多轮成稿，不走技术推广包。
+RETIRED_PRODUCTS = frozenset(
+    {
+        "speech_skill",
+        "speech_draft_skill",
+        "video_skill",
+        "video_script_skill",
+    }
+)
 PRODUCTS = (
     "a4_skill",
     "tech_pr_skill",
     "interview_qa_skill",
-    "speech_skill",
-    "speech_draft_skill",
-    "video_skill",
-    "video_script_skill",
     "sales_skill",
-    "material_skill",
+    GEO_PRODUCT,
 )
 _COMMON = list(PRODUCTS)
 PRODUCT_TITLES = {
@@ -30,6 +36,7 @@ PRODUCT_TITLES = {
     "video_script_skill": "导演脚本",
     "sales_skill": "销售话术",
     "material_skill": "传播素材清单",
+    GEO_PRODUCT: "GEO结构化信息卡",
 }
 PRODUCT_FILES = {
     "a4_skill": "A4技术一页纸.md",
@@ -41,6 +48,7 @@ PRODUCT_FILES = {
     "video_script_skill": "导演脚本.md",
     "sales_skill": "销售话术.md",
     "material_skill": "传播素材清单.md",
+    GEO_PRODUCT: "GEO结构化信息卡.md",
 }
 
 FIELDS: list[dict[str, Any]] = [
@@ -233,6 +241,86 @@ def assess_documents(
     return {"fields": fields, "candidates": candidates, "blocked_products": blocked}
 
 
+def gap_fields(fields: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [
+        field
+        for field in fields
+        if field.get("status") in {"missing", "conflict"} and field.get("key") != "parse"
+    ]
+
+
+def suggest_from_project_docs(
+    documents: list[dict[str, Any]],
+    fields: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """在项目资料正文里为缺口找可核对的短句。结果只作候选，不直接成为事实。"""
+    found: list[dict[str, Any]] = []
+    seen: set[tuple[str, str]] = set()
+    for field in gap_fields(fields):
+        label = str(field.get("label") or "")
+        key = str(field.get("key") or "")
+        if not label:
+            continue
+        for doc in documents:
+            if doc.get("parse_status") != "ok":
+                continue
+            for raw in str(doc.get("content") or "").splitlines():
+                line = raw.strip()
+                if not line or label not in line:
+                    continue
+                value = line
+                head, sep, tail = line.partition("：")
+                if not sep:
+                    head, sep, tail = line.partition(":")
+                if sep and label in head:
+                    value = tail.strip()
+                value = value.strip()
+                if is_placeholder(value):
+                    continue
+                value = value[:160]
+                token = (key, value)
+                if token in seen:
+                    continue
+                seen.add(token)
+                found.append(
+                    {
+                        "origin": "project",
+                        "claim": key,
+                        "value": value,
+                        "needs_confirm": True,
+                        "source": {
+                            "doc_id": "",
+                            "locator": str(doc.get("title") or ""),
+                            "url": "",
+                            "file_id": str(doc.get("file_id") or ""),
+                        },
+                    }
+                )
+                break
+    return found
+
+
+def mark_gap_attention(fields: list[dict[str, Any]], candidates: list[dict[str, Any]]) -> None:
+    covered = {str(item.get("claim") or "") for item in candidates if str(item.get("value") or "").strip()}
+    for field in fields:
+        status = field.get("status")
+        key = str(field.get("key") or "")
+        if status == "conflict" or (status == "missing" and key in covered):
+            field["attention"] = "confirm"
+        elif status == "missing":
+            field["attention"] = "fill"
+        else:
+            field["attention"] = ""
+
+
+def public_gap_query(fields: list[dict[str, Any]], label: str) -> str:
+    """联网检索词只用可公开称呼，不带内部实测数字。"""
+    base = build_search_query(fields)
+    if base == "公开技术对比":
+        return f"公开技术 {label}".strip()
+    return f"{base} {label}".strip()
+
+
 def build_search_query(fields: list[dict[str, Any]]) -> str:
     """检索词只用可公开信息，不带内部参数。"""
     by_key = {field["key"]: field for field in fields}
@@ -249,14 +337,76 @@ def build_search_query(fields: list[dict[str, Any]]) -> str:
     return "公开技术对比"
 
 
-def blocked_by_facts(facts: list[dict[str, Any]], selected: list[str]) -> list[dict[str, Any]]:
-    present = {
-        str(fact.get("claim") or "")
-        for fact in facts
-        if str(fact.get("value") or "").strip() and not is_placeholder(str(fact.get("value") or ""))
+_WIKI_SECTIONS = (
+    ("技术定义与定位", {"tech_name", "selling_points", "public_wording"}),
+    ("工作机制与核心能力", {"mechanism"}),
+    ("核心指标", {"quantified_data", "conditions", "comparison"}),
+    ("应用与场景", {"audience_scene", "vehicle_scope"}),
+)
+
+
+def wiki_page(facts: list[dict[str, Any]], *, goal: str = "", audience: str = "") -> dict[str, Any]:
+    """按技术页结构收成 claims。占位和空值不进入，条件紧挨结论。"""
+    claims: list[dict[str, Any]] = []
+    for fact in facts:
+        value = str(fact.get("value") or "").strip()
+        claim_key = str(fact.get("claim") or "")
+        if not value or is_placeholder(value) or claim_key not in FIELD_BY_KEY:
+            continue
+        label = FIELD_BY_KEY[claim_key]["label"]
+        statement = value if value.startswith(label) else f"{label}：{value}"
+        visibility = "public" if str(fact.get("visibility") or "") == "public" else "project"
+        claims.append(
+            {
+                "id": str(fact.get("id") or claim_key),
+                "claim": claim_key,
+                "statement": statement,
+                "conditions": str(fact.get("conditions") or "").strip(),
+                "source": " ".join(
+                    part
+                    for part in (str(fact.get("source_type") or ""), str(fact.get("source_ref") or ""))
+                    if part
+                ),
+                "usage": "current" if visibility == "public" else "internal",
+            }
+        )
+    by_key = {item["claim"]: item for item in claims}
+    sections = []
+    for heading, keys in _WIKI_SECTIONS:
+        lines = []
+        for key in keys:
+            item = by_key.get(key)
+            if not item:
+                continue
+            line = item["statement"]
+            if item["conditions"]:
+                line = f"{line}（{item['conditions']}）"
+            lines.append(line)
+        if lines:
+            sections.append({"heading": heading, "body": "\n".join(lines)})
+    title = ""
+    if "tech_name" in by_key:
+        title = by_key["tech_name"]["statement"].split("：", 1)[-1]
+    return {
+        "type": "product",
+        "title": title,
+        "goal": goal.strip(),
+        "audience": audience.strip(),
+        "summary": sections[0]["body"].split("\n", 1)[0] if sections else "",
+        "sections": sections,
+        "claims": claims,
     }
+
+
+def blocked_by_facts(facts: list[dict[str, Any]], selected: list[str]) -> list[dict[str, Any]]:
     blocked: list[dict[str, Any]] = []
     for product in selected:
+        present = {
+            str(fact.get("claim") or "")
+            for fact in facts
+            if (product != GEO_PRODUCT or fact.get("visibility") == "public")
+            and not is_placeholder(str(fact.get("value") or ""))
+        }
         spec = [item["key"] for item in FIELDS if product in item["required_for"]]
         missing = [key for key in spec if key not in present]
         if missing:
@@ -302,6 +452,19 @@ def changed_fact_ids(previous: list[dict[str, Any]], current: list[dict[str, Any
 
 
 def skill_context(product: str, facts: list[dict[str, Any]], brief: dict[str, Any]) -> dict[str, Any]:
+    if product == GEO_PRODUCT:
+        return {"facts": [fact for fact in facts if fact.get("visibility") == "public"]}
+    context = _skill_context(product, facts, brief)
+    wiki = brief.get("wiki") if isinstance(brief.get("wiki"), dict) else {}
+    context["wiki_claims"] = [
+        item.get("statement")
+        for item in wiki.get("claims") or []
+        if isinstance(item, dict) and item.get("statement")
+    ]
+    return context
+
+
+def _skill_context(product: str, facts: list[dict[str, Any]], brief: dict[str, Any]) -> dict[str, Any]:
     by_claim = {str(fact.get("claim")): fact for fact in facts}
     def value(key: str) -> str:
         return str((by_claim.get(key) or {}).get("value") or "")
@@ -360,17 +523,12 @@ def skill_context(product: str, facts: list[dict[str, Any]], brief: dict[str, An
             "vehicle_model": value("vehicle_scope") or "目标车型",
             "top_selling_points": [value("selling_points")] if value("selling_points") else [],
         }
-    if product == "material_skill":
-        return {
-            "project_name": tech,
-            "vehicle_model": value("vehicle_scope") or "目标车型",
-            "tech_theme": value("selling_points") or tech,
-            "topic": tech,
-        }
     return {"topic": tech, "spokesperson": str(brief.get("audience") or "项目发言人")}
 
 
 def cited_fact_ids(product: str, facts: list[dict[str, Any]]) -> list[str]:
+    if product == GEO_PRODUCT:
+        return [str(fact["id"]) for fact in facts if fact.get("id") and fact.get("visibility") == "public" and fact.get("claim") in FIELD_BY_KEY]
     required = [item["key"] for item in FIELDS if product in item["required_for"]]
     by_claim = {str(fact.get("claim")): str(fact.get("id")) for fact in facts if fact.get("id")}
     return [by_claim[key] for key in required if key in by_claim]

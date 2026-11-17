@@ -27,3 +27,17 @@ def test_down_app_reports_url(monkeypatch):
     assert body["ready"] is False
     assert body["phase"] == "idle"
     assert body["url"] == "http://127.0.0.1:4318"
+
+
+def test_peditor_reports_local_url(monkeypatch):
+    def fail(*_args, **_kwargs):
+        raise URLError("refused")
+
+    monkeypatch.setattr(studio_local_apps, "urlopen", fail)
+    with TestClient(app) as client:
+        response = client.get("/api/v1/studio/local-apps/V22")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["name"] == "Peditor"
+    assert body["ready"] is False
+    assert body["url"] == "http://127.0.0.1:4320"

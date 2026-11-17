@@ -1,13 +1,18 @@
+/** 复杂文稿改由共创等路径完成，技术推广包只保留可一次成稿的出品。 */
+export const RETIRED_PROMOTION_PRODUCTS = [
+  "speech_skill",
+  "speech_draft_skill",
+  "video_skill",
+  "video_script_skill",
+  "material_skill",
+] as const;
+
 export const PROMOTION_PRODUCTS = [
   { id: "a4_skill", label: "A4 技术一页纸" },
   { id: "tech_pr_skill", label: "技术通稿" },
   { id: "interview_qa_skill", label: "采访 QA" },
-  { id: "speech_skill", label: "发言稿" },
-  { id: "speech_draft_skill", label: "领导讲稿" },
-  { id: "video_skill", label: "短视频脚本" },
-  { id: "video_script_skill", label: "导演脚本" },
   { id: "sales_skill", label: "销售话术" },
-  { id: "material_skill", label: "传播素材清单" },
+  { id: "geo_card_skill", label: "GEO结构化信息卡" },
 ] as const;
 
 export const DEFAULT_PROMOTION_PRODUCTS = ["a4_skill", "tech_pr_skill", "interview_qa_skill"];

@@ -23,7 +23,7 @@ from backend.services.tpcstore_bridge import (
     read_studio_source,
     read_workbench_html,
 )
-from backend.services.user_identity import get_effective_user_id
+from backend.services.user_identity import get_effective_user_id, is_global_admin_user
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/studio", tags=["studio"])
@@ -383,10 +383,44 @@ async def read_workbench_job(
 
 
 class CutPotRequest(BaseModel):
-    project_id: str
+    project_id: str | None = None
     action: Literal["connect", "show", "rename", "disconnect"]
     name: str | None = Field(default=None, min_length=1, max_length=120)
     expected_revision: str | None = None
+
+
+async def _cutpot_scope(
+    db: AsyncSession, project_id: str | None, user_id: str
+) -> tuple[str, str]:
+    """返回 (工作区键, 已绑定项目 id)。未选项目时不校验项目权限。"""
+    from backend.services.cutpot_workbench import workspace_id
+    from backend.services.project_access import (
+        project_owner_id,
+        require_project_for_user,
+    )
+
+    bound = (project_id or "").strip()
+    if not bound:
+        logger.info("cutpot open unbound user_id=%s", user_id)
+        return workspace_id(None, user_id), ""
+    project = await require_project_for_user(db, bound, user_id, min_perm="write")
+    owner_id = project_owner_id(project)
+    if owner_id != user_id and not is_global_admin_user(user_id):
+        logger.warning(
+            "cutpot denied project_id=%s user_id=%s owner_id=%s",
+            bound,
+            user_id,
+            owner_id,
+        )
+        raise HTTPException(403, "CutPot 本机工程仅供项目所有者操作")
+    if owner_id != user_id:
+        logger.info(
+            "cutpot open project_id=%s user_id=%s owner_id=%s via=global_admin",
+            bound,
+            user_id,
+            owner_id,
+        )
+    return workspace_id(bound, user_id), bound
 
 
 @router.post("/cutpot")
@@ -396,31 +430,23 @@ async def cutpot_workbench(
     user_id: str = Depends(get_effective_user_id),
 ) -> dict[str, Any]:
     from backend.services.cutpot_workbench import call_cutpot
-    from backend.services.project_access import (
-        project_owner_id,
-        require_project_for_user,
-    )
 
-    project = await require_project_for_user(
-        db, request.project_id, user_id, min_perm="write"
-    )
-    if project_owner_id(project) != user_id:
-        raise HTTPException(403, "CutPot 本机工程仅供项目所有者操作")
+    scope, bound = await _cutpot_scope(db, request.project_id, user_id)
     if request.action in {"connect", "disconnect"}:
-        data = await call_cutpot(request.project_id, request.action)
-        if request.action == "connect":
+        data = await call_cutpot(scope, request.action)
+        if request.action == "connect" and bound:
             from backend.services.project_session_service import record_cutpot_reference
 
             await record_cutpot_reference(
-                db, project_id=request.project_id, user_id=user_id, detail=data
+                db, project_id=bound, user_id=user_id, detail=data
             )
         return data
     if request.action == "show":
-        return await call_cutpot(request.project_id, "turn")
+        return await call_cutpot(scope, "turn")
     if not request.name or not request.name.strip() or not request.expected_revision:
         raise HTTPException(422, "请提供新名称和当前 CutPot 工程版本")
     return await call_cutpot(
-        request.project_id,
+        scope,
         "turn",
         "project-rename",
         name=request.name,
@@ -436,7 +462,7 @@ class CutPotInstruction(BaseModel):
 
 
 class CutPotChatRequest(BaseModel):
-    project_id: str
+    project_id: str | None = None
     message: str = Field(min_length=1, max_length=1000)
 
 

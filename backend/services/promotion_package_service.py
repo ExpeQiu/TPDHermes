@@ -25,17 +25,24 @@ from backend.models.promotion_package import (
 from backend.services.file_action_service import FileActionConflict, _claim_output_version
 from backend.services.project_access import project_owner_id, require_project_for_user
 from backend.services.project_files_service import get_project_file_detail
+from backend.services.project_session_service import ensure_project_session
 from backend.services.project_member_service import get_project_role
 from backend.services.promotion_quality import (
     FIELDS,
     PRODUCT_FILES,
     PRODUCT_TITLES,
+    GEO_PRODUCT,
     PRODUCTS,
+    RETIRED_PRODUCTS,
     TEMPLATE_VERSION,
     append_citations,
     assess_documents,
     blocked_by_facts,
     build_search_query,
+    gap_fields,
+    mark_gap_attention,
+    public_gap_query,
+    suggest_from_project_docs,
     changed_fact_ids,
     cited_fact_ids,
     corpus_token,
@@ -44,6 +51,7 @@ from backend.services.promotion_quality import (
     invalidate_products,
     safe_zip_name,
     skill_context,
+    wiki_page,
 )
 from backend.services.skill_loader import get_loader
 from backend.services.user_identity import is_global_admin_user
@@ -86,6 +94,52 @@ async def public_search(query: str) -> list[dict[str, Any]]:
     """默认可替换的公开检索。未配置外部检索时返回空列表，不抛网络错误。"""
     _ = query
     return []
+
+
+async def search_knowledge(project_id: str, query: str) -> list[dict[str, Any]]:
+    """项目知识库检索。失败时返回空列表，由调用方记日志。"""
+    from backend.services.project_kb import project_kb_collection
+    from backend.tools.kb_tools import kb_query
+
+    # 不传 project_id，避免来源捕获再抢同一条数据库连接，把补齐拖成逐项等待。
+    result = await kb_query(query, project_kb_collection(project_id), limit=3, project_id=None)
+    rows = result.get("results") if isinstance(result, dict) else []
+    found: list[dict[str, Any]] = []
+    for row in rows or []:
+        if not isinstance(row, dict):
+            continue
+        text = str(row.get("content") or "").strip().replace("\n", " ")
+        if not text:
+            continue
+        meta = row.get("metadata") if isinstance(row.get("metadata"), dict) else {}
+        found.append(
+            {
+                "value": text[:160],
+                "doc_id": str(meta.get("doc_id") or meta.get("id") or ""),
+                "locator": str(meta.get("locator") or meta.get("heading") or meta.get("title") or ""),
+            }
+        )
+    return found[:1]
+
+
+async def search_web(query: str) -> list[dict[str, Any]]:
+    """互联网检索。未配置或失败时返回空列表。"""
+    from backend.tools.tavily_tools import tavily_search
+
+    result = await tavily_search(query, max_results=2)
+    if isinstance(result, dict) and result.get("error"):
+        raise RuntimeError(str(result.get("error")))
+    rows = result.get("results") if isinstance(result, dict) else []
+    found: list[dict[str, Any]] = []
+    for row in rows or []:
+        if not isinstance(row, dict):
+            continue
+        text = str(row.get("content") or row.get("snippet") or row.get("title") or "").strip().replace("\n", " ")
+        url = str(row.get("url") or "")
+        if not text or not url:
+            continue
+        found.append({"value": text[:160], "url": url})
+    return found[:1]
 
 
 def _lease_deadline() -> str:
@@ -232,6 +286,124 @@ async def get_package(
     return await _detail(db, row, role=role, replayed=False)
 
 
+def _append_candidate(assessment: dict[str, Any], item: dict[str, Any]) -> None:
+    value = str(item.get("value") or "").strip()
+    claim = str(item.get("claim") or "").strip()
+    origin = str(item.get("origin") or "")
+    if not value or not claim or not origin:
+        return
+    for existing in assessment["candidates"]:
+        if existing.get("origin") == origin and existing.get("claim") == claim and existing.get("value") == value:
+            return
+    assessment["candidates"].append(item)
+
+
+def _attach_external_hits(
+    assessment: dict[str, Any],
+    gaps: list[dict[str, Any]],
+    hits: list[dict[str, Any]],
+    *,
+    origin: str,
+) -> int:
+    """只把命中字段名的片段挂到对应缺口，一次检索覆盖多项。"""
+    count = 0
+    for hit in hits:
+        text = str(hit.get("value") or "")
+        if not text:
+            continue
+        for field in gaps:
+            label = str(field.get("label") or "")
+            key = str(field.get("key") or "")
+            if (label and label in text) or (key and key in text):
+                _append_candidate(
+                    assessment,
+                    {
+                        "origin": origin,
+                        "claim": key,
+                        "value": text[:160],
+                        "visibility": "public",
+                        "needs_confirm": True,
+                        "source": {
+                            "doc_id": str(hit.get("doc_id") or ""),
+                            "locator": str(hit.get("locator") or hit.get("url") or ""),
+                            "url": str(hit.get("url") or ""),
+                            "file_id": "",
+                        },
+                    },
+                )
+                count += 1
+                break
+    return count
+
+
+async def _fill_gaps(
+    *,
+    project_id: str,
+    package_id: str,
+    documents: list[dict[str, Any]],
+    assessment: dict[str, Any],
+) -> str:
+    """按缺口检索项目资料、知识库和互联网。候选需人工确认后才能写入事实。"""
+    gaps = gap_fields(assessment["fields"])
+    project_hits = suggest_from_project_docs(documents, assessment["fields"])
+    for item in project_hits:
+        _append_candidate(assessment, item)
+    if not gaps:
+        mark_gap_attention(assessment["fields"], assessment["candidates"])
+        assessment["fill"] = {"project": len(project_hits), "kb": 0, "web": 0}
+        return ""
+    labels = [str(field.get("label") or "") for field in gaps if field.get("label")]
+    kb_query = " ".join(labels)[:180]
+    web_query = public_gap_query(assessment["fields"], " ".join(labels[:4]))[:180]
+    started = time.perf_counter()
+
+    async def _bounded(name: str, coro):
+        try:
+            return await asyncio.wait_for(coro, timeout=8)
+        except Exception as exc:  # noqa: BLE001
+            logger.info(
+                "promotion fill %s failed package_id=%s project_id=%s error_type=%s elapsed_ms=%s",
+                name,
+                package_id,
+                project_id,
+                type(exc).__name__,
+                int((time.perf_counter() - started) * 1000),
+            )
+            return exc
+
+    kb_result, web_result = await asyncio.gather(
+        _bounded("kb", search_knowledge(project_id, kb_query)),
+        _bounded("web", search_web(web_query)),
+    )
+    kb_hits = kb_result if isinstance(kb_result, list) else []
+    web_hits = web_result if isinstance(web_result, list) else []
+    errors = [
+        type(item).__name__
+        for item in (kb_result, web_result)
+        if not isinstance(item, list)
+    ]
+    search_error = errors[0] if errors else ""
+    kb_count = _attach_external_hits(assessment, gaps, kb_hits, origin="kb")
+    web_count = _attach_external_hits(assessment, gaps, web_hits, origin="web")
+    mark_gap_attention(assessment["fields"], assessment["candidates"])
+    assessment["fill"] = {
+        "project": len(project_hits),
+        "kb": kb_count,
+        "web": web_count,
+    }
+    logger.info(
+        "promotion fill package_id=%s project_id=%s project=%s kb=%s web=%s gaps=%s error_type=%s",
+        package_id,
+        project_id,
+        len(project_hits),
+        kb_count,
+        web_count,
+        len(gaps),
+        search_error,
+    )
+    return search_error
+
+
 async def assess_package(
     db: AsyncSession,
     *,
@@ -239,6 +411,7 @@ async def assess_package(
     package_id: str,
     user_id: str,
     expected_revision: int,
+    fill: bool = False,
 ) -> dict[str, Any]:
     started = time.perf_counter()
     row, _project, role = await _load_package(
@@ -248,7 +421,7 @@ async def assess_package(
     await recover_expired_steps(db, package_id=row.id)
     documents = await _read_snapshot_docs(db, row)
     selected = _loads(row.product_types_json, [])
-    assessment = assess_documents(documents, selected=selected)
+    assessment = assess_documents(documents, selected=[GEO_PRODUCT if name == "material_skill" else name for name in selected])
     search_error = ""
     query = build_search_query(assessment["fields"])
     try:
@@ -266,20 +439,33 @@ async def assess_package(
     for item in found:
         if not isinstance(item, dict):
             continue
-        assessment["candidates"].append(
+        _append_candidate(
+            assessment,
             {
                 "origin": "web",
                 "claim": str(item.get("claim") or "comparison"),
                 "value": str(item.get("value") or ""),
                 "visibility": "public",
+                "needs_confirm": True,
                 "source": {
                     "doc_id": "",
                     "locator": str(item.get("url") or ""),
                     "url": str(item.get("url") or ""),
                     "file_id": "",
                 },
-            }
+            },
         )
+    if fill:
+        fill_error = await _fill_gaps(
+            project_id=project_id,
+            package_id=row.id,
+            documents=documents,
+            assessment=assessment,
+        )
+        if fill_error:
+            search_error = search_error or fill_error
+    elif gap_fields(assessment["fields"]):
+        mark_gap_attention(assessment["fields"], assessment["candidates"])
     for index, candidate in enumerate(assessment["candidates"], start=1):
         candidate["id"] = candidate.get("id") or f"cand_{index}"
         candidate["adopted"] = False
@@ -359,12 +545,15 @@ async def confirm_facts(
     for item in facts:
         origin = str(item.get("source_type") or "human")
         candidate_id = str(item.get("candidate_id") or "")
+        source_ref = str(item.get("source_ref") or "")
         if origin in {"kb", "web"}:
             candidate = candidates.get(candidate_id)
             if candidate_id not in adopted or not candidate:
                 raise PromotionError(400, "知识库和联网证据需人工采纳后才能确认")
             if candidate.get("origin") != origin:
                 raise PromotionError(400, "候选来源与事实来源不一致")
+            if origin == "web":
+                source_ref = str((candidate.get("source") or {}).get("url") or source_ref)
         claim = str(item.get("claim") or "")
         if claim not in {field["key"] for field in FIELDS}:
             raise PromotionError(400, f"未知事实字段 {claim}")
@@ -378,7 +567,7 @@ async def confirm_facts(
                 "conditions": str(item.get("conditions") or "").strip(),
                 "visibility": "public" if str(item.get("visibility") or "") == "public" else "project",
                 "source_type": origin,
-                "source_ref": str(item.get("source_ref") or candidate_id),
+                "source_ref": source_ref or candidate_id,
                 "candidate_id": candidate_id,
                 "confirmed_by": user_id,
             }
@@ -390,13 +579,15 @@ async def confirm_facts(
     changed = changed_fact_ids(previous_facts, cleaned) if previous_facts else []
     row.brief_version = int(row.brief_version or 0) + 1
     row.facts_version = int(row.facts_version or 0) + 1
+    page = wiki_page(cleaned, goal=goal, audience=audience)
     row.brief_json = _dumps(
         {
             "goal": goal.strip(),
             "audience": audience.strip(),
-            "summary": summary.strip(),
+            "summary": page["summary"] or summary.strip(),
             "version": row.brief_version,
             "confirmed_by": user_id,
+            "wiki": page,
         }
     )
     row.facts_json = _dumps(cleaned)
@@ -499,7 +690,9 @@ async def generate_package(
             )
             continue
         fact_ids = cited_fact_ids(name, facts)
-        content = append_citations(outcome["content"], facts, fact_ids)
+        content = outcome["content"]
+        if name != GEO_PRODUCT:
+            content = append_citations(content, facts, fact_ids)
         output = _new_output(
             project_id=project_id,
             user_id=user_id,
@@ -826,6 +1019,67 @@ async def export_package(
     return f"promotion-{row.id[:8]}.zip", data
 
 
+async def save_package_to_project(
+    db: AsyncSession,
+    *,
+    project_id: str,
+    package_id: str,
+    user_id: str,
+    output_ids: list[str],
+) -> dict[str, Any]:
+    """把已生成的出品挂到项目文件夹。再次保存仍指向同一份文件。"""
+    row, _project, _role = await _load_package(
+        db, project_id=project_id, package_id=package_id, user_id=user_id, min_perm="write"
+    )
+    if not output_ids:
+        raise PromotionError(400, "请选择要保存的文件")
+    if len(output_ids) > MAX_EXPORT_FILES:
+        raise PromotionError(400, "保存文件数量超过限制")
+    state = _loads(row.products_json, {})
+    session = await ensure_project_session(
+        db,
+        project_id=project_id,
+        kind="cocreate",
+        source_id=f"promotion:{row.id}",
+        source_kind="promotion",
+        title="技术推广包",
+        owner_id=user_id,
+        commit=False,
+    )
+    saved: list[dict[str, str]] = []
+    seen: set[str] = set()
+    now = _now()
+    for output_id in output_ids:
+        if output_id in seen:
+            continue
+        seen.add(output_id)
+        product, _version = _find_version(state, output_id)
+        if product in RETIRED_PRODUCTS:
+            continue
+        current = await db.get(OutputAsset, output_id)
+        if not current or current.project_id != project_id:
+            raise PromotionError(404, "出品不在当前项目")
+        content = (current.content or "").strip()
+        if not content:
+            continue
+        title = PRODUCT_TITLES.get(product, current.title or product)
+        current.title = title
+        current.session_id = session.id
+        current.updated_at = now
+        saved.append({"id": current.id, "title": title, "product": product})
+    if not saved:
+        raise PromotionError(400, "所选出品还没有可保存的正文")
+    await db.commit()
+    logger.info(
+        "promotion save project package_id=%s project_id=%s step=save status=ok elapsed_ms=0 error_type= files=%s session_id=%s",
+        row.id,
+        project_id,
+        len(saved),
+        session.id,
+    )
+    return {"saved": len(saved), "files": saved, "session_id": session.id}
+
+
 async def recover_expired_steps(db: AsyncSession, *, package_id: str) -> int:
     now = _now()
     result = await db.execute(
@@ -853,6 +1107,10 @@ async def recover_expired_steps(db: AsyncSession, *, package_id: str) -> int:
 def _normalize_products(products: list[str]) -> list[str]:
     names: list[str] = []
     for name in products:
+        if name == "material_skill":
+            name = GEO_PRODUCT
+        if name in RETIRED_PRODUCTS:
+            continue
         if name not in PRODUCTS:
             raise PromotionError(400, f"不支持的出品 {name}")
         if name not in names:

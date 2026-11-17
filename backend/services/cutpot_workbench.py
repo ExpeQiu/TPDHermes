@@ -11,6 +11,15 @@ from typing import Any, Literal
 from fastapi import HTTPException
 
 
+def workspace_id(project_id: str | None, user_id: str) -> str:
+    """有项目时按项目隔离；未选项目时用当前用户的本机工作区。"""
+    bound = (project_id or "").strip()
+    if bound:
+        return bound
+    owner = (user_id or "").strip() or "default"
+    return f"user:{owner}"
+
+
 async def call_cutpot(
     project_id: str,
     command: Literal["connect", "turn", "disconnect"],
