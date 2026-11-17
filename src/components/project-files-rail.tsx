@@ -16,6 +16,8 @@ type Props = {
   locked?: boolean;
   /** 与项目共创右侧栏相同：默认收起，悬停展开，可固定 */
   autoHide?: boolean;
+  /** 进入页面时直接展开并固定，便于选择项目 */
+  initialOpen?: boolean;
   onProjectChange: (projectId: string) => void;
   onFileChange: (fileKey: string | null) => void;
   onRefresh: () => void;
@@ -31,12 +33,13 @@ export function ProjectFilesRail({
   loading,
   locked = false,
   autoHide = false,
+  initialOpen = false,
   onProjectChange,
   onFileChange,
   onRefresh,
 }: Props) {
-  const [pinned, setPinned] = useState(false);
-  const [revealed, setRevealed] = useState(false);
+  const [pinned, setPinned] = useState(initialOpen);
+  const [revealed, setRevealed] = useState(initialOpen);
   const hideTimer = useRef<number | null>(null);
   const open = !autoHide || pinned || revealed;
 

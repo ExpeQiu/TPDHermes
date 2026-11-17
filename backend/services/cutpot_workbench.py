@@ -7,6 +7,7 @@ import os
 import shutil
 from pathlib import Path
 from typing import Any, Literal
+from urllib.parse import urlparse, urlunparse
 
 from fastapi import HTTPException
 
@@ -18,6 +19,22 @@ def workspace_id(project_id: str | None, user_id: str) -> str:
         return bound
     owner = (user_id or "").strip() or "default"
     return f"user:{owner}"
+
+
+def _public_urls(data: dict[str, Any]) -> dict[str, Any]:
+    host = os.getenv("STUDIO_PUBLIC_HOST", "").strip()
+    if not host:
+        return data
+    rewritten = dict(data)
+    for key in ("url", "webUrl"):
+        value = rewritten.get(key)
+        if not isinstance(value, str):
+            continue
+        parsed = urlparse(value)
+        if parsed.hostname not in {"127.0.0.1", "localhost"} or not parsed.port:
+            continue
+        rewritten[key] = urlunparse(parsed._replace(netloc=f"{host}:{parsed.port}"))
+    return rewritten
 
 
 async def call_cutpot(
@@ -42,6 +59,10 @@ async def call_cutpot(
         "HOME": str(Path.home()),
         "TPCSTORE_APP_DATA": str(directory),
     }
+    if os.getenv("STUDIO_PUBLIC_HOST"):
+        env["STUDIO_PUBLIC_HOST"] = os.environ["STUDIO_PUBLIC_HOST"]
+        env["BIND_HOST"] = os.getenv("BIND_HOST", "0.0.0.0")
+        env["CUTPOT_PORT"] = os.getenv("CUTPOT_PORT", "4317")
     proc = await asyncio.create_subprocess_exec(
         node,
         str(entry.resolve()),
@@ -83,6 +104,6 @@ async def call_cutpot(
             )
         if not isinstance(response["data"], dict):
             raise ValueError("invalid data")
-        return response["data"]
+        return _public_urls(response["data"])
     except (ValueError, TypeError, KeyError) as exc:
         raise HTTPException(502, "CutPot 返回契约无效") from exc

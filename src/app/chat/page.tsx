@@ -1268,7 +1268,7 @@ function ChatPageInner() {
                 {docOptimizeBindingHint}
               </p>
             ) : null}
-            <div className="relative mx-auto w-full max-w-3xl rounded-2xl border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-800">
+            <div className="relative w-full rounded-2xl border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-800">
                 {mentionOpen && mentionCandidates.length > 0 ? (
                   <div className="absolute bottom-full left-0 z-20 mb-1 max-h-52 w-full overflow-y-auto rounded-xl border border-slate-300 bg-white py-1 shadow-lg dark:border-slate-600 dark:bg-slate-900">
                     {mentionCandidates.map((skill, index) => (

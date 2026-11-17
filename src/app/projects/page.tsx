@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { Suspense, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { apiGet, apiPut } from "@/lib/api";
 import { CONTENT_MAX_CLASS } from "@/lib/content-shell";
 import { projectRoleBadgeClass, projectRoleLabel } from "@/lib/rbac";
@@ -34,8 +34,37 @@ const statusLabels: Record<Project["status"], string> = {
   archived: "已归档",
 };
 
-export default function ProjectsPage() {
+function ProjectEntryRedirect({
+  loading,
+  error,
+  projects,
+}: {
+  loading: boolean;
+  error: string | null;
+  projects: Project[];
+}) {
   const router = useRouter();
+  const entry = useSearchParams().get("entry");
+
+  useEffect(() => {
+    if (entry === "promotion") {
+      console.info("[projects] open promotion chooser");
+      router.replace("/promotion");
+      return;
+    }
+    if (loading || error) return;
+    if (entry !== "brainstorm") return;
+    const first = projects.find((project) => project.status !== "archived");
+    if (!first) return;
+    const target = `/projects/${first.id}/brainstorm`;
+    console.info("[projects] open entry", { entry, projectId: first.id, target });
+    router.replace(target);
+  }, [loading, error, projects, router, entry]);
+
+  return null;
+}
+
+export default function ProjectsPage() {
   const scopeUserId = useEffectiveUserScopeId();
   const coCreateHref = useMemo(
     () => resolveCoCreateNavHref(scopeUserId),
@@ -64,16 +93,11 @@ export default function ProjectsPage() {
       });
   }, []);
 
-  useEffect(() => {
-    if (loading || error) return;
-    const entry = new URLSearchParams(window.location.search).get("entry");
-    if (entry !== "brainstorm") return;
-    const first = projects.find((project) => project.status !== "archived");
-    if (first) router.replace(`/projects/${first.id}/brainstorm`);
-  }, [loading, error, projects, router]);
-
   return (
     <main className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-slate-100 p-4 text-slate-900 sm:p-6 md:p-8 dark:from-slate-950 dark:via-slate-900 dark:to-slate-950 dark:text-white">
+      <Suspense fallback={null}>
+        <ProjectEntryRedirect loading={loading} error={error} projects={projects} />
+      </Suspense>
       <div className={CONTENT_MAX_CLASS}>
         <header className="mb-6 lg:mb-8">
           <div className="inline-flex items-center gap-2 rounded-full border border-blue-500/30 bg-blue-500/10 px-3 py-1 text-xs font-medium text-blue-700 dark:text-blue-200">

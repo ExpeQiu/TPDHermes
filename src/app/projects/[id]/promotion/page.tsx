@@ -30,15 +30,17 @@ export default function PromotionEntryPage() {
     async function openWorkspace() {
       const listed = await apiGet<{ items: PackageSummary[] }>(`/projects/${projectId}/promotion-packages`);
       const latest = [...(listed.items ?? [])].sort((a, b) => (b.updated_at || "").localeCompare(a.updated_at || ""))[0];
+      const choose = new URLSearchParams(window.location.search).get("choose") === "1" ? "&choose=1" : "";
       if (latest) {
         console.info("[promotion] open existing", { projectId, packageId: latest.id });
-        router.replace(`/projects/${projectId}/promotion/${latest.id}?tab=materials`);
+        router.replace(`/projects/${projectId}/promotion/${latest.id}?tab=materials${choose}`);
         return;
       }
       const files = await apiGet<{ items: ProjectFile[] }>(`/projects/${projectId}/files`);
       const refs = (files.items ?? []).map((file) => ({ file_id: file.id, kind: file.kind }));
       if (!refs.length) {
-        if (!cancelled) setMessage("这个项目还没有资料，先在项目里放入文件后再打开快捷创作。");
+        console.info("[promotion] no files, keep chooser", { projectId });
+        router.replace(`/promotion?project=${encodeURIComponent(projectId)}&empty=1`);
         return;
       }
       const created = await apiPost<{ id: string }>(`/projects/${projectId}/promotion-packages`, {
@@ -47,7 +49,7 @@ export default function PromotionEntryPage() {
         file_refs: refs,
       });
       console.info("[promotion] open created", { projectId, packageId: created.id, files: refs.length });
-      router.replace(`/projects/${projectId}/promotion/${created.id}?tab=materials`);
+      router.replace(`/projects/${projectId}/promotion/${created.id}?tab=materials${choose}`);
     }
     void openWorkspace().catch((err: Error) => {
       if (!cancelled) setMessage(err.message || "打开快捷创作失败");

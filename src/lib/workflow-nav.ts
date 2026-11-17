@@ -26,7 +26,7 @@ export function isBrainstormNavPath(pathname: string): boolean {
 }
 
 export function isPromotionNavPath(pathname: string): boolean {
-  return /\/projects\/[^/]+\/promotion(?:\/|$)/.test(pathname);
+  return pathname === "/promotion" || /\/projects\/[^/]+\/promotion(?:\/|$)/.test(pathname);
 }
 
 export function projectIdFromPath(pathname: string): string | null {
@@ -36,16 +36,16 @@ export function projectIdFromPath(pathname: string): string | null {
 }
 
 export function resolveTechIpNavHref(scopeUserId: string): string {
-  if (typeof window === "undefined") return "/projects";
+  if (typeof window === "undefined") return "/promotion";
   const current = projectIdFromPath(window.location.pathname);
-  if (current) return `/projects/${current}/promotion`;
+  if (current) return `/projects/${current}/promotion?choose=1`;
   const brainstormHref = resolveBrainstormNavHref(scopeUserId);
   const fromBrainstorm = brainstormHref.match(/^\/projects\/([^/]+)\/brainstorm$/)?.[1];
-  if (fromBrainstorm) return `/projects/${fromBrainstorm}/promotion`;
+  if (fromBrainstorm) return `/projects/${fromBrainstorm}/promotion?choose=1`;
   const coCreateHref = resolveCoCreateNavHref(scopeUserId);
   const fromCoCreate = coCreateHref.match(/^\/projects\/([^/]+)\/co-create$/)?.[1];
-  if (fromCoCreate) return `/projects/${fromCoCreate}/promotion`;
-  return "/projects";
+  if (fromCoCreate) return `/projects/${fromCoCreate}/promotion?choose=1`;
+  return "/promotion";
 }
 
 export function brainstormProjectStorageKey(scopeUserId: string): string {
@@ -151,7 +151,7 @@ export const WORKFLOW_NAV_ITEMS: WorkflowNavItem[] = [
       !isPromotionNavPath(pathname),
   },
   {
-    href: "/projects",
+    href: "/promotion",
     label: "快捷创作",
     shortLabel: "快捷创作",
     description: "进入当前项目的快捷创作。",

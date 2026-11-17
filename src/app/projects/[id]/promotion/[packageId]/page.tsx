@@ -527,12 +527,15 @@ function PromotionTaskTabs() {
     }
   }
 
+  const chooseProject = searchParams.get("choose") === "1";
+
   function renderProjectFilesRail(autoHide = false) {
     const fileKey = openMaterial ? `${openMaterial.kind || "attachment"}:${openMaterial.id}` : null;
     return (
       <ProjectFilesRail
         scope="promotion"
         autoHide={autoHide}
+        initialOpen={chooseProject}
         projects={projects}
         projectId={projectId}
         fileKey={fileKey}
@@ -541,7 +544,7 @@ function PromotionTaskTabs() {
         onProjectChange={(next) => {
           if (!next || next === projectId) return;
           console.info("[promotion] 文件栏切换项目", { from: projectId, to: next });
-          router.push(`/projects/${next}/promotion`);
+          router.push(`/projects/${next}/promotion?choose=1`);
         }}
         onFileChange={(next) => {
           const decoded = next ? decodeProjectFileSelectValue(next) : null;

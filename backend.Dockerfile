@@ -50,8 +50,24 @@ COPY tpdhermes ./tpdhermes
 COPY skills ./skills
 COPY scripts/docker/backend-entrypoint.sh /app/scripts/docker/backend-entrypoint.sh
 COPY schema.sql .
+COPY shared/studio-skills.json ./shared/studio-skills.json
 
 RUN chmod +x /app/scripts/docker/backend-entrypoint.sh
+
+# TPCstore CLI 与场景工作台需要 Node 22（zlib.crc32、node:sqlite）
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates curl xz-utils \
+    && curl -fsSL https://npmmirror.com/mirrors/node/v22.17.0/node-v22.17.0-linux-x64.tar.xz -o /tmp/node.tar.xz \
+    && tar -xJf /tmp/node.tar.xz -C /usr/local --strip-components=1 \
+    && rm /tmp/node.tar.xz \
+    && rm -rf /var/lib/apt/lists/* \
+    && node --version \
+    && npm --version
+
+# Peditor 抠图依赖。单独一层，避免改动上面的 torch 缓存。
+RUN pip install --no-cache-dir --default-timeout=600 --retries 5 \
+      -i https://mirrors.aliyun.com/pypi/simple/ --trusted-host mirrors.aliyun.com \
+      "Pillow==12.2.0" "numpy>=2.0,<3" "opencv-python-headless>=4.10,<5"
 
 ENV PYTHONPATH=/app
 EXPOSE 8000

@@ -169,6 +169,21 @@ services:
       - MULTI_AGENT_PROGRESS_TIMEOUT_PER_ROUND=${MULTI_AGENT_PROGRESS_TIMEOUT_PER_ROUND:-90}
       - MULTI_AGENT_PROGRESS_GRACE_SEC=${MULTI_AGENT_PROGRESS_GRACE_SEC:-120}
       - MULTI_AGENT_SDK_FALLBACK=${MULTI_AGENT_SDK_FALLBACK:-false}
+      - TPCSTORE_ROOT=/opt/tpcstore
+      - TPCSTORE_NODE_BIN=node
+      - TPCSTORE_APP_DATA=/app/data/tpcstore/v04
+      - TPCSTORE_V05_APP_DATA=/app/data/tpcstore/v05
+      - TPCSTORE_V07_APP_DATA=/app/data/tpcstore/v07
+      - TPCSTORE_V10_APP_DATA=/app/data/tpcstore/v10
+      - TPDHERMES_STUDIO_SKILLS_CONFIG=/app/data/studio-skills.json
+      - STUDIO_PUBLIC_HOST=${STUDIO_PUBLIC_HOST:-47.113.225.93}
+      - CUTPOT_PORT=4317
+      - TPCSTORE_NODE_BIN=/usr/local/bin/node
+    ports:
+      - "3217:3217"
+      - "4317:4317"
+      - "4318:4318"
+      - "4320:4320"
     expose:
       - "8000"
     healthcheck:
@@ -185,6 +200,7 @@ services:
       - tphermes-data:/app/data
       - tphermes-hf-cache:/app/.cache/huggingface
       - ./skills:/app/skills
+      - /opt/tpcstore:/opt/tpcstore:ro
       - ./deploy/hermes-agent/config.yaml:/app/hermes-agent/config.yaml
     networks:
       - tphermes-net

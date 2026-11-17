@@ -4,6 +4,7 @@ import {
   accessibleWorkflowPages,
   groupWorkflowNavEntries,
   isCoCreateNavPath,
+  resolveTechIpNavHref,
   WORKFLOW_NAV_ITEMS,
 } from "./workflow-nav";
 
@@ -34,6 +35,14 @@ describe("groupWorkflowNavEntries", () => {
     const centerIndex = labels.indexOf("内容创作中心");
     expect(labels[centerIndex - 1]).toBe("快捷创作");
     expect(labels[centerIndex - 2]).toBe("项目中心");
+  });
+});
+
+describe("quick create nav", () => {
+  it("opens the promotion page so the user can pick a project", () => {
+    window.history.pushState({}, "", "/projects");
+    window.localStorage.clear();
+    expect(resolveTechIpNavHref("user-1")).toBe("/promotion");
   });
 });
 

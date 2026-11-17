@@ -27,7 +27,12 @@ export default function StudioSkillReleasePanel() {
     let alive = true;
     apiGet<ReleasePayload>("/system/studio-skills")
       .then((payload) => {
-        if (alive) apply(payload);
+        if (!alive) return;
+        if (!payload || !Array.isArray(payload.skills)) {
+          setError("加载技能卡失败");
+          return;
+        }
+        apply(payload);
       })
       .catch((err: unknown) => {
         if (alive) setError(err instanceof Error ? err.message : "加载技能卡失败");

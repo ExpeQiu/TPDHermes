@@ -168,7 +168,8 @@ export default function StudioClient({ initialProjectId = "" }: { initialProject
     if (!cutpotUrl) return "";
     try {
       const parsed = new URL(cutpotUrl);
-      if (parsed.protocol !== "http:" || parsed.hostname !== "127.0.0.1" || parsed.pathname !== "/editor") return "";
+      const allowedHost = parsed.hostname === "127.0.0.1" || parsed.hostname === "localhost" || parsed.hostname === window.location.hostname;
+      if (parsed.protocol !== "http:" || !allowedHost || parsed.pathname !== "/editor") return "";
       return `${parsed.origin}/editor`;
     } catch {
       return "";
